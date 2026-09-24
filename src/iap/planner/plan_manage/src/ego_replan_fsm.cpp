@@ -15,14 +15,6 @@ namespace ego_planner
     constexpr int kP5FinalGateGlobalTrajTrialLimit = 1;
     constexpr int kDefaultGlobalTrajTrialLimit = 10;
 
-    bool p4UsesDeferredExecution(const P4ForwardDecision & decision)
-    {
-      return decision.action == P4ForwardAction::OBSERVE_MORE ||
-             (decision.action == P4ForwardAction::DEFER_RISK_SELECTION &&
-              decision.deferred_motion_mode !=
-                  P4ForwardDeferredMotionMode::NATIVE_EGO);
-    }
-
     double activeTrajectoryTime(
         const EGOPlannerManager::Ptr &manager, const LocalTrajData &trajectory,
         const double now_s)
@@ -702,7 +694,7 @@ namespace ego_planner
     else
       continously_called_times_ = 1;
 
-    static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START", "OBSERVE_MORE"};
+    static string state_str[7] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
     int pre_s = int(exec_state_);
     exec_state_ = new_state;
     cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
@@ -715,7 +707,7 @@ namespace ego_planner
 
   void EGOReplanFSM::printFSMExecState()
   {
-    static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START", "OBSERVE_MORE"};
+    static string state_str[7] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
 
     cout << "[FSM]: state: " + state_str[int(exec_state_)] << endl;
   }
@@ -802,11 +794,7 @@ namespace ego_planner
               planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
           if (success)
           {
-            changeFSMExecState(
-                p4UsesDeferredExecution(
-                    planner_manager_->lastP4ForwardDecision()) ?
-                    OBSERVE_MORE : EXEC_TRAJ,
-                "FSM");
+            changeFSMExecState(EXEC_TRAJ, "FSM");
 
             publishSwarmTrajs(true);
           }
@@ -817,18 +805,7 @@ namespace ego_planner
             {
               RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
             }
-            if (p4UsesDeferredExecution(
-                planner_manager_->lastP4ForwardDecision()))
-            {
-              // With no published parent, traj_server's startup contract
-              // already holds the current odometry position. Do not invent
-              // an emergency identity merely because route evidence is still
-              // being prepared.
-              if (planner_manager_->hasPublishedTrajectoryCommand())
-                callEmergencyStop(odom_pos_);
-              changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
-            }
-            else if (!p4_waiting_for_risk_grid_ready_)
+            if (!p4_waiting_for_risk_grid_ready_)
               changeFSMExecState(SEQUENTIAL_START, "FSM");
           }
         }
@@ -847,11 +824,7 @@ namespace ego_planner
       bool success = planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
       if (success)
       {
-        changeFSMExecState(
-            p4UsesDeferredExecution(
-                planner_manager_->lastP4ForwardDecision()) ?
-                OBSERVE_MORE : EXEC_TRAJ,
-            "FSM");
+        changeFSMExecState(EXEC_TRAJ, "FSM");
         flag_escape_emergency_ = true;
         publishSwarmTrajs(false);
       }
@@ -865,13 +838,6 @@ namespace ego_planner
                  P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
         {
           changeFSMExecState(EXEC_TRAJ, "P4_COMMIT");
-        }
-        else if (p4UsesDeferredExecution(
-            planner_manager_->lastP4ForwardDecision()))
-        {
-          if (planner_manager_->hasPublishedTrajectoryCommand())
-            callEmergencyStop(odom_pos_);
-          changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
         }
         else if (p5_final_gate_emergency_candidate_)
         {
@@ -893,11 +859,7 @@ namespace ego_planner
       const auto planning_result = planFromCurrentTraj(1);
       if (planning_result == P4PlanningCycleResult::NEW_TRAJECTORY_READY)
       {
-        changeFSMExecState(
-            p4UsesDeferredExecution(
-                planner_manager_->lastP4ForwardDecision()) ?
-                OBSERVE_MORE : EXEC_TRAJ,
-            "FSM");
+        changeFSMExecState(EXEC_TRAJ, "FSM");
         publishSwarmTrajs(false);
       }
       else
@@ -919,13 +881,6 @@ namespace ego_planner
                  P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
         {
           changeFSMExecState(EXEC_TRAJ, "P4_COMMIT");
-        }
-        else if (p4UsesDeferredExecution(
-            planner_manager_->lastP4ForwardDecision()))
-        {
-          if (planner_manager_->hasPublishedTrajectoryCommand())
-            callEmergencyStop(odom_pos_);
-          changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
         }
         else if (p5_final_gate_emergency_candidate_)
         {
@@ -986,10 +941,20 @@ namespace ego_planner
           planner_manager_->committedP4TrajectoryReachedEndpoint(
               time_now.seconds()))
       {
-        // A certified brake ends in a stopped, approved hold. Resume route
-        // observation at the bounded scheduler rate instead of letting the
-        // ordinary 100 Hz periodic-replan rule oscillate EXEC/REPLAN.
-        changeFSMExecState(OBSERVE_MORE, "P4_BRAKE_COMPLETE");
+        // A certified brake ends in a stopped, approved hold. Retry ordinary
+        // planning at the existing 2 Hz ceiling without a separate execution
+        // state; the stopped parent remains authoritative until replacement.
+        P4PlanningCycleResult endpoint_result =
+            P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT;
+        if (p4_endpoint_retry_scheduler_.runIfDue(
+                time_now.seconds(),
+                planner_manager_->p4ForwardDecisionReady(),
+                [this, &endpoint_result]() {
+                  endpoint_result = planFromCurrentTraj(1);
+                }) &&
+            endpoint_result ==
+                P4PlanningCycleResult::NEW_TRAJECTORY_READY)
+          publishSwarmTrajs(false);
         break;
       }
 
@@ -1059,71 +1024,6 @@ namespace ego_planner
       break;
     }
 
-    case OBSERVE_MORE:
-    {
-      if (planner_manager_->trajectoryCommandAwaitingActivation())
-        break;
-      // Execute only the certified short trajectory. Before its endpoint the
-      // deadline-driven successor lane is the sole planning producer: ordinary
-      // OBSERVE_MORE polling must not churn the parent's frozen guide or pass
-      // through the normal 0.5 s submission gate. At the approved stopped
-      // endpoint the ordinary 2 Hz observer may resume looking for a new move.
-      const double now_s = plannerNow().seconds();
-      P4PlanningCycleResult planning_result =
-          P4PlanningCycleResult::RETRYABLE_FAILURE;
-      const auto &certificate = planner_manager_->p4ExecutionCertificate();
-      const bool executing_limited_prefix = certificate.valid &&
-          certificate.authority == P4ExecutionAuthority::LIMITED_PREFIX &&
-          !planner_manager_->p4ExecutionRevoked() &&
-          !planner_manager_->committedP4TrajectoryReachedEndpoint(now_s);
-      if (executing_limited_prefix)
-      {
-        if (!planner_manager_->p4SuccessorPreparationDue(now_s))
-          break;
-        planning_result = planFromCurrentTraj(1);
-      }
-      else if (!p4_observe_more_scheduler_.runIfDue(
-          now_s, planner_manager_->p4ForwardDecisionReady(),
-          [this, &planning_result]() {
-            if (!planner_manager_->hasPublishedTrajectoryCommand())
-            {
-              const bool ready = planFromGlobalTraj(
-                  globalTrajTrialLimitForP5FinalGate());
-              planning_result = classifyP4PlanningCycle(
-                  ready, planner_manager_->p4PlanningDisposition(), false,
-                  planner_manager_->p4ExecutionRevoked());
-            }
-            else
-            {
-              planning_result = planFromCurrentTraj(1);
-            }
-          }))
-      {
-        break;
-      }
-      if (planning_result == P4PlanningCycleResult::NEW_TRAJECTORY_READY)
-      {
-        publishSwarmTrajs(false);
-        if (!p4UsesDeferredExecution(
-            planner_manager_->lastP4ForwardDecision()))
-          changeFSMExecState(EXEC_TRAJ, "P4_FORWARD");
-      }
-      else if (planning_result ==
-                   P4PlanningCycleResult::CONTINUE_COMMITTED ||
-               planning_result ==
-                   P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT)
-      {
-        // Waiting for a worker result is an execution state.  The committed
-        // trajectory keeps its original start time, endpoint, and authority.
-        // The trajectory server holds its final position after expiry.
-      }
-      else if (!p4_waiting_for_risk_grid_ready_)
-      {
-        if (planner_manager_->hasPublishedTrajectoryCommand())
-          callEmergencyStop(odom_pos_);
-      }
-      break;
-    }
     }
 
     data_disp_.header.stamp = plannerNow();
@@ -1273,7 +1173,7 @@ namespace ego_planner
         return P4PlanningCycleResult::CONTINUE_COMMITTED;
       // The brake's stopped endpoint is a valid frozen start for the next
       // fully certified rolling segment. Fall through only after it is
-      // reached; the OBSERVE_MORE scheduler rate-limits this work.
+      // reached; the endpoint retry scheduler rate-limits this work.
     }
     if (planner_manager_->p4GuardTransitionPending())
     {
@@ -1785,22 +1685,16 @@ namespace ego_planner
       }
     }
 
-    const bool reuse_normal_channel_context =
-        p4_normal_channel_prepare_recursion_ &&
-        planner_manager_->planningRiskContext().active;
-    if (!reuse_normal_channel_context)
-    {
-      if (p4_require_risk_grid_ready_before_planning_)
-        planner_manager_->beginPlanningRiskContextWithSnapshot(
-            plannerNow().seconds(), admitted_snapshot);
-      else if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
-        planner_manager_->beginPlanningRiskContextWithSnapshot(
-            plannerNow().seconds(),
-            acquire_p1_context ? admitted_snapshot : nullptr,
-            p1_planning_attempt_id);
-      else
-        planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
-    }
+    if (p4_require_risk_grid_ready_before_planning_)
+      planner_manager_->beginPlanningRiskContextWithSnapshot(
+          plannerNow().seconds(), admitted_snapshot);
+    else if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+      planner_manager_->beginPlanningRiskContextWithSnapshot(
+          plannerNow().seconds(),
+          acquire_p1_context ? admitted_snapshot : nullptr,
+          p1_planning_attempt_id);
+    else
+      planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
     struct PlanningRiskContextGuard
     {
       EGOPlannerManager *manager = nullptr;
@@ -1811,8 +1705,7 @@ namespace ego_planner
           manager->clearPlanningRiskContext();
         }
       }
-    } planning_risk_context_guard{
-        reuse_normal_channel_context ? nullptr : planner_manager_.get()};
+    } planning_risk_context_guard{planner_manager_.get()};
 
     // Formal qualification observes the actual executing incumbent once in
     // the immutable decision window. This is read-only for both reference and
@@ -1859,6 +1752,7 @@ namespace ego_planner
       {
         planner_manager_->recordPreparedP4SuccessorCurveFailure(
             plannerNow().seconds(),
+            P4PreparedCurveFailure::DYNAMICS,
             "terminal_bspline_refinement_collision_or_dynamics");
       }
       else
@@ -1875,14 +1769,7 @@ namespace ego_planner
         {
           planner_manager_->local_data_ = previous_local_data;
           planner_manager_->restoreP4ExecutionCommitmentAfterCandidateRejection();
-          const bool previous_normal_channel_recursion =
-              p4_normal_channel_prepare_recursion_;
-          p4_normal_channel_prepare_recursion_ = true;
-          const bool prepared = callReboundReplan(
-              flag_use_poly_init, flag_randomPolyTraj);
-          p4_normal_channel_prepare_recursion_ =
-              previous_normal_channel_recursion;
-          return prepared;
+          return false;
         }
       }
     }
@@ -1929,35 +1816,25 @@ namespace ego_planner
               plannerNow().seconds()))
       {
         RCLCPP_ERROR(node_->get_logger(),
-                     "P4-v2 final lineage write failed before P5");
-        std::string feedback_reason;
-        const unsigned int retry_index =
-            p4_actual_curve_feedback_depth_ + 1u;
-        // Interior clearance feedback often advances the first failing
-        // station in several bounded steps (guide smoothing attenuates each
-        // correction). Keep the recursion finite while allowing the exact
-        // regenerated curve to finish that monotone repair.
-        // The fourth stage may create a new finite prefix. Allow two bounded
-        // follow-up crops for independent smoothing failures on that newly
-        // generated curve; retry depth remains hard-limited.
-        constexpr unsigned int kMaximumActualCurveFeedbackRetries = 6u;
-        const bool retry_ready =
-            retry_index <= kMaximumActualCurveFeedbackRetries &&
-            planner_manager_->prepareP4ActualCurveFeedbackRetry(
-                retry_index, &feedback_reason);
+                     "P4 actual-curve certification failed before P5");
         P4NormalChannelPreparationDisposition normal_failure_disposition =
             P4NormalChannelPreparationDisposition::NOT_APPLICABLE;
-        if (!retry_ready && preparing_normal_multi_channel_curve)
+        if (preparing_normal_multi_channel_curve)
         {
-          P4PreparedCurveFailure failure =
-              P4PreparedCurveFailure::LOCAL_GEOMETRY;
+          P4PreparedCurveFailure failure = planner_manager_->
+              lastP4ActualCurveCertification().failure;
           const auto &evidence =
               planner_manager_->latestP4DirectRiskEvidence();
-          if (evidence.trajectory_assurance_complete &&
+          if (failure == P4PreparedCurveFailure::NONE ||
+              failure == P4PreparedCurveFailure::INCOMPLETE)
+            failure = P4PreparedCurveFailure::LOCAL_GEOMETRY;
+          if ((failure == P4PreparedCurveFailure::LOCAL_GEOMETRY) &&
+              evidence.trajectory_assurance_complete &&
               evidence.trajectory_assurance.local.status !=
                   iap::LocalMotionAssuranceStatus::SAFE)
             failure = P4PreparedCurveFailure::LOCAL_CLEARANCE;
-          else if (!evidence.admissionComplete())
+          else if ((failure == P4PreparedCurveFailure::LOCAL_GEOMETRY) &&
+                   !evidence.admissionComplete())
             failure = P4PreparedCurveFailure::GNSS_RISK;
           normal_failure_disposition =
               planner_manager_->recordP4NormalChannelCurveFailure(
@@ -1965,45 +1842,12 @@ namespace ego_planner
                   "normal_final_curve_lineage_rejected", nullptr);
         }
         reject_candidate();
-        if (retry_ready)
-        {
-          RCLCPP_WARN(
-              node_->get_logger(),
-              "P4 actual B-spline certification requested bounded feedback "
-              "retry %u/%u: %s",
-              retry_index, kMaximumActualCurveFeedbackRetries,
-              feedback_reason.c_str());
-          ++p4_actual_curve_feedback_depth_;
-          const bool retried = callReboundReplan(
-              flag_use_poly_init, flag_randomPolyTraj);
-          --p4_actual_curve_feedback_depth_;
-          if (!retried && preparing_successor_curve)
-            planner_manager_->recordPreparedP4SuccessorCurveFailure(
-                plannerNow().seconds(),
-                "successor_lineage_write_failed_after_feedback");
-          return retried;
-        }
-        if (normal_failure_disposition ==
-            P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING)
-        {
-          const bool previous_normal_channel_recursion =
-              p4_normal_channel_prepare_recursion_;
-          p4_normal_channel_prepare_recursion_ = true;
-          const bool prepared = callReboundReplan(
-              flag_use_poly_init, flag_randomPolyTraj);
-          p4_normal_channel_prepare_recursion_ =
-              previous_normal_channel_recursion;
-          return prepared;
-        }
         if (preparing_successor_curve)
           planner_manager_->recordPreparedP4SuccessorCurveFailure(
-              plannerNow().seconds(), "successor_lineage_write_failed");
-        RCLCPP_WARN(
-            node_->get_logger(),
-            "P4 actual B-spline certification feedback unavailable at "
-            "retry %u/%u: %s",
-            retry_index, kMaximumActualCurveFeedbackRetries,
-            feedback_reason.c_str());
+              plannerNow().seconds(),
+              planner_manager_->lastP4ActualCurveCertification().failure,
+              "successor_curve_certification_failed");
+        (void)normal_failure_disposition;
         return false;
       }
 
@@ -2090,6 +1934,7 @@ namespace ego_planner
           if (preparing_successor_curve)
             planner_manager_->recordPreparedP4SuccessorCurveFailure(
                 plannerNow().seconds(),
+                P4PreparedCurveFailure::P5_PREVIEW,
                 std::string("p5_preview_rejected:") +
                     P5RuntimeIntegrityGate::reasonName(p5_status.reason));
           P4NormalChannelPreparationDisposition normal_failure_disposition =
@@ -2104,18 +1949,7 @@ namespace ego_planner
                             p5_status.reason),
                     nullptr);
           reject_candidate();
-          if (normal_failure_disposition ==
-              P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING)
-          {
-            const bool previous_normal_channel_recursion =
-                p4_normal_channel_prepare_recursion_;
-            p4_normal_channel_prepare_recursion_ = true;
-            const bool prepared = callReboundReplan(
-                flag_use_poly_init, flag_randomPolyTraj);
-            p4_normal_channel_prepare_recursion_ =
-                previous_normal_channel_recursion;
-            return prepared;
-          }
+          (void)normal_failure_disposition;
           return false;
         }
         p5_final_status = p5_status;
@@ -2143,7 +1977,8 @@ namespace ego_planner
                       "P4 successor full-curve cache rejected: %s",
                       cache_reason.c_str());
           planner_manager_->recordPreparedP4SuccessorCurveFailure(
-              plannerNow().seconds(), "bundle_cache_rejected:" +
+              plannerNow().seconds(), P4PreparedCurveFailure::INCOMPLETE,
+              "bundle_cache_rejected:" +
                   cache_reason);
           reject_candidate();
           return false;
@@ -2173,17 +2008,9 @@ namespace ego_planner
               "P4 normal channel prepare-only handoff: %s",
               comparison_reason.c_str());
           reject_candidate();
-          // This is fair scheduling across already-enumerated channels, not
-          // another repair attempt on one curve. The ordinary rebound and
-          // final certification path remains the sole curve-authority path.
-          const bool previous_normal_channel_recursion =
-              p4_normal_channel_prepare_recursion_;
-          p4_normal_channel_prepare_recursion_ = true;
-          const bool prepared = callReboundReplan(
-              flag_use_poly_init, flag_randomPolyTraj);
-          p4_normal_channel_prepare_recursion_ =
-              previous_normal_channel_recursion;
-          return prepared;
+          // The next frozen guide is consumed by a later FSM callback. Never
+          // recurse through the planner from an actual-curve result.
+          return false;
         }
         if (comparison_disposition ==
             P4NormalChannelPreparationDisposition::REJECTED)
@@ -2325,7 +2152,7 @@ namespace ego_planner
       // until the immutable start still has enough queue margin.  A missed
       // deadline is a canceled candidate, never a committed switch.
       const bool publication_committed = using_cached_successor
-          ? planner_manager_->commitActivatedP4SuccessorBundle(
+          ? planner_manager_->commitP4PreparedBundle(
                 plannerNow().seconds(), &successor_publish_reason)
           : planner_manager_->recordP4VerticalSliceLineage(
                 "normal_publish_authorized",

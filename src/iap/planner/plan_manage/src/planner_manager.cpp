@@ -72,93 +72,43 @@ namespace ego_planner
       return p4ControlPointHash(points);
     }
 
-    Eigen::Vector3d p4DeterministicLateralRepairDirection(
-        const std::vector<Eigen::Vector3d> &guide,
-        const std::size_t nearest_index,
-        const Eigen::Vector3d &failure_position,
-        const Eigen::Vector3d &measured_escape_direction,
-        const double scan_distance_m,
-        const std::shared_ptr<const std::vector<Eigen::Vector3d>>
-            &occupied_centers)
+    P4SuccessorFailure p4SuccessorFailureForPreparedCurve(
+        const P4PreparedCurveFailure failure)
     {
-      if (guide.size() < 2u || nearest_index >= guide.size() ||
-          !failure_position.allFinite() ||
-          !std::isfinite(scan_distance_m) || scan_distance_m <= 0.0)
-        return Eigen::Vector3d::Zero();
-
-      const std::size_t before = nearest_index == 0u
-          ? 0u : nearest_index - 1u;
-      const std::size_t after = std::min(
-          guide.size() - 1u, nearest_index + 1u);
-      Eigen::Vector3d tangent = guide[after] - guide[before];
-      tangent.z() = 0.0;
-      if (tangent.head<2>().norm() <= 1.0e-9)
+      switch (failure)
       {
-        tangent = guide.back() - guide.front();
-        tangent.z() = 0.0;
+        case P4PreparedCurveFailure::NONE:
+          return P4SuccessorFailure::NONE;
+        case P4PreparedCurveFailure::IDENTITY:
+          return P4SuccessorFailure::PARENT_IDENTITY_CHANGED;
+        case P4PreparedCurveFailure::TERMINAL_CONTRACT:
+        case P4PreparedCurveFailure::DYNAMICS:
+        case P4PreparedCurveFailure::TRACKING_CAPABILITY:
+          return P4SuccessorFailure::DYNAMICS_INVALID;
+        case P4PreparedCurveFailure::COLLISION:
+        case P4PreparedCurveFailure::LOCAL_GEOMETRY:
+          return P4SuccessorFailure::COLLISION_CHANGED;
+        case P4PreparedCurveFailure::LOCAL_CLEARANCE:
+          return P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
+        case P4PreparedCurveFailure::SUPPORT:
+        case P4PreparedCurveFailure::INCOMPLETE:
+          return P4SuccessorFailure::SUPPORT_INCOMPLETE;
+        case P4PreparedCurveFailure::FRESHNESS:
+          return P4SuccessorFailure::LOCAL_MAP_STALE;
+        case P4PreparedCurveFailure::BRAKING:
+          return P4SuccessorFailure::BRAKING_CURVE_UNSAFE;
+        case P4PreparedCurveFailure::GNSS_RISK:
+          return P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+        case P4PreparedCurveFailure::EXPOSURE_BUDGET:
+          return P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED;
+        case P4PreparedCurveFailure::P5_PREVIEW:
+          return P4SuccessorFailure::INTEGRITY_UNSAFE;
+        case P4PreparedCurveFailure::COMPUTE_BUDGET:
+          return P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
+        case P4PreparedCurveFailure::SNAPSHOT_MISMATCH:
+          return P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE;
       }
-      if (tangent.head<2>().norm() <= 1.0e-9)
-        return Eigen::Vector3d::Zero();
-      tangent.normalize();
-      const Eigen::Vector3d left(-tangent.y(), tangent.x(), 0.0);
-
-      // Compare both sides on the exact frozen occupancy used by the failed
-      // candidate.  Only the ordering is needed here; the regenerated spline
-      // still repeats the full collision and clearance certification.
-      const auto clearance_score = [&](const double sign) {
-          if (!occupied_centers || occupied_centers->empty())
-            return -std::numeric_limits<double>::infinity();
-          double minimum_distance_sq =
-              std::numeric_limits<double>::infinity();
-          for (int step = 1; step <= 4; ++step)
-          {
-            const Eigen::Vector3d sample = failure_position +
-                sign * (scan_distance_m * static_cast<double>(step) / 4.0) *
-                    left;
-            double step_minimum_sq =
-                std::numeric_limits<double>::infinity();
-            for (const auto &obstacle : *occupied_centers)
-            {
-              if (!obstacle.allFinite()) continue;
-              step_minimum_sq = std::min(
-                  step_minimum_sq, (sample - obstacle).squaredNorm());
-            }
-            minimum_distance_sq = std::min(
-                minimum_distance_sq, step_minimum_sq);
-          }
-          return minimum_distance_sq;
-        };
-      const double left_clearance = clearance_score(1.0);
-      const double right_clearance = clearance_score(-1.0);
-      if (std::isfinite(left_clearance) && std::isfinite(right_clearance) &&
-          std::abs(left_clearance - right_clearance) > 1.0e-8)
-        return left_clearance > right_clearance ? left : -left;
-
-      // If both sides are equally clear, retain the lateral component of the
-      // measured escape.  A purely vertical/longitudinal gradient is not
-      // allowed to turn a right-side repair into climb or backtracking.
-      if (measured_escape_direction.allFinite())
-      {
-        const double lateral_escape = measured_escape_direction.dot(left);
-        if (std::abs(lateral_escape) > 1.0e-6)
-          return lateral_escape > 0.0 ? left : -left;
-      }
-
-      // Symmetric obstacles are resolved from the topology itself: keep the
-      // side already occupied by the corridor. Mirroring the corridor mirrors
-      // this choice without any world-frame y-sign special case.
-      const Eigen::Vector3d chord = guide.back() - guide.front();
-      double corridor_side = 0.0;
-      for (const auto &point : guide)
-      {
-        const double alpha = chord.squaredNorm() > 1.0e-12
-            ? std::clamp((point - guide.front()).dot(chord) /
-                chord.squaredNorm(), 0.0, 1.0)
-            : 0.0;
-        const Eigen::Vector3d projection = guide.front() + alpha * chord;
-        corridor_side += (point - projection).dot(left);
-      }
-      return corridor_side < 0.0 ? -left : left;
+      return P4SuccessorFailure::SUPPORT_INCOMPLETE;
     }
 
     bool p4SlamRegistrationHealthValid(
@@ -549,36 +499,6 @@ namespace ego_planner
       return length_m;
     }
 
-    std::vector<Eigen::Vector3d> p4CropPolyline(
-        const std::vector<Eigen::Vector3d> &path,
-        const double maximum_length_m)
-    {
-      if (path.empty() || !std::isfinite(maximum_length_m) ||
-          maximum_length_m < 0.0)
-        return {};
-      std::vector<Eigen::Vector3d> cropped{path.front()};
-      double accumulated_m = 0.0;
-      for (std::size_t index = 1; index < path.size(); ++index)
-      {
-        const Eigen::Vector3d segment = path[index] - path[index - 1];
-        const double segment_length_m = segment.norm();
-        if (!std::isfinite(segment_length_m) || segment_length_m <= 1.0e-9)
-          continue;
-        if (accumulated_m + segment_length_m <=
-            maximum_length_m + 1.0e-9)
-        {
-          cropped.push_back(path[index]);
-          accumulated_m += segment_length_m;
-          continue;
-        }
-        const double remaining_m = maximum_length_m - accumulated_m;
-        if (remaining_m > 1.0e-9)
-          cropped.push_back(
-              path[index - 1] + segment * (remaining_m / segment_length_m));
-        break;
-      }
-      return cropped;
-    }
   }
 
   bool EGOPlannerManager::P4PlanningAuthority::valid() const
@@ -795,30 +715,36 @@ namespace ego_planner
       const int64_t expected_parent_start_time_ns,
       const std::string &expected_parent_control_points_hash,
       const double now_s, std::string *reason,
-      const bool require_switch_window)
+      const bool require_switch_window, P4SuccessorFailure *failure)
   {
-    const auto finish = [reason](const bool valid, const char *why) {
+    const auto finish = [reason, failure](
+        const bool valid, const char *why,
+        const P4SuccessorFailure typed_failure) {
       if (reason) *reason = why;
+      if (failure) *failure = typed_failure;
       return valid;
     };
     if (successor.parent_trajectory_id != expected_parent_trajectory_id ||
         successor.parent_start_time_ns != expected_parent_start_time_ns ||
         successor.parent_control_points_hash !=
             expected_parent_control_points_hash)
-      return finish(false, "successor_parent_identity_mismatch");
+      return finish(false, "successor_parent_identity_mismatch",
+                    P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
     if (!std::isfinite(now_s) ||
         !std::isfinite(successor.planned_switch_time_s) ||
         (require_switch_window &&
          (now_s + 1.0e-9 < successor.planned_switch_time_s ||
           now_s - successor.planned_switch_time_s > 0.2)))
-      return finish(false, "successor_switch_window_missed");
+      return finish(false, "successor_switch_window_missed",
+                    P4SuccessorFailure::DEADLINE_MISSED);
     if (!successor.incumbent_position.allFinite() ||
         !successor.incumbent_velocity.allFinite() ||
         !successor.incumbent_acceleration.allFinite() ||
         !successor.successor_position.allFinite() ||
         !successor.successor_velocity.allFinite() ||
         !successor.successor_acceleration.allFinite())
-      return finish(false, "successor_nonfinite_boundary_state");
+      return finish(false, "successor_nonfinite_boundary_state",
+                    P4SuccessorFailure::DYNAMICS_INVALID);
     // The optimizer hard-constrains the successor at its planning anchor.
     // This publish-time check additionally bounds motion accrued while the
     // candidate was prepared, preventing a late result from causing a jump.
@@ -828,57 +754,79 @@ namespace ego_planner
             0.5 ||
         (successor.incumbent_acceleration -
              successor.successor_acceleration).norm() > 1.0)
-      return finish(false, "successor_boundary_state_discontinuous");
+      return finish(false, "successor_boundary_state_discontinuous",
+                    P4SuccessorFailure::DYNAMICS_INVALID);
     if (successor.execution_snapshot_id == 0)
-      return finish(false, "successor_execution_snapshot_missing");
+      return finish(false, "successor_execution_snapshot_missing",
+                    P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE);
     if (!successor.assurance.complete || !successor.assurance.safe ||
         successor.assurance.failure != P4SuccessorFailure::NONE)
     {
       switch (successor.assurance.failure)
       {
         case P4SuccessorFailure::GNSS_LIMIT_EXCEEDED:
-          return finish(false, "successor_gnss_limit_exceeded");
+          return finish(false, "successor_gnss_limit_exceeded",
+                        successor.assurance.failure);
         case P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED:
-          return finish(false, "successor_global_exposure_budget_exhausted");
+          return finish(false, "successor_global_exposure_budget_exhausted",
+                        successor.assurance.failure);
         case P4SuccessorFailure::SUPPORT_INCOMPLETE:
-          return finish(false, "successor_support_incomplete");
+          return finish(false, "successor_support_incomplete",
+                        successor.assurance.failure);
         case P4SuccessorFailure::LOCAL_MAP_STALE:
-          return finish(false, "successor_local_map_stale");
+          return finish(false, "successor_local_map_stale",
+                        successor.assurance.failure);
         case P4SuccessorFailure::INTEGRITY_STALE:
-          return finish(false, "successor_integrity_stale");
+          return finish(false, "successor_integrity_stale",
+                        successor.assurance.failure);
         case P4SuccessorFailure::INTEGRITY_UNSAFE:
-          return finish(false, "successor_integrity_unsafe");
+          return finish(false, "successor_integrity_unsafe",
+                        successor.assurance.failure);
         case P4SuccessorFailure::GNSS_EPOCH_STALE:
-          return finish(false, "successor_gnss_epoch_stale");
+          return finish(false, "successor_gnss_epoch_stale",
+                        successor.assurance.failure);
         case P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT:
-          return finish(false, "successor_local_clearance_insufficient");
+          return finish(false, "successor_local_clearance_insufficient",
+                        successor.assurance.failure);
         case P4SuccessorFailure::BRAKING_CURVE_UNSAFE:
-          return finish(false, "successor_braking_curve_unsafe");
+          return finish(false, "successor_braking_curve_unsafe",
+                        successor.assurance.failure);
         case P4SuccessorFailure::DIRECT_QUERY_TIMEOUT:
-          return finish(false, "successor_direct_query_timeout");
+          return finish(false, "successor_direct_query_timeout",
+                        successor.assurance.failure);
         case P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE:
-          return finish(false, "successor_snapshot_reauth_semantic_change");
+          return finish(false, "successor_snapshot_reauth_semantic_change",
+                        successor.assurance.failure);
         case P4SuccessorFailure::COLLISION_CHANGED:
-          return finish(false, "successor_collision_changed");
+          return finish(false, "successor_collision_changed",
+                        successor.assurance.failure);
         case P4SuccessorFailure::DYNAMICS_INVALID:
-          return finish(false, "successor_dynamics_invalid");
+          return finish(false, "successor_dynamics_invalid",
+                        successor.assurance.failure);
         case P4SuccessorFailure::PROGRESS_INSUFFICIENT:
-          return finish(false, "successor_progress_insufficient");
+          return finish(false, "successor_progress_insufficient",
+                        successor.assurance.failure);
         case P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED:
-          return finish(false, "successor_compute_budget_exceeded");
+          return finish(false, "successor_compute_budget_exceeded",
+                        successor.assurance.failure);
         case P4SuccessorFailure::DEADLINE_MISSED:
-          return finish(false, "successor_deadline_missed");
+          return finish(false, "successor_deadline_missed",
+                        successor.assurance.failure);
         case P4SuccessorFailure::CORRIDOR_INVALID:
-          return finish(false, "successor_corridor_invalid");
+          return finish(false, "successor_corridor_invalid",
+                        successor.assurance.failure);
         case P4SuccessorFailure::PARENT_IDENTITY_CHANGED:
-          return finish(false, "successor_parent_identity_changed");
+          return finish(false, "successor_parent_identity_changed",
+                        successor.assurance.failure);
         case P4SuccessorFailure::CANCELED_SUPERSEDED:
-          return finish(false, "successor_canceled_superseded");
+          return finish(false, "successor_canceled_superseded",
+                        successor.assurance.failure);
         case P4SuccessorFailure::NONE:
-          return finish(false, "successor_assurance_incomplete");
+          return finish(false, "successor_assurance_incomplete",
+                        P4SuccessorFailure::SUPPORT_INCOMPLETE);
       }
     }
-    return finish(true, "prepared_successor_ready");
+    return finish(true, "prepared_successor_ready", P4SuccessorFailure::NONE);
   }
 
   namespace
@@ -1996,13 +1944,9 @@ namespace ego_planner
           decision.selected_guide.size() >= 2)
         return decision.selected_guide;
       if (decision.action == P4ForwardAction::DEFER_RISK_SELECTION &&
-          decision.deferred_motion_mode ==
-              P4ForwardDeferredMotionMode::COMMON_PREFIX &&
+          decision.executable_intent == P4ExecutableIntent::LIMITED_PREFIX &&
           decision.deferred_trajectory.size() >= 2)
         return decision.deferred_trajectory;
-      if (decision.action == P4ForwardAction::OBSERVE_MORE &&
-          decision.observe_more_trajectory.size() >= 2)
-        return decision.observe_more_trajectory;
       return {};
     }
 
@@ -2345,9 +2289,7 @@ namespace ego_planner
       viz.segment_end = decision.common_anchor;
       viz.common_anchor = decision.common_anchor;
       viz.selected_path = decision.selected_guide;
-      viz.observe_more_path = decision.action ==
-          P4ForwardAction::DEFER_RISK_SELECTION ?
-          decision.deferred_trajectory : decision.observe_more_trajectory;
+      viz.deferred_path = decision.deferred_trajectory;
       viz.decision_horizon_m = decision.decision_horizon_m;
       viz.stopping_distance_m = decision.stopping_distance_m;
       viz.first_failed_position = decision.first_failed_position;
@@ -2383,8 +2325,6 @@ namespace ego_planner
           " safety=" + p4ForwardSafetyStateName(decision.safety_state) +
           " authority=" +
           p4ForwardSelectionAuthorityName(decision.selection_authority) +
-          " deferred=" +
-          p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) +
           " speed_cap=" + std::to_string(decision.speed_cap_mps) +
           " common_prefix=" +
           std::to_string(decision.common_prefix_length_m) +
@@ -3001,7 +2941,9 @@ namespace ego_planner
           p4_successor_deadline_policy_,
           std::max(static_cast<double>(start_time_ns) * 1.0e-9,
                    activation_now_s),
-          p4_execution_certificate_.execution_deadline_s);
+          p4_execution_certificate_.execution_deadline_s,
+          static_cast<double>(start_time_ns) * 1.0e-9 +
+              p4_execution_certificate_.latest_rolling_switch_elapsed_s);
       p4_successor_schedule_.force_full_search =
           p4RequiresFullSuccessorChannelSearch(
               last_p4_forward_decision_,
@@ -3063,7 +3005,8 @@ namespace ego_planner
       p4_cached_successor_bundle_.reset();
       p4_cached_successor_activation_in_progress_ = false;
       p4_pending_activation_is_prepared_successor_ = false;
-      p4_actual_curve_feedback_override_.reset();
+      p4_pending_channel_work_item_.reset();
+      p4_pending_channel_context_.reset();
       p4_planning_disposition_ = P4PlanningDisposition::HOLD_REQUIRED;
       last_p4_forward_decision_.planning_disposition =
           P4PlanningDisposition::HOLD_REQUIRED;
@@ -3243,7 +3186,9 @@ namespace ego_planner
       p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
           p4_successor_deadline_policy_,
           successor_window_start_s,
-          p4_execution_certificate_.execution_deadline_s);
+          p4_execution_certificate_.execution_deadline_s,
+          static_cast<double>(parent_start_ns) * 1.0e-9 +
+              p4_execution_certificate_.latest_rolling_switch_elapsed_s);
       p4_successor_schedule_.force_full_search =
           p4RequiresFullSuccessorChannelSearch(
               last_p4_forward_decision_,
@@ -4335,6 +4280,13 @@ namespace ego_planner
       const Eigen::Vector3d &start_acc,
       const Eigen::Vector3d &local_target_pt)
   {
+    // A pending channel is an already-enumerated member of one comparison,
+    // not a request to search again.  Restore the authority that froze that
+    // comparison before constructing callbacks or validating geometry so a
+    // later planning callback cannot silently rebind it to another snapshot.
+    if (p4_pending_channel_work_item_ && p4_pending_channel_context_)
+      planning_risk_context_ = *p4_pending_channel_context_;
+
     P4ForwardDecision unavailable;
     unavailable.planning_attempt_id =
         planning_risk_context_.planning_attempt_id;
@@ -4794,17 +4746,6 @@ namespace ego_planner
           std::vector<Eigen::Vector3d> path = p4ExecutablePath(*decision);
           if (trim_to_current_position)
             path = p4RemainingPath(path, start_pt);
-          // Native EGO has not generated its B-spline yet. It is validated
-          // against this same base epoch in recordP4VerticalSliceLineage().
-          if (path.size() < 2 &&
-              decision->action == P4ForwardAction::DEFER_RISK_SELECTION &&
-              decision->deferred_motion_mode ==
-                  P4ForwardDeferredMotionMode::NATIVE_EGO)
-          {
-            decision->planning_disposition =
-                P4PlanningDisposition::NEW_TRAJECTORY_READY;
-            return true;
-          }
           if (path.size() < 2 || !grid_map_ ||
               !occupancy->frozen_grid_map_epoch)
           {
@@ -4868,30 +4809,23 @@ namespace ego_planner
     const double successor_now_s = plannerNow().seconds();
     const bool successor_due = p4SuccessorPreparationDue(
         successor_now_s, execution ? execution->execution_snapshot_id : 0u);
-    const auto consume_actual_curve_feedback =
-        [this, &request, &validate_geometry_commit](
+    const auto consume_pending_channel_work_item =
+        [this, &validate_geometry_commit](
             const bool successor_retry)
             -> std::optional<P4ForwardDecision>
         {
-          if (!p4_actual_curve_feedback_override_)
+          if (!p4_pending_channel_work_item_)
             return std::nullopt;
           P4ForwardDecision retry =
-              std::move(*p4_actual_curve_feedback_override_);
-          p4_actual_curve_feedback_override_.reset();
-          retry.planning_attempt_id = request.planning_attempt_id;
-          retry.snapshot_identity = request.snapshot_identity;
-          retry.request_position = request.position;
-          retry.local_target = request.local_target;
-          retry.live_occupancy_generation_at_submit =
-              request.live_occupancy_generation_at_submit;
+              std::move(*p4_pending_channel_work_item_);
+          p4_pending_channel_work_item_.reset();
+          p4_pending_channel_context_.reset();
           retry.result_status = P4ForwardResultStatus::READY;
           if (successor_retry)
           {
-            // Final-curve feedback is part of the same immutable child
-            // preparation transaction.  It must win over scheduling another
-            // route worker; otherwise a support/envelope repair is left
-            // pending while identical route searches consume the handoff
-            // deadline.
+            // An already-enumerated channel is part of the same immutable
+            // child comparison. Consume it before scheduling another route
+            // worker so one frozen comparison reaches a terminal result.
             retry.successor_latest_prepare_start_s =
                 p4_successor_schedule_.deadline.latest_prepare_start_s;
             retry.successor_candidate_ready_deadline_s =
@@ -4904,7 +4838,7 @@ namespace ego_planner
             retry.action = P4ForwardAction::NO_SAFE_ROUTE;
             retry.planning_disposition =
                 P4PlanningDisposition::HOLD_REQUIRED;
-            retry.reason = "actual_curve_feedback_geometry_rejected:" +
+            retry.reason = "pending_channel_geometry_rejected:" +
                 retry.geometry_commit.reason;
           }
           return retry;
@@ -4978,8 +4912,8 @@ namespace ego_planner
           bounded_successor, p4_successor_schedule_.force_full_search,
           incumbent_channel_id, &request);
 
-      if (auto feedback = consume_actual_curve_feedback(true))
-        return std::move(*feedback);
+      if (auto pending_channel = consume_pending_channel_work_item(true))
+        return std::move(*pending_channel);
 
       const int parent_id = p4_successor_schedule_.parent_trajectory_id;
       std::optional<P4SuccessorPreparationResult> completed_result;
@@ -5114,8 +5048,8 @@ namespace ego_planner
                decision.action == P4ForwardAction::CONTINUE_NOMINAL ||
                (decision.action ==
                     P4ForwardAction::DEFER_RISK_SELECTION &&
-                decision.deferred_motion_mode ==
-                    P4ForwardDeferredMotionMode::COMMON_PREFIX));
+                decision.executable_intent ==
+                    P4ExecutableIntent::LIMITED_PREFIX));
           };
           result.decision = P4ForwardRoutePlanner().decide(request);
           result.decision.successor_fast_path = request.successor_fast_path;
@@ -5185,7 +5119,6 @@ namespace ego_planner
       unavailable.result_status = P4ForwardResultStatus::PENDING;
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
-      unavailable.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       unavailable.planning_disposition =
           P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
       unavailable.successor_fast_path = request.successor_fast_path;
@@ -5198,8 +5131,8 @@ namespace ego_planner
       unavailable.reason = "successor_worker_pending";
       return unavailable;
     }
-    if (auto feedback = consume_actual_curve_feedback(false))
-      return std::move(*feedback);
+    if (auto pending_channel = consume_pending_channel_work_item(false))
+      return std::move(*pending_channel);
     const bool same_snapshot =
         last_p4_forward_decision_.snapshot_identity.canonical() ==
         request.snapshot_identity.canonical();
@@ -5231,8 +5164,6 @@ namespace ego_planner
         unavailable.request_position = request.position;
         unavailable.local_target = request.local_target;
         unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
-        unavailable.deferred_motion_mode =
-            P4ForwardDeferredMotionMode::HOLD;
         unavailable.speed_cap_mps = 0.0;
         unavailable.trigger_reason =
             P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
@@ -5320,8 +5251,6 @@ namespace ego_planner
       unavailable.result_status = P4ForwardResultStatus::RATE_LIMITED;
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
-      unavailable.deferred_motion_mode =
-          P4ForwardDeferredMotionMode::HOLD;
       unavailable.speed_cap_mps = 0.0;
       unavailable.trigger_reason =
           P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
@@ -5340,8 +5269,6 @@ namespace ego_planner
       return unavailable;
     }
     unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
-    unavailable.deferred_motion_mode =
-        P4ForwardDeferredMotionMode::HOLD;
     unavailable.speed_cap_mps = 0.0;
     unavailable.trigger_reason =
         P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
@@ -5371,7 +5298,7 @@ namespace ego_planner
       csv << "schema_version,stage,stamp_s,decision_event_id,planning_attempt_id,"
              "action,executable_intent,trigger_reason,geometry_state,risk_support,safety_state,"
              "selection_authority,formal_support,selection_applied,"
-             "deferred_motion_mode,common_prefix_length_m,"
+             "common_prefix_length_m,"
              "limited_prefix_endpoint_x,limited_prefix_endpoint_y,"
              "limited_prefix_endpoint_z,limited_prefix_boundary_x,"
              "limited_prefix_boundary_y,limited_prefix_boundary_z,"
@@ -5632,7 +5559,6 @@ namespace ego_planner
         << p4ForwardSelectionAuthorityName(decision.selection_authority) << ','
         << (decision.formal_support ? 1 : 0) << ','
         << (!decision.selected_guide.empty() ? 1 : 0) << ','
-        << p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) << ','
         << decision.common_prefix_length_m << ','
         << decision.limited_prefix_endpoint.x() << ','
         << decision.limited_prefix_endpoint.y() << ','
@@ -6258,8 +6184,6 @@ namespace ego_planner
         P4ForwardGeometryState::OCCUPIED;
     last_p4_forward_decision_.selected_candidate_id = 0;
     last_p4_forward_decision_.selected_guide.clear();
-    last_p4_forward_decision_.deferred_motion_mode =
-        P4ForwardDeferredMotionMode::HOLD;
     last_p4_forward_decision_.deferred_trajectory.clear();
     last_p4_forward_decision_.speed_cap_mps = 0.0;
     last_p4_forward_decision_.reason = "native_ego_astar_no_path";
@@ -6362,7 +6286,9 @@ namespace ego_planner
         p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
             p4_successor_deadline_policy_,
             p4_execution_certificate_.start_time_ns * 1.0e-9,
-            p4_execution_certificate_.execution_deadline_s);
+            p4_execution_certificate_.execution_deadline_s,
+            p4_execution_certificate_.start_time_ns * 1.0e-9 +
+                p4_execution_certificate_.latest_rolling_switch_elapsed_s);
         p4_successor_schedule_.force_full_search =
             p4RequiresFullSuccessorChannelSearch(
                 last_p4_forward_decision_,
@@ -6427,8 +6353,6 @@ namespace ego_planner
           {
             last_p4_forward_decision_.executable_intent =
                 P4ExecutableIntent::HOLD;
-            last_p4_forward_decision_.deferred_motion_mode =
-                P4ForwardDeferredMotionMode::HOLD;
             last_p4_forward_decision_.deferred_trajectory.clear();
             last_p4_forward_decision_.speed_cap_mps = 0.0;
             last_p4_forward_decision_.reason = reason;
@@ -6457,8 +6381,6 @@ namespace ego_planner
     const bool deferred_route = limited_prefix_intent &&
         last_p4_forward_decision_.action ==
             P4ForwardAction::DEFER_RISK_SELECTION &&
-        last_p4_forward_decision_.deferred_motion_mode ==
-            P4ForwardDeferredMotionMode::COMMON_PREFIX &&
         last_p4_forward_decision_.selected_candidate_id == 0u &&
         last_p4_forward_decision_.selected_channel_id == 0u &&
         last_p4_forward_decision_.selection_authority ==
@@ -7325,9 +7247,9 @@ namespace ego_planner
             P4ForwardAction::CANDIDATE_READY)
     {
       // A long route may establish preference, but controlled degradation is
-      // execution-authorized only over a reaction-and-stopping envelope. Ask
-      // the existing bounded feedback loop to regenerate that short actual
-      // curve; never relabel this long B-spline as FORMAL_RISK_SELECTED.
+      // execution-authorized only over a reaction-and-stopping envelope.
+      // Reject this actual curve unchanged; only a LIMITED_PREFIX guide built
+      // before B-spline generation may enter the certification seam.
       last_p4_forward_decision_.reason =
           "route_preference_requires_bounded_execution_envelope";
       appendP4ForwardDecision(
@@ -7460,10 +7382,8 @@ namespace ego_planner
       if (!reference_path.empty())
       {
         const bool constrained_prefix =
-            last_p4_forward_decision_.deferred_motion_mode ==
-                P4ForwardDeferredMotionMode::COMMON_PREFIX ||
-            last_p4_forward_decision_.action ==
-                P4ForwardAction::OBSERVE_MORE;
+            last_p4_forward_decision_.executable_intent ==
+                P4ExecutableIntent::LIMITED_PREFIX;
         const double maximum_deviation =
             (constrained_prefix ? 0.5 : 1.0) *
             p4_forward_limits_.topology_resolution_m;
@@ -8067,7 +7987,9 @@ namespace ego_planner
           p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
               p4_successor_deadline_policy_,
               p4_execution_certificate_.start_time_ns * 1.0e-9,
-              p4_execution_certificate_.execution_deadline_s);
+              p4_execution_certificate_.execution_deadline_s,
+              p4_execution_certificate_.start_time_ns * 1.0e-9 +
+                  p4_execution_certificate_.latest_rolling_switch_elapsed_s);
           // A bounded envelope produced from an unresolved multi-channel
           // decision is execution authority only; it is not permission to
           // turn that provisional guide into the sole successor channel.
@@ -8985,8 +8907,8 @@ namespace ego_planner
     // spuriously trigger the full-channel fallback.
     p4_successor_preparation_state_ =
         P4SuccessorPreparationState::ROUTE_PENDING;
-    p4_actual_curve_feedback_override_.reset();
-    p4_actual_curve_failure_signatures_.clear();
+    p4_pending_channel_work_item_.reset();
+    p4_pending_channel_context_.reset();
   }
 
   bool EGOPlannerManager::preparedP4SuccessorCandidateEarly(
@@ -9020,8 +8942,7 @@ namespace ego_planner
       Eigen::Vector3d *acceleration)
   {
     // The structured preparation state and immutable parent identity own this
-    // transaction. Final-curve feedback legitimately changes the diagnostic
-    // route reason while retrying the same child at the same frozen boundary.
+    // transaction while frozen channels are prepared at the same boundary.
     if (!position || !velocity || !acceleration ||
         p4_successor_preparation_state_ !=
             P4SuccessorPreparationState::CURVE_PREPARING ||
@@ -9070,7 +8991,8 @@ namespace ego_planner
   }
 
   void EGOPlannerManager::recordPreparedP4SuccessorCurveFailure(
-      const double now_s, const std::string &detail)
+      const double now_s, const P4PreparedCurveFailure curve_failure,
+      const std::string &detail)
   {
     // The structured preparation state owns this failure.  The route reason
     // is diagnostic text and may already have been replaced by a lower-level
@@ -9080,7 +9002,7 @@ namespace ego_planner
             P4SuccessorPreparationState::CURVE_PREPARING)
       return;
     const P4SuccessorFailure failure =
-        p4SuccessorFailureFromReason(detail);
+        p4SuccessorFailureForPreparedCurve(curve_failure);
     const bool retry_with_full_channel_search =
         last_p4_forward_decision_.successor_fast_path &&
         !p4_successor_schedule_.force_full_search &&
@@ -9181,7 +9103,7 @@ namespace ego_planner
     {
       bundle.channel_record.guide_identity = selected_candidate->path_hash;
       // Keep the route worker's stable channel guide identity separate from
-      // the exact guide handed to the final optimizer after bounded feedback.
+      // the exact immutable guide handed to the final optimizer.
       bundle.channel_record.refined_path_identity = p4PreparedGuideIdentity(
           bundle.decision.selected_guide);
     }
@@ -9264,8 +9186,6 @@ namespace ego_planner
             P4ExecutableIntent::LIMITED_PREFIX &&
         bundle.certificate.authority == P4ExecutionAuthority::LIMITED_PREFIX &&
         bundle.decision.action == P4ForwardAction::DEFER_RISK_SELECTION &&
-        bundle.decision.deferred_motion_mode ==
-            P4ForwardDeferredMotionMode::COMMON_PREFIX &&
         bundle.decision.deferred_trajectory.size() >= 2u;
     if (certified_limited_prefix)
     {
@@ -9363,7 +9283,8 @@ namespace ego_planner
       // this frozen snapshot; without this explicit handoff the next callback
       // observes result_delivered and silently falls into an unrelated normal
       // replan, leaving the multi-channel comparison permanently partial.
-      p4_actual_curve_feedback_override_ = last_p4_forward_decision_;
+      p4_pending_channel_work_item_ = last_p4_forward_decision_;
+      p4_pending_channel_context_ = planning_risk_context_;
       appendP4ForwardDecision(
           bundle.decision, "successor_channel_curve_prepared", now_s);
       return finish(true, "successor_next_channel_curve_pending");
@@ -9392,7 +9313,6 @@ namespace ego_planner
           std::numeric_limits<double>::quiet_NaN());
       observe.runner_up_actual_endpoint = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());
-      observe.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       observe.deferred_trajectory.clear();
       observe.speed_cap_mps = 0.0;
       observe.reason = "final_channel_intervals_overlap_hold";
@@ -9625,7 +9545,8 @@ namespace ego_planner
     appendP4ForwardDecision(
         last_p4_forward_decision_, "normal_channel_typed_failure", now_s);
     last_p4_forward_decision_ = next;
-    p4_actual_curve_feedback_override_ = std::move(next);
+    p4_pending_channel_work_item_ = std::move(next);
+    p4_pending_channel_context_ = planning_risk_context_;
     return finish(
         P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
         "normal_next_channel_after_typed_failure");
@@ -9888,7 +9809,8 @@ namespace ego_planner
           P4ChannelComparisonState::PARTIAL_COMPARISON;
       next.reason = "normal_next_channel_curve_pending";
       last_p4_forward_decision_ = next;
-      p4_actual_curve_feedback_override_ = std::move(next);
+      p4_pending_channel_work_item_ = std::move(next);
+      p4_pending_channel_context_ = planning_risk_context_;
       appendP4ForwardDecision(
           bundle.decision, "normal_channel_curve_prepared", now_s);
       return finish(
@@ -9921,12 +9843,12 @@ namespace ego_planner
           std::numeric_limits<double>::quiet_NaN());
       observe.runner_up_actual_endpoint = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());
-      observe.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       observe.deferred_trajectory.clear();
       observe.speed_cap_mps = 0.0;
       observe.reason = "normal_channel_comparison_incomparable_hold";
       last_p4_forward_decision_ = std::move(observe);
-      p4_actual_curve_feedback_override_.reset();
+      p4_pending_channel_work_item_.reset();
+      p4_pending_channel_context_.reset();
       appendP4ForwardDecision(
           last_p4_forward_decision_,
           "normal_channel_comparison_incomparable", now_s);
@@ -10037,7 +9959,9 @@ namespace ego_planner
         retry_policy.scheduler_guard_s);
     const auto retry_deadline = computeP4SuccessorDeadline(
         retry_policy, now_s,
-        p4_execution_certificate_.execution_deadline_s);
+        p4_execution_certificate_.execution_deadline_s,
+        p4_execution_certificate_.start_time_ns * 1.0e-9 +
+            p4_execution_certificate_.latest_rolling_switch_elapsed_s);
     if (!retry_deadline.valid)
       return false;
     if (p4_successor_schedule_.parent_trajectory_id > 0)
@@ -10109,7 +10033,6 @@ namespace ego_planner
       appendP4ExecutionEvent(
           "SUCCESSOR_ID_REBOUND", now_s, rebound);
     }
-    bundle.state = P4SuccessorPreparationState::REAUTHORIZING;
     p4_successor_preparation_state_ =
         P4SuccessorPreparationState::REAUTHORIZING;
     local_data_ = bundle.trajectory;
@@ -10144,7 +10067,7 @@ namespace ego_planner
     return finish(true, "successor_prepared_bundle_activated");
   }
 
-  bool EGOPlannerManager::commitActivatedP4SuccessorBundle(
+  bool EGOPlannerManager::commitP4PreparedBundle(
       const double now_s, std::string *reason)
   {
     const auto finish = [reason](const bool ok, const char *why) {
@@ -10153,10 +10076,21 @@ namespace ego_planner
     };
     if (!p4_cached_successor_activation_in_progress_ ||
         !p4_cached_successor_bundle_ || !p4_prepared_successor_ ||
+        !p4_cached_successor_bundle_->complete() ||
         !p4_execution_certificate_.valid ||
         p4_execution_certificate_.trajectory_id != local_data_.traj_id_ ||
         p4ControlPointHash(local_data_.position_traj_.getControlPoint()) !=
             p4_execution_certificate_.control_points_hash ||
+        p4KnotVectorHash(local_data_.position_traj_.getKnot()) !=
+            p4_execution_certificate_.knot_vector_hash ||
+        p4_execution_certificate_.control_points_hash !=
+            p4_cached_successor_bundle_->certificate.control_points_hash ||
+        p4_execution_certificate_.knot_vector_hash !=
+            p4_cached_successor_bundle_->certificate.knot_vector_hash ||
+        local_data_.start_time_.nanoseconds() !=
+            p4_cached_successor_bundle_->trajectory.start_time_.nanoseconds() ||
+        local_data_.duration_ !=
+            p4_cached_successor_bundle_->trajectory.duration_ ||
         !p4_direct_risk_evidence_.admissionComplete() ||
         !p4_direct_risk_evidence_.trajectory_assurance_complete ||
         !p4_direct_risk_evidence_.trajectory_assurance.authorized())
@@ -10176,9 +10110,9 @@ namespace ego_planner
         p4_execution_certificate_.control_points_hash;
     p4_committed_direct_risk_evidence_ = p4_direct_risk_evidence_;
     p4_execution_revoked_ = false;
-    if (!appendP4ForwardDecision(
-            last_p4_forward_decision_, "normal_publish_authorized", now_s))
-      return finish(false, "successor_publish_lineage_failed");
+    const bool lineage_written = appendP4ForwardDecision(
+        last_p4_forward_decision_, "normal_publish_authorized", now_s);
+    p4_lineage_telemetry_fault_ = !lineage_written;
     P4ExecutionCheckDiagnostics switched;
     switched.applicable = true;
     switched.allowed = true;
@@ -10205,7 +10139,9 @@ namespace ego_planner
       p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
           p4_successor_deadline_policy_,
           p4_execution_certificate_.start_time_ns * 1.0e-9,
-          p4_execution_certificate_.execution_deadline_s);
+          p4_execution_certificate_.execution_deadline_s,
+          p4_execution_certificate_.start_time_ns * 1.0e-9 +
+              p4_execution_certificate_.latest_rolling_switch_elapsed_s);
       p4_successor_schedule_.force_full_search =
           p4RequiresFullSuccessorChannelSearch(
               last_p4_forward_decision_,
@@ -10214,730 +10150,17 @@ namespace ego_planner
     return finish(true, "successor_cached_curve_publish_committed");
   }
 
-  bool EGOPlannerManager::prepareP4ActualCurveFeedbackRetry(
-      const unsigned int retry_index, std::string *reason)
-  {
-    const auto finish = [reason](const bool ready, const std::string &why) {
-        if (reason) *reason = why;
-        return ready;
-      };
-    const bool controlled_route_preference =
-        p4_direct_risk_evidence_.admissionComplete() &&
-        p4_direct_risk_evidence_.trajectory_assurance_complete &&
-        (p4_direct_risk_evidence_.trajectory_assurance.mode ==
-             iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION ||
-         p4_direct_risk_evidence_.trajectory_assurance.mode ==
-             iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION) &&
-        p4_direct_risk_evidence_.trajectory_assurance.authorized() &&
-        last_p4_forward_decision_.action ==
-            P4ForwardAction::CANDIDATE_READY;
-    const bool local_clearance_failure =
-        p4_direct_risk_evidence_.trajectory_assurance_complete &&
-        p4_direct_risk_evidence_.trajectory_assurance.local.status ==
-            iap::LocalMotionAssuranceStatus::UNSAFE &&
-        p4_direct_risk_evidence_.trajectory_assurance.local.reason ==
-            "local_clearance_margin_not_positive";
-    const bool local_support_envelope_failure =
-        last_p4_forward_decision_.geometry_commit.reason.rfind(
-            "final_bspline_corridor_support_stale_or_invalid:", 0u) == 0u;
-    // Four stages are available to repair the original full route.  A crop
-    // regenerates a different actual B-spline whose smoothing can expose an
-    // earlier, independent interior failure, so reserve two final stages for
-    // monotonically shortening that already-bounded observation prefix.
-    constexpr unsigned int kInitialPrefixCropRetry = 4u;
-    constexpr unsigned int kMaximumClearanceFeedbackRetries = 6u;
-    const bool recovery_braking_deadline_failure =
-        last_p4_forward_decision_.local_clearance_recovery &&
-        last_p4_forward_decision_.geometry_commit.reason.rfind(
-            "braking_window_layout_invalid:", 0u) == 0u &&
-        last_p4_forward_decision_.geometry_commit.reason.find(
-            "braking_stop_not_dynamically_feasible_before_deadline") !=
-            std::string::npos;
-    if (recovery_braking_deadline_failure && retry_index >= 1u &&
-        retry_index <= 4u &&
-        last_p4_forward_decision_.actual_curve_duration_scale < 4.0)
-    {
-      P4ForwardDecision retry = last_p4_forward_decision_;
-      retry.result_status = P4ForwardResultStatus::READY;
-      retry.planning_disposition =
-          P4PlanningDisposition::NEW_TRAJECTORY_READY;
-      retry.geometry_commit = P4GeometryCommitResult{};
-      retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-      retry.formal_support = false;
-      // Slowing the same finite recovery reduces v/a/j and gives every
-      // 0.2-second braking anchor more time before the fixed stopped
-      // endpoint.  Each bounded stage receives a new curve identity and must
-      // repeat collision, clearance, dynamics, GNSS, braking and P5 checks.
-      retry.actual_curve_duration_scale = std::clamp(
-          retry.actual_curve_duration_scale + 1.0, 2.0, 4.0);
-      retry.local_clearance_recovery_max_duration_s = std::max(
-          retry.local_clearance_recovery_max_duration_s,
-          retry.actual_curve_duration_scale);
-      retry.reason = "actual_curve_feedback_recovery_braking_retime";
-      p4_actual_curve_feedback_override_ = std::move(retry);
-      return finish(
-          true, "recovery_braking_deadline_retime_feedback_ready");
-    }
-    if (retry_index == 0u ||
-        retry_index > kMaximumClearanceFeedbackRetries ||
-        (!p4_direct_risk_evidence_.admissionComplete() &&
-         !local_support_envelope_failure) ||
-        (!controlled_route_preference && !local_clearance_failure &&
-         !local_support_envelope_failure &&
-         (p4_direct_risk_evidence_.executionAuthorized() ||
-          p4_direct_risk_evidence_.first_failure_index ==
-              std::numeric_limits<std::size_t>::max())))
-      return finish(false, "actual_curve_feedback_not_applicable");
-
-    P4ForwardDecision retry = last_p4_forward_decision_;
-    retry.result_status = P4ForwardResultStatus::READY;
-    retry.planning_disposition = P4PlanningDisposition::NEW_TRAJECTORY_READY;
-    retry.geometry_commit = P4GeometryCommitResult{};
-    // A support-envelope projection can be the first bounded retry and expose
-    // an independent millimetre-scale clearance failure on the regenerated
-    // curve.  Permit the unchanged clearance repair on the second retry as
-    // well; the repaired curve still has to repeat every final gate.
-    if (local_clearance_failure &&
-        retry_index <= kMaximumClearanceFeedbackRetries)
-    {
-      const auto &failure =
-          p4_direct_risk_evidence_.trajectory_assurance.local.first_failure;
-      const Eigen::Vector3d escape = failure.escape_direction_map;
-      std::vector<Eigen::Vector3d> *repair_guide = &retry.selected_guide;
-      const bool repairing_deferred_prefix =
-          retry.action == P4ForwardAction::DEFER_RISK_SELECTION &&
-          retry.deferred_motion_mode ==
-              P4ForwardDeferredMotionMode::COMMON_PREFIX &&
-          retry.deferred_trajectory.size() >= 2u;
-      const bool repairing_observation_prefix =
-          retry.action == P4ForwardAction::OBSERVE_MORE &&
-          retry.observe_more_trajectory.size() >= 2u;
-      if (retry.selected_guide.size() < 2u)
-      {
-        if (repairing_deferred_prefix)
-          repair_guide = &retry.deferred_trajectory;
-        else if (repairing_observation_prefix)
-          repair_guide = &retry.observe_more_trajectory;
-      }
-      if (!failure.position_map.allFinite() || !escape.allFinite() ||
-          escape.norm() <= 1.0e-9 || repair_guide->size() < 2u)
-        return finish(false, "local_clearance_escape_evidence_incomplete");
-      std::ostringstream signature;
-      signature << retry.planning_attempt_id << ':'
-                << p4_direct_risk_evidence_.execution_snapshot_id << ':'
-                << p4_direct_risk_evidence_.control_points_hash << ':'
-                << failure.nearest_obstacle_identity << ':'
-                << failure.sample_index << ':' << retry_index;
-      if (!p4_actual_curve_failure_signatures_.insert(signature.str()).second)
-        return finish(false, "local_clearance_duplicate_failure_candidate");
-
-      // The B-spline start is an immutable boundary condition. When that
-      // exact first nominal sample is hard-safe but lacks only the generation
-      // reserve, later guide corrections cannot repair it. Build a finite,
-      // low-speed exit along the frozen clearance gradient; the exact curve
-      // and all braking branches are still certified below.
-      const double planning_buffer_m =
-          p4_direct_risk_evidence_.trajectory_assurance.local.
-                  planning_buffer_m > 0.0
-              ? p4_direct_risk_evidence_.trajectory_assurance.local.
-                    planning_buffer_m
-              : p4_planning_clearance_buffer_m_;
-      const double hard_margin_m = failure.obstacle_clearance_m -
-          (failure.required_envelope_m - planning_buffer_m);
-      const bool nominal_start_deficit =
-          failure.curve_id.rfind("brake-", 0u) != 0u &&
-          failure.sample_index == 0u &&
-          std::isfinite(failure.relative_time_s) &&
-          std::abs(failure.relative_time_s) <= 1.0e-9 &&
-          std::isfinite(failure.obstacle_clearance_m) &&
-          std::isfinite(failure.required_envelope_m) &&
-          std::isfinite(planning_buffer_m) && planning_buffer_m > 0.0 &&
-          std::isfinite(hard_margin_m) && hard_margin_m > 0.0;
-      if (nominal_start_deficit)
-      {
-        const Eigen::Vector3d direction = escape.normalized();
-        const double planning_deficit_m = std::max(
-            0.0, failure.required_envelope_m -
-                     failure.obstacle_clearance_m);
-        constexpr double kRecoveryReserveM = 0.04;
-        constexpr double kMinimumRecoveryDistanceM = 0.10;
-        constexpr double kMaximumRecoveryDistanceM = 0.30;
-        const double recovery_distance_m = std::clamp(
-            planning_deficit_m + kRecoveryReserveM,
-            kMinimumRecoveryDistanceM, kMaximumRecoveryDistanceM);
-        retry.action = P4ForwardAction::OBSERVE_MORE;
-        retry.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
-        retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-        retry.formal_support = false;
-        retry.selected_candidate_id = 0u;
-        retry.selected_channel_id = 0u;
-        retry.selected_guide.clear();
-        retry.deferred_trajectory.clear();
-        retry.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-        retry.observe_more_trajectory = {
-            failure.position_map,
-            failure.position_map + 0.5 * recovery_distance_m * direction,
-            failure.position_map + recovery_distance_m * direction};
-        retry.local_clearance_recovery = true;
-        retry.local_clearance_recovery_max_duration_s = 1.0;
-        retry.speed_cap_mps = std::min(
-            0.25, std::max(0.1, p4_forward_limits_.max_observe_speed_mps));
-        retry.actual_curve_duration_scale = 1.0;
-        retry.reason = "initial_clearance_recovery_exit";
-        p4_actual_curve_feedback_override_ = std::move(retry);
-        return finish(true, "local_clearance_recovery_feedback_ready");
-      }
-
-      // Rebound smoothing can keep moving a late, millimetre-scale failure
-      // along the same endpoint neighbourhood even after several lateral
-      // seed corrections.  The fourth bounded attempt must not regenerate
-      // that same unauthorizable full segment forever.  Preserve only the
-      // already-clear prefix ending before the failed station and certify it
-      // as OBSERVE_MORE; the normal exact-curve, braking, GNSS and P5 gates
-      // still run on the shortened curve before it can be published.
-      const bool original_route_crop =
-          retry_index == kInitialPrefixCropRetry;
-      const bool regenerated_prefix_crop =
-          retry_index > kInitialPrefixCropRetry &&
-          retry.reason == "actual_curve_feedback_local_clearance_prefix" &&
-          repairing_observation_prefix;
-      if ((original_route_crop || regenerated_prefix_crop) &&
-          failure.curve_id.rfind("brake-", 0u) != 0u)
-      {
-        double projected_station_m = 0.0;
-        double best_distance_m = std::numeric_limits<double>::infinity();
-        double traversed_m = 0.0;
-        for (std::size_t index = 1u; index < repair_guide->size(); ++index)
-        {
-          const Eigen::Vector3d segment = (*repair_guide)[index] -
-              (*repair_guide)[index - 1u];
-          const double length_m = segment.norm();
-          if (length_m <= 1.0e-9) continue;
-          const double alpha = std::clamp(
-              (failure.position_map - (*repair_guide)[index - 1u]).dot(
-                  segment) / (length_m * length_m), 0.0, 1.0);
-          const Eigen::Vector3d projection =
-              (*repair_guide)[index - 1u] + alpha * segment;
-          const double distance_m =
-              (failure.position_map - projection).norm();
-          if (distance_m < best_distance_m)
-          {
-            best_distance_m = distance_m;
-            projected_station_m = traversed_m + alpha * length_m;
-          }
-          traversed_m += length_m;
-        }
-        const double terminal_smoothing_reserve_m = std::max(
-            p4_forward_limits_.topology_resolution_m,
-            p4_forward_limits_.min_creep_progress_m);
-        const double prefix_progress_m =
-            projected_station_m - terminal_smoothing_reserve_m;
-        auto prefix = p4CropPolyline(
-            *repair_guide, prefix_progress_m);
-        if (std::isfinite(best_distance_m) && prefix_progress_m + 1.0e-9 >=
-                p4_forward_limits_.min_creep_progress_m &&
-            prefix.size() >= 2u &&
-            p4PolylineLength(prefix) + 1.0e-9 >=
-                p4_forward_limits_.min_creep_progress_m)
-        {
-          retry.action = P4ForwardAction::OBSERVE_MORE;
-          retry.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
-          retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-          retry.formal_support = false;
-          retry.selected_candidate_id = 0u;
-          retry.selected_channel_id = 0u;
-          retry.selected_guide.clear();
-          retry.deferred_trajectory.clear();
-          retry.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-          retry.observe_more_trajectory = std::move(prefix);
-          retry.speed_cap_mps = std::min(
-              0.25,
-              std::max(0.1, p4_forward_limits_.max_observe_speed_mps));
-          retry.local_clearance_recovery = false;
-          retry.actual_curve_duration_scale = 1.0;
-          retry.reason = "actual_curve_feedback_local_clearance_prefix";
-          p4_actual_curve_feedback_override_ = std::move(retry);
-          return finish(
-              true, "local_clearance_prefix_crop_feedback_ready");
-        }
-      }
-
-      if (failure.curve_id.rfind("brake-", 0u) == 0u)
-      {
-        double projected_station_m = 0.0;
-        double best_distance_m = std::numeric_limits<double>::infinity();
-        double traversed_m = 0.0;
-        for (std::size_t index = 1u; index < repair_guide->size();
-             ++index)
-        {
-          const Eigen::Vector3d segment = (*repair_guide)[index] -
-              (*repair_guide)[index - 1u];
-          const double length_m = segment.norm();
-          if (length_m <= 1.0e-9) continue;
-          const double alpha = std::clamp(
-              (failure.position_map - (*repair_guide)[index - 1u]).dot(
-                  segment) / (length_m * length_m), 0.0, 1.0);
-          const Eigen::Vector3d projection =
-              (*repair_guide)[index - 1u] + alpha * segment;
-          const double distance_m =
-              (failure.position_map - projection).norm();
-          if (distance_m < best_distance_m)
-          {
-            best_distance_m = distance_m;
-            projected_station_m = traversed_m + alpha * length_m;
-          }
-          traversed_m += length_m;
-        }
-        const double reserve_m = p4_forward_limits_.vehicle_radius_m +
-            p4_forward_limits_.safety_margin_m;
-        const double cropped_progress_m = std::max(
-            p4_forward_limits_.min_creep_progress_m,
-            projected_station_m - reserve_m);
-        auto cropped = p4CropPolyline(
-            *repair_guide, cropped_progress_m);
-        if (cropped.size() < 2u ||
-            p4PolylineLength(cropped) + 1.0e-9 <
-                p4_forward_limits_.min_creep_progress_m)
-          return finish(false, "local_clearance_braking_crop_too_short");
-        *repair_guide = std::move(cropped);
-        retry.speed_cap_mps = std::min(
-            p4_forward_limits_.max_observe_speed_mps,
-            std::max(0.1, 0.5 * retry.speed_cap_mps));
-        if (!repairing_deferred_prefix && !repairing_observation_prefix)
-          retry.action = P4ForwardAction::CANDIDATE_READY;
-        retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-        retry.formal_support = false;
-        retry.actual_curve_duration_scale = 1.0;
-        retry.reason = "actual_curve_feedback_local_braking_crop";
-        p4_actual_curve_feedback_override_ = std::move(retry);
-        return finish(true, "local_clearance_braking_crop_feedback_ready");
-      }
-
-      const double required_curve_correction_m = std::max(
-          0.06, p4_planning_clearance_buffer_m_ -
-                    p4_direct_risk_evidence_.trajectory_assurance.local.
-                        minimum_margin_m + 0.01);
-      // A guide waypoint is only a seed for rebound optimization; its
-      // displacement is attenuated by smoothing before it appears on the
-      // final B-spline.  Apply a bounded seed-space gain over a local window,
-      // then require the regenerated exact curve to pass the unchanged
-      // clearance, dynamics, braking and P5 gates again.
-      constexpr double kClearanceGuideCorrectionGain = 4.0;
-      constexpr double kMaximumClearanceGuideCorrectionM = 0.35;
-      const double guide_correction_m = std::min(
-          kMaximumClearanceGuideCorrectionM,
-          kClearanceGuideCorrectionGain * required_curve_correction_m);
-      std::size_t nearest = 0u;
-      double nearest_distance = std::numeric_limits<double>::infinity();
-      for (std::size_t index = 0; index < repair_guide->size(); ++index)
-      {
-        const double distance =
-            ((*repair_guide)[index] - failure.position_map).norm();
-        if (distance < nearest_distance)
-        {
-          nearest_distance = distance;
-          nearest = index;
-        }
-      }
-      const auto occupied_centers = published_p4_bound_occupancy_
-          ? published_p4_bound_occupancy_->current_frame_occupied_voxel_centers
-          : std::shared_ptr<const std::vector<Eigen::Vector3d>>{};
-      const Eigen::Vector3d direction =
-          p4DeterministicLateralRepairDirection(
-              *repair_guide, nearest, failure.position_map, escape,
-              guide_correction_m, occupied_centers);
-      if (!direction.allFinite() || direction.norm() <= 1.0e-9)
-        return finish(false, "local_clearance_lateral_scan_unavailable");
-      if (nearest == 0u || nearest + 1u == repair_guide->size())
-      {
-        const auto insert_at = repair_guide->begin() +
-            static_cast<std::ptrdiff_t>(std::min<std::size_t>(
-                std::max<std::size_t>(1u, nearest),
-                repair_guide->size() - 1u));
-        repair_guide->insert(
-            insert_at,
-            failure.position_map + guide_correction_m * direction);
-      }
-      else
-      {
-        const double correction_radius_m = std::max(
-            0.75, p4_forward_limits_.topology_resolution_m);
-        for (std::size_t index = 1u; index + 1u < repair_guide->size();
-             ++index)
-        {
-          const double distance_m =
-              ((*repair_guide)[index] - failure.position_map).norm();
-          if (distance_m >= correction_radius_m) continue;
-          const double weight = std::max(
-              0.2, 1.0 - distance_m / correction_radius_m);
-          (*repair_guide)[index] +=
-              weight * guide_correction_m * direction;
-        }
-      }
-      if (!repairing_deferred_prefix && !repairing_observation_prefix)
-        retry.action = P4ForwardAction::CANDIDATE_READY;
-      retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-      retry.formal_support = false;
-      retry.actual_curve_duration_scale = 1.0;
-      retry.reason = "actual_curve_feedback_local_clearance_escape";
-      p4_actual_curve_feedback_override_ = std::move(retry);
-      return finish(true, "local_clearance_escape_feedback_ready");
-    }
-    if (controlled_route_preference &&
-        retry_index <= kMaximumClearanceFeedbackRetries &&
-        retry.reason != "controlled_degraded_execution_envelope")
-    {
-      const double selected_length_m = p4PolylineLength(
-          retry.selected_guide);
-      const double execution_envelope_m = std::min({
-          selected_length_m,
-          p4_forward_limits_.max_lookahead_m,
-          std::max(p4_forward_limits_.min_creep_progress_m,
-                   retry.stopping_distance_m +
-                       p4_forward_limits_.min_creep_progress_m)});
-      auto observation = p4CropPolyline(
-          retry.selected_guide, execution_envelope_m);
-      if (observation.size() < 2u ||
-          p4PolylineLength(observation) + 1.0e-9 <
-              p4_forward_limits_.min_creep_progress_m)
-        return finish(false, "controlled_execution_envelope_too_short");
-      retry.action = P4ForwardAction::OBSERVE_MORE;
-      retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-      retry.formal_support = false;
-      retry.observe_more_trajectory = std::move(observation);
-      retry.speed_cap_mps = std::min(
-          p4_forward_limits_.max_observe_speed_mps,
-          std::max(0.1, p4_forward_limits_.nominal_query_speed_mps));
-      retry.actual_curve_duration_scale = 1.0;
-      retry.reason = "controlled_degraded_execution_envelope";
-      p4_actual_curve_feedback_override_ = std::move(retry);
-      return finish(true, "controlled_execution_envelope_ready");
-    }
-    if (((p4_direct_risk_evidence_.certification_status ==
-              P4ActualCurveCertificationStatus::UNSAFE_SPATIAL_DOMINANT &&
-          retry_index == 1u) ||
-         (local_clearance_failure && retry_index == 2u) ||
-         (local_support_envelope_failure && retry_index == 1u)))
-    {
-      const auto selected = std::find_if(
-          retry.candidates.begin(), retry.candidates.end(),
-          [&retry](const P4ForwardCandidate &candidate) {
-            return candidate.candidate_id == retry.selected_candidate_id;
-          });
-      const uint64_t selected_channel = selected != retry.candidates.end()
-          ? selected->channel_id : 0u;
-      const auto alternative = std::find_if(
-          retry.candidates.begin(), retry.candidates.end(),
-          [&retry, selected_channel](const P4ForwardCandidate &candidate) {
-            return candidate.candidate_id != retry.selected_candidate_id &&
-                (selected_channel == 0u ||
-                 candidate.channel_id != selected_channel) &&
-                (candidate.safety_gate_passed ||
-                 candidate.controlled_degraded_candidate ||
-                 candidate.mission_degraded_candidate) &&
-                candidate.path.size() >= 2;
-      });
-      if (alternative != retry.candidates.end())
-      {
-        const uint64_t rejected_candidate_id = retry.selected_candidate_id;
-        const uint64_t rejected_channel_id = selected_channel != 0u
-            ? selected_channel : retry.selected_channel_id;
-        retry.action = P4ForwardAction::CANDIDATE_READY;
-        retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-        retry.formal_support = false;
-        retry.selected_candidate_id = alternative->candidate_id;
-        retry.selected_channel_id = alternative->channel_id;
-        retry.runner_up_candidate_id = rejected_candidate_id;
-        retry.runner_up_channel_id = rejected_channel_id;
-        retry.selected_guide = alternative->path;
-        retry.selected_actual_endpoint.setConstant(
-            std::numeric_limits<double>::quiet_NaN());
-        retry.selected_unevaluated_suffix_m =
-            std::numeric_limits<double>::quiet_NaN();
-        retry.actual_curve_duration_scale = 1.0;
-        retry.reason = "actual_curve_feedback_alternate_channel";
-        p4_actual_curve_feedback_override_ = std::move(retry);
-        return finish(true, "alternate_channel_feedback_ready");
-      }
-    }
-
-    // A final spline can leave the sensor support envelope between sparse
-    // topology waypoints even when the guide itself is supported.  If no
-    // unused channel is available, add a deterministic waypoint at the
-    // failed curve station projected onto that guide.  This carries no risk
-    // or geometry authority: the regenerated curve must pass the complete
-    // support, collision, dynamics, braking and P5 gates again.
-    if (local_support_envelope_failure && retry_index <= 2u &&
-        retry.selected_guide.size() >= 2u &&
-        retry.first_failed_position.allFinite())
-    {
-      std::size_t best_segment = 0u;
-      double best_distance_m = std::numeric_limits<double>::infinity();
-      Eigen::Vector3d projected = retry.selected_guide.front();
-      for (std::size_t index = 1u; index < retry.selected_guide.size();
-           ++index)
-      {
-        const Eigen::Vector3d segment = retry.selected_guide[index] -
-            retry.selected_guide[index - 1u];
-        const double squared_length = segment.squaredNorm();
-        if (squared_length <= 1.0e-12) continue;
-        const double alpha = std::clamp(
-            (retry.first_failed_position -
-             retry.selected_guide[index - 1u]).dot(segment) /
-                squared_length,
-            0.0, 1.0);
-        const Eigen::Vector3d candidate =
-            retry.selected_guide[index - 1u] + alpha * segment;
-        const double distance_m =
-            (candidate - retry.first_failed_position).norm();
-        if (distance_m < best_distance_m)
-        {
-          best_distance_m = distance_m;
-          best_segment = index - 1u;
-          projected = candidate;
-        }
-      }
-      Eigen::Vector3d correction =
-          projected - retry.first_failed_position;
-      bool used_sensor_envelope_projection = false;
-      const auto occupancy = planning_risk_context_.occupancy_snapshot;
-      if (occupancy && occupancy->trusted_local_map_support)
-      {
-        Eigen::Vector3d support_projection;
-        // Keep a small metric margin from the angular boundary so spline
-        // fitting and state-estimation jitter do not reproduce the same
-        // barely-outside point.  This uses only an observation that is fresh
-        // at the immutable planning context's evaluation time.
-        constexpr double kSupportInteriorMarginM = 0.03;
-        if (occupancy->trusted_local_map_support->projectIntoFreshEnvelope(
-                retry.first_failed_position,
-                planning_risk_context_.query_base_time_s,
-                kSupportInteriorMarginM, &support_projection))
-        {
-          // The failed sample is an optimized B-spline point, whereas this
-          // correction is applied to its guide seed.  In the native rebound
-          // optimizer the local guide displacement is attenuated by smoothing
-          // before it reaches the curve.  Apply a bounded seed-space gain;
-          // this grants no authority because the resulting exact curve still
-          // repeats support, clearance, collision, dynamics, braking and P5.
-          constexpr double kSupportGuideCorrectionGain = 6.0;
-          correction = kSupportGuideCorrectionGain *
-              (support_projection - retry.first_failed_position);
-          used_sensor_envelope_projection = true;
-        }
-      }
-      constexpr double kMaximumSupportCorrectionM = 0.5;
-      if (correction.norm() > kMaximumSupportCorrectionM)
-        correction *= kMaximumSupportCorrectionM / correction.norm();
-      if (correction.norm() <= 1.0e-6)
-        return finish(false, "support_projection_has_no_correction");
-      if (used_sensor_envelope_projection)
-        projected = retry.first_failed_position + correction;
-      // The native rebound entry consumes the guide endpoint as its local
-      // target.  Merely inserting an interior point would therefore rebuild
-      // the identical spline.  Move the remaining local segment by the
-      // bounded projection correction so the next solve has a genuinely new
-      // endpoint/identity and can steer back inside support.
-      for (std::size_t index = best_segment + 1u;
-           index < retry.selected_guide.size(); ++index)
-        retry.selected_guide[index] += correction;
-      const auto insertion = retry.selected_guide.begin() +
-          static_cast<std::ptrdiff_t>(best_segment + 1u);
-      retry.selected_guide.insert(insertion, projected);
-      retry.action = P4ForwardAction::CANDIDATE_READY;
-      retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-      retry.formal_support = false;
-      retry.actual_curve_duration_scale = 1.0;
-      retry.reason = used_sensor_envelope_projection
-          ? "actual_curve_feedback_sensor_envelope_projection"
-          : "actual_curve_feedback_support_projection";
-      p4_actual_curve_feedback_override_ = std::move(retry);
-      return finish(
-          true, used_sensor_envelope_projection
-              ? "sensor_envelope_projection_feedback_ready"
-              : "support_projection_feedback_ready");
-    }
-
-    if (p4_direct_risk_evidence_.certification_status ==
-            P4ActualCurveCertificationStatus::UNSAFE_TEMPORAL_DOMINANT &&
-        retry_index == 1u)
-    {
-      // Make one bounded attempt to reduce future-time covariance growth.
-      // The shorter interval is a hint only; terminal-stop fitting may lengthen
-      // it again when required by the unchanged velocity/acceleration limits.
-      retry.action = P4ForwardAction::CANDIDATE_READY;
-      retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-      retry.formal_support = false;
-      retry.actual_curve_duration_scale = 0.85;
-      retry.reason = "actual_curve_feedback_temporal_acceleration";
-      p4_actual_curve_feedback_override_ = std::move(retry);
-      return finish(true, "temporal_acceleration_feedback_ready");
-    }
-
-    // A temporal failure, or a spatial failure with no unused channel, may
-    // degrade only onto geometry shared by multiple topology channels. The
-    // failed selected curve supplies a conservative safe-distance ceiling;
-    // it must never be relabelled as a public prefix after the branch point.
-    // The regenerated terminal-stop spline still has to pass every final
-    // gate, so the corridor itself carries no inherited risk authority.
-    double safe_actual_arc_m =
-        last_p4_forward_decision_.first_failed_arc_length_m;
-    if (local_clearance_failure && !local_support_envelope_failure &&
-        (!std::isfinite(safe_actual_arc_m) || safe_actual_arc_m <= 0.0) &&
-        retry.geometry_common_corridor.size() >= 2u)
-    {
-      const Eigen::Vector3d failure_position =
-          p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.
-              position_map;
-      double traversed_m = 0.0;
-      double best_distance_m = std::numeric_limits<double>::infinity();
-      for (std::size_t index = 1u;
-           index < retry.geometry_common_corridor.size(); ++index)
-      {
-        const Eigen::Vector3d segment = retry.geometry_common_corridor[index] -
-            retry.geometry_common_corridor[index - 1u];
-        const double length_m = segment.norm();
-        if (length_m <= 1.0e-9) continue;
-        const double alpha = std::clamp(
-            (failure_position - retry.geometry_common_corridor[index - 1u]).
-                dot(segment) / (length_m * length_m), 0.0, 1.0);
-        const double distance_m = (failure_position -
-            (retry.geometry_common_corridor[index - 1u] + alpha * segment)).
-                norm();
-        if (distance_m < best_distance_m)
-        {
-          best_distance_m = distance_m;
-          safe_actual_arc_m = traversed_m + alpha * length_m;
-        }
-        traversed_m += length_m;
-      }
-      safe_actual_arc_m = std::max(
-          0.0, safe_actual_arc_m - p4_planning_clearance_buffer_m_);
-    }
-    // The direct-evidence rows are a window-membership lattice, not an
-    // ordered polyline: transition samples occur twice and braking branches
-    // leave the nominal curve.  The final checker has already projected the
-    // failed physical sample (including a braking sample via its anchor) onto
-    // the nominal B-spline.  Reuse that station instead of concatenating the
-    // evidence rows and accidentally approving a prefix beyond the failure.
-    if (!std::isfinite(safe_actual_arc_m) || safe_actual_arc_m <= 0.0)
-      return finish(false, "actual_curve_safe_prefix_too_short");
-
-    // Leaving a fresh sensor envelope is not an obstacle boundary.  The
-    // exact stopped curve only needs to remain inside the already-supported
-    // arc; subtracting vehicle radius and obstacle safety margin here made a
-    // short, fully observable transition mathematically impossible.  After
-    // alternate-channel and projection retries, rebuild only the observed
-    // portion with a metric sampling reserve.  This carries no inherited
-    // authority: the regenerated spline and every braking branch repeat all
-    // support, collision, clearance, dynamics, GNSS and P5 checks.
-    if (local_support_envelope_failure && retry_index >= 3u &&
-        retry_index <= kMaximumClearanceFeedbackRetries)
-    {
-      const std::vector<Eigen::Vector3d> *support_guide =
-          &retry.selected_guide;
-      if (retry.action == P4ForwardAction::OBSERVE_MORE &&
-          retry.reason == "actual_curve_feedback_sensor_support_prefix" &&
-          retry.observe_more_trajectory.size() >= 2u)
-        support_guide = &retry.observe_more_trajectory;
-      const double support_sampling_reserve_m = std::max(
-          p4_planning_clearance_buffer_m_,
-          p4_forward_limits_.occupancy_resolution_m);
-      const double supported_progress_m = std::min(
-          p4PolylineLength(*support_guide),
-          safe_actual_arc_m - support_sampling_reserve_m);
-      auto supported_prefix = p4CropPolyline(
-          *support_guide, supported_progress_m);
-      if (supported_progress_m + 1.0e-9 >=
-              p4_forward_limits_.min_creep_progress_m &&
-          supported_prefix.size() >= 2u &&
-          p4PolylineLength(supported_prefix) + 1.0e-9 >=
-              p4_forward_limits_.min_creep_progress_m)
-      {
-        retry.action = P4ForwardAction::OBSERVE_MORE;
-        retry.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
-        retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-        retry.formal_support = false;
-        retry.selected_candidate_id = 0u;
-        retry.selected_channel_id = 0u;
-        retry.selected_guide.clear();
-        retry.deferred_trajectory.clear();
-        retry.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-        retry.observe_more_trajectory = std::move(supported_prefix);
-        retry.speed_cap_mps = std::min(
-            0.25,
-            std::max(0.1, p4_forward_limits_.max_observe_speed_mps));
-        retry.actual_curve_duration_scale = 1.0;
-        retry.reason = "actual_curve_feedback_sensor_support_prefix";
-        p4_actual_curve_feedback_override_ = std::move(retry);
-        return finish(true, "sensor_support_prefix_feedback_ready");
-      }
-    }
-    std::set<uint64_t> channels;
-    for (const auto &candidate : retry.candidates)
-      if (candidate.channel_id != 0u) channels.insert(candidate.channel_id);
-    if (channels.size() < 2u || retry.geometry_common_corridor.size() < 2u)
-      return finish(false, "actual_curve_public_common_corridor_unavailable");
-    const double fixed_reserve_m = p4_forward_limits_.vehicle_radius_m +
-        p4_forward_limits_.safety_margin_m;
-    const double terminal_reserve_m = std::max({
-        fixed_reserve_m, retry.stopping_distance_m,
-        p4StoppingDistance(
-            p4_forward_limits_.max_observe_speed_mps,
-            p4_forward_limits_)});
-    const double common_corridor_m =
-        p4PolylineLength(retry.geometry_common_corridor);
-    const double configured_progress_cap_m =
-        p4_forward_limits_.max_creep_progress_m >= 0.0
-        ? p4_forward_limits_.max_creep_progress_m
-        : p4_forward_limits_.max_limited_prefix_progress_m;
-    const double progress_m = std::min({
-        std::max(0.0, safe_actual_arc_m - terminal_reserve_m),
-        std::max(0.0, common_corridor_m - terminal_reserve_m),
-        configured_progress_cap_m});
-    std::vector<Eigen::Vector3d> prefix = p4CropPolyline(
-        retry.geometry_common_corridor, progress_m);
-    if (prefix.size() < 2u || p4PolylineLength(prefix) <
-            p4_forward_limits_.min_creep_progress_m)
-      return finish(false, "actual_curve_safe_prefix_too_short");
-    retry.action = P4ForwardAction::DEFER_RISK_SELECTION;
-    retry.executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
-    retry.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
-    retry.selection_authority = P4ForwardSelectionAuthority::NONE;
-    retry.formal_support = false;
-    retry.selected_candidate_id = 0u;
-    retry.selected_channel_id = 0u;
-    retry.runner_up_candidate_id = 0u;
-    retry.runner_up_channel_id = 0u;
-    retry.selected_guide.clear();
-    retry.deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
-    retry.deferred_trajectory = std::move(prefix);
-    retry.common_prefix_length_m = common_corridor_m;
-    retry.certified_free_distance_m = std::min(
-        safe_actual_arc_m, common_corridor_m);
-    retry.limited_prefix_endpoint = retry.deferred_trajectory.back();
-    retry.limited_prefix_boundary = retry.geometry_common_corridor.back();
-    retry.limited_prefix_stopping_reserve_m = terminal_reserve_m;
-    retry.observation_predicted_information_gain = 0.0;
-    retry.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
-    retry.reason = "safe_limited_common_prefix";
-    last_p4_forward_decision_ = retry;
-    p4_actual_curve_feedback_override_ = std::move(retry);
-    return finish(true, "safe_limited_prefix_feedback_ready");
-  }
-
   bool EGOPlannerManager::validatePreparedP4SuccessorBeforePublish(
       const LocalTrajData &incumbent, const double now_s,
       std::string *reason, const double emergency_time_s,
       P5GateStatus *revalidated_p5_status)
   {
     const auto finish = [this, now_s, reason](
-                            const bool valid, const std::string &why) {
+                            const bool valid, const std::string &why,
+                            const P4SuccessorFailure failure) {
       if (reason) *reason = why;
       if (!valid && p4_prepared_successor_)
       {
-        const P4SuccessorFailure failure =
-            p4SuccessorFailureFromReason(why);
         p4_prepared_successor_->assurance.complete = false;
         p4_prepared_successor_->assurance.safe = false;
         p4_prepared_successor_->assurance.failure = failure;
@@ -10947,7 +10170,7 @@ namespace ego_planner
         rejected.applicable = true;
         rejected.allowed = false;
         rejected.identity_match =
-            why.find("identity") == std::string::npos;
+            failure != P4SuccessorFailure::PARENT_IDENTITY_CHANGED;
         rejected.execution_snapshot_id =
             p4_execution_certificate_.execution_snapshot_id;
         rejected.reason = why;
@@ -10965,7 +10188,8 @@ namespace ego_planner
       return valid;
     };
     if (!p4_prepared_successor_)
-      return finish(true, "not_a_prepared_successor");
+      return finish(true, "not_a_prepared_successor",
+                    P4SuccessorFailure::NONE);
     if (!std::isfinite(now_s) ||
         local_data_.traj_id_ !=
             p4_prepared_successor_->successor_trajectory_id ||
@@ -10973,7 +10197,8 @@ namespace ego_planner
             p4_prepared_successor_->successor_start_time_ns ||
         p4ControlPointHash(local_data_.position_traj_.getControlPoint()) !=
             p4_prepared_successor_->successor_control_points_hash)
-      return finish(false, "successor_candidate_identity_changed");
+      return finish(false, "successor_candidate_identity_changed",
+                    P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
 
     P4PreparedSuccessor current = *p4_prepared_successor_;
     // Boundary continuity belongs to the immutable absolute switch anchor,
@@ -11001,12 +10226,13 @@ namespace ego_planner
     current.successor_acceleration =
         local_data_.acceleration_traj_.evaluateDeBoorT(successor_t);
     std::string prepared_reason;
+    P4SuccessorFailure prepared_failure = P4SuccessorFailure::NONE;
     if (!validateP4PreparedSuccessor(
             current, incumbent.traj_id_,
             incumbent.start_time_.nanoseconds(),
             p4ControlPointHash(incumbent_position.getControlPoint()),
-            now_s, &prepared_reason, false))
-      return finish(false, prepared_reason);
+            now_s, &prepared_reason, false, &prepared_failure))
+      return finish(false, prepared_reason, prepared_failure);
 
     const auto execution = p0_risk_grid_runtime_
         ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
@@ -11025,7 +10251,8 @@ namespace ego_planner
                    execution->risk_policy.stale_timeout_s)
              : !p4SlamRegistrationHealthValid(
                    execution->integrity_anchor.current)))
-      return finish(false, "successor_latest_execution_authority_invalid");
+      return finish(false, "successor_latest_execution_authority_invalid",
+                    P4SuccessorFailure::INTEGRITY_STALE);
     if (!p4_execution_certificate_.valid ||
         p4_execution_certificate_.trajectory_id != local_data_.traj_id_ ||
         p4_execution_certificate_.start_time_ns !=
@@ -11046,7 +10273,8 @@ namespace ego_planner
               p4_execution_certificate_.window_layout_hash ||
           p4_direct_risk_evidence_.window_satellite_sets_hash !=
               p4_execution_certificate_.window_satellite_sets_hash)))
-      return finish(false, "successor_actual_curve_identity_changed");
+      return finish(false, "successor_actual_curve_identity_changed",
+                    P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
 
     {
       // Always recheck the exact cached curve at the fixed handoff, even when
@@ -11058,7 +10286,8 @@ namespace ego_planner
       std::vector<double> times;
       if (!sampleTrajectoryForGeometryCommit(
               &local_data_, 0.0, &points, &times) || points.empty())
-        return finish(false, "successor_actual_curve_sampling_failed");
+        return finish(false, "successor_actual_curve_sampling_failed",
+                      P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
       const auto nominal_points = points;
       const auto nominal_times = times;
       P4ExecutionRiskWindowLayout successor_layout;
@@ -11076,7 +10305,8 @@ namespace ego_planner
             p4_committed_risk_window_plan_->layout.identity_hash !=
                 p4_execution_certificate_.window_layout_hash)
           return finish(false,
-              "successor_committed_window_plan_identity_invalid");
+              "successor_committed_window_plan_identity_invalid",
+              P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE);
         successor_layout = p4_committed_risk_window_plan_->layout;
         points.clear();
         times.clear();
@@ -11089,7 +10319,8 @@ namespace ego_planner
         }
       }
       if (!execution->occupancy || !execution->forward_risk_batch)
-        return finish(false, "successor_latest_query_incomplete");
+        return finish(false, "successor_latest_query_incomplete",
+                      P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
       if (execution->occupancy->trusted_local_map_support)
       {
         for (std::size_t index = 0; index < points.size(); ++index)
@@ -11099,7 +10330,8 @@ namespace ego_planner
               local_data_.start_time_.seconds() + times[index]);
           if (!support.complete())
             return finish(false, "successor_latest_support_changed:" +
-                std::string(iap::localMapSupportStatusName(support.status)));
+                std::string(iap::localMapSupportStatusName(support.status)),
+                P4SuccessorFailure::SUPPORT_INCOMPLETE);
         }
       }
       const auto risk_snapshot = planning_risk_context_.snapshot;
@@ -11126,7 +10358,8 @@ namespace ego_planner
           result.combined_snapshot_identity !=
               request.combined_snapshot_identity ||
           result.points.size() != points.size())
-        return finish(false, "successor_latest_query_incomplete");
+        return finish(false, "successor_latest_query_incomplete",
+                      P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
       for (const auto &point : result.points)
       {
         if ((point.safety_state != iap::ForwardRiskSafetyState::SAFE &&
@@ -11138,7 +10371,8 @@ namespace ego_planner
                  iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) ||
             !point.gnss_supported || !point.lidar_supported ||
             !point.fim_supported || !std::isfinite(point.safety_ratio))
-          return finish(false, "successor_latest_query_incomplete");
+          return finish(false, "successor_latest_query_incomplete",
+                        P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
       }
       p4_direct_risk_evidence_ = makeP4DirectRiskEvidence(
           local_data_, risk_snapshot, execution, now_s, points, times,
@@ -11210,9 +10444,25 @@ namespace ego_planner
           p4_direct_risk_evidence_.trajectory_assurance.local.status !=
               iap::LocalMotionAssuranceStatus::UNKNOWN;
       if (!p4_direct_risk_evidence_.trajectory_assurance.authorized())
+      {
+        const auto &assurance =
+            p4_direct_risk_evidence_.trajectory_assurance;
+        P4SuccessorFailure assurance_failure =
+            P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+        if (assurance.local.status == iap::LocalMotionAssuranceStatus::UNKNOWN)
+          assurance_failure = P4SuccessorFailure::SUPPORT_INCOMPLETE;
+        else if (assurance.local.status == iap::LocalMotionAssuranceStatus::UNSAFE)
+          assurance_failure = assurance.local.first_failure.curve_id.find(
+              "brake-") == 0u
+              ? P4SuccessorFailure::BRAKING_CURVE_UNSAFE
+              : P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
+        else if (assurance.global.complete && !assurance.global.within_budget)
+          assurance_failure =
+              P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED;
         return finish(false, "successor_latest_trajectory_assurance_changed:" +
-            p4_direct_risk_evidence_.trajectory_assurance.reason + ":" +
-            p4_direct_risk_evidence_.trajectory_assurance.local.reason);
+            assurance.reason + ":" + assurance.local.reason,
+            assurance_failure);
+      }
       p4_committed_direct_risk_evidence_ = p4_direct_risk_evidence_;
       p4_execution_certificate_.execution_snapshot_id =
           execution->execution_snapshot_id;
@@ -11282,11 +10532,12 @@ namespace ego_planner
     }
     if (!p4_direct_risk_evidence_.trajectory_assurance_complete ||
         !p4_direct_risk_evidence_.trajectory_assurance.authorized())
-      return finish(false, "successor_latest_assurance_evidence_invalid");
+      return finish(false, "successor_latest_assurance_evidence_invalid",
+                    P4SuccessorFailure::SUPPORT_INCOMPLETE);
     const auto geometry = validateCommittedP4TrajectoryGeometry(now_s);
     if (geometry && !geometry->accepted())
       return finish(false, "successor_publish_collision_recheck_failed:" +
-          geometry->reason);
+          geometry->reason, P4SuccessorFailure::COLLISION_CHANGED);
     if (p5_integrity_gate_ &&
         p5_integrity_gate_->finalGateEnabled())
     {
@@ -11298,13 +10549,15 @@ namespace ego_planner
           p4_execution_certificate_.window_satellite_sets_hash);
       if (p5.action != P5GateAction::OK)
         return finish(false, "successor_latest_p5_recheck_failed:" +
-            std::string(P5RuntimeIntegrityGate::reasonName(p5.reason)));
+            std::string(P5RuntimeIntegrityGate::reasonName(p5.reason)),
+            P4SuccessorFailure::INTEGRITY_UNSAFE);
       // The publication event must carry the admission produced for the
       // rebound snapshot/certificate, never the earlier pre-rebind result.
       if (revalidated_p5_status)
         *revalidated_p5_status = p5;
     }
-    return finish(true, "prepared_successor_publish_revalidated");
+    return finish(true, "prepared_successor_publish_revalidated",
+                  P4SuccessorFailure::NONE);
   }
 
   P4ExecutionCheckDiagnostics
@@ -15014,14 +14267,14 @@ namespace ego_planner
         planning_max_vel = std::min(
             planning_max_vel, last_p4_forward_decision_.speed_cap_mps);
         if (!std::isfinite(planning_max_vel) || planning_max_vel <= 1.0e-3 ||
-            last_p4_forward_decision_.deferred_motion_mode ==
-                P4ForwardDeferredMotionMode::HOLD)
+            last_p4_forward_decision_.executable_intent ==
+                P4ExecutableIntent::HOLD)
         {
           continous_failures_count_++;
           return false;
         }
-        if (last_p4_forward_decision_.deferred_motion_mode ==
-            P4ForwardDeferredMotionMode::COMMON_PREFIX)
+        if (last_p4_forward_decision_.executable_intent ==
+            P4ExecutableIntent::LIMITED_PREFIX)
         {
           p4_forward_seed =
               last_p4_forward_decision_.deferred_trajectory;
@@ -15032,26 +14285,6 @@ namespace ego_planner
           }
           local_target_pt = p4_forward_seed.back();
           local_target_vel.setZero();
-        }
-      }
-      else if (last_p4_forward_decision_.action == P4ForwardAction::OBSERVE_MORE)
-      {
-        p4_forward_seed =
-            last_p4_forward_decision_.observe_more_trajectory;
-        if (p4_forward_seed.size() < 2)
-        {
-          continous_failures_count_++;
-          return false;
-        }
-        local_target_pt = p4_forward_seed.back();
-        local_target_vel.setZero();
-        planning_max_vel = std::min(
-            planning_max_vel,
-            last_p4_forward_decision_.speed_cap_mps);
-        if (!std::isfinite(planning_max_vel) || planning_max_vel <= 1.0e-3)
-        {
-          continous_failures_count_++;
-          return false;
         }
       }
       else if (last_p4_forward_decision_.action ==
@@ -17221,8 +16454,10 @@ namespace ego_planner
       }
       else
       {
-        prepared.assurance.failure = p4SuccessorFailureFromReason(
-            last_p4_forward_decision_.reason);
+        prepared.assurance.failure = p4SuccessorFailureForPreparedCurve(
+            p4_last_actual_curve_certification_.failure);
+        if (prepared.assurance.failure == P4SuccessorFailure::NONE)
+          prepared.assurance.failure = P4SuccessorFailure::SUPPORT_INCOMPLETE;
         prepared.assurance.detail = last_p4_forward_decision_.reason;
       }
       if (!comparable && successor_first_failure_index >= 0)
@@ -17250,11 +16485,14 @@ namespace ego_planner
           ? execution->risk_policy.alert_limit_v_m
           : std::numeric_limits<double>::quiet_NaN();
       prepared.assurance.query_duration_ms = successor_query_duration_ms;
+      P4SuccessorFailure prepared_validation_failure =
+          P4SuccessorFailure::NONE;
       const bool prepared_valid = validateP4PreparedSuccessor(
           prepared, local_data_.traj_id_,
           local_data_.start_time_.nanoseconds(),
           prepared.parent_control_points_hash, accepted_time.seconds(),
-          &replacement_reason, !successor_curve_preparation);
+          &replacement_reason, !successor_curve_preparation,
+          &prepared_validation_failure);
       if (!corridor_progress_valid || !prepared_valid ||
           !shouldReplaceCommittedLimitedPrefix(
               replacement, &replacement_reason))
@@ -17264,7 +16502,7 @@ namespace ego_planner
               P4SuccessorFailure::CORRIDOR_INVALID;
         else if (!prepared_valid)
           last_p4_forward_decision_.successor_failure =
-              p4SuccessorFailureFromReason(replacement_reason);
+              prepared_validation_failure;
         else if (replacement_reason == "minimum_endpoint_progress_not_met")
           last_p4_forward_decision_.successor_failure =
               P4SuccessorFailure::PROGRESS_INSUFFICIENT;
@@ -17351,7 +16589,7 @@ namespace ego_planner
       Eigen::Vector3d stop_pos, Eigen::Vector3d stop_vel,
       Eigen::Vector3d stop_acc)
   {
-    // OBSERVE_MORE and collision watchdog callbacks may independently request
+    // Endpoint retry and collision watchdog callbacks may independently request
     // the same stop. Keep one immutable emergency command in flight until a
     // normally planned trajectory replaces it; otherwise each timer tick
     // would allocate a new identity and integrate the measured state again.

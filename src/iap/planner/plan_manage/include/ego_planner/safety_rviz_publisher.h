@@ -123,7 +123,7 @@ struct SafetyVizP4Guide {
   std::vector<Eigen::Vector3d> original_path;
   std::vector<Eigen::Vector3d> risk_path;
   std::vector<Eigen::Vector3d> selected_path;
-  std::vector<Eigen::Vector3d> observe_more_path;
+  std::vector<Eigen::Vector3d> deferred_path;
   Eigen::Vector3d segment_start = Eigen::Vector3d::Zero();
   Eigen::Vector3d segment_end = Eigen::Vector3d::Zero();
   Eigen::Vector3d common_anchor = Eigen::Vector3d::Constant(

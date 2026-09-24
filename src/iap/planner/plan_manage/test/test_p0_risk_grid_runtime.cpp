@@ -2808,7 +2808,7 @@ TEST(SafetyRvizPublisherTest,
        Eigen::Vector3d(4.0, 0.0, 1.5)}};
   guide.topology_channel_ids = {2, 1};
   guide.topology_candidate_labels = {"channel 1", "channel 2"};
-  guide.observe_more_path = {
+  guide.deferred_path = {
       Eigen::Vector3d(0.0, 0.0, 1.5), Eigen::Vector3d(0.5, 0.0, 1.5)};
 
   ego_planner::SafetyRvizPublisher::Config config;
@@ -2915,7 +2915,7 @@ TEST(SafetyRvizPublisherTest,
 
   ego_planner::SafetyVizP4Guide deferred;
   deferred.forward_decision = true;
-  deferred.observe_more_path = {
+  deferred.deferred_path = {
       Eigen::Vector3d(0.0, 0.0, 1.5),
       Eigen::Vector3d(0.5, 0.0, 1.5)};
   publisher.publishP4Guides({deferred}, 100.0);

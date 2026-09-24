@@ -614,7 +614,7 @@ void SafetyRvizPublisher::publishP4Guides(
       guides.begin(), guides.end(), [](const SafetyVizP4Guide& guide) {
         return guide.forward_decision &&
                (!guide.topology_candidates.empty() ||
-                guide.observe_more_path.size() >= 2);
+                guide.deferred_path.size() >= 2);
       }) || !last_p4_topology_channel_ids_.empty();
   if (p4_topology_channels_pub_ && has_topology_payload &&
       shouldPublish(now_s, &last_p4_topology_publish_s_)) {
@@ -1496,7 +1496,7 @@ SafetyRvizPublisher::buildP4GuideMarkers(
           arr.markers.push_back(std::move(label));
         }
       }
-      add_path(guide.observe_more_path,
+      add_path(guide.deferred_path,
                color(0.1f, 0.95f, 0.95f, 0.95f), 0.09);
     }
     add_path(guide.original_path, color(0.2f, 0.45f, 1.0f, 0.45f), 0.04);
@@ -1673,14 +1673,14 @@ SafetyRvizPublisher::buildP4TopologyChannelMarkers(
       arr.markers.push_back(std::move(label));
     }
 
-    if (guide.observe_more_path.size() >= 2) {
+    if (guide.deferred_path.size() >= 2) {
       auto prefix = base_marker(
           config, stamp, kNamespace, 1,
           visualization_msgs::msg::Marker::LINE_STRIP);
       prefix.scale.x = 0.16;
       prefix.color = color(1.0f, 1.0f, 1.0f, 1.0f);
       prefix.lifetime = marker_lifetime;
-      for (const auto& point : guide.observe_more_path) {
+      for (const auto& point : guide.deferred_path) {
         prefix.points.push_back(point_msg(point));
       }
       arr.markers.push_back(std::move(prefix));

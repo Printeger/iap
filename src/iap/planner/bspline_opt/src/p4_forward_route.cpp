@@ -1932,7 +1932,6 @@ void configureKnownGeometryPrefixMotion(
   const std::vector<Eigen::Vector3d> & prefix,
   P4ForwardDecision * decision)
 {
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
   decision->executable_intent = P4ExecutableIntent::HOLD;
   decision->deferred_trajectory.clear();
   decision->geometry_common_corridor = prefix;
@@ -1972,7 +1971,6 @@ bool configureSafeLimitedCommonPrefix(
   {
     return false;
   }
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
   decision->executable_intent = P4ExecutableIntent::HOLD;
   decision->deferred_trajectory.clear();
   decision->speed_cap_mps = 0.0;
@@ -2238,7 +2236,6 @@ bool configureSafeLimitedCommonPrefix(
   decision->runner_up_candidate_id = 0;
   decision->runner_up_channel_id = 0;
   decision->selected_guide.clear();
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = std::move(executable);
   decision->executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
   decision->channel_comparison_state =
@@ -2339,7 +2336,6 @@ bool configureAdvisorySelection(
   decision->selected_channel_id = eligible.front()->channel_id;
   decision->selected_guide = eligible.front()->path;
   decision->speed_cap_mps = request.limits.max_observe_speed_mps;
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
   decision->reason = "known_hazard_ranked_advisory_selected";
   return true;
 }
@@ -2554,7 +2550,8 @@ bool p4ChannelCorridorIntersectsPoint(
 
 P4SuccessorDeadline computeP4SuccessorDeadline(
   const P4SuccessorDeadlinePolicy & policy,
-  const double trajectory_start_s, const double trajectory_end_s)
+  const double trajectory_start_s, const double trajectory_end_s,
+  const double latest_switch_time_s)
 {
   P4SuccessorDeadline result;
   const std::array<double, 8> values = {
@@ -2568,7 +2565,8 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
     trajectory_end_s};
   if (std::any_of(values.begin(), values.end(), [](const double value) {
       return !std::isfinite(value);
-    }) || policy.successor_prepare_wcet_s < 0.0 ||
+    }) || std::isnan(latest_switch_time_s) ||
+    policy.successor_prepare_wcet_s < 0.0 ||
     policy.direct_authorization_budget_s < 0.0 ||
     policy.latest_snapshot_reauthorization_budget_s < 0.0 ||
     policy.control_switch_margin_s < 0.0 ||
@@ -2586,7 +2584,14 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
     trajectory_end_s,
     trajectory_start_s + policy.maximum_parent_execution_before_switch_s,
     std::max(trajectory_start_s + 1.0,
-      trajectory_end_s - policy.control_switch_margin_s)});
+      trajectory_end_s - policy.control_switch_margin_s),
+    latest_switch_time_s});
+  if (std::isfinite(latest_switch_time_s) &&
+      result.planned_switch_time_s + kEpsilon < trajectory_start_s + 1.0)
+  {
+    result.reason = "no_legal_switch_before_terminal_deceleration";
+    return result;
+  }
   // The control margin has already moved the switch anchor earlier.  Do not
   // subtract it a second time from the candidate preparation deadline.
   const double unconstrained_start =
@@ -3117,61 +3122,6 @@ const char * p4SuccessorFailureName(const P4SuccessorFailure failure)
   return "UNKNOWN";
 }
 
-P4SuccessorFailure p4SuccessorFailureFromReason(
-  const std::string & reason)
-{
-  const auto contains = [&reason](const char * token) {
-    return reason.find(token) != std::string::npos;
-  };
-  // Specific evidence classes must precede the generic risk/assurance
-  // fallback. Integrity and support failures often contain those words too.
-  if (contains("future_unknown"))
-    return P4SuccessorFailure::SUPPORT_INCOMPLETE;
-  if (contains("future_bad"))
-    return P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
-  if (contains("current_invalid") || contains("current_stale"))
-    return P4SuccessorFailure::INTEGRITY_STALE;
-  if (contains("current_low_margin") || contains("al_invalid"))
-    return P4SuccessorFailure::INTEGRITY_UNSAFE;
-  if (contains("snapshot_unavailable"))
-    return P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE;
-  if (contains("local_clearance"))
-    return P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
-  if (contains("braking"))
-    return P4SuccessorFailure::BRAKING_CURVE_UNSAFE;
-  if (contains("global_exposure"))
-    return P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED;
-  if (contains("gnss_epoch"))
-    return P4SuccessorFailure::GNSS_EPOCH_STALE;
-  if (contains("integrity_unsafe"))
-    return P4SuccessorFailure::INTEGRITY_UNSAFE;
-  if (contains("integrity") || contains("execution_authority"))
-    return P4SuccessorFailure::INTEGRITY_STALE;
-  if (contains("support"))
-    return P4SuccessorFailure::SUPPORT_INCOMPLETE;
-  if (contains("local_map") || contains("stale"))
-    return P4SuccessorFailure::LOCAL_MAP_STALE;
-  if (contains("query") || contains("sampling"))
-    return P4SuccessorFailure::DIRECT_QUERY_TIMEOUT;
-  if (contains("snapshot") || contains("reauth"))
-    return P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE;
-  if (contains("collision") || contains("geometry"))
-    return P4SuccessorFailure::COLLISION_CHANGED;
-  if (contains("dynamic") || contains("boundary_state_discontinuous"))
-    return P4SuccessorFailure::DYNAMICS_INVALID;
-  if (contains("progress"))
-    return P4SuccessorFailure::PROGRESS_INSUFFICIENT;
-  if (contains("budget"))
-    return P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
-  if (contains("deadline") || contains("switch_window"))
-    return P4SuccessorFailure::DEADLINE_MISSED;
-  if (contains("identity") || contains("parent"))
-    return P4SuccessorFailure::PARENT_IDENTITY_CHANGED;
-  if (contains("gnss") || contains("risk") || contains("assurance"))
-    return P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
-  return P4SuccessorFailure::CORRIDOR_INVALID;
-}
-
 std::optional<Eigen::Vector3d> p4SelectedGuideTerminal(
   const P4ForwardDecision & decision)
 {
@@ -3356,9 +3306,7 @@ bool configureP4RefinementClearanceRecovery(
     decision->runner_up_candidate_id = 0u;
     decision->runner_up_channel_id = 0u;
     decision->selected_guide.clear();
-    decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
     decision->deferred_trajectory = std::move(prefix);
-    decision->observe_more_trajectory.clear();
     decision->geometry_common_corridor = decision->deferred_trajectory;
     decision->executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
     decision->request_position = current_position;
@@ -3396,12 +3344,10 @@ bool configureP4RefinementClearanceRecovery(
   decision->runner_up_candidate_id = 0u;
   decision->runner_up_channel_id = 0u;
   decision->selected_guide.clear();
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = {
     current_position,
     current_position + 0.5 * distance_m * direction,
     current_position + distance_m * direction};
-  decision->observe_more_trajectory.clear();
   decision->geometry_common_corridor = decision->deferred_trajectory;
   decision->executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
   decision->request_position = current_position;
@@ -3485,7 +3431,6 @@ const char * p4ForwardActionName(const P4ForwardAction action)
     case P4ForwardAction::RISK_SELECTED: return "RISK_SELECTED";
     case P4ForwardAction::ADVISORY_SELECTED: return "ADVISORY_SELECTED";
     case P4ForwardAction::DEFER_RISK_SELECTION: return "DEFER_RISK_SELECTION";
-    case P4ForwardAction::OBSERVE_MORE: return "OBSERVE_MORE";
     case P4ForwardAction::REPLAN_REQUIRED: return "REPLAN_REQUIRED";
     case P4ForwardAction::NO_SAFE_ROUTE: return "NO_SAFE_ROUTE";
   }
@@ -3525,7 +3470,7 @@ bool parseP4ForwardAction(
   } catch (const std::exception &) {
     return false;
   }
-  *action = P4ForwardAction::OBSERVE_MORE;
+  *action = P4ForwardAction::DEFER_RISK_SELECTION;
   return true;
 }
 
@@ -3595,17 +3540,6 @@ const char * p4ForwardSafetyStateName(const P4ForwardSafetyState state)
     case P4ForwardSafetyState::SAFE: return "SAFE";
     case P4ForwardSafetyState::UNSAFE: return "UNSAFE";
     case P4ForwardSafetyState::UNKNOWN: return "UNKNOWN";
-  }
-  return "UNKNOWN";
-}
-
-const char * p4ForwardDeferredMotionModeName(
-  const P4ForwardDeferredMotionMode mode)
-{
-  switch (mode) {
-    case P4ForwardDeferredMotionMode::NATIVE_EGO: return "NATIVE_EGO";
-    case P4ForwardDeferredMotionMode::COMMON_PREFIX: return "COMMON_PREFIX";
-    case P4ForwardDeferredMotionMode::HOLD: return "HOLD";
   }
   return "UNKNOWN";
 }
@@ -3991,8 +3925,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         output.selection_authority = P4ForwardSelectionAuthority::NONE;
         output.formal_support = false;
         output.deferred_trajectory.clear();
-        output.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-        output.observe_more_trajectory.clear();
         output.speed_cap_mps = 0.0;
       }
       return output;
@@ -4172,7 +4104,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.trigger_reason =
       P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED;
     decision.reason = "channel_enumeration_budget_exceeded";
-    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
     return finalize(std::move(decision));
   }
   if (raw.empty()) {
@@ -4197,8 +4128,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     }
     decision.common_anchor = prefix.back();
     configureKnownGeometryPrefixMotion(request, prefix, &decision);
-    decision.reason = decision.deferred_motion_mode ==
-      P4ForwardDeferredMotionMode::COMMON_PREFIX ?
+    decision.reason = decision.executable_intent ==
+      P4ExecutableIntent::LIMITED_PREFIX ?
       "frontier_common_prefix_deferred_motion" :
       "topology_probe_inconclusive_hold";
     return finalize(std::move(decision));
@@ -4275,7 +4206,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.geometry_state = P4ForwardGeometryState::CLEAR;
     decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
     decision.reason = "topology_candidates_failed_swept_check_hold";
-    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
     decision.speed_cap_mps = 0.0;
     std::vector<P4ForwardCandidate> clear_prefixes;
     for (const auto & raw_candidate : decision.raw_candidates) {
@@ -4300,8 +4230,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     auto prefix = p4CommonGeometryPrefix(
       clear_prefixes, request.limits.topology_resolution_m * 0.5);
     configureKnownGeometryPrefixMotion(request, prefix, &decision);
-    if (decision.deferred_motion_mode ==
-      P4ForwardDeferredMotionMode::COMMON_PREFIX)
+    if (decision.executable_intent == P4ExecutableIntent::LIMITED_PREFIX)
     {
       decision.reason = "topology_candidates_deferred_common_prefix";
     }
@@ -4398,7 +4327,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.runner_up_candidate_id = 0u;
     decision.runner_up_channel_id = 0u;
     decision.selected_guide.clear();
-    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
     decision.deferred_trajectory.clear();
     decision.speed_cap_mps = 0.0;
     return finalize(std::move(decision));
@@ -4812,7 +4740,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       decision.runner_up_candidate_id = 0u;
       decision.runner_up_channel_id = 0u;
       decision.selected_guide.clear();
-      decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       decision.deferred_trajectory.clear();
       decision.speed_cap_mps = 0.0;
       return finalize(std::move(decision));
@@ -4870,7 +4797,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.runner_up_candidate_id = 0;
     decision.runner_up_channel_id = 0;
     decision.selected_guide.clear();
-    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
     decision.deferred_trajectory.clear();
     decision.speed_cap_mps = 0.0;
     if (decision.reason == "not_evaluated" || decision.reason == "ok") {

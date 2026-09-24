@@ -56,7 +56,8 @@ namespace ego_planner
 
   P4SuccessorDeadline computeP4SuccessorDeadline(
     const P4SuccessorDeadlinePolicy & policy,
-    double trajectory_start_s, double trajectory_end_s);
+    double trajectory_start_s, double trajectory_end_s,
+    double latest_switch_time_s = std::numeric_limits<double>::infinity());
 
   struct P4SuccessorProgressInput
   {
@@ -192,8 +193,6 @@ namespace ego_planner
 
   struct P4ForwardDecision;
   const char * p4SuccessorFailureName(P4SuccessorFailure failure);
-  P4SuccessorFailure p4SuccessorFailureFromReason(
-    const std::string & reason);
   bool p4SuccessorGeometryFallbackAllowed(
     const P4ForwardDecision & decision);
   bool p4SuccessorSnapshotRetryDue(
@@ -223,9 +222,6 @@ namespace ego_planner
     RISK_SELECTED,
     ADVISORY_SELECTED,
     DEFER_RISK_SELECTION,
-    // Retained so archived v1 captures remain readable. New v2 decisions use
-    // DEFER_RISK_SELECTION with an explicit deferred motion mode.
-    OBSERVE_MORE,
     REPLAN_REQUIRED,
     NO_SAFE_ROUTE,
   };
@@ -241,13 +237,6 @@ namespace ego_planner
   {
     FINAL_CHANNEL = 0,
     LIMITED_PREFIX,
-    HOLD,
-  };
-
-  enum class P4ForwardDeferredMotionMode
-  {
-    NATIVE_EGO = 0,
-    COMMON_PREFIX,
     HOLD,
   };
 
@@ -454,8 +443,6 @@ namespace ego_planner
   const char * p4ForwardSelectionAuthorityName(
     P4ForwardSelectionAuthority authority);
   const char * p4ExecutableIntentName(P4ExecutableIntent intent);
-  const char * p4ForwardDeferredMotionModeName(
-    P4ForwardDeferredMotionMode mode);
   const char * p4PlanningDispositionName(P4PlanningDisposition disposition);
   const char * p4ForwardResultStatusName(P4ForwardResultStatus status);
 
@@ -825,8 +812,6 @@ namespace ego_planner
     // no risk authority; actual-curve feedback may use it only as the shape
     // of a LIMITED_PREFIX that is independently regenerated and certified.
     std::vector < Eigen::Vector3d > geometry_common_corridor;
-    P4ForwardDeferredMotionMode deferred_motion_mode =
-      P4ForwardDeferredMotionMode::HOLD;
     std::vector < Eigen::Vector3d > deferred_trajectory;
     double common_prefix_length_m = 0.0;
     Eigen::Vector3d limited_prefix_endpoint = Eigen::Vector3d::Constant(
@@ -839,9 +824,6 @@ namespace ego_planner
     // LIMITED_PREFIX execution authority.
     double observation_predicted_information_gain =
       std::numeric_limits<double>::quiet_NaN();
-    // Archived v1 readers use this field. New v2 production decisions leave
-    // it empty and publish deferred_trajectory instead.
-    std::vector < Eigen::Vector3d > observe_more_trajectory;
     // Typed authority for a short, independently certified exit from a state
     // that is hard-safe but has lost the generation planning reserve.
     bool local_clearance_recovery = false;
@@ -901,7 +883,7 @@ namespace ego_planner
 
   // Convert a frozen refinement that lost only the extra planning-clearance
   // reserve into a finite escape guide. This grants no motion authority: the
-  // resulting OBSERVE_MORE curve still passes the ordinary exact-curve,
+  // resulting LIMITED_PREFIX curve still passes the ordinary exact-curve,
   // braking, collision, GNSS and P5 certification chain.
   bool configureP4RefinementClearanceRecovery(
     const Eigen::Vector3d & current_position,

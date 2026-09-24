@@ -208,7 +208,8 @@ namespace ego_planner
       const std::string &expected_parent_control_points_hash,
       double now_s,
       std::string *reason = nullptr,
-      bool require_switch_window = true);
+      bool require_switch_window = true,
+      P4SuccessorFailure *failure = nullptr);
 
   bool shouldReplaceCommittedLimitedPrefix(
       const P4LimitedPrefixReplacementInput &input,
@@ -976,6 +977,10 @@ namespace ego_planner
     bool p4LineageTelemetryFault() const {
       return p4_lineage_telemetry_fault_;
     }
+    const P4ActualCurveCertificationResult &
+    lastP4ActualCurveCertification() const {
+      return p4_last_actual_curve_certification_;
+    }
     bool recordP4RuntimeLineage(double stamp_s);
     const P4ForwardDecision &lastP4ForwardDecision() const {
       return last_p4_forward_decision_;
@@ -1067,7 +1072,7 @@ namespace ego_planner
     bool preparedP4SuccessorBundleDue(double now_s) const;
     bool activatePreparedP4SuccessorBundle(
         double now_s, std::string *reason = nullptr);
-    bool commitActivatedP4SuccessorBundle(
+    bool commitP4PreparedBundle(
         double now_s, std::string *reason = nullptr);
     bool rescheduleP4SuccessorAfterReauthorizationFailure(
         double now_s, const std::string &failure_reason);
@@ -1112,7 +1117,8 @@ namespace ego_planner
           position_traj, frozen_parent_switch_elapsed_s, reason);
     }
     void recordPreparedP4SuccessorCurveFailure(
-        double now_s, const std::string &detail);
+        double now_s, P4PreparedCurveFailure failure,
+        const std::string &detail);
     bool activatingPreparedP4SuccessorBundle() const
     {
       return p4_cached_successor_activation_in_progress_;
@@ -1138,20 +1144,20 @@ namespace ego_planner
       const LocalTrajData &incumbent, double now_s,
       std::string *reason = nullptr, double emergency_time_s = 1.0,
       P5GateStatus *revalidated_p5_status = nullptr);
-    bool prepareP4ActualCurveFeedbackRetry(
-        unsigned int retry_index, std::string *reason = nullptr);
     const std::optional<P4ForwardDecision>&
-    pendingP4ActualCurveFeedbackForTest() const
+    pendingP4ChannelWorkItemForTest() const
     {
-      return p4_actual_curve_feedback_override_;
+      return p4_pending_channel_work_item_;
     }
-    void setP4ActualCurveFeedbackForTest(P4ForwardDecision decision)
+    void setP4PendingChannelWorkItemForTest(P4ForwardDecision decision)
     {
-      p4_actual_curve_feedback_override_ = std::move(decision);
+      p4_pending_channel_work_item_ = std::move(decision);
+      p4_pending_channel_context_ = planning_risk_context_;
     }
-    void clearP4ActualCurveFeedbackForTest()
+    void clearP4PendingChannelWorkItemForTest()
     {
-      p4_actual_curve_feedback_override_.reset();
+      p4_pending_channel_work_item_.reset();
+      p4_pending_channel_context_.reset();
     }
     void setPreparedP4SuccessorForTest(P4PreparedSuccessor successor)
     {
@@ -1456,11 +1462,11 @@ namespace ego_planner
     bool p4_pending_activation_is_prepared_successor_ = false;
     P4SuccessorPreparationState p4_successor_preparation_state_ =
         P4SuccessorPreparationState::ROUTE_PENDING;
-    std::optional<P4ForwardDecision> p4_actual_curve_feedback_override_;
+    std::optional<P4ForwardDecision> p4_pending_channel_work_item_;
+    std::optional<PlanningRiskContext> p4_pending_channel_context_;
     // Approved publication seam: freeze only route-level inputs, then let
     // reboundReplan generate and identify the actual B-spline normally.
     std::optional<P4ForwardDecision> p4_forward_decision_override_for_test_;
-    std::set<std::string> p4_actual_curve_failure_signatures_;
     std::string p4_last_astar_replay_signature_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
     std::optional<P4PendingBrakingTransition> p4_pending_braking_anchor_;

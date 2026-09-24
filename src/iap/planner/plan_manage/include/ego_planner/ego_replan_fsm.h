@@ -90,10 +90,10 @@ namespace ego_planner
             P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
   }
 
-  class P4ObserveMoreReplanScheduler
+  class P4EndpointRetryScheduler
   {
   public:
-    explicit P4ObserveMoreReplanScheduler(
+    explicit P4EndpointRetryScheduler(
         const double minimum_replan_period_s = 0.5)
       : minimum_replan_period_s_(minimum_replan_period_s) {}
 
@@ -198,8 +198,7 @@ namespace ego_planner
       REPLAN_TRAJ,
       EXEC_TRAJ,
       EMERGENCY_STOP,
-      SEQUENTIAL_START,
-      OBSERVE_MORE
+      SEQUENTIAL_START
     };
     enum TARGET_TYPE
     {
@@ -246,12 +245,10 @@ namespace ego_planner
 
     bool flag_escape_emergency_ = false;
   bool p5_final_gate_emergency_candidate_ = false;
-  unsigned int p4_actual_curve_feedback_depth_ = 0u;
-    bool p4_normal_channel_prepare_recursion_ = false;
     bool p5_waiting_for_p0_ready_ = false;
     bool p4_waiting_for_risk_grid_ready_ = false;
     bool p4_require_risk_grid_ready_before_planning_ = false;
-    P4ObserveMoreReplanScheduler p4_observe_more_scheduler_;
+    P4EndpointRetryScheduler p4_endpoint_retry_scheduler_;
     std::shared_ptr<const iap::RiskGridSnapshot> p4_admitted_risk_grid_snapshot_;
     P4RiskGridPlanningAdmission p4_risk_grid_planning_admission_;
     P1ReplanAdmission p1_replan_admission_;
