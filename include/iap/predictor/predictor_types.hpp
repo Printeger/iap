@@ -47,6 +47,38 @@ inline std::uint64_t forwardRiskSatelliteSetHash(
   return hash;
 }
 
+// Exact identity for the request-ordered point-local satellite sets in one
+// braking window.  The immutable execution layout owns point order; this hash
+// binds that order to each physical evidence point and its independently
+// selected satellite set.
+inline std::uint64_t forwardRiskPointSatelliteSetsHash(
+    const std::uint64_t satellite_window_id,
+    const std::vector<std::uint64_t>& evidence_point_ids,
+    const std::vector<std::uint64_t>& local_satellite_set_hashes) {
+  if (satellite_window_id == 0u || evidence_point_ids.empty() ||
+      evidence_point_ids.size() != local_satellite_set_hashes.size()) {
+    return 0u;
+  }
+  std::uint64_t hash = 1469598103934665603ULL;
+  const auto append = [&hash](const std::uint64_t value) {
+    for (unsigned int byte = 0; byte < 8u; ++byte) {
+      hash ^= (value >> (byte * 8u)) & 0xffu;
+      hash *= 1099511628211ULL;
+    }
+  };
+  append(satellite_window_id);
+  append(static_cast<std::uint64_t>(evidence_point_ids.size()));
+  for (std::size_t index = 0; index < evidence_point_ids.size(); ++index) {
+    if (evidence_point_ids[index] == 0u ||
+        local_satellite_set_hashes[index] == 0u) {
+      return 0u;
+    }
+    append(evidence_point_ids[index]);
+    append(local_satellite_set_hashes[index]);
+  }
+  return hash == 0u ? 1u : hash;
+}
+
 struct GnssAdvisoryPredictorParams {
   GnssGeometryPlPredictorParams geometry_params;
   VisibilityPredictor::Params visibility_params;
@@ -440,7 +472,7 @@ struct ForwardRiskQueryPoint {
   // distinct evidence point.
   std::uint64_t evidence_point_id = 0;
   // Deterministic execution-commitment window. Required by
-  // BRAKING_WINDOW_CORE and ignored by the legacy policies.
+  // BRAKING_WINDOW_POINTWISE and ignored by the legacy policies.
   std::uint64_t satellite_window_id = 0;
 };
 
@@ -451,10 +483,9 @@ enum class ForwardRiskSatelliteSetPolicy {
   // Execution authorization uses one conservative set that is usable at
   // every point of the remaining curve.
   COMMON_CORE,
-  // Execution authorization intersects locally usable satellites only over
-  // one reaction-and-braking commitment window. Transition samples appear
-  // once per adjacent window and must pass with both exact cores.
-  BRAKING_WINDOW_CORE,
+  // Execution authorization certifies each point with its own locally usable
+  // satellite set. Windows aggregate point results without intersecting sets.
+  BRAKING_WINDOW_POINTWISE,
 };
 
 struct GnssRiskSatelliteDiagnostic {
@@ -552,8 +583,9 @@ struct ForwardRiskPointResult {
 
 struct ForwardRiskWindowResult {
   std::uint64_t satellite_window_id = 0;
-  std::vector<int> satellite_ids;
-  std::uint64_t satellite_set_hash = 0;
+  std::uint64_t point_satellite_sets_hash = 0;
+  double maximum_hpl_over_hal = std::numeric_limits<double>::infinity();
+  double maximum_vpl_over_val = std::numeric_limits<double>::infinity();
   std::size_t point_count = 0;
   bool complete = false;
   std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();
@@ -575,15 +607,11 @@ struct ForwardRiskBatchTiming {
 struct ForwardRiskBatchResult {
   bool complete = false;
   std::string combined_snapshot_identity;
-  // For COMMON_CORE, the exact sorted IDs used by every point. For
-  // BRAKING_WINDOW_CORE, the diagnostic whole-request intersection computed
-  // from the same evidence pass but not used for authorization. Empty for
-  // PER_POINT requests or incomplete evidence.
+  // For COMMON_CORE, the exact sorted IDs used by every point. Empty for
+  // PER_POINT and BRAKING_WINDOW_POINTWISE requests.
   std::vector<int> common_satellite_ids;
-  // Populated for BRAKING_WINDOW_CORE in first-appearance order. Each entry
-  // contains the exact sorted IDs used by every row assigned to that original
-  // logical window. Equal adjacent sets may share cached calculations, but
-  // their window certificates are never merged.
+  // Populated for BRAKING_WINDOW_POINTWISE in first-appearance order. Each
+  // entry binds the request-ordered point-local set identities in that window.
   std::vector<ForwardRiskWindowResult> windows;
   ForwardRiskBatchTiming timing;
   std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();

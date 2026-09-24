@@ -90,19 +90,20 @@ inline std::string p4RiskQueryLatticeHash(
   return p4IdentityHash(canonical.str());
 }
 
-inline std::string p4WindowSatelliteSetsHash(
+inline std::string p4WindowPointSatelliteSetsHash(
     const std::vector<iap::ForwardRiskWindowResult>& windows) {
   if (windows.empty()) {
     return {};
   }
   std::ostringstream canonical;
-  canonical << "p4_window_satellite_sets_v1;";
+  canonical << "p4_window_point_satellite_sets_v1;";
   for (const auto& window : windows) {
-    canonical << window.satellite_window_id << ':';
-    for (const int satellite_id : window.satellite_ids) {
-      canonical << satellite_id << ',';
+    if (window.satellite_window_id == 0u || window.point_count == 0u ||
+        window.point_satellite_sets_hash == 0u) {
+      return {};
     }
-    canonical << ';';
+    canonical << window.satellite_window_id << ':' << window.point_count
+              << ':' << window.point_satellite_sets_hash << ';';
   }
   return p4IdentityHash(canonical.str());
 }
@@ -129,7 +130,7 @@ struct P4DirectTrajectoryRiskEvidence {
       iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
   std::string satellite_set_policy = "whole_curve_common_core";
   std::string window_layout_hash;
-  std::string window_satellite_sets_hash;
+  std::string window_point_satellite_sets_hash;
   std::uint64_t first_failure_window_id = 0;
   iap::ForwardRiskFailureReason first_failure_window_reason =
       iap::ForwardRiskFailureReason::NONE;

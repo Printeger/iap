@@ -564,7 +564,7 @@ def stage_launch_args(
         stage: str, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
-        gnss_core_policy: str = "braking_window_core",
+        gnss_core_policy: str = "braking_window_pointwise",
         task_mode: str = "mission_best_effort") -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
@@ -576,9 +576,9 @@ def stage_launch_args(
         raise ValueError("forest variants require the dense forest scenario")
     if gnss_arm not in ("baseline", "bds"):
         raise ValueError(f"unsupported GNSS arm: {gnss_arm}")
-    if gnss_core_policy != "braking_window_core":
+    if gnss_core_policy != "braking_window_pointwise":
         raise ValueError(
-            "production runner requires braking_window_core; legacy cores "
+            "production runner requires braking_window_pointwise; legacy cores "
             "are diagnostic-only C++ fixtures")
     launch_args = dict(STAGES[stage].launch_args)
     launch_args["scenario"] = scenario
@@ -2011,7 +2011,7 @@ def analyze_limited_prefix_records(
                 actual_curve_status_counts.get(status, 0) + 1)
     windowed_lineage_rows = [
         row for row in lineage
-        if row.get("actual_curve_core_policy") == "braking_window_core"]
+        if row.get("actual_curve_core_policy") == "braking_window_pointwise"]
     # One immutable direct certificate is written at several lineage stages.
     # Count/timing the CSV rows would multiply a single computation by the
     # number of audit records and bias p95. Deduplicate the exact certificate
@@ -2044,21 +2044,9 @@ def analyze_limited_prefix_records(
 
     window_counts = _lineage_numbers("actual_curve_window_count")
     transition_counts = _lineage_numbers("actual_curve_transition_count")
-    window_sat_mins = _lineage_numbers("actual_curve_window_sat_min")
-    window_sat_medians = _lineage_numbers("actual_curve_window_sat_median")
-    window_sat_maxes = _lineage_numbers("actual_curve_window_sat_max")
-    pooled_window_satellite_counts = []
-    for row in windowed_rows:
-        encoded_sets = str(
-            row.get("actual_curve_window_satellite_sets", ""))
-        for encoded_window in encoded_sets.split("/"):
-            if ":" not in encoded_window:
-                continue
-            encoded_ids = encoded_window.split(":", 1)[1]
-            satellite_ids = [value for value in encoded_ids.split("|")
-                             if value]
-            if satellite_ids:
-                pooled_window_satellite_counts.append(len(satellite_ids))
+    point_sat_mins = _lineage_numbers("actual_curve_point_sat_min")
+    point_sat_medians = _lineage_numbers("actual_curve_point_sat_median")
+    point_sat_maxes = _lineage_numbers("actual_curve_point_sat_max")
     window_saved_satellites = _lineage_numbers(
         "actual_curve_satellites_saved_from_remote_count")
     window_evidence_ms = _lineage_numbers("actual_curve_evidence_ms")
@@ -2145,17 +2133,15 @@ def analyze_limited_prefix_records(
         braking_window_count_max=max(window_counts, default=None),
         braking_window_transition_count_max=max(
             transition_counts, default=None),
-        braking_window_satellite_min=min(window_sat_mins, default=None),
+        braking_window_satellite_min=min(point_sat_mins, default=None),
         braking_window_satellite_median=(
-            statistics.median(pooled_window_satellite_counts)
-            if pooled_window_satellite_counts
-            else (statistics.median(window_sat_medians)
-                  if window_sat_medians else None)),
-        braking_window_satellite_max=max(window_sat_maxes, default=None),
+            statistics.median(point_sat_medians)
+            if point_sat_medians else None),
+        braking_window_satellite_max=max(point_sat_maxes, default=None),
         braking_window_satellites_saved_from_remote_max=max(
             window_saved_satellites, default=None),
         braking_window_evidence_ms_max=max(window_evidence_ms, default=None),
-        braking_window_core_ms_max=max(window_core_ms, default=None),
+        braking_window_pointwise_ms_max=max(window_core_ms, default=None),
         braking_window_advisory_ms_max=max(window_advisory_ms, default=None),
         braking_window_transition_ms_max=max(
             window_transition_ms, default=None),
@@ -2439,6 +2425,12 @@ def analyze_runtime_window_evidence(
         if sequence:
             window_rows_by_sequence.setdefault(sequence, []).append(row)
     incomplete_identity_rows = []
+    def _positive_int(value) -> bool:
+        try:
+            return int(value or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
     for row in batches:
         try:
             active_windows = int(row.get("active_window_count", 0) or 0)
@@ -2457,9 +2449,12 @@ def analyze_runtime_window_evidence(
         unique_windows = (len(window_ids) == len(set(window_ids)) and
                           all(window_ids))
         window_summaries_valid = all(
-            str(item.get("satellite_ids", "") or "") not in ("", "none")
-            and str(item.get("satellite_set_hash", "") or "") not in
+            str(item.get("point_satellite_sets_hash", "") or "") not in
             ("", "0")
+            and _positive_int(item.get("point_count", 0))
+            and str(item.get("maximum_hpl_over_hal", "") or "") != ""
+            and str(item.get("maximum_vpl_over_val", "") or "") != ""
+            and str(item.get("first_failure_index", "") or "") != ""
             and str(item.get("failure_reason", "") or "") != ""
             for item in window_rows)
         batch_complete = str(row.get("complete", "0")) == "1"
@@ -2488,7 +2483,7 @@ def analyze_runtime_window_evidence(
 
     missing_references = []
     for event in execution_events:
-        if str(event.get("gnss_core_policy", "")) != "braking_window_core":
+        if str(event.get("gnss_core_policy", "")) != "braking_window_pointwise":
             continue
         # Initial publication has commit-time P5 evidence; every subsequent
         # watchdog/hold/revoke/brake event must cite runtime evidence.
@@ -4376,7 +4371,7 @@ def _run_one_impl(
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
-        gnss_core_policy: str = "braking_window_core",
+        gnss_core_policy: str = "braking_window_pointwise",
         task_mode: str = "mission_best_effort",
         retain_raw_risk_detail: bool = False) -> dict:
     spec = STAGES[stage]
@@ -4594,7 +4589,7 @@ def _run_one(
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
-        gnss_core_policy: str = "braking_window_core",
+        gnss_core_policy: str = "braking_window_pointwise",
         task_mode: str = "mission_best_effort",
         retain_raw_risk_detail: bool = False) -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
@@ -4739,7 +4734,7 @@ def _run_main(args: argparse.Namespace) -> int:
     forest_ab = bool(getattr(args, "forest_ab", False))
     gnss_arm = getattr(args, "gnss_arm", "bds")
     gnss_core_policy = getattr(
-        args, "gnss_core_policy", "braking_window_core")
+        args, "gnss_core_policy", "braking_window_pointwise")
     task_mode = getattr(args, "task_mode", "mission_best_effort")
     retain_raw_risk_detail = bool(getattr(
         args, "retain_raw_risk_detail", False))

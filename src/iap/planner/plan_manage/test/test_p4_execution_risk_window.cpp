@@ -270,6 +270,7 @@ TEST(P4ExecutionRiskWindowTest,
     unsafe.points[index].failure_reason =
         iap::ForwardRiskFailureReason::NONE;
     unsafe.points[index].safety_ratio = 0.5 + 0.001 * index;
+    unsafe.points[index].local_satellite_set_hash = 1234u;
   }
   std::vector<std::size_t> nominal_indices;
   for (std::size_t index = 0; index < selection.rows.size(); ++index) {
@@ -286,10 +287,18 @@ TEST(P4ExecutionRiskWindowTest,
   for (const auto& window : selection.windows) {
     iap::ForwardRiskWindowResult result;
     result.satellite_window_id = window.window_id;
-    result.satellite_ids = {3, 7, 12, 18, 23};
-    result.satellite_set_hash = 1234;
     result.complete = true;
     result.point_count = window.request_row_indices.size();
+    std::vector<std::uint64_t> evidence_ids;
+    std::vector<std::uint64_t> local_hashes;
+    for (const std::size_t row_index : window.request_row_indices) {
+      evidence_ids.push_back(selection.rows[row_index].evidence_point_id);
+      local_hashes.push_back(
+          unsafe.points[row_index].local_satellite_set_hash);
+    }
+    result.point_satellite_sets_hash =
+        iap::forwardRiskPointSatelliteSetsHash(
+            result.satellite_window_id, evidence_ids, local_hashes);
     unsafe.windows.push_back(std::move(result));
   }
 

@@ -209,6 +209,53 @@ ego_planner::P4DirectTrajectoryRiskEvidence directRiskEvidence(
   return evidence;
 }
 
+void setKnownVisibleSatellites(
+    iap::ForwardRiskPointResult* point,
+    const std::vector<int>& satellite_ids) {
+  ASSERT_NE(point, nullptr);
+  point->gnss_satellites.clear();
+  point->prediction.gnss.used_sat_ids = satellite_ids;
+  point->gnss_used_satellite_count =
+      static_cast<int>(satellite_ids.size());
+  point->local_satellite_set_hash =
+      iap::forwardRiskSatelliteSetHash(satellite_ids);
+  for (const int satellite_id : satellite_ids) {
+    iap::GnssRiskSatelliteDiagnostic satellite;
+    satellite.sat_id = satellite_id;
+    satellite.above_elevation_mask = true;
+    satellite.support_known = true;
+    satellite.visible = true;
+    satellite.used = true;
+    point->gnss_satellites.push_back(std::move(satellite));
+  }
+}
+
+void rebuildPointwiseWindowHashes(
+    ego_planner::P4DirectTrajectoryRiskEvidence* evidence) {
+  ASSERT_NE(evidence, nullptr);
+  for (auto& window : evidence->windows) {
+    std::vector<std::uint64_t> evidence_point_ids;
+    std::vector<std::uint64_t> local_satellite_set_hashes;
+    for (std::size_t index = 0;
+         index < evidence->satellite_window_ids.size(); ++index) {
+      if (evidence->satellite_window_ids[index] !=
+          window.satellite_window_id) {
+        continue;
+      }
+      evidence_point_ids.push_back(evidence->evidence_point_ids[index]);
+      local_satellite_set_hashes.push_back(
+          evidence->points[index].local_satellite_set_hash);
+    }
+    window.point_count = evidence_point_ids.size();
+    window.point_satellite_sets_hash =
+        iap::forwardRiskPointSatelliteSetsHash(
+            window.satellite_window_id, evidence_point_ids,
+            local_satellite_set_hashes);
+  }
+  evidence->window_point_satellite_sets_hash =
+      ego_planner::p4WindowPointSatelliteSetsHash(evidence->windows);
+}
+
 void bindFreshExecutionSnapshot(
     ego_planner::P4DirectTrajectoryRiskEvidence* evidence,
     const std::shared_ptr<const iap::RiskGridSnapshot>& construction_grid,
@@ -1323,11 +1370,11 @@ TEST(P5RuntimeIntegrityGateTest,
 
   const auto legacy = gate.evaluateFinal(
       trajectory, snapshot, 0.0, -1.0, &direct,
-      "braking_window_core", "layout", "sets");
+      "braking_window_pointwise", "layout", "sets");
   EXPECT_NE(legacy.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(legacy.raw_reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
 
-  direct.satellite_set_policy = "braking_window_core";
+  direct.satellite_set_policy = "braking_window_pointwise";
   direct.certified_safe = true;
   direct.certification_status =
       ego_planner::P4ActualCurveCertificationStatus::SAFE;
@@ -1339,19 +1386,15 @@ TEST(P5RuntimeIntegrityGateTest,
     direct.evidence_point_ids[index] = index + 1u;
   iap::ForwardRiskWindowResult window;
   window.satellite_window_id = 1u;
-  window.satellite_ids = {1, 2, 3, 4, 5, 6};
-  window.satellite_set_hash =
-      iap::forwardRiskSatelliteSetHash(window.satellite_ids);
   window.point_count = direct.positions.size();
   window.complete = true;
   direct.windows = {window};
   for (auto& point : direct.points) {
-    point.local_satellite_set_hash = window.satellite_set_hash;
+    setKnownVisibleSatellites(&point, {1, 2, 3, 4, 5, 6});
   }
-  direct.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
-  ASSERT_EQ(direct.window_satellite_sets_hash,
-            ego_planner::p4WindowSatelliteSetsHash(direct.windows));
+  rebuildPointwiseWindowHashes(&direct);
+  ASSERT_EQ(direct.window_point_satellite_sets_hash,
+            ego_planner::p4WindowPointSatelliteSetsHash(direct.windows));
   ASSERT_EQ(direct.evidence_point_ids.size(), direct.positions.size());
   ASSERT_EQ(direct.satellite_window_ids.size(), direct.positions.size());
   ASSERT_EQ(direct.nominal_sample_rows.size(), direct.positions.size());
@@ -1369,8 +1412,8 @@ TEST(P5RuntimeIntegrityGateTest,
 
   const auto valid = gate.evaluateFinal(
       trajectory, snapshot, 0.1, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
-      direct.window_satellite_sets_hash);
+      "braking_window_pointwise", direct.window_layout_hash,
+      direct.window_point_satellite_sets_hash);
   std::string valid_reasons;
   for (const auto& sample : valid.viz_samples) {
     valid_reasons += sample.reason + ";";
@@ -1384,14 +1427,14 @@ TEST(P5RuntimeIntegrityGateTest,
 
   const auto mutated = gate.evaluateFinal(
       trajectory, snapshot, 0.2, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
+      "braking_window_pointwise", direct.window_layout_hash,
       "mutated-satellite-sets");
   EXPECT_NE(mutated.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(mutated.raw_reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
   ASSERT_FALSE(mutated.viz_samples.empty());
   EXPECT_EQ(mutated.viz_samples.front().reason,
             "direct_risk_evidence_incomplete:"
-            "required_window_satellite_sets_hash_mismatch");
+            "required_window_point_satellite_sets_hash_mismatch");
 }
 
 TEST(P5RuntimeIntegrityGateTest,
@@ -1407,7 +1450,7 @@ TEST(P5RuntimeIntegrityGateTest,
   auto trajectory = makeTrajectory();
   const auto snapshot = makeSnapshot(1.0, 1.0);
   auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
-  direct.satellite_set_policy = "braking_window_core";
+  direct.satellite_set_policy = "braking_window_pointwise";
   direct.certified_safe = true;
   direct.certification_status =
       ego_planner::P4ActualCurveCertificationStatus::SAFE;
@@ -1415,32 +1458,27 @@ TEST(P5RuntimeIntegrityGateTest,
   direct.nominal_sample_rows.assign(direct.positions.size(), true);
   direct.evidence_point_ids.resize(direct.positions.size());
   direct.satellite_window_ids.resize(direct.positions.size());
-  constexpr std::uint64_t kSatellitesOneThroughSixHash =
-      2951027553797236500ULL;
   const std::size_t split = direct.positions.size() / 2u;
   for (std::size_t index = 0; index < direct.positions.size(); ++index) {
     direct.evidence_point_ids[index] = index + 1u;
     direct.satellite_window_ids[index] = index < split ? 10u : 20u;
-    direct.points[index].local_satellite_set_hash =
-        kSatellitesOneThroughSixHash;
+    setKnownVisibleSatellites(
+        &direct.points[index], {1, 2, 3, 4, 5, 6});
   }
   iap::ForwardRiskWindowResult first;
   first.satellite_window_id = 10u;
-  first.satellite_ids = {1, 2, 3, 4, 5, 6};
-  first.satellite_set_hash = kSatellitesOneThroughSixHash;
   first.point_count = split;
   first.complete = true;
   iap::ForwardRiskWindowResult second = first;
   second.satellite_window_id = 20u;
   second.point_count = direct.positions.size() - split;
   direct.windows = {first, second};
-  direct.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  rebuildPointwiseWindowHashes(&direct);
 
   const auto valid = gate.evaluateFinal(
       trajectory, snapshot, 0.1, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
-      direct.window_satellite_sets_hash);
+      "braking_window_pointwise", direct.window_layout_hash,
+      direct.window_point_satellite_sets_hash);
   EXPECT_EQ(valid.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(valid.raw_reason, ego_planner::P5GateReason::OK);
 
@@ -1458,14 +1496,16 @@ TEST(P5RuntimeIntegrityGateTest,
   }
   unsafe.windows.front().failure_reason =
       iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+  unsafe.windows.front().complete = false;
   unsafe.windows.front().first_failure_index = 0u;
   unsafe.windows.back().failure_reason =
       iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+  unsafe.windows.back().complete = false;
   unsafe.windows.back().first_failure_index = split;
   const auto unsafe_status = gate.evaluateFinal(
       trajectory, snapshot, 0.15, -1.0, &unsafe,
-      "braking_window_core", unsafe.window_layout_hash,
-      unsafe.window_satellite_sets_hash);
+      "braking_window_pointwise", unsafe.window_layout_hash,
+      unsafe.window_point_satellite_sets_hash);
   EXPECT_EQ(unsafe_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_BAD);
   EXPECT_GT(unsafe_status.bad_count, 0u);
@@ -1473,37 +1513,34 @@ TEST(P5RuntimeIntegrityGateTest,
 
   auto missing = direct;
   missing.windows.pop_back();
-  missing.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(missing.windows);
+  missing.window_point_satellite_sets_hash =
+      ego_planner::p4WindowPointSatelliteSetsHash(missing.windows);
   const auto missing_status = gate.evaluateFinal(
       trajectory, snapshot, 0.2, -1.0, &missing,
-      "braking_window_core", missing.window_layout_hash,
-      missing.window_satellite_sets_hash);
+      "braking_window_pointwise", missing.window_layout_hash,
+      missing.window_point_satellite_sets_hash);
   EXPECT_EQ(missing_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
 
   auto duplicate = direct;
   duplicate.windows.push_back(first);
-  duplicate.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(duplicate.windows);
+  duplicate.window_point_satellite_sets_hash =
+      ego_planner::p4WindowPointSatelliteSetsHash(duplicate.windows);
   const auto duplicate_status = gate.evaluateFinal(
       trajectory, snapshot, 0.3, -1.0, &duplicate,
-      "braking_window_core", duplicate.window_layout_hash,
-      duplicate.window_satellite_sets_hash);
+      "braking_window_pointwise", duplicate.window_layout_hash,
+      duplicate.window_point_satellite_sets_hash);
   EXPECT_EQ(duplicate_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
 
   auto noncanonical_hash = direct;
   for (auto& window : noncanonical_hash.windows) {
-    window.satellite_set_hash ^= 1u;
-  }
-  for (auto& point : noncanonical_hash.points) {
-    point.local_satellite_set_hash ^= 1u;
+    window.point_satellite_sets_hash ^= 1u;
   }
   const auto noncanonical_hash_status = gate.evaluateFinal(
       trajectory, snapshot, 0.4, -1.0, &noncanonical_hash,
-      "braking_window_core", noncanonical_hash.window_layout_hash,
-      noncanonical_hash.window_satellite_sets_hash);
+      "braking_window_pointwise", noncanonical_hash.window_layout_hash,
+      noncanonical_hash.window_point_satellite_sets_hash);
   EXPECT_EQ(noncanonical_hash_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
 
@@ -1511,9 +1548,40 @@ TEST(P5RuntimeIntegrityGateTest,
   point_hash_mismatch.points.back().local_satellite_set_hash ^= 1u;
   const auto point_hash_status = gate.evaluateFinal(
       trajectory, snapshot, 0.5, -1.0, &point_hash_mismatch,
-      "braking_window_core", point_hash_mismatch.window_layout_hash,
-      point_hash_mismatch.window_satellite_sets_hash);
+      "braking_window_pointwise", point_hash_mismatch.window_layout_hash,
+      point_hash_mismatch.window_point_satellite_sets_hash);
   EXPECT_EQ(point_hash_status.raw_reason,
+            ego_planner::P5GateReason::FUTURE_UNKNOWN);
+
+  auto reordered_points = direct;
+  ASSERT_GE(reordered_points.evidence_point_ids.size(), 2u);
+  std::swap(reordered_points.evidence_point_ids[0],
+            reordered_points.evidence_point_ids[1]);
+  const auto reordered_status = gate.evaluateFinal(
+      trajectory, snapshot, 0.55, -1.0, &reordered_points,
+      "braking_window_pointwise", reordered_points.window_layout_hash,
+      reordered_points.window_point_satellite_sets_hash);
+  EXPECT_EQ(reordered_status.raw_reason,
+            ego_planner::P5GateReason::FUTURE_UNKNOWN);
+
+  auto wrong_count = direct;
+  ++wrong_count.windows.front().point_count;
+  wrong_count.window_point_satellite_sets_hash =
+      ego_planner::p4WindowPointSatelliteSetsHash(wrong_count.windows);
+  const auto wrong_count_status = gate.evaluateFinal(
+      trajectory, snapshot, 0.56, -1.0, &wrong_count,
+      "braking_window_pointwise", wrong_count.window_layout_hash,
+      wrong_count.window_point_satellite_sets_hash);
+  EXPECT_EQ(wrong_count_status.raw_reason,
+            ego_planner::P5GateReason::FUTURE_UNKNOWN);
+
+  auto wrong_used_count = direct;
+  ++wrong_used_count.points.front().gnss_used_satellite_count;
+  const auto wrong_used_count_status = gate.evaluateFinal(
+      trajectory, snapshot, 0.57, -1.0, &wrong_used_count,
+      "braking_window_pointwise", wrong_used_count.window_layout_hash,
+      wrong_used_count.window_point_satellite_sets_hash);
+  EXPECT_EQ(wrong_used_count_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
 
   auto hidden_failure = direct;
@@ -1521,8 +1589,8 @@ TEST(P5RuntimeIntegrityGateTest,
       iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
   const auto hidden_failure_status = gate.evaluateFinal(
       trajectory, snapshot, 0.6, -1.0, &hidden_failure,
-      "braking_window_core", hidden_failure.window_layout_hash,
-      hidden_failure.window_satellite_sets_hash);
+      "braking_window_pointwise", hidden_failure.window_layout_hash,
+      hidden_failure.window_point_satellite_sets_hash);
   EXPECT_EQ(hidden_failure_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
 
@@ -1535,12 +1603,12 @@ TEST(P5RuntimeIntegrityGateTest,
   wrong_first_failure.windows.front().failure_reason =
       iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
   wrong_first_failure.windows.front().first_failure_index = 1u;
-  wrong_first_failure.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(wrong_first_failure.windows);
+  wrong_first_failure.window_point_satellite_sets_hash =
+      ego_planner::p4WindowPointSatelliteSetsHash(wrong_first_failure.windows);
   const auto wrong_first_failure_status = gate.evaluateFinal(
       trajectory, snapshot, 0.7, -1.0, &wrong_first_failure,
-      "braking_window_core", wrong_first_failure.window_layout_hash,
-      wrong_first_failure.window_satellite_sets_hash);
+      "braking_window_pointwise", wrong_first_failure.window_layout_hash,
+      wrong_first_failure.window_point_satellite_sets_hash);
   EXPECT_EQ(wrong_first_failure_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
 }
@@ -1560,30 +1628,27 @@ TEST(P5RuntimeIntegrityGateTest,
   auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
   direct.task_mode =
       iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  direct.satellite_set_policy = "braking_window_core";
+  direct.satellite_set_policy = "braking_window_pointwise";
   direct.window_layout_hash = "mission-incomplete-layout";
   direct.nominal_sample_rows.assign(direct.positions.size(), true);
   direct.evidence_point_ids.resize(direct.positions.size());
   direct.satellite_window_ids.assign(direct.positions.size(), 33u);
-  const auto empty_set_hash = iap::forwardRiskSatelliteSetHash({});
   for (std::size_t index = 0; index < direct.positions.size(); ++index) {
     direct.evidence_point_ids[index] = index + 1u;
     direct.points[index] = iap::ForwardRiskPointResult{};
-    direct.points[index].local_satellite_set_hash = empty_set_hash;
+    setKnownVisibleSatellites(&direct.points[index], {1, 2, 3});
   }
   direct.points.front().failure_reason =
       iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
   iap::ForwardRiskWindowResult window;
   window.satellite_window_id = 33u;
-  window.satellite_set_hash = empty_set_hash;
   window.point_count = direct.positions.size();
   window.complete = false;
   window.failure_reason =
       iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
   window.first_failure_index = 0u;
   direct.windows = {window};
-  direct.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  rebuildPointwiseWindowHashes(&direct);
   // The provider truthfully reports an incomplete global batch because GNSS
   // is unavailable.  The typed failures above are nevertheless completely
   // accounted for by the mission-degraded certificate; P5 must not require
@@ -1605,8 +1670,8 @@ TEST(P5RuntimeIntegrityGateTest,
 
   const auto status = gate.evaluateFinal(
       trajectory, snapshot, 0.1, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
-      direct.window_satellite_sets_hash);
+      "braking_window_pointwise", direct.window_layout_hash,
+      direct.window_point_satellite_sets_hash);
 
   EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK)
       << status.future_reason;
@@ -1628,30 +1693,27 @@ TEST(P5RuntimeIntegrityGateTest,
   auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
   direct.task_mode =
       iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  direct.satellite_set_policy = "braking_window_core";
+  direct.satellite_set_policy = "braking_window_pointwise";
   direct.window_layout_hash = "mission-malformed-layout";
   direct.nominal_sample_rows.assign(direct.positions.size(), true);
   direct.evidence_point_ids.resize(direct.positions.size());
   direct.satellite_window_ids.assign(direct.positions.size(), 55u);
-  const auto empty_set_hash = iap::forwardRiskSatelliteSetHash({});
   for (std::size_t index = 0; index < direct.positions.size(); ++index) {
     direct.evidence_point_ids[index] = index + 1u;
     direct.points[index] = iap::ForwardRiskPointResult{};
     direct.points[index].failure_reason =
         iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED;
-    direct.points[index].local_satellite_set_hash = empty_set_hash;
+    setKnownVisibleSatellites(&direct.points[index], {1, 2, 3});
   }
   iap::ForwardRiskWindowResult window;
   window.satellite_window_id = 55u;
-  window.satellite_set_hash = empty_set_hash;
   window.point_count = direct.positions.size();
   window.complete = false;
   window.failure_reason =
       iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
   window.first_failure_index = 0u;
   direct.windows = {window};
-  direct.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  rebuildPointwiseWindowHashes(&direct);
   direct.trajectory_assurance_complete = true;
   direct.trajectory_assurance.mode =
       iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
@@ -1662,8 +1724,8 @@ TEST(P5RuntimeIntegrityGateTest,
 
   const auto status = gate.evaluateFinal(
       trajectory, snapshot, 0.1, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
-      direct.window_satellite_sets_hash);
+      "braking_window_pointwise", direct.window_layout_hash,
+      direct.window_point_satellite_sets_hash);
 
   EXPECT_NE(status.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(status.future_reason, "future_unknown");
@@ -1683,30 +1745,25 @@ TEST(P5RuntimeIntegrityGateTest,
   auto direct = directRiskEvidence(trajectory, grid, 1.0, 1.0);
   direct.task_mode =
       iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  direct.satellite_set_policy = "braking_window_core";
+  direct.satellite_set_policy = "braking_window_pointwise";
   direct.window_layout_hash = "best-effort-local-fresh-layout";
   direct.nominal_sample_rows.assign(direct.positions.size(), true);
   direct.evidence_point_ids.resize(direct.positions.size());
   direct.satellite_window_ids.assign(direct.positions.size(), 44u);
   const std::vector<int> satellite_ids{1, 2, 3, 4, 5, 6};
-  const auto satellite_hash =
-      iap::forwardRiskSatelliteSetHash(satellite_ids);
   for (std::size_t index = 0; index < direct.positions.size(); ++index) {
     direct.evidence_point_ids[index] = index + 1u;
-    direct.points[index].local_satellite_set_hash = satellite_hash;
+    setKnownVisibleSatellites(&direct.points[index], satellite_ids);
     direct.points[index].prediction.gnss.valid = true;
     direct.points[index].prediction.gnss.hpl = 1.0;
     direct.points[index].prediction.gnss.vpl = 1.0;
   }
   iap::ForwardRiskWindowResult window;
   window.satellite_window_id = 44u;
-  window.satellite_ids = satellite_ids;
-  window.satellite_set_hash = satellite_hash;
   window.point_count = direct.positions.size();
   window.complete = true;
   direct.windows = {window};
-  direct.window_satellite_sets_hash =
-      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  rebuildPointwiseWindowHashes(&direct);
   direct.trajectory_assurance_complete = true;
   direct.trajectory_assurance.mode =
       iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
@@ -1748,8 +1805,8 @@ TEST(P5RuntimeIntegrityGateTest,
   ASSERT_FALSE(execution->globalFreshAt(0.5, 1.0));
   const auto status = gate.evaluateFinal(
       trajectory, nullptr, 0.5, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
-      direct.window_satellite_sets_hash);
+      "braking_window_pointwise", direct.window_layout_hash,
+      direct.window_point_satellite_sets_hash);
 
   EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK)
       << status.future_reason;
@@ -1763,8 +1820,8 @@ TEST(P5RuntimeIntegrityGateTest,
       0.5, std::numeric_limits<double>::quiet_NaN(), 1.0, 10.0, 10.0));
   const auto global_invalid = gate.evaluateFinal(
       trajectory, nullptr, 0.5, -1.0, &direct,
-      "braking_window_core", direct.window_layout_hash,
-      direct.window_satellite_sets_hash);
+      "braking_window_pointwise", direct.window_layout_hash,
+      direct.window_point_satellite_sets_hash);
   EXPECT_EQ(global_invalid.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(global_invalid.raw_reason, ego_planner::P5GateReason::OK);
 }

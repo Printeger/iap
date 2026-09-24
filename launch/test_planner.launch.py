@@ -1096,7 +1096,7 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.nominal_query_speed_mps": "1.5",
     "p4.forward.route_compute_budget_ms": "1200.0",
     "p4.forward.compute_budget_ms": "150.0",
-    "p4.forward.gnss_core_policy": "braking_window_core",
+    "p4.forward.gnss_core_policy": "braking_window_pointwise",
     "p4.forward.window_transition_overlap_s": "0.4",
     "p4.execution.successor_prepare_wcet_s": "1.2",
     "p4.execution.successor_control_switch_margin_s": "0.2",
@@ -3444,7 +3444,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_to
             {"p4.forward.compute_budget_ms": _param_float(context, "p4.forward.compute_budget_ms")},
             # Production authorization has one implementation. Legacy
             # whole-curve cores remain available only in focused C++ tests.
-            {"p4.forward.gnss_core_policy": "braking_window_core"},
+            {"p4.forward.gnss_core_policy": "braking_window_pointwise"},
             {"p4.forward.window_transition_overlap_s": _param_float(context, "p4.forward.window_transition_overlap_s")},
             {"p4.execution.successor_prepare_wcet_s": _param_float(context, "p4.execution.successor_prepare_wcet_s")},
             {"p4.execution.successor_control_switch_margin_s": _param_float(context, "p4.execution.successor_control_switch_margin_s")},

@@ -2106,7 +2106,7 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
       << config_.predictor_gnss_clearance_transition_m
       << ";admission_epochs=" << config_.predictor_gnss_admission_epochs
       << ";geometry_solver=sherman_morrison_v1"
-      << ";execution_satellite_set=braking_window_core_v2"
+      << ";execution_satellite_set=braking_window_pointwise_v2"
       << ";task_mode="
       << iap::globalNavigationTaskModeName(config_.task_mode);
   source_identity.predictor_algorithm_identity = algorithm_identity.str();
@@ -3169,7 +3169,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         << config_.predictor_gnss_clearance_transition_m
         << ";admission_epochs=" << config_.predictor_gnss_admission_epochs
         << ";geometry_solver=sherman_morrison_v1"
-        << ";execution_satellite_set=braking_window_core_v2"
+        << ";execution_satellite_set=braking_window_pointwise_v2"
         << ";task_mode="
         << iap::globalNavigationTaskModeName(config_.task_mode);
     source_identity.predictor_algorithm_identity = predictor_identity.str();

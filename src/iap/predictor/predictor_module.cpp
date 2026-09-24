@@ -901,6 +901,17 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         std::chrono::steady_clock::now() - started_at).count();
     return out;
   }
+  if (request.satellite_set_policy ==
+      ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE) {
+    for (std::size_t index = 0; index < request.points.size(); ++index) {
+      if (request.points[index].satellite_window_id == 0u ||
+          request.points[index].evidence_point_id == 0u) {
+        fail_from(index,
+                  ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH);
+        return out;
+      }
+    }
+  }
   if (budget_expired()) {
     fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
     return out;
@@ -1252,25 +1263,9 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       }
     }
   } else if (request.satellite_set_policy ==
-             ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
-    std::vector<bool> diagnostic_whole_curve_mask(sat_count, true);
-    for (const auto& local_mask : local_satellite_masks) {
-      for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
-        diagnostic_whole_curve_mask[sat_index] =
-            diagnostic_whole_curve_mask[sat_index] && local_mask[sat_index];
-      }
-    }
-    for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
-      if (diagnostic_whole_curve_mask[sat_index]) {
-        out.common_satellite_ids.push_back(
-            request.snapshot.gnss_epoch.sats[sat_index].sat_id);
-      }
-    }
-    std::sort(out.common_satellite_ids.begin(),
-              out.common_satellite_ids.end());
+             ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE) {
     std::unordered_map<std::uint64_t, std::size_t> window_lookup;
     window_lookup.reserve(request.points.size());
-    std::vector<std::vector<std::size_t>> window_rows;
     for (std::size_t point_index = 0;
          point_index < request.points.size(); ++point_index) {
       const std::uint64_t window_id =
@@ -1280,66 +1275,8 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         ForwardRiskWindowResult window;
         window.satellite_window_id = window_id;
         out.windows.push_back(std::move(window));
-        window_rows.emplace_back();
       }
-      window_rows[inserted.first->second].push_back(point_index);
-    }
-
-    for (std::size_t window_index = 0;
-         window_index < out.windows.size(); ++window_index) {
-      auto& window = out.windows[window_index];
-      const auto& rows = window_rows[window_index];
-      window.point_count = rows.size();
-      std::vector<bool> window_mask(sat_count, true);
-      for (const std::size_t row : rows) {
-        for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
-          window_mask[sat_index] = window_mask[sat_index] &&
-              local_satellite_masks[row][sat_index];
-        }
-      }
-      const int window_satellite_count = static_cast<int>(std::count(
-          window_mask.begin(), window_mask.end(), true));
-      for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
-        if (!window_mask[sat_index]) continue;
-        const int sat_id = request.snapshot.gnss_epoch.sats[sat_index].sat_id;
-        window.satellite_ids.push_back(sat_id);
-      }
-      std::sort(window.satellite_ids.begin(), window.satellite_ids.end());
-      window.satellite_set_hash =
-          forwardRiskSatelliteSetHash(window.satellite_ids);
-      if (window_satellite_count < params_.gnss.geometry_params.min_sats) {
-        window.complete = false;
-        window.first_failure_index = rows.front();
-        window.failure_reason =
-            ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
-        if (out.failure_reason == ForwardRiskFailureReason::NONE) {
-          out.failure_reason = window.failure_reason;
-          out.first_failure_index = rows.front();
-        }
-      }
-      for (const std::size_t row : rows) {
-        local_satellite_masks[row] = window_mask;
-        auto& point = out.points[row];
-        point.gnss_used_satellite_count = window_satellite_count;
-        point.local_satellite_set_hash = window.satellite_set_hash;
-        for (std::size_t sat_index = 0;
-             sat_index < point.gnss_satellites.size() &&
-                 sat_index < sat_count;
-             ++sat_index) {
-          auto& diagnostic = point.gnss_satellites[sat_index];
-          if (diagnostic.used && !window_mask[sat_index]) {
-            diagnostic.used = false;
-            diagnostic.exclusion_reason =
-                "not_in_braking_window_execution_core";
-          }
-        }
-      }
-    }
-    if (out.failure_reason != ForwardRiskFailureReason::NONE) {
-      const auto reason = out.failure_reason;
-      const auto first = out.first_failure_index;
-      fail_from(first, reason);
-      return out;
+      ++out.windows[inserted.first->second].point_count;
     }
   }
   const auto core_complete_at = std::chrono::steady_clock::now();
@@ -1568,6 +1505,9 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       result.safety_state = ForwardRiskSafetyState::UNKNOWN;
       out.complete = false;
     }
+    if (result.failure_reason != ForwardRiskFailureReason::NONE) {
+      out.complete = false;
+    }
     if (out.failure_reason == ForwardRiskFailureReason::NONE &&
         result.failure_reason != ForwardRiskFailureReason::NONE) {
       out.failure_reason = result.failure_reason;
@@ -1584,30 +1524,72 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     }
   }
   if (request.satellite_set_policy ==
-      ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
+      ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE) {
     std::unordered_map<std::uint64_t, std::size_t> window_lookup;
     window_lookup.reserve(out.windows.size());
+    std::vector<std::vector<std::uint64_t>> evidence_point_ids(
+        out.windows.size());
+    std::vector<std::vector<std::uint64_t>> local_satellite_set_hashes(
+        out.windows.size());
+    std::vector<std::size_t> first_window_rows(
+        out.windows.size(), request.points.size());
     for (std::size_t index = 0; index < out.windows.size(); ++index) {
       auto& window = out.windows[index];
       window.complete = true;
+      window.maximum_hpl_over_hal = 0.0;
+      window.maximum_vpl_over_val = 0.0;
       window.failure_reason = ForwardRiskFailureReason::NONE;
       window_lookup.emplace(window.satellite_window_id, index);
     }
     for (std::size_t point_index = 0;
          point_index < request.points.size(); ++point_index) {
-      auto& window = out.windows[window_lookup.at(
-          request.points[point_index].satellite_window_id)];
+      const std::size_t window_index = window_lookup.at(
+          request.points[point_index].satellite_window_id);
+      first_window_rows[window_index] = std::min(
+          first_window_rows[window_index], point_index);
+      auto& window = out.windows[window_index];
       const auto& point = out.points[point_index];
-      if (point.ranking_state == ForwardRiskRankingState::COMPARABLE &&
-          point.failure_reason == ForwardRiskFailureReason::NONE) {
-        continue;
+      evidence_point_ids[window_index].push_back(
+          request.points[point_index].evidence_point_id);
+      local_satellite_set_hashes[window_index].push_back(
+          point.local_satellite_set_hash);
+      if (point.pl_upper_available) {
+        window.maximum_hpl_over_hal = std::max(
+            window.maximum_hpl_over_hal, point.hpl_upper_m / request.hal);
+        window.maximum_vpl_over_val = std::max(
+            window.maximum_vpl_over_val, point.vpl_upper_m / request.val);
+      } else {
+        window.maximum_hpl_over_hal =
+            std::numeric_limits<double>::infinity();
+        window.maximum_vpl_over_val =
+            std::numeric_limits<double>::infinity();
       }
-      window.complete = window.complete &&
-          point.ranking_state == ForwardRiskRankingState::COMPARABLE;
+      if (point.failure_reason != ForwardRiskFailureReason::NONE) {
+        window.complete = false;
+      }
       if (window.failure_reason == ForwardRiskFailureReason::NONE &&
           point.failure_reason != ForwardRiskFailureReason::NONE) {
         window.first_failure_index = point_index;
         window.failure_reason = point.failure_reason;
+      }
+    }
+    for (std::size_t index = 0; index < out.windows.size(); ++index) {
+      auto& window = out.windows[index];
+      window.point_satellite_sets_hash = forwardRiskPointSatelliteSetsHash(
+          window.satellite_window_id, evidence_point_ids[index],
+          local_satellite_set_hashes[index]);
+      if (window.point_satellite_sets_hash == 0u) {
+        window.complete = false;
+        if (window.failure_reason == ForwardRiskFailureReason::NONE) {
+          window.first_failure_index = first_window_rows[index];
+          window.failure_reason =
+              ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH;
+        }
+        out.complete = false;
+        if (out.failure_reason == ForwardRiskFailureReason::NONE) {
+          out.first_failure_index = window.first_failure_index;
+          out.failure_reason = window.failure_reason;
+        }
       }
     }
   }

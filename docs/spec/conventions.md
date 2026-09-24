@@ -147,24 +147,27 @@
   raw epochs before use. Disappearance, certified exclusion and hard LOS
   obstruction remove it immediately. This admission state is explicitly
   diagnostic and is not added to the certified epoch identity. Production
-  final/runtime checks use `BRAKING_WINDOW_CORE`: each deterministic window
+  final/runtime checks use `BRAKING_WINDOW_POINTWISE`: each deterministic window
   covers the nominal commands that may execute before the next handover, every
   real certified braking curve reachable from those commands, and a 0.4 s
-  transition overlap. Usable satellites are intersected only inside that
-  execution commitment envelope; candidate and receiver raw PL use the same
-  exact IDs at every point. Transition evidence evaluates the same space-time
-  samples once and applies both old and new cores, accepting only when both are
-  complete and below AL. Equal adjacent cores may reuse exact receiver,
-  candidate and geometry calculations, but every original logical window ID
-  retains its own certificate and transition responsibility. An insufficient
-  core, missing braking anchor, anchor gap over 0.2 s, degenerate geometry or
-  budget expiry is `UNKNOWN/HOLD`. The legacy whole-curve `COMMON_CORE` remains an
-  explicit diagnostic/A-B policy, not the formal forest default. During the
+  transition overlap. Every point uses its own known-visible, non-blocked LOS
+  satellite set for candidate and receiver geometry, fault subsets and PL/AL;
+  a window never intersects or overwrites those point-local sets. Transition
+  evidence evaluates the same space-time samples once for each owning window,
+  accepting only when every point is complete and below AL. Exact equal point
+  sets may reuse receiver, candidate and geometry calculations, but every
+  original logical window ID retains its own certificate and transition
+  responsibility. A point with insufficient satellites, missing braking
+  anchor, anchor gap over 0.2 s, degenerate geometry or budget expiry makes its
+  window `UNKNOWN/HOLD`. The legacy whole-curve `COMMON_CORE` remains an
+  explicit diagnostic/A-B policy, not the formal forest default. The former
+  braking-window common-core production semantics are replaced. During the
   final 0.2 s after the last discrete guard anchor, the exact remaining
   hard-terminal spline is registered as the reachable suffix braking curve
   and can be activated without a state discontinuity; it may neither extend
   the deadline nor move the approved endpoint. Every admission certificate
-  binds the window-layout hash and the exact per-window satellite-set hash.
+  binds the window-layout hash and each request-ordered window sequence hash of
+  `(evidence_point_id, local_satellite_set_hash)` pairs.
   Successor reauthorization and P5 must reject a policy/layout/set mismatch;
   a legacy common-core result cannot be relabelled as a window certificate.
   The window layout is constructed exactly once when the actual B-spline is

@@ -645,7 +645,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
     const P4DirectTrajectoryRiskEvidence* direct_risk,
     const std::string& required_gnss_core_policy,
     const std::string& required_window_layout_hash,
-    const std::string& required_window_satellite_sets_hash,
+    const std::string& required_window_point_satellite_sets_hash,
     const double runtime_authority_end_s,
     const double runtime_trajectory_time_s) {
   if (!config_.enable_runtime_gate) {
@@ -657,7 +657,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
       local_data, snapshot,
       EvalContext{false, now_s, emergency_time_s, direct_risk,
                   required_gnss_core_policy, required_window_layout_hash,
-                  required_window_satellite_sets_hash,
+                  required_window_point_satellite_sets_hash,
                   runtime_authority_end_s, runtime_trajectory_time_s});
   status = applyDebounce(status, now_s);
   publishStatus(status, "runtime");
@@ -672,7 +672,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
     const P4DirectTrajectoryRiskEvidence* direct_risk,
     const std::string& required_gnss_core_policy,
     const std::string& required_window_layout_hash,
-    const std::string& required_window_satellite_sets_hash) {
+    const std::string& required_window_point_satellite_sets_hash) {
   if (!config_.enable_final_gate) {
     resetFinalGateFailureState();
     P5GateStatus status;
@@ -683,7 +683,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
       local_data, snapshot,
       EvalContext{true, now_s, emergency_time_s, direct_risk,
                   required_gnss_core_policy, required_window_layout_hash,
-                  required_window_satellite_sets_hash,
+                  required_window_point_satellite_sets_hash,
                   std::numeric_limits<double>::infinity()});
   status = applyFinalGateBudget(status, now_s);
   status.final_evaluation_stamp_s = now_s;
@@ -702,7 +702,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinalPreview(
     const P4DirectTrajectoryRiskEvidence* direct_risk,
     const std::string& required_gnss_core_policy,
     const std::string& required_window_layout_hash,
-    const std::string& required_window_satellite_sets_hash) {
+    const std::string& required_window_point_satellite_sets_hash) {
   if (!config_.enable_final_gate) {
     P5GateStatus status;
     status.reason = P5GateReason::DISABLED;
@@ -721,7 +721,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinalPreview(
       local_data, snapshot,
       EvalContext{true, now_s, emergency_time_s, direct_risk,
                   required_gnss_core_policy, required_window_layout_hash,
-                  required_window_satellite_sets_hash,
+                  required_window_point_satellite_sets_hash,
                   std::numeric_limits<double>::infinity()});
   current_problem_started_s_ = saved_current_problem_started_s;
   current_low_margin_started_s_ = saved_current_low_margin_started_s;
@@ -1105,120 +1105,158 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
           source_identity->occupancy_generation &&
       direct_evidence->gnss_epoch_identity ==
           source_identity->gnss_epoch_identity;
-  bool window_contract_valid = direct_evidence != nullptr;
-  if (window_contract_valid &&
-      !context.required_gnss_core_policy.empty()) {
-    window_contract_valid = direct_evidence->satellite_set_policy ==
-        context.required_gnss_core_policy;
-  }
-  if (window_contract_valid &&
-      !context.required_window_layout_hash.empty()) {
-    window_contract_valid = direct_evidence->window_layout_hash ==
-        context.required_window_layout_hash;
-  }
-  if (window_contract_valid &&
-      !context.required_window_satellite_sets_hash.empty()) {
-    window_contract_valid = direct_evidence->window_satellite_sets_hash ==
-        context.required_window_satellite_sets_hash;
-  }
-  if (window_contract_valid && direct_evidence->satellite_set_policy ==
-          "braking_window_core") {
-    window_contract_valid =
-        !direct_evidence->window_layout_hash.empty() &&
-        !direct_evidence->window_satellite_sets_hash.empty() &&
-        !direct_evidence->windows.empty() &&
-        direct_evidence->window_satellite_sets_hash ==
-            p4WindowSatelliteSetsHash(direct_evidence->windows) &&
-        direct_evidence->evidence_point_ids.size() ==
-            direct_evidence->positions.size() &&
-        direct_evidence->satellite_window_ids.size() ==
-            direct_evidence->positions.size() &&
-        direct_evidence->nominal_sample_rows.size() ==
-            direct_evidence->positions.size();
+  const auto window_contract_failure = [&]() -> std::string {
+    if (direct_evidence == nullptr) return "direct_evidence_missing";
+    if (!context.required_gnss_core_policy.empty() &&
+        direct_evidence->satellite_set_policy !=
+            context.required_gnss_core_policy) {
+      return "required_gnss_core_policy_mismatch";
+    }
+    if (!context.required_window_layout_hash.empty() &&
+        direct_evidence->window_layout_hash !=
+            context.required_window_layout_hash) {
+      return "required_window_layout_hash_mismatch";
+    }
+    if (!context.required_window_point_satellite_sets_hash.empty() &&
+        direct_evidence->window_point_satellite_sets_hash !=
+            context.required_window_point_satellite_sets_hash) {
+      return "required_window_point_satellite_sets_hash_mismatch";
+    }
+    if (direct_evidence->satellite_set_policy !=
+        "braking_window_pointwise") {
+      return {};
+    }
+    if (direct_evidence->window_layout_hash.empty())
+      return "window_layout_hash_missing";
+    if (direct_evidence->window_point_satellite_sets_hash.empty())
+      return "window_point_satellite_sets_hash_missing";
+    if (direct_evidence->windows.empty()) return "windows_missing";
+    if (direct_evidence->evidence_point_ids.size() !=
+            direct_evidence->positions.size()) {
+      return "evidence_point_ids_size_mismatch";
+    }
+    if (direct_evidence->satellite_window_ids.size() !=
+            direct_evidence->positions.size()) {
+      return "satellite_window_ids_size_mismatch";
+    }
+    if (direct_evidence->nominal_sample_rows.size() !=
+            direct_evidence->positions.size()) {
+      return "nominal_sample_rows_size_mismatch";
+    }
+    if (direct_evidence->points.size() != direct_evidence->positions.size())
+      return "point_result_size_mismatch";
+
+    struct WindowRows {
+      std::vector<std::uint64_t> evidence_point_ids;
+      std::vector<std::uint64_t> local_satellite_set_hashes;
+      std::size_t first_failure_index =
+          std::numeric_limits<std::size_t>::max();
+      iap::ForwardRiskFailureReason first_failure_reason =
+          iap::ForwardRiskFailureReason::NONE;
+    };
     std::unordered_map<std::uint64_t,
                        const iap::ForwardRiskWindowResult*> windows_by_id;
+    std::unordered_map<std::uint64_t, WindowRows> rows_by_window;
     windows_by_id.reserve(direct_evidence->windows.size());
+    rows_by_window.reserve(direct_evidence->windows.size());
     for (const auto& window : direct_evidence->windows) {
-      const bool sorted_unique_satellites =
-          std::is_sorted(window.satellite_ids.begin(),
-                         window.satellite_ids.end()) &&
-          std::adjacent_find(window.satellite_ids.begin(),
-                             window.satellite_ids.end()) ==
-              window.satellite_ids.end();
-      const bool global_only_degraded_window =
-          mission_degraded_evidence &&
-          iap::forwardRiskFailureIsGlobalNavigationDegradable(
-              window.failure_reason);
-      const bool failure_is_complete_evidence =
-          window.failure_reason == iap::ForwardRiskFailureReason::NONE ||
-          window.failure_reason ==
-              iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED ||
-          global_only_degraded_window;
-      const bool inserted = window.satellite_window_id != 0u &&
-          windows_by_id.emplace(window.satellite_window_id, &window).second;
-      window_contract_valid = window_contract_valid && inserted &&
-          (global_only_degraded_window || !window.satellite_ids.empty()) &&
-          sorted_unique_satellites &&
-          window.satellite_set_hash ==
-              iap::forwardRiskSatelliteSetHash(window.satellite_ids) &&
-          (window.complete || global_only_degraded_window) &&
-          failure_is_complete_evidence;
+      if (window.satellite_window_id == 0u || window.point_count == 0u ||
+          window.point_satellite_sets_hash == 0u ||
+          !windows_by_id.emplace(window.satellite_window_id, &window).second) {
+        return "window_identity_missing_or_duplicate";
+      }
+      rows_by_window.emplace(window.satellite_window_id, WindowRows{});
     }
-    std::unordered_map<std::uint64_t, std::size_t> window_row_counts;
-    window_row_counts.reserve(windows_by_id.size());
-    std::unordered_map<std::uint64_t, std::size_t> window_first_failures;
-    window_first_failures.reserve(windows_by_id.size());
-    for (std::size_t index = 0;
-         window_contract_valid &&
-         index < direct_evidence->satellite_window_ids.size(); ++index) {
+
+    for (std::size_t index = 0; index < direct_evidence->points.size();
+         ++index) {
       const std::uint64_t window_id =
           direct_evidence->satellite_window_ids[index];
       const auto window = windows_by_id.find(window_id);
-      const bool point_failure_is_complete_evidence =
-          index < direct_evidence->points.size() &&
-          (direct_evidence->points[index].failure_reason ==
-               iap::ForwardRiskFailureReason::NONE ||
-           direct_evidence->points[index].failure_reason ==
-               iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED ||
-           (mission_degraded_evidence &&
-            iap::forwardRiskFailureIsGlobalNavigationDegradable(
-                direct_evidence->points[index].failure_reason)));
-      window_contract_valid = window != windows_by_id.end() &&
-          index < direct_evidence->points.size() &&
-          point_failure_is_complete_evidence &&
-          direct_evidence->points[index].local_satellite_set_hash ==
-              window->second->satellite_set_hash;
-      if (window_contract_valid) {
-        ++window_row_counts[window_id];
-        if (direct_evidence->points[index].failure_reason !=
-                iap::ForwardRiskFailureReason::NONE) {
-          window_first_failures.emplace(window_id, index);
+      if (window == windows_by_id.end()) return "point_window_id_unknown";
+      if (direct_evidence->evidence_point_ids[index] == 0u)
+        return "evidence_point_id_missing";
+      const auto& point = direct_evidence->points[index];
+      const auto failure = point.failure_reason;
+      if (failure != iap::ForwardRiskFailureReason::NONE &&
+          failure != iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED &&
+          !(mission_degraded_evidence &&
+            iap::forwardRiskFailureIsGlobalNavigationDegradable(failure))) {
+        return "point_failure_not_authorized";
+      }
+
+      std::vector<int> used_satellite_ids;
+      for (const auto& satellite : point.gnss_satellites) {
+        if (!satellite.used) continue;
+        if (!satellite.support_known || !satellite.visible ||
+            satellite.blocked || satellite.epoch_excluded) {
+          return "point_used_satellite_lacks_known_visible_support";
         }
+        used_satellite_ids.push_back(satellite.sat_id);
+      }
+      std::sort(used_satellite_ids.begin(), used_satellite_ids.end());
+      if (std::adjacent_find(used_satellite_ids.begin(),
+                             used_satellite_ids.end()) !=
+          used_satellite_ids.end()) {
+        return "point_used_satellite_ids_duplicate";
+      }
+      if (point.gnss_used_satellite_count !=
+          static_cast<int>(used_satellite_ids.size())) {
+        return "point_used_satellite_count_mismatch";
+      }
+      if (point.local_satellite_set_hash == 0u ||
+          point.local_satellite_set_hash !=
+              iap::forwardRiskSatelliteSetHash(used_satellite_ids)) {
+        return "point_local_satellite_set_hash_invalid";
+      }
+      auto predicted_ids = point.prediction.gnss.used_sat_ids;
+      std::sort(predicted_ids.begin(), predicted_ids.end());
+      if (predicted_ids != used_satellite_ids)
+        return "point_predictor_satellite_ids_mismatch";
+
+      auto& rows = rows_by_window.at(window_id);
+      rows.evidence_point_ids.push_back(
+          direct_evidence->evidence_point_ids[index]);
+      rows.local_satellite_set_hashes.push_back(
+          point.local_satellite_set_hash);
+      if (failure != iap::ForwardRiskFailureReason::NONE &&
+          rows.first_failure_reason == iap::ForwardRiskFailureReason::NONE) {
+        rows.first_failure_index = index;
+        rows.first_failure_reason = failure;
       }
     }
+
     for (const auto& window : direct_evidence->windows) {
-      const auto row_count = window_row_counts.find(
-          window.satellite_window_id);
-      window_contract_valid = window_contract_valid &&
-          row_count != window_row_counts.end() &&
-          row_count->second == window.point_count;
-      if (!window_contract_valid) {
-        break;
+      const auto& rows = rows_by_window.at(window.satellite_window_id);
+      if (rows.evidence_point_ids.size() != window.point_count)
+        return "window_point_count_mismatch";
+      if (iap::forwardRiskPointSatelliteSetsHash(
+              window.satellite_window_id, rows.evidence_point_ids,
+              rows.local_satellite_set_hashes) !=
+          window.point_satellite_sets_hash) {
+        return "window_point_satellite_sets_hash_invalid";
       }
-      const auto first_failure = window_first_failures.find(
-          window.satellite_window_id);
-      if (window.failure_reason == iap::ForwardRiskFailureReason::NONE) {
-        window_contract_valid =
-            first_failure == window_first_failures.end();
-      } else {
-        window_contract_valid =
-            first_failure != window_first_failures.end() &&
-            window.first_failure_index == first_failure->second &&
-            direct_evidence->points[first_failure->second].failure_reason ==
-                window.failure_reason;
+      const bool points_complete =
+          rows.first_failure_reason == iap::ForwardRiskFailureReason::NONE;
+      if (window.complete != points_complete)
+        return "window_complete_mismatch";
+      if (window.failure_reason != rows.first_failure_reason)
+        return "window_first_failure_reason_mismatch";
+      if (!points_complete &&
+          window.first_failure_index != rows.first_failure_index) {
+        return "window_first_failure_index_mismatch";
       }
     }
-  }
+    if (direct_evidence->window_point_satellite_sets_hash !=
+        p4WindowPointSatelliteSetsHash(direct_evidence->windows)) {
+      return "window_point_satellite_sets_hash_aggregate_invalid";
+    }
+    return {};
+  };
+  const std::string window_contract_failure_reason =
+      window_contract_failure();
+  const bool window_contract_valid =
+      direct_evidence != nullptr && window_contract_failure_reason.empty();
   const bool direct_evidence_valid = direct_evidence &&
       // MISSION_DEGRADED_EXECUTION deliberately preserves the provider's
       // truthful top-level `complete=false` when every missing row is a typed
@@ -1244,123 +1282,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       direct_evidence->positions.size() == direct_evidence->points.size();
   std::string direct_evidence_failure_reason;
   if (direct_evidence && !direct_evidence_valid) {
-    const auto window_contract_failure = [&]() -> std::string {
-      if (!context.required_gnss_core_policy.empty() &&
-          direct_evidence->satellite_set_policy !=
-              context.required_gnss_core_policy) {
-        return "required_gnss_core_policy_mismatch";
-      }
-      if (!context.required_window_layout_hash.empty() &&
-          direct_evidence->window_layout_hash !=
-              context.required_window_layout_hash) {
-        return "required_window_layout_hash_mismatch";
-      }
-      if (!context.required_window_satellite_sets_hash.empty() &&
-          direct_evidence->window_satellite_sets_hash !=
-              context.required_window_satellite_sets_hash) {
-        return "required_window_satellite_sets_hash_mismatch";
-      }
-      if (direct_evidence->satellite_set_policy != "braking_window_core") {
-        return window_contract_valid ? std::string{}
-                                     : "window_contract_invalid";
-      }
-      if (direct_evidence->window_layout_hash.empty())
-        return "window_layout_hash_missing";
-      if (direct_evidence->window_satellite_sets_hash.empty())
-        return "window_satellite_sets_hash_missing";
-      if (direct_evidence->windows.empty()) return "windows_missing";
-      if (direct_evidence->window_satellite_sets_hash !=
-          p4WindowSatelliteSetsHash(direct_evidence->windows)) {
-        return "window_satellite_sets_hash_invalid";
-      }
-      if (direct_evidence->evidence_point_ids.size() !=
-          direct_evidence->positions.size()) {
-        return "evidence_point_ids_size_mismatch";
-      }
-      if (direct_evidence->satellite_window_ids.size() !=
-          direct_evidence->positions.size()) {
-        return "satellite_window_ids_size_mismatch";
-      }
-      if (direct_evidence->nominal_sample_rows.size() !=
-          direct_evidence->positions.size()) {
-        return "nominal_sample_rows_size_mismatch";
-      }
-      std::unordered_map<std::uint64_t,
-                         const iap::ForwardRiskWindowResult*> by_id;
-      for (const auto& window : direct_evidence->windows) {
-        if (window.satellite_window_id == 0u ||
-            !by_id.emplace(window.satellite_window_id, &window).second) {
-          return "window_id_missing_or_duplicate";
-        }
-        const bool sorted_unique =
-            std::is_sorted(window.satellite_ids.begin(),
-                           window.satellite_ids.end()) &&
-            std::adjacent_find(window.satellite_ids.begin(),
-                               window.satellite_ids.end()) ==
-                window.satellite_ids.end();
-        if (!sorted_unique) return "window_satellite_ids_not_sorted_unique";
-        if (window.satellite_set_hash !=
-            iap::forwardRiskSatelliteSetHash(window.satellite_ids)) {
-          return "window_satellite_set_hash_invalid";
-        }
-        const bool degraded = mission_degraded_evidence &&
-            iap::forwardRiskFailureIsGlobalNavigationDegradable(
-                window.failure_reason);
-        if (!degraded && window.satellite_ids.empty())
-          return "window_satellite_ids_missing";
-        if (!window.complete && !degraded)
-          return "window_incomplete_without_degraded_authority";
-        if (window.failure_reason != iap::ForwardRiskFailureReason::NONE &&
-            window.failure_reason !=
-                iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED &&
-            !degraded) {
-          return "window_failure_not_authorized";
-        }
-      }
-      std::unordered_map<std::uint64_t, std::size_t> row_counts;
-      std::unordered_map<std::uint64_t, std::size_t> first_failures;
-      for (std::size_t index = 0;
-           index < direct_evidence->satellite_window_ids.size(); ++index) {
-        const auto found = by_id.find(
-            direct_evidence->satellite_window_ids[index]);
-        if (found == by_id.end()) return "point_window_id_unknown";
-        if (index >= direct_evidence->points.size())
-          return "point_result_missing";
-        const auto failure = direct_evidence->points[index].failure_reason;
-        if (failure != iap::ForwardRiskFailureReason::NONE &&
-            failure != iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED &&
-            !(mission_degraded_evidence &&
-              iap::forwardRiskFailureIsGlobalNavigationDegradable(failure))) {
-          return "point_failure_not_authorized";
-        }
-        if (direct_evidence->points[index].local_satellite_set_hash !=
-            found->second->satellite_set_hash) {
-          return "point_window_satellite_set_hash_mismatch";
-        }
-        ++row_counts[found->first];
-        if (failure != iap::ForwardRiskFailureReason::NONE)
-          first_failures.emplace(found->first, index);
-      }
-      for (const auto& window : direct_evidence->windows) {
-        if (row_counts[window.satellite_window_id] != window.point_count)
-          return "window_point_count_mismatch";
-        const auto first = first_failures.find(window.satellite_window_id);
-        if (window.failure_reason == iap::ForwardRiskFailureReason::NONE) {
-          if (first != first_failures.end())
-            return "window_missing_failure_summary";
-        } else if (first == first_failures.end()) {
-          return "window_failure_point_missing";
-        } else if (window.first_failure_index != first->second) {
-          return "window_first_failure_index_mismatch";
-        } else if (direct_evidence->points[first->second].failure_reason !=
-                   window.failure_reason) {
-          return "window_first_failure_reason_mismatch";
-        }
-      }
-      return window_contract_valid ? std::string{}
-                                   : "window_contract_invalid";
-    };
-
     if (!direct_evidence->complete && !mission_degraded_evidence)
       direct_evidence_failure_reason = "evidence_incomplete";
     else if (mission_degraded_evidence &&
@@ -1368,7 +1289,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
                  iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT)
       direct_evidence_failure_reason = "mission_degraded_task_mode_mismatch";
     else if (!window_contract_valid)
-      direct_evidence_failure_reason = window_contract_failure();
+      direct_evidence_failure_reason = window_contract_failure_reason;
     else if (!execution_evidence_bound && !legacy_grid_evidence_bound)
       direct_evidence_failure_reason = "execution_evidence_unbound_or_stale";
     else if (direct_evidence->trajectory_id != local_data.traj_id_)

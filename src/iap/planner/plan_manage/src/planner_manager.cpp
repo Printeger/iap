@@ -469,6 +469,87 @@ namespace ego_planner
       return stream.str();
     }
 
+    std::vector<iap::ForwardRiskWindowResult>
+    p4SummarizePointwiseWindowRows(
+        const std::vector<P4ExecutionRiskWindow> &layout_windows,
+        const std::vector<P4ExecutionRiskWindowQueryRow> &rows,
+        const std::vector<iap::ForwardRiskPointResult> &points,
+        const double hal, const double val,
+        const iap::ForwardRiskFailureReason forced_failure =
+            iap::ForwardRiskFailureReason::NONE)
+    {
+      std::vector<iap::ForwardRiskWindowResult> summaries;
+      summaries.reserve(layout_windows.size());
+      std::unordered_map<std::uint64_t, std::size_t> indices;
+      std::vector<std::vector<std::uint64_t>> evidence_ids;
+      std::vector<std::vector<std::uint64_t>> point_hashes;
+      for (const auto &layout_window : layout_windows)
+      {
+        iap::ForwardRiskWindowResult summary;
+        summary.satellite_window_id = layout_window.window_id;
+        summary.complete = true;
+        summary.maximum_hpl_over_hal = 0.0;
+        summary.maximum_vpl_over_val = 0.0;
+        indices.emplace(summary.satellite_window_id, summaries.size());
+        summaries.push_back(std::move(summary));
+        evidence_ids.emplace_back();
+        point_hashes.emplace_back();
+      }
+      for (std::size_t row_index = 0; row_index < rows.size(); ++row_index)
+      {
+        const auto found = indices.find(rows[row_index].satellite_window_id);
+        if (found == indices.end()) continue;
+        const std::size_t window_index = found->second;
+        auto &summary = summaries[window_index];
+        ++summary.point_count;
+        evidence_ids[window_index].push_back(rows[row_index].evidence_point_id);
+        const bool point_available = row_index < points.size();
+        const std::uint64_t point_hash = point_available
+            ? points[row_index].local_satellite_set_hash : 0u;
+        point_hashes[window_index].push_back(point_hash);
+        const auto point_failure = forced_failure !=
+                iap::ForwardRiskFailureReason::NONE
+            ? forced_failure
+            : point_available ? points[row_index].failure_reason
+                              : iap::ForwardRiskFailureReason::
+                                    EVIDENCE_IDENTITY_MISMATCH;
+        if (!point_available || !std::isfinite(hal) || hal <= 0.0 ||
+            !std::isfinite(val) || val <= 0.0 ||
+            !points[row_index].pl_upper_available)
+        {
+          summary.maximum_hpl_over_hal =
+              std::numeric_limits<double>::infinity();
+          summary.maximum_vpl_over_val =
+              std::numeric_limits<double>::infinity();
+        }
+        else
+        {
+          summary.maximum_hpl_over_hal = std::max(
+              summary.maximum_hpl_over_hal,
+              points[row_index].hpl_upper_m / hal);
+          summary.maximum_vpl_over_val = std::max(
+              summary.maximum_vpl_over_val,
+              points[row_index].vpl_upper_m / val);
+        }
+        if (point_failure != iap::ForwardRiskFailureReason::NONE)
+        {
+          summary.complete = false;
+          if (summary.failure_reason ==
+              iap::ForwardRiskFailureReason::NONE)
+          {
+            summary.first_failure_index = row_index;
+            summary.failure_reason = point_failure;
+          }
+        }
+      }
+      for (std::size_t index = 0; index < summaries.size(); ++index)
+        summaries[index].point_satellite_sets_hash =
+            iap::forwardRiskPointSatelliteSetsHash(
+                summaries[index].satellite_window_id,
+                evidence_ids[index], point_hashes[index]);
+      return summaries;
+    }
+
     std::string p4RuntimeEvidenceIdentity(
         const P0ExecutionRiskSnapshot *snapshot)
     {
@@ -1687,7 +1768,7 @@ namespace ego_planner
                 : snapshot
                     ? std::max(0.0, query_time_s - snapshot->stamp_s())
                     : relative_times[index],
-            static_cast<uint64_t>(index)});
+            1u, static_cast<uint64_t>(index + 1u), 1u});
       }
       return request;
     }
@@ -1708,7 +1789,7 @@ namespace ego_planner
       request.evaluation_time_s = evaluation_time_s;
       request.compute_budget_ms = compute_budget_ms;
       request.satellite_set_policy =
-          iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+          iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE;
       request.task_mode = task_mode;
       if (execution)
       {
@@ -1779,8 +1860,7 @@ namespace ego_planner
           request.task_mode ==
               iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
           p4BestEffortGlobalEvidenceDegradable(result, points.size());
-      evidence.complete =
-          (result.complete || best_effort_global_only_failure) &&
+      evidence.complete = result.complete &&
           (execution || snapshot) &&
           points.size() == relative_times.size() &&
           result.points.size() == points.size() &&
@@ -1841,7 +1921,7 @@ namespace ego_planner
       // hard motion gate.
       if (best_effort_global_only_failure &&
           request.satellite_set_policy ==
-              iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE &&
+              iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE &&
           evidence.windows.empty())
       {
         std::unordered_map<std::uint64_t, std::size_t> window_indices;
@@ -1856,8 +1936,6 @@ namespace ego_planner
           {
             iap::ForwardRiskWindowResult window;
             window.satellite_window_id = window_id;
-            window.satellite_set_hash =
-                iap::forwardRiskSatelliteSetHash({});
             window.complete = false;
             window.failure_reason = result.failure_reason ==
                     iap::ForwardRiskFailureReason::NONE
@@ -1869,8 +1947,8 @@ namespace ego_planner
           ++evidence.windows[inserted.first->second].point_count;
         }
       }
-      evidence.window_satellite_sets_hash =
-          p4WindowSatelliteSetsHash(evidence.windows);
+      evidence.window_point_satellite_sets_hash =
+          p4WindowPointSatelliteSetsHash(evidence.windows);
       evidence.timing = result.timing;
       for (const auto &window : evidence.windows)
         if (window.failure_reason != iap::ForwardRiskFailureReason::NONE)
@@ -1881,8 +1959,8 @@ namespace ego_planner
         }
       evidence.satellite_set_policy =
           request.satellite_set_policy ==
-                  iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE
-              ? "braking_window_core"
+                  iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE
+              ? "braking_window_pointwise"
               : request.satellite_set_policy ==
                     iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE
                   ? "whole_curve_common_core" : "per_point";
@@ -1924,7 +2002,10 @@ namespace ego_planner
         }
         break;
       }
-      if (!evidence.complete || evidence.points.size() != points.size())
+      if (evidence.points.size() != points.size() ||
+          (!evidence.complete &&
+           evidence.certification_status ==
+               P4ActualCurveCertificationStatus::SAFE))
       {
         evidence.certified_safe = false;
         evidence.certification_status =
@@ -3356,7 +3437,7 @@ namespace ego_planner
     node->declare_parameter("p4.forward.compute_budget_ms", 150.0);
     node->declare_parameter("p4.forward.route_compute_budget_ms", 500.0);
     node->declare_parameter(
-        "p4.forward.gnss_core_policy", "braking_window_core");
+        "p4.forward.gnss_core_policy", "braking_window_pointwise");
     node->declare_parameter(
         "p4.forward.window_transition_overlap_s", 0.4);
     node->declare_parameter("p4.execution.successor_prepare_wcet_s", 0.8);
@@ -5363,11 +5444,11 @@ namespace ego_planner
              "actual_curve_certification_status,actual_curve_first_failure_index,"
              "actual_curve_common_satellite_ids,actual_curve_core_policy,"
              "actual_curve_window_layout_hash,actual_curve_window_count,"
-             "actual_curve_transition_count,actual_curve_window_sat_min,"
-             "actual_curve_window_sat_median,actual_curve_window_sat_max,"
-             "actual_curve_window_satellite_sets,"
-             "actual_curve_satellites_saved_from_remote_count,"
-             "actual_curve_satellites_saved_from_remote_ids,"
+             "actual_curve_transition_count,actual_curve_point_sat_min,"
+             "actual_curve_point_sat_median,actual_curve_point_sat_max,"
+             "actual_curve_window_point_satellite_sets_hashes,"
+             "actual_curve_window_point_satellite_sets_hash,"
+             "actual_curve_point_count,"
              "actual_curve_first_failure_window,"
              "actual_curve_first_failure_window_reason,"
              "actual_curve_unique_evidence_points,"
@@ -5402,33 +5483,28 @@ namespace ego_planner
         selected_hash = candidate.path_hash;
     std::string control_hash;
     std::string knot_hash;
-    std::vector<std::size_t> window_satellite_counts;
-    std::set<int> window_satellite_union;
-    std::ostringstream window_satellite_sets;
+    std::vector<std::size_t> point_satellite_counts;
+    std::ostringstream window_point_satellite_sets_hashes;
     for (std::size_t index = 0;
          index < p4_direct_risk_evidence_.windows.size(); ++index)
     {
       const auto &window = p4_direct_risk_evidence_.windows[index];
-      window_satellite_counts.push_back(window.satellite_ids.size());
-      window_satellite_union.insert(
-          window.satellite_ids.begin(), window.satellite_ids.end());
-      if (index > 0) window_satellite_sets << '/';
-      window_satellite_sets << window.satellite_window_id << ':'
-                            << p4SatelliteIdsString(window.satellite_ids);
+      if (index > 0) window_point_satellite_sets_hashes << '/';
+      window_point_satellite_sets_hashes
+          << window.satellite_window_id << ':' << window.point_count << ':'
+          << window.point_satellite_sets_hash;
     }
-    std::sort(window_satellite_counts.begin(), window_satellite_counts.end());
-    const std::size_t window_sat_min = window_satellite_counts.empty()
-        ? 0u : window_satellite_counts.front();
-    const std::size_t window_sat_median = window_satellite_counts.empty()
-        ? 0u : window_satellite_counts[window_satellite_counts.size() / 2u];
-    const std::size_t window_sat_max = window_satellite_counts.empty()
-        ? 0u : window_satellite_counts.back();
-    std::vector<int> satellites_saved_from_remote;
-    std::set_difference(
-        window_satellite_union.begin(), window_satellite_union.end(),
-        p4_direct_risk_evidence_.common_satellite_ids.begin(),
-        p4_direct_risk_evidence_.common_satellite_ids.end(),
-        std::back_inserter(satellites_saved_from_remote));
+    point_satellite_counts.reserve(p4_direct_risk_evidence_.points.size());
+    for (const auto &point : p4_direct_risk_evidence_.points)
+      point_satellite_counts.push_back(static_cast<std::size_t>(
+          std::max(0, point.gnss_used_satellite_count)));
+    std::sort(point_satellite_counts.begin(), point_satellite_counts.end());
+    const std::size_t point_sat_min = point_satellite_counts.empty()
+        ? 0u : point_satellite_counts.front();
+    const std::size_t point_sat_median = point_satellite_counts.empty()
+        ? 0u : point_satellite_counts[point_satellite_counts.size() / 2u];
+    const std::size_t point_sat_max = point_satellite_counts.empty()
+        ? 0u : point_satellite_counts.back();
     if (local_data_.traj_id_ > 0)
     {
       control_hash = p4ControlPointHash(
@@ -5702,10 +5778,11 @@ namespace ego_planner
         << ',' << p4_direct_risk_evidence_.windows.size()
         << ',' << (p4_direct_risk_evidence_.windows.empty()
                        ? 0u : p4_direct_risk_evidence_.windows.size() - 1u)
-        << ',' << window_sat_min << ',' << window_sat_median
-        << ',' << window_sat_max << ',' << window_satellite_sets.str()
-        << ',' << satellites_saved_from_remote.size()
-        << ',' << p4SatelliteIdsString(satellites_saved_from_remote)
+        << ',' << point_sat_min << ',' << point_sat_median
+        << ',' << point_sat_max << ','
+        << window_point_satellite_sets_hashes.str()
+        << ',' << p4_direct_risk_evidence_.window_point_satellite_sets_hash
+        << ',' << p4_direct_risk_evidence_.points.size()
         << ',' << p4_direct_risk_evidence_.first_failure_window_id
         << ',' << iap::forwardRiskFailureReasonName(
             p4_direct_risk_evidence_.first_failure_window_reason)
@@ -6759,7 +6836,7 @@ namespace ego_planner
 
     const bool limited_prefix_commit = limited_prefix_intent;
     const bool configured_braking_windows =
-        p4_gnss_core_policy_ == "braking_window_core";
+        p4_gnss_core_policy_ == "braking_window_pointwise";
     if (!configured_braking_windows &&
         p4_gnss_core_policy_ != "whole_curve_common_core")
       return reject_final_identity(
@@ -7900,7 +7977,7 @@ namespace ego_planner
       braking_request.hal = final_risk_policy.alert_limit_h_m;
       braking_request.val = final_risk_policy.alert_limit_v_m;
       braking_request.satellite_set_policy =
-          iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+          iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE;
       braking_request.task_mode = p4_global_exposure_policy_.task_mode;
       for (std::size_t index = 0; index < braking_risk_points.size(); ++index)
       {
@@ -7912,7 +7989,7 @@ namespace ego_planner
                 ? std::max(0.0, query_time_s -
                            execution_snapshot->evaluation_time_s)
                 : std::max(0.0, query_time_s - snapshot->stamp_s()),
-            static_cast<uint64_t>(index + 1)});
+            1u, static_cast<uint64_t>(index + 1u), 1u});
       }
       const auto braking_result = direct_risk_batch(braking_request);
       if (!braking_result.complete ||
@@ -8048,12 +8125,12 @@ namespace ego_planner
         p4_execution_certificate_.risk_query_lattice_hash =
             p4RiskQueryLatticeHash(risk_points, risk_times);
       p4_execution_certificate_.gnss_core_policy =
-          use_braking_windows ? "braking_window_core" :
+          use_braking_windows ? "braking_window_pointwise" :
           "whole_curve_common_core";
       p4_execution_certificate_.window_layout_hash =
           p4_direct_risk_evidence_.window_layout_hash;
-      p4_execution_certificate_.window_satellite_sets_hash =
-          p4_direct_risk_evidence_.window_satellite_sets_hash;
+      p4_execution_certificate_.window_point_satellite_sets_hash =
+          p4_direct_risk_evidence_.window_point_satellite_sets_hash;
       p4_committed_direct_risk_evidence_ = p4_direct_risk_evidence_;
       p4_committed_risk_window_plan_ =
           p4_direct_risk_evidence_.committed_window_plan;
@@ -8576,11 +8653,13 @@ namespace ego_planner
     const std::string identity = p4DirectRiskRequestIdentity(
         "p4_recovery_braking_direct_v1", candidate,
         risk_snapshot, execution, points, times);
-    const auto request = makeP4CurveRiskRequest(
+    auto request = makeP4CurveRiskRequest(
         identity, risk_snapshot, execution, now_s,
         candidate.start_time_.seconds(), points, times,
         p4_forward_limits_.compute_budget_ms,
         p4_global_exposure_policy_.task_mode);
+    request.satellite_set_policy =
+        iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE;
     const auto risk_started = std::chrono::steady_clock::now();
     const auto risk_result = execution->forward_risk_batch(request);
     const double risk_duration_ms =
@@ -8598,6 +8677,10 @@ namespace ego_planner
     auto evidence = makeP4DirectRiskEvidence(
         candidate, risk_snapshot, execution, now_s,
         points, times, request, risk_result, risk_duration_ms);
+    evidence.window_layout_hash = p4IdentityHash(
+        "p4_recovery_braking_window_layout_v1;curve=" +
+        candidate.curve_hash_ + ";lattice=" +
+        p4RiskQueryLatticeHash(points, times));
 
     iap::TrajectoryAssuranceRequest assurance;
     assurance.has_prior_global_episode =
@@ -8632,7 +8715,8 @@ namespace ego_planner
     const auto p5 = p5_integrity_gate_->evaluateFinalPreview(
         candidate, risk_snapshot, now_s,
         p4_execution_certificate_.execution_deadline_s, &evidence,
-        "whole_curve_common_core", {}, {});
+        "braking_window_pointwise", evidence.window_layout_hash,
+        evidence.window_point_satellite_sets_hash);
     if (p5.action != P5GateAction::OK)
       return finish(false, std::string("recovery_braking_p5_") +
           P5RuntimeIntegrityGate::reasonName(p5.reason));
@@ -10706,13 +10790,13 @@ namespace ego_planner
         p4_direct_risk_evidence_.satellite_set_policy !=
             p4_execution_certificate_.gnss_core_policy ||
         (p4_execution_certificate_.gnss_core_policy ==
-             "braking_window_core" &&
+             "braking_window_pointwise" &&
          (p4_direct_risk_evidence_.window_layout_hash.empty() ||
-          p4_direct_risk_evidence_.window_satellite_sets_hash.empty() ||
+          p4_direct_risk_evidence_.window_point_satellite_sets_hash.empty() ||
           p4_direct_risk_evidence_.window_layout_hash !=
               p4_execution_certificate_.window_layout_hash ||
-          p4_direct_risk_evidence_.window_satellite_sets_hash !=
-              p4_execution_certificate_.window_satellite_sets_hash)))
+          p4_direct_risk_evidence_.window_point_satellite_sets_hash !=
+              p4_execution_certificate_.window_point_satellite_sets_hash)))
       return finish(false, "successor_actual_curve_identity_changed",
                     P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
 
@@ -10733,7 +10817,7 @@ namespace ego_planner
       P4ExecutionRiskWindowLayout successor_layout;
       const bool successor_windowed =
           p4_execution_certificate_.gnss_core_policy ==
-              "braking_window_core";
+              "braking_window_pointwise";
       if (successor_windowed)
       {
         if (!p4_committed_risk_window_plan_ ||
@@ -10794,7 +10878,18 @@ namespace ego_planner
       const auto result = execution->forward_risk_batch(request);
       const double duration_ms = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - started).count();
-      if ((successor_strict_global && !result.complete) ||
+      const bool typed_safety_exceedance =
+          !result.complete &&
+          result.failure_reason ==
+              iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED &&
+          std::any_of(result.points.begin(), result.points.end(),
+              [](const auto &point) {
+                return point.safety_state ==
+                           iap::ForwardRiskSafetyState::UNSAFE &&
+                    point.failure_reason == iap::ForwardRiskFailureReason::
+                        SAFETY_LIMIT_EXCEEDED;
+              });
+      if ((!result.complete && !typed_safety_exceedance) ||
           result.combined_snapshot_identity !=
               request.combined_snapshot_identity ||
           result.points.size() != points.size())
@@ -10922,8 +11017,8 @@ namespace ego_planner
               exceedance_integral_ratio_s;
       p4_execution_certificate_.window_layout_hash =
           p4_direct_risk_evidence_.window_layout_hash;
-      p4_execution_certificate_.window_satellite_sets_hash =
-          p4_direct_risk_evidence_.window_satellite_sets_hash;
+      p4_execution_certificate_.window_point_satellite_sets_hash =
+          p4_direct_risk_evidence_.window_point_satellite_sets_hash;
       p4_execution_certificate_.snapshot_identity.execution_snapshot_id =
           execution->execution_snapshot_id;
       p4_execution_certificate_.snapshot_identity.risk_source_identity_hash =
@@ -10980,7 +11075,7 @@ namespace ego_planner
           emergency_time_s, &p4_direct_risk_evidence_,
           p4_execution_certificate_.gnss_core_policy,
           p4_execution_certificate_.window_layout_hash,
-          p4_execution_certificate_.window_satellite_sets_hash);
+          p4_execution_certificate_.window_point_satellite_sets_hash);
       if (p5.action != P5GateAction::OK)
         return finish(false, "successor_latest_p5_recheck_failed:" +
             std::string(P5RuntimeIntegrityGate::reasonName(p5.reason)),
@@ -11110,22 +11205,16 @@ namespace ego_planner
               p4_last_runtime_window_evidence_.window_layout_hash;
           out.window_count =
               p4_last_runtime_window_evidence_.active_windows.size();
-          std::ostringstream satellite_sets;
           for (std::size_t index = 0;
                index < evidence_result.windows.size(); ++index)
           {
-            if (index > 0) satellite_sets << '|';
-            satellite_sets
-                << evidence_result.windows[index].satellite_window_id << ':'
-                << p4SatelliteIdsString(
-                       evidence_result.windows[index].satellite_ids);
             if (out.first_failure_window_id == 0u &&
                 !evidence_result.windows[index].complete)
               out.first_failure_window_id =
                   evidence_result.windows[index].satellite_window_id;
           }
-          out.common_satellite_ids = satellite_sets.str();
-          out.gnss_core_policy = "braking_window_core";
+          out.common_satellite_ids.clear();
+          out.gnss_core_policy = "braking_window_pointwise";
           // The in-memory evidence is the authority/event reference. CSV is a
           // diagnostic mirror and is deliberately not allowed to erase it.
           appendP4RuntimeWindowEvidence(p4_last_runtime_window_evidence_);
@@ -11136,7 +11225,7 @@ namespace ego_planner
             const std::string &reason) {
           if (out.runtime_window_evidence_sequence_id != 0u ||
               p4_execution_certificate_.gnss_core_policy !=
-                  "braking_window_core")
+                  "braking_window_pointwise")
             return;
           const auto bind_causal_evidence = [this, &out]() {
               if (p4_last_runtime_window_evidence_.sequence_id == 0u)
@@ -11147,19 +11236,8 @@ namespace ego_planner
                   p4_last_runtime_window_evidence_.window_layout_hash;
               out.window_count =
                   p4_last_runtime_window_evidence_.active_windows.size();
-              std::ostringstream satellite_sets;
-              for (std::size_t index = 0;
-                   index < p4_last_runtime_window_evidence_.windows.size();
-                   ++index)
-              {
-                if (index > 0) satellite_sets << '|';
-                const auto &window =
-                    p4_last_runtime_window_evidence_.windows[index];
-                satellite_sets << window.satellite_window_id << ':'
-                    << p4SatelliteIdsString(window.satellite_ids);
-              }
-              out.common_satellite_ids = satellite_sets.str();
-              out.gnss_core_policy = "braking_window_core";
+              out.common_satellite_ids.clear();
+              out.gnss_core_policy = "braking_window_pointwise";
             };
           if (!p4_committed_risk_window_plan_ ||
               !p4_committed_risk_window_plan_->valid)
@@ -11279,38 +11357,29 @@ namespace ego_planner
                     p4_committed_direct_risk_evidence_.points[source_index]);
               }
             }
-            for (const auto &layout_window : selection.windows)
-            {
-              iap::ForwardRiskWindowResult summary;
-              summary.satellite_window_id = layout_window.window_id;
-              const auto committed = std::find_if(
-                  p4_committed_direct_risk_evidence_.windows.begin(),
-                  p4_committed_direct_risk_evidence_.windows.end(),
-                  [&layout_window](const auto &candidate) {
-                    return candidate.satellite_window_id ==
-                        layout_window.window_id;
-                  });
-              if (committed ==
-                  p4_committed_direct_risk_evidence_.windows.end())
+            const auto &committed_snapshot =
+                p4_committed_direct_risk_evidence_.execution_snapshot;
+            const double hal = committed_snapshot
+                ? committed_snapshot->risk_policy.alert_limit_h_m
+                : std::numeric_limits<double>::quiet_NaN();
+            const double val = committed_snapshot
+                ? committed_snapshot->risk_policy.alert_limit_v_m
+                : std::numeric_limits<double>::quiet_NaN();
+            committed_safe.windows = p4SummarizePointwiseWindowRows(
+                selection.windows, selection.rows, committed_safe.points,
+                hal, val);
+            for (const auto &summary : committed_safe.windows)
+              if (!summary.complete ||
+                  summary.point_satellite_sets_hash == 0u)
               {
                 committed_safe.complete = false;
                 committed_safe.failure_reason =
                     iap::ForwardRiskFailureReason::
                         EVIDENCE_IDENTITY_MISMATCH;
+                break;
               }
-              else
-              {
-                summary = *committed;
-              }
-              summary.point_count = layout_window.request_row_indices.size();
-              summary.complete = committed_safe.complete;
-              summary.failure_reason = committed_safe.failure_reason;
-              committed_safe.windows.push_back(std::move(summary));
-            }
             if (committed_safe.complete)
             {
-              const auto &committed_snapshot =
-                  p4_committed_direct_risk_evidence_.execution_snapshot;
               persist_window_evidence(
                   selection, committed_safe, "",
                   p4_committed_direct_risk_evidence_.execution_snapshot_id,
@@ -11343,28 +11412,6 @@ namespace ego_planner
                 fallback.points.push_back(
                     p4_committed_direct_risk_evidence_.points[source_index]);
           }
-          for (const auto &layout_window : selection.windows)
-          {
-            iap::ForwardRiskWindowResult summary;
-            summary.satellite_window_id = layout_window.window_id;
-            const auto committed = std::find_if(
-                p4_committed_direct_risk_evidence_.windows.begin(),
-                p4_committed_direct_risk_evidence_.windows.end(),
-                [&layout_window](const auto &candidate) {
-                  return candidate.satellite_window_id ==
-                      layout_window.window_id;
-                });
-            if (committed !=
-                p4_committed_direct_risk_evidence_.windows.end())
-            {
-              summary.satellite_ids = committed->satellite_ids;
-              summary.satellite_set_hash = committed->satellite_set_hash;
-            }
-            summary.complete = false;
-            summary.point_count = layout_window.request_row_indices.size();
-            summary.failure_reason = fallback.failure_reason;
-            fallback.windows.push_back(std::move(summary));
-          }
           const auto current = runtime_execution_snapshot_for_evidence
               ? runtime_execution_snapshot_for_evidence
               : p0_risk_grid_runtime_
@@ -11372,6 +11419,15 @@ namespace ego_planner
                         acquireExecutionRiskSnapshotForEvaluation(
                             evaluation_now_s)
                   : planning_risk_context_.execution_snapshot;
+          const double hal = current
+              ? current->risk_policy.alert_limit_h_m
+              : std::numeric_limits<double>::quiet_NaN();
+          const double val = current
+              ? current->risk_policy.alert_limit_v_m
+              : std::numeric_limits<double>::quiet_NaN();
+          fallback.windows = p4SummarizePointwiseWindowRows(
+              selection.windows, selection.rows, fallback.points, hal, val,
+              fallback.failure_reason);
           persist_window_evidence(
               selection, fallback, reason,
               current ? current->execution_snapshot_id : 0u,
@@ -11440,9 +11496,9 @@ namespace ego_planner
                 p4_direct_risk_evidence_.satellite_set_policy ==
                     p4_execution_certificate_.gnss_core_policy &&
                 (p4_execution_certificate_.gnss_core_policy !=
-                     "braking_window_core" ||
+                     "braking_window_pointwise" ||
                  (!p4_direct_risk_evidence_.window_layout_hash.empty() &&
-                  !p4_direct_risk_evidence_.window_satellite_sets_hash.empty()));
+                  !p4_direct_risk_evidence_.window_point_satellite_sets_hash.empty()));
             UniformBspline terminal_suffix;
             if (prior_window_certificate_valid &&
                 local_data_.position_traj_.sliceFrom(
@@ -11637,11 +11693,11 @@ namespace ego_planner
         p4KnotVectorHash(local_data_.position_traj_.getKnot()) !=
             p4_execution_certificate_.knot_vector_hash ||
         (p4_execution_certificate_.gnss_core_policy !=
-             "braking_window_core" &&
+             "braking_window_pointwise" &&
          p4_execution_certificate_.gnss_core_policy !=
              "whole_curve_common_core") ||
         (p4_execution_certificate_.gnss_core_policy ==
-             "braking_window_core" &&
+             "braking_window_pointwise" &&
          p4_execution_certificate_.window_layout_hash.empty()))
       return revoke("committed_trajectory_identity_mismatch");
     out.identity_match = true;
@@ -12380,11 +12436,11 @@ namespace ego_planner
         : planning_risk_context_.forward_risk_batch;
     const bool runtime_windowed =
         p4_execution_certificate_.gnss_core_policy ==
-            "braking_window_core" &&
+            "braking_window_pointwise" &&
         runtime_execution_snapshot && !p4_braking_anchors_.empty();
     std::vector<Eigen::Vector3d> remaining_points;
     std::vector<double> remaining_times;
-    // BRAKING_WINDOW_CORE owns an immutable submit-time lattice.  Only the
+    // BRAKING_WINDOW_POINTWISE owns an immutable submit-time lattice.  Only the
     // legacy whole-curve path may sample a moving suffix at watchdog time.
     if (!runtime_windowed && !sampleTrajectoryForGeometryCommit(
             &local_data_, current_t, &remaining_points, &remaining_times))
@@ -12502,8 +12558,8 @@ namespace ego_planner
             p4_execution_certificate_.gnss_core_policy &&
         (!runtime_windowed ||
          (!p4_direct_risk_evidence_.window_layout_hash.empty() &&
-          p4_direct_risk_evidence_.window_satellite_sets_hash ==
-              p4WindowSatelliteSetsHash(
+          p4_direct_risk_evidence_.window_point_satellite_sets_hash ==
+              p4WindowPointSatelliteSetsHash(
                   p4_direct_risk_evidence_.windows)));
     if (!cache_matches)
     {
@@ -12886,17 +12942,7 @@ namespace ego_planner
         p4_runtime_risk_cache_.common_satellite_ids =
             p4SatelliteIdsString(result.common_satellite_ids);
       else
-      {
-        std::ostringstream window_sets;
-        for (std::size_t index = 0; index < result.windows.size(); ++index)
-        {
-          if (index > 0) window_sets << '|';
-          window_sets << result.windows[index].satellite_window_id << ':'
-                      << p4SatelliteIdsString(
-                             result.windows[index].satellite_ids);
-        }
-        p4_runtime_risk_cache_.common_satellite_ids = window_sets.str();
-      }
+        p4_runtime_risk_cache_.common_satellite_ids.clear();
       p4_runtime_risk_cache_.control_points_hash =
           p4_execution_certificate_.control_points_hash;
       p4_runtime_risk_cache_.knot_vector_hash =
@@ -13117,7 +13163,7 @@ namespace ego_planner
             // guard that was never safe under the active window certificate.
             bool safe = p4_direct_risk_evidence_.complete &&
                 p4_direct_risk_evidence_.satellite_set_policy ==
-                    "braking_window_core" &&
+                    "braking_window_pointwise" &&
                 p4_direct_risk_evidence_.execution_snapshot_id ==
                     (runtime_execution_snapshot
                          ? runtime_execution_snapshot->execution_snapshot_id
@@ -13695,8 +13741,9 @@ namespace ego_planner
     auto windows = write_header_if_needed(
         window_path,
         "schema_version,evidence_sequence_id,window_id,nominal_start_s,"
-        "nominal_end_s,certified_start_s,certified_end_s,satellite_ids,"
-        "satellite_set_hash,complete,point_count,first_failure_index,"
+        "nominal_end_s,certified_start_s,certified_end_s,"
+        "point_satellite_sets_hash,point_count,maximum_hpl_over_hal,"
+        "maximum_vpl_over_val,complete,first_failure_index,"
         "failure_reason,worst_index,worst_x,worst_y,worst_z,worst_relative_time_s,"
         "worst_ratio,worst_hpl,worst_vpl,worst_raw_hpl,worst_raw_vpl,"
         "worst_receiver_raw_hpl,worst_receiver_raw_vpl,worst_anchor_hpl,"
@@ -13715,21 +13762,23 @@ namespace ego_planner
       const std::size_t worst_index = index < evidence.per_window_worst.size()
           ? evidence.per_window_worst[index].result_index
           : std::numeric_limits<std::size_t>::max();
-      windows << std::setprecision(17) << "p4_runtime_window_v1,"
+      windows << std::setprecision(17) << "p4_runtime_window_v2,"
               << evidence.sequence_id << ',' << layout_window.window_id << ','
               << layout_window.nominal_start_time_s << ','
               << layout_window.nominal_end_time_s << ','
               << layout_window.certified_start_time_s << ','
               << layout_window.certified_end_time_s << ',';
       if (result_window == evidence.windows.end())
-        windows << "none,0,0," << layout_window.request_row_indices.size()
-                << ',' << std::numeric_limits<std::size_t>::max()
+        windows << "0," << layout_window.request_row_indices.size()
+                << ",inf,inf,0,"
+                << std::numeric_limits<std::size_t>::max()
                 << ",missing_window_result,";
       else
-        windows << p4SatelliteIdsString(result_window->satellite_ids) << ','
-                << result_window->satellite_set_hash << ','
-                << (result_window->complete ? 1 : 0) << ','
+        windows << result_window->point_satellite_sets_hash << ','
                 << result_window->point_count << ','
+                << result_window->maximum_hpl_over_hal << ','
+                << result_window->maximum_vpl_over_val << ','
+                << (result_window->complete ? 1 : 0) << ','
                 << result_window->first_failure_index << ','
                 << iap::forwardRiskFailureReasonName(
                        result_window->failure_reason) << ',';
@@ -13837,7 +13886,7 @@ namespace ego_planner
 
     iap::ForwardRiskBatchRequest base;
     base.satellite_set_policy =
-        iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+        iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE;
     base.task_mode = p4_global_exposure_policy_.task_mode;
     base.compute_budget_ms = 50.0;
     base.hal = task.current->risk_policy.alert_limit_h_m;
@@ -16721,8 +16770,8 @@ namespace ego_planner
         request.evaluation_time_s = accepted_time.seconds();
         request.compute_budget_ms = p4_forward_limits_.compute_budget_ms;
         request.satellite_set_policy = p4_gnss_core_policy_ ==
-                "braking_window_core"
-            ? iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE
+                "braking_window_pointwise"
+            ? iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE
             : iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
         request.task_mode = p4_global_exposure_policy_.task_mode;
         request.points.reserve(

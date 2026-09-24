@@ -1104,48 +1104,33 @@ std::function<iap::ForwardRiskBatchResult(
         const double safety_ratio) {
   return [safety_ratio](const iap::ForwardRiskBatchRequest& request) {
       iap::ForwardRiskBatchResult out;
-      out.complete = true;
+      out.complete = safety_ratio < 1.0;
       out.combined_snapshot_identity = request.combined_snapshot_identity;
       out.points.resize(request.points.size());
-      if (request.satellite_set_policy ==
-          iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
-        std::set<std::uint64_t> seen_windows;
-        for (std::size_t index = 0; index < request.points.size(); ++index) {
-          const auto window_id = request.points[index].satellite_window_id;
-          if (!seen_windows.insert(window_id).second) continue;
-          iap::ForwardRiskWindowResult window;
-          window.satellite_window_id = window_id;
-          window.satellite_ids = {1, 2, 3, 4, 5, 6, 7, 8};
-          window.satellite_set_hash =
-              iap::forwardRiskSatelliteSetHash(window.satellite_ids);
-          window.point_count = static_cast<std::size_t>(std::count_if(
-              request.points.begin(), request.points.end(),
-              [window_id](const auto &point) {
-                return point.satellite_window_id == window_id;
-              }));
-          window.complete = true;
-          window.failure_reason = safety_ratio < 1.0
-              ? iap::ForwardRiskFailureReason::NONE
-              : iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
-          if (safety_ratio >= 1.0) {
-            window.first_failure_index = static_cast<std::size_t>(
-                std::distance(request.points.begin(), std::find_if(
-                    request.points.begin(), request.points.end(),
-                    [window_id](const auto& point) {
-                      return point.satellite_window_id == window_id;
-                    })));
-          }
-          out.windows.push_back(std::move(window));
-        }
-      }
+      const std::vector<int> satellite_ids{1, 2, 3, 4, 5, 6, 7, 8};
       for (std::size_t index = 0; index < out.points.size(); ++index) {
         auto& point = out.points[index];
         if (request.satellite_set_policy ==
-            iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
-          point.local_satellite_set_hash = iap::forwardRiskSatelliteSetHash(
-              std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8});
+            iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE) {
+          point.local_satellite_set_hash =
+              iap::forwardRiskSatelliteSetHash(satellite_ids);
+          point.gnss_used_satellite_count = satellite_ids.size();
+          point.prediction.gnss.used_sat_ids = satellite_ids;
+          for (const int satellite_id : satellite_ids) {
+            iap::GnssRiskSatelliteDiagnostic satellite;
+            satellite.sat_id = satellite_id;
+            satellite.above_elevation_mask = true;
+            satellite.support_known = true;
+            satellite.visible = true;
+            satellite.used = true;
+            point.gnss_satellites.push_back(std::move(satellite));
+          }
         }
         point.safety_ratio = safety_ratio;
+        point.pl_upper_available = true;
+        point.hpl_upper_m = request.hal * safety_ratio;
+        point.vpl_upper_m = request.val * safety_ratio;
+        point.safety_ratio_upper = safety_ratio;
         point.prediction.fused.hpl = request.hal * safety_ratio;
         point.prediction.fused.vpl = request.val * safety_ratio;
         point.prediction.gnss.valid = true;
@@ -1161,6 +1146,51 @@ std::function<iap::ForwardRiskBatchResult(
         point.gnss_supported = true;
         point.lidar_supported = true;
         point.fim_supported = true;
+      }
+      if (request.satellite_set_policy ==
+          iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE) {
+        std::unordered_map<std::uint64_t, std::size_t> window_indices;
+        std::vector<std::vector<std::uint64_t>> evidence_ids;
+        std::vector<std::vector<std::uint64_t>> local_hashes;
+        for (std::size_t index = 0; index < request.points.size(); ++index) {
+          const auto window_id = request.points[index].satellite_window_id;
+          const auto inserted = window_indices.emplace(
+              window_id, out.windows.size());
+          if (inserted.second) {
+            iap::ForwardRiskWindowResult window;
+            window.satellite_window_id = window_id;
+            window.complete = safety_ratio < 1.0;
+            window.maximum_hpl_over_hal = safety_ratio;
+            window.maximum_vpl_over_val = safety_ratio;
+            out.windows.push_back(std::move(window));
+            evidence_ids.emplace_back();
+            local_hashes.emplace_back();
+          }
+          const std::size_t window_index = inserted.first->second;
+          auto& window = out.windows[window_index];
+          ++window.point_count;
+          evidence_ids[window_index].push_back(
+              request.points[index].evidence_point_id);
+          local_hashes[window_index].push_back(
+              out.points[index].local_satellite_set_hash);
+          if (safety_ratio >= 1.0 &&
+              window.failure_reason == iap::ForwardRiskFailureReason::NONE) {
+            window.failure_reason =
+                iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+            window.first_failure_index = index;
+          }
+        }
+        for (std::size_t index = 0; index < out.windows.size(); ++index) {
+          out.windows[index].point_satellite_sets_hash =
+              iap::forwardRiskPointSatelliteSetsHash(
+                  out.windows[index].satellite_window_id,
+                  evidence_ids[index], local_hashes[index]);
+        }
+      }
+      if (!out.complete) {
+        out.failure_reason =
+            iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+        out.first_failure_index = 0u;
       }
       return out;
     };
@@ -1184,6 +1214,10 @@ std::function<iap::ForwardRiskBatchResult(
         satellite.support_covered_sample_count = 2u;
         satellite.exclusion_reason = "used";
         point.gnss_satellites = {satellite};
+        point.gnss_used_satellite_count = 1;
+        point.prediction.gnss.used_sat_ids = {17};
+        point.local_satellite_set_hash =
+            iap::forwardRiskSatelliteSetHash({17});
         point.gnss_supported = false;
         point.ranking_state = iap::ForwardRiskRankingState::INCOMPLETE;
         point.failure_reason =
@@ -1193,7 +1227,20 @@ std::function<iap::ForwardRiskBatchResult(
         window.complete = false;
         window.failure_reason =
             iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
-        window.first_failure_index = 0u;
+        std::vector<std::uint64_t> evidence_ids;
+        std::vector<std::uint64_t> local_hashes;
+        for (std::size_t index = 0; index < request.points.size(); ++index) {
+          if (request.points[index].satellite_window_id !=
+              window.satellite_window_id) {
+            continue;
+          }
+          if (evidence_ids.empty()) window.first_failure_index = index;
+          evidence_ids.push_back(request.points[index].evidence_point_id);
+          local_hashes.push_back(out.points[index].local_satellite_set_hash);
+        }
+        window.point_satellite_sets_hash =
+            iap::forwardRiskPointSatelliteSetsHash(
+                window.satellite_window_id, evidence_ids, local_hashes);
       }
       return out;
     };
@@ -3407,7 +3454,7 @@ TEST(P4ForwardTerminalLineageTest,
       largest_direct_batch = std::max(
           largest_direct_batch, request.points.size());
       if (request.satellite_set_policy ==
-              iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE)
+              iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE)
       {
         braking_batch_points = request.points.size();
         EXPECT_TRUE(std::all_of(
@@ -3573,13 +3620,14 @@ TEST(P4ForwardTerminalLineageTest,
                 std::ceil(certificate.duration_s / 0.2)) + 1u);
   EXPECT_LT(braking_batch_points, 512u);
   const auto &window_evidence = manager.latestP4DirectRiskEvidence();
-  EXPECT_EQ(window_evidence.satellite_set_policy, "braking_window_core");
+  EXPECT_EQ(window_evidence.satellite_set_policy, "braking_window_pointwise");
   EXPECT_FALSE(window_evidence.window_layout_hash.empty());
   EXPECT_GE(window_evidence.windows.size(), 2u);
   EXPECT_TRUE(std::all_of(
       window_evidence.windows.begin(), window_evidence.windows.end(),
       [](const auto &window) {
-        return window.complete && window.satellite_ids.size() >= 4u;
+        return window.complete && window.point_count > 0u &&
+            window.point_satellite_sets_hash != 0u;
       }));
   EXPECT_TRUE(certificate.approved_endpoint.isApprox(
       approved_prefix.back(), 1.0e-9));
@@ -4120,17 +4168,17 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(manager.p4ExecutionCertificate().authority,
             ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED);
   EXPECT_EQ(manager.p4ExecutionCertificate().gnss_core_policy,
-            "braking_window_core");
+            "braking_window_pointwise");
   const auto &evidence = manager.latestP4DirectRiskEvidence();
   EXPECT_TRUE(evidence.certified_safe);
-  EXPECT_EQ(evidence.satellite_set_policy, "braking_window_core");
+  EXPECT_EQ(evidence.satellite_set_policy, "braking_window_pointwise");
   EXPECT_GE(evidence.windows.size(), 2u);
   EXPECT_FALSE(evidence.window_layout_hash.empty());
   EXPECT_EQ(manager.p4ExecutionCertificate().window_layout_hash,
             evidence.window_layout_hash);
-  EXPECT_FALSE(evidence.window_satellite_sets_hash.empty());
-  EXPECT_EQ(manager.p4ExecutionCertificate().window_satellite_sets_hash,
-            evidence.window_satellite_sets_hash);
+  EXPECT_FALSE(evidence.window_point_satellite_sets_hash.empty());
+  EXPECT_EQ(manager.p4ExecutionCertificate().window_point_satellite_sets_hash,
+            evidence.window_point_satellite_sets_hash);
   const double terminal_recheck_stamp =
       manager.p4ExecutionCertificate().execution_deadline_s - 0.45;
   const auto terminal_recheck_position = stopped.evaluateDeBoorT(
@@ -7417,7 +7465,6 @@ TEST(P4PreparedChannelPreparation,
     for (auto &window : result.windows)
     {
       window.complete = false;
-      window.satellite_ids.clear();
       window.failure_reason =
           iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
     }
@@ -7428,6 +7475,28 @@ TEST(P4PreparedChannelPreparation,
       point.safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
       point.failure_reason =
           iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+      point.gnss_satellites.resize(3u);
+      point.prediction.gnss.used_sat_ids = {1, 2, 3};
+      point.gnss_used_satellite_count = 3;
+      point.local_satellite_set_hash =
+          iap::forwardRiskSatelliteSetHash({1, 2, 3});
+    }
+    for (auto &window : result.windows)
+    {
+      std::vector<std::uint64_t> evidence_ids;
+      std::vector<std::uint64_t> local_hashes;
+      for (std::size_t index = 0; index < request.points.size(); ++index)
+        if (request.points[index].satellite_window_id ==
+            window.satellite_window_id)
+        {
+          if (evidence_ids.empty()) window.first_failure_index = index;
+          evidence_ids.push_back(request.points[index].evidence_point_id);
+          local_hashes.push_back(
+              result.points[index].local_satellite_set_hash);
+        }
+      window.point_satellite_sets_hash =
+          iap::forwardRiskPointSatelliteSetsHash(
+              window.satellite_window_id, evidence_ids, local_hashes);
     }
     return result;
   };
@@ -7831,7 +7900,6 @@ TEST(P4PreparedChannelPreparation,
     for (auto &window : result.windows)
     {
       window.complete = false;
-      window.satellite_ids = {1, 2, 3};
       window.failure_reason =
           iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
     }
@@ -7842,6 +7910,28 @@ TEST(P4PreparedChannelPreparation,
       point.safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
       point.failure_reason =
           iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+      point.gnss_satellites.resize(3u);
+      point.prediction.gnss.used_sat_ids = {1, 2, 3};
+      point.gnss_used_satellite_count = 3;
+      point.local_satellite_set_hash =
+          iap::forwardRiskSatelliteSetHash({1, 2, 3});
+    }
+    for (auto &window : result.windows)
+    {
+      std::vector<std::uint64_t> evidence_ids;
+      std::vector<std::uint64_t> local_hashes;
+      for (std::size_t index = 0; index < request.points.size(); ++index)
+        if (request.points[index].satellite_window_id ==
+            window.satellite_window_id)
+        {
+          if (evidence_ids.empty()) window.first_failure_index = index;
+          evidence_ids.push_back(request.points[index].evidence_point_id);
+          local_hashes.push_back(
+              result.points[index].local_satellite_set_hash);
+        }
+      window.point_satellite_sets_hash =
+          iap::forwardRiskPointSatelliteSetsHash(
+              window.satellite_window_id, evidence_ids, local_hashes);
     }
     return result;
   };

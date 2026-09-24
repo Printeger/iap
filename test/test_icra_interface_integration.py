@@ -1882,41 +1882,44 @@ class TestStageAnalyzer(unittest.TestCase):
             summary["actual_curve_certification_status_counts"],
             {"SAFE": 1})
 
-    def test_limited_prefix_window_satellite_median_pools_window_sets(self):
+    def test_limited_prefix_satellite_median_uses_pointwise_distribution(self):
         lineage, bsplines, poscmd, odom, events = \
             self.limited_prefix_fixture()
         first = lineage[0]
         first.update({
-            "actual_curve_core_policy": "braking_window_core",
+            "actual_curve_core_policy": "braking_window_pointwise",
             "actual_curve_window_layout_hash": "layout-a",
             "actual_curve_certification_status": "SAFE",
             "actual_curve_first_failure_index": "0",
             "actual_curve_total_ms": "10",
             "actual_curve_window_count": "2",
             "actual_curve_transition_count": "1",
-            "actual_curve_window_sat_min": "2",
-            "actual_curve_window_sat_median": "8",
-            "actual_curve_window_sat_max": "8",
-            "actual_curve_window_satellite_sets": "1:1|2/2:1|2|3|4|5|6|7|8",
+            "actual_curve_point_sat_min": "2",
+            "actual_curve_point_sat_median": "8",
+            "actual_curve_point_sat_max": "8",
+            "actual_curve_window_point_satellite_sets_hashes":
+                "1:2:41/2:8:42",
         })
         second = dict(first)
         second.update({
+            "stage": "actual_curve_certified",
             "execution_snapshot_id": "9",
             "trajectory_id": "32",
             "trajectory_start_ns": "13000000000",
             "control_points_hash": "other-control-points",
             "actual_curve_window_layout_hash": "layout-b",
-            "actual_curve_window_sat_min": "4",
-            "actual_curve_window_sat_median": "6",
-            "actual_curve_window_sat_max": "6",
-            "actual_curve_window_satellite_sets": "1:1|2|3|4/2:1|2|3|4|5|6",
+            "actual_curve_point_sat_min": "4",
+            "actual_curve_point_sat_median": "6",
+            "actual_curve_point_sat_max": "6",
+            "actual_curve_window_point_satellite_sets_hashes":
+                "1:4:51/2:6:52",
         })
         lineage.append(second)
 
         summary = MODULE.analyze_limited_prefix_records(
             lineage, bsplines, poscmd, odom, events)
 
-        self.assertEqual(summary["braking_window_satellite_median"], 5.0)
+        self.assertEqual(summary["braking_window_satellite_median"], 7.0)
 
     def test_limited_prefix_accepts_evidenced_new_generation_revoke(self):
         lineage, bsplines, poscmd, odom, events = \
@@ -2500,7 +2503,7 @@ class TestStageAnalyzer(unittest.TestCase):
         }]
         events = [{
             "event": "FAILSAFE_BRAKING_SCHEDULED",
-            "gnss_core_policy": "braking_window_core",
+            "gnss_core_policy": "braking_window_pointwise",
             "reason": "failsafe_braking_scheduled:"
                       "runtime_trajectory_assurance_rejected:unsafe",
             "runtime_window_evidence_sequence_id": "2",
@@ -2508,7 +2511,10 @@ class TestStageAnalyzer(unittest.TestCase):
         probes = [{"classification": "GNSS_EPOCH_OR_SET"}]
         windows = [
             {"evidence_sequence_id": sequence, "window_id": window,
-             "satellite_ids": "1;2;3;4", "satellite_set_hash": "17",
+             "point_satellite_sets_hash": "17", "point_count": "2",
+             "maximum_hpl_over_hal": "0.5",
+             "maximum_vpl_over_val": "0.4",
+             "first_failure_index": "18446744073709551615",
              "complete": "1", "failure_reason": "NONE"}
             for sequence in ("1", "2") for window in ("10", "11")]
         summary = MODULE.analyze_runtime_window_evidence(

@@ -302,7 +302,7 @@ namespace ego_planner
     std::string risk_query_lattice_hash;
     std::string gnss_core_policy;
     std::string window_layout_hash;
-    std::string window_satellite_sets_hash;
+    std::string window_point_satellite_sets_hash;
     Eigen::Vector3d approved_endpoint = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     double terminal_speed_mps = std::numeric_limits<double>::infinity();
@@ -1397,7 +1397,7 @@ namespace ego_planner
     std::string last_p1_rejection_reason_;
     bool last_p1_rejection_requires_new_generation_{false};
     P4ForwardLimits p4_forward_limits_;
-    std::string p4_gnss_core_policy_ = "braking_window_core";
+    std::string p4_gnss_core_policy_ = "braking_window_pointwise";
     double p4_window_transition_overlap_s_ = 0.4;
     P4SuccessorDeadlinePolicy p4_successor_deadline_policy_;
     double p4_successor_progress_jitter_floor_m_ = 0.10;

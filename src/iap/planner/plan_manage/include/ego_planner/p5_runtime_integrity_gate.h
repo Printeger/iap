@@ -212,7 +212,7 @@ class P5RuntimeIntegrityGate {
       const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
       const std::string& required_gnss_core_policy = {},
       const std::string& required_window_layout_hash = {},
-      const std::string& required_window_satellite_sets_hash = {},
+      const std::string& required_window_point_satellite_sets_hash = {},
       double runtime_authority_end_s =
           std::numeric_limits<double>::infinity(),
       double runtime_trajectory_time_s =
@@ -226,7 +226,7 @@ class P5RuntimeIntegrityGate {
       const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
       const std::string& required_gnss_core_policy = {},
       const std::string& required_window_layout_hash = {},
-      const std::string& required_window_satellite_sets_hash = {});
+      const std::string& required_window_point_satellite_sets_hash = {});
 
   // Read-only final-gate evaluation for a future successor. It must not
   // advance debounce/exposure state or publish a gate decision.
@@ -238,7 +238,7 @@ class P5RuntimeIntegrityGate {
       const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
       const std::string& required_gnss_core_policy = {},
       const std::string& required_window_layout_hash = {},
-      const std::string& required_window_satellite_sets_hash = {});
+      const std::string& required_window_point_satellite_sets_hash = {});
 
   void publishFinalAdmission(P5GateStatus status,
                              double publish_authorization_stamp_s);
@@ -274,7 +274,7 @@ class P5RuntimeIntegrityGate {
     const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr;
     std::string required_gnss_core_policy;
     std::string required_window_layout_hash;
-    std::string required_window_satellite_sets_hash;
+    std::string required_window_point_satellite_sets_hash;
     double runtime_authority_end_s =
         std::numeric_limits<double>::infinity();
     double runtime_trajectory_time_s =

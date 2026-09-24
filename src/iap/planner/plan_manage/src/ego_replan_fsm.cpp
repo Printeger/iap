@@ -1933,13 +1933,13 @@ namespace ego_planner
                 &direct_evidence,
                 execution_certificate.gnss_core_policy,
                 execution_certificate.window_layout_hash,
-                execution_certificate.window_satellite_sets_hash)
+                execution_certificate.window_point_satellite_sets_hash)
             : planner_manager_->p5_integrity_gate_->evaluateFinal(
                 *info, snapshot, now_s, emergency_time_,
                 &direct_evidence,
                 execution_certificate.gnss_core_policy,
                 execution_certificate.window_layout_hash,
-                execution_certificate.window_satellite_sets_hash);
+                execution_certificate.window_point_satellite_sets_hash);
         if (p5_status.action != P5GateAction::OK)
         {
           if (p5_status.action ==
@@ -2085,7 +2085,7 @@ namespace ego_planner
                   &direct_evidence,
                   execution_certificate.gnss_core_policy,
                   execution_certificate.window_layout_hash,
-                  execution_certificate.window_satellite_sets_hash);
+                  execution_certificate.window_point_satellite_sets_hash);
           p5_final_status_evaluated = true;
           if (p5_final_status.action != P5GateAction::OK)
           {
