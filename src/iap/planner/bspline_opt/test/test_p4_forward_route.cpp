@@ -19,6 +19,22 @@
 namespace
 {
 
+TEST(P4ForwardRouteSchema, LegacyObserveMoreIsReadOnlyBeforeV18)
+{
+  ego_planner::P4ForwardAction action =
+    ego_planner::P4ForwardAction::NO_SAFE_ROUTE;
+  EXPECT_TRUE(ego_planner::parseP4ForwardAction(
+      "p4_forward_route_decision_v1", "OBSERVE_MORE", &action));
+  EXPECT_EQ(action, ego_planner::P4ForwardAction::OBSERVE_MORE);
+  EXPECT_TRUE(ego_planner::parseP4ForwardAction(
+      "p4_forward_route_decision_v17", "OBSERVE_MORE", &action));
+  EXPECT_FALSE(ego_planner::parseP4ForwardAction(
+      "p4_forward_route_decision_v18", "OBSERVE_MORE", &action));
+  EXPECT_TRUE(ego_planner::parseP4ForwardAction(
+      "p4_forward_route_decision_v18", "DEFER_RISK_SELECTION", &action));
+  EXPECT_EQ(action, ego_planner::P4ForwardAction::DEFER_RISK_SELECTION);
+}
+
 template<typename T, typename = void>
 struct HasGnssSatelliteVector : std::false_type {};
 
@@ -3766,7 +3782,10 @@ TEST(P4ForwardRoute,
   const Eigen::Vector3d start(-12.105, 2.357, 1.263);
   ASSERT_TRUE(ego_planner::configureP4RefinementClearanceRecovery(
       start, Eigen::Vector3d::Zero(), 0.05, &decision));
-  EXPECT_EQ(decision.action, ego_planner::P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.action,
+            ego_planner::P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
   EXPECT_EQ(decision.trigger_reason,
             ego_planner::P4ForwardTriggerReason::NO_SAFE_ROUTE);
   EXPECT_EQ(decision.planning_disposition,
@@ -3775,11 +3794,11 @@ TEST(P4ForwardRoute,
   EXPECT_EQ(decision.selection_authority,
             ego_planner::P4ForwardSelectionAuthority::NONE);
   EXPECT_FALSE(decision.formal_support);
-  ASSERT_EQ(decision.observe_more_trajectory.size(), 3u);
-  EXPECT_TRUE(decision.observe_more_trajectory.front().isApprox(start));
-  EXPECT_NEAR((decision.observe_more_trajectory.back() - start).norm(),
+  ASSERT_EQ(decision.deferred_trajectory.size(), 3u);
+  EXPECT_TRUE(decision.deferred_trajectory.front().isApprox(start));
+  EXPECT_NEAR((decision.deferred_trajectory.back() - start).norm(),
               0.10, 1.0e-12);
-  EXPECT_GT((decision.observe_more_trajectory.back() - start)
+  EXPECT_GT((decision.deferred_trajectory.back() - start)
                 .dot(failure.escape_direction),
             0.09);
   EXPECT_LE(decision.speed_cap_mps, 0.25);

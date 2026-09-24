@@ -3214,7 +3214,7 @@ TEST(P4LimitedPrefixPublication,
             ego_planner::P4ExecutionAuthority::LIMITED_PREFIX);
   EXPECT_EQ(certificate.trajectory_id, published->traj_id);
   const auto &committed = manager_ptr->lastP4ForwardDecision();
-  EXPECT_EQ(committed.schema_version, "p4_forward_route_decision_v17");
+  EXPECT_EQ(committed.schema_version, "p4_forward_route_decision_v18");
   ASSERT_TRUE(committed.limited_prefix_boundary.allFinite());
   EXPECT_LT(certificate.approved_endpoint.x(),
             committed.limited_prefix_boundary.x());
@@ -3506,7 +3506,7 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(cached_continuing.allowed) << cached_continuing.reason;
   EXPECT_NEAR(cached_continuing.tracking_error_m, 0.03, 1.0e-9);
   EXPECT_EQ(cached_continuing.reason, "runtime_execution_contract_valid");
-  EXPECT_EQ(cached_continuing.runtime_window_evidence_sequence_id,
+  EXPECT_GT(cached_continuing.runtime_window_evidence_sequence_id,
             continuing.runtime_window_evidence_sequence_id);
   EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
 
@@ -4160,8 +4160,12 @@ TEST(P4ForwardTerminalLineageTest,
   decision.formal_support = false;
   decision.reason = "known_hazard_ranked_advisory_selected";
   manager.setP4ForwardDecisionForTest(decision);
-  manager.local_data_.position_traj_ =
-      ego_planner::UniformBspline(p4RefinedControlPoints(), 3, 0.5);
+  auto stopped = ego_planner::UniformBspline(
+      p4RefinedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
   manager.local_data_.traj_id_ = 34;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
@@ -4230,8 +4234,12 @@ TEST(P4ForwardTerminalLineageTest,
   ego_planner::EGOPlannerManager manager;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
   manager.setPlanningRiskContextForTest(snapshot, 10.0);
-  manager.local_data_.position_traj_ =
-      ego_planner::UniformBspline(p4RefinedControlPoints(), 3, 0.5);
+  auto stopped = ego_planner::UniformBspline(
+      p4RefinedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
   manager.local_data_.traj_id_ = 31;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
@@ -4283,13 +4291,14 @@ TEST(P4ForwardTerminalLineageTest,
   missing_manager.setPlanningRiskContextForTest(snapshot, 10.0);
   missing_manager.setP4ForwardDecisionForTest(makeForwardDecision(
       snapshot, missing_manager.planningRiskContext().planning_attempt_id));
-  missing_manager.local_data_.position_traj_ =
-      ego_planner::UniformBspline(p4RefinedControlPoints(), 3, 0.5);
+  missing_manager.local_data_.position_traj_ = stopped;
   missing_manager.local_data_.traj_id_ = 32;
   missing_manager.local_data_.start_time_ =
       rclcpp::Time(10, 0, RCL_ROS_TIME);
-  EXPECT_FALSE(missing_manager.recordP4VerticalSliceLineage(
+  EXPECT_TRUE(missing_manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.3));
+  EXPECT_TRUE(missing_manager.p4LineageTelemetryFault());
+  EXPECT_TRUE(missing_manager.p4ExecutionCertificate().valid);
 }
 
 TEST(PlanningRiskContextTest, ManualContextKeepsGenerationUntilClear) {

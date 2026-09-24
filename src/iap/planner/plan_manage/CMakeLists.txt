@@ -63,6 +63,7 @@ add_executable(ego_planner_node
   src/ego_replan_fsm.cpp
   src/gate0_qualification_writer.cpp
   src/planner_manager.cpp
+  src/p4_actual_curve_certifier.cpp
   src/p4_terminal_stop.cpp
   src/p4_execution_risk_window.cpp
   src/p0_risk_grid_runtime.cpp
@@ -162,6 +163,14 @@ if(BUILD_TESTING)
   )
   ament_target_dependencies(test_p4_execution_risk_window Eigen3 iap)
   target_link_libraries(test_p4_execution_risk_window iap::iap)
+
+  ament_add_gtest(test_p4_actual_curve_certifier
+    test/test_p4_actual_curve_certifier.cpp
+    src/p4_actual_curve_certifier.cpp
+  )
+  ament_target_dependencies(test_p4_actual_curve_certifier
+    rclcpp Eigen3 bspline_opt traj_utils
+  )
   ament_add_gtest(test_p1_candidate_selection
     test/test_p1_candidate_selection.cpp
     src/p1_candidate_selection.cpp
@@ -218,6 +227,7 @@ if(BUILD_TESTING)
     src/ego_replan_fsm.cpp
     src/gate0_qualification_writer.cpp
     src/planner_manager.cpp
+    src/p4_actual_curve_certifier.cpp
     src/p4_terminal_stop.cpp
     src/p4_execution_risk_window.cpp
     src/p0_risk_grid_runtime.cpp

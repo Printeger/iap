@@ -20,7 +20,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v17";
+    "p4_forward_route_decision_v18";
 
   enum class P4ForwardResultStatus
   {
@@ -444,6 +444,9 @@ namespace ego_planner
       const Eigen::Vector3d &point, double radius_m);
 
   const char * p4ForwardActionName(P4ForwardAction action);
+  bool parseP4ForwardAction(
+    const std::string & schema_version, const std::string & value,
+    P4ForwardAction * action);
   const char * p4ForwardTriggerReasonName(P4ForwardTriggerReason reason);
   const char * p4ForwardGeometryStateName(P4ForwardGeometryState state);
   const char * p4ForwardRiskSupportName(P4ForwardRiskSupport support);

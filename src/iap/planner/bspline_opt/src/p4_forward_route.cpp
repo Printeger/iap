@@ -3344,7 +3344,7 @@ bool configureP4RefinementClearanceRecovery(
         kMinimumLimitedPrefixProgressM)
       return false;
 
-    decision->action = P4ForwardAction::OBSERVE_MORE;
+    decision->action = P4ForwardAction::DEFER_RISK_SELECTION;
     decision->trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
     decision->geometry_state = P4ForwardGeometryState::CLEAR;
     decision->risk_support = P4ForwardRiskSupport::INCOMPLETE;
@@ -3356,12 +3356,17 @@ bool configureP4RefinementClearanceRecovery(
     decision->runner_up_candidate_id = 0u;
     decision->runner_up_channel_id = 0u;
     decision->selected_guide.clear();
-    decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-    decision->deferred_trajectory.clear();
-    decision->observe_more_trajectory = std::move(prefix);
+    decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
+    decision->deferred_trajectory = std::move(prefix);
+    decision->observe_more_trajectory.clear();
+    decision->geometry_common_corridor = decision->deferred_trajectory;
+    decision->executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
     decision->request_position = current_position;
     decision->selected_actual_endpoint =
-      decision->observe_more_trajectory.back();
+      decision->deferred_trajectory.back();
+    decision->limited_prefix_endpoint = decision->deferred_trajectory.back();
+    decision->limited_prefix_boundary = decision->deferred_trajectory.back();
+    decision->limited_prefix_stopping_reserve_m = 0.0;
     decision->local_clearance_recovery = false;
     decision->speed_cap_mps = 0.1;
     decision->actual_curve_duration_scale = 1.0;
@@ -3379,7 +3384,7 @@ bool configureP4RefinementClearanceRecovery(
   const double distance_m = std::clamp(
     deficit_m + kRecoveryReserveM,
     kMinimumRecoveryDistanceM, kMaximumRecoveryDistanceM);
-  decision->action = P4ForwardAction::OBSERVE_MORE;
+  decision->action = P4ForwardAction::DEFER_RISK_SELECTION;
   decision->trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
   decision->geometry_state = P4ForwardGeometryState::CLEAR;
   decision->risk_support = P4ForwardRiskSupport::INCOMPLETE;
@@ -3391,15 +3396,20 @@ bool configureP4RefinementClearanceRecovery(
   decision->runner_up_candidate_id = 0u;
   decision->runner_up_channel_id = 0u;
   decision->selected_guide.clear();
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-  decision->deferred_trajectory.clear();
-  decision->observe_more_trajectory = {
+  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
+  decision->deferred_trajectory = {
     current_position,
     current_position + 0.5 * distance_m * direction,
     current_position + distance_m * direction};
+  decision->observe_more_trajectory.clear();
+  decision->geometry_common_corridor = decision->deferred_trajectory;
+  decision->executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
   decision->request_position = current_position;
   decision->selected_actual_endpoint =
-    decision->observe_more_trajectory.back();
+    decision->deferred_trajectory.back();
+  decision->limited_prefix_endpoint = decision->deferred_trajectory.back();
+  decision->limited_prefix_boundary = decision->deferred_trajectory.back();
+  decision->limited_prefix_stopping_reserve_m = 0.0;
   decision->local_clearance_recovery = true;
   decision->local_clearance_recovery_max_duration_s = 1.0;
   decision->speed_cap_mps = 0.1;
@@ -3480,6 +3490,43 @@ const char * p4ForwardActionName(const P4ForwardAction action)
     case P4ForwardAction::NO_SAFE_ROUTE: return "NO_SAFE_ROUTE";
   }
   return "UNKNOWN";
+}
+
+bool parseP4ForwardAction(
+  const std::string & schema_version, const std::string & value,
+  P4ForwardAction * action)
+{
+  if (!action) return false;
+  const std::pair<const char *, P4ForwardAction> current_actions[] = {
+    {"CONTINUE_NOMINAL", P4ForwardAction::CONTINUE_NOMINAL},
+    {"CANDIDATE_READY", P4ForwardAction::CANDIDATE_READY},
+    {"RISK_SELECTED", P4ForwardAction::RISK_SELECTED},
+    {"ADVISORY_SELECTED", P4ForwardAction::ADVISORY_SELECTED},
+    {"DEFER_RISK_SELECTION", P4ForwardAction::DEFER_RISK_SELECTION},
+    {"REPLAN_REQUIRED", P4ForwardAction::REPLAN_REQUIRED},
+    {"NO_SAFE_ROUTE", P4ForwardAction::NO_SAFE_ROUTE},
+  };
+  for (const auto & entry : current_actions)
+    if (value == entry.first) {
+      *action = entry.second;
+      return true;
+    }
+
+  // OBSERVE_MORE is an archive-only spelling. It remains readable for
+  // captures written before v18 but can never enter a new production row.
+  constexpr char prefix[] = "p4_forward_route_decision_v";
+  if (value != "OBSERVE_MORE" ||
+      schema_version.rfind(prefix, 0u) != 0u)
+    return false;
+  const std::string revision_text = schema_version.substr(sizeof(prefix) - 1u);
+  try {
+    const int revision = std::stoi(revision_text);
+    if (revision < 1 || revision > 17) return false;
+  } catch (const std::exception &) {
+    return false;
+  }
+  *action = P4ForwardAction::OBSERVE_MORE;
+  return true;
 }
 
 const char * p4ForwardSelectionAuthorityName(

@@ -32,6 +32,7 @@
 #include <iap/predictor/predictor_types.hpp>
 #include <ego_planner/direct_trajectory_risk_evidence.h>
 #include <ego_planner/p4_execution_risk_window.h>
+#include <ego_planner/p4_actual_curve_certifier.h>
 
 namespace ego_planner
 {
@@ -307,6 +308,10 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN());
     double terminal_speed_mps = std::numeric_limits<double>::infinity();
     double terminal_acceleration_mps2 = std::numeric_limits<double>::infinity();
+    double terminal_deceleration_start_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double latest_rolling_switch_elapsed_s =
+        std::numeric_limits<double>::quiet_NaN();
     double braking_distance_m = std::numeric_limits<double>::infinity();
     P4ExecutionAuthority authority = P4ExecutionAuthority::LIMITED_PREFIX;
     uint64_t execution_snapshot_id = 0;
@@ -392,20 +397,6 @@ namespace ego_planner
     REAUTHORIZING,
     READY_TO_SWITCH,
     FAILED,
-  };
-
-  enum class P4PreparedCurveFailure
-  {
-    NONE = 0,
-    LOCAL_GEOMETRY,
-    LOCAL_CLEARANCE,
-    DYNAMICS,
-    TRACKING_CAPABILITY,
-    BRAKING,
-    FRESHNESS,
-    GNSS_RISK,
-    P5_PREVIEW,
-    INCOMPLETE,
   };
 
   struct P4PreparedChannelRecord
@@ -982,6 +973,9 @@ namespace ego_planner
     void recordGate0NormalBsplinePublish(double stamp_s);
     bool recordP4VerticalSliceLineage(const std::string &stage,
                                       double stamp_s);
+    bool p4LineageTelemetryFault() const {
+      return p4_lineage_telemetry_fault_;
+    }
     bool recordP4RuntimeLineage(double stamp_s);
     const P4ForwardDecision &lastP4ForwardDecision() const {
       return last_p4_forward_decision_;
@@ -1217,6 +1211,22 @@ namespace ego_planner
     {
       bspline_optimizer_ = std::move(optimizer);
       grid_map_ = std::move(grid_map);
+      if (!p4_control_profile_.valid())
+      {
+        p4_control_profile_.maximum_velocity_mps =
+            Eigen::Vector3d::Constant(100.0);
+        p4_control_profile_.maximum_acceleration_mps2 =
+            Eigen::Vector3d::Constant(1000.0);
+        p4_control_profile_.maximum_jerk_mps3 =
+            Eigen::Vector3d::Constant(10000.0);
+        p4_control_profile_.position_tracking_bound_m =
+            Eigen::Vector3d::Zero();
+        p4_control_profile_.velocity_tracking_bound_mps =
+            Eigen::Vector3d::Zero();
+        p4_control_profile_.controller_identity = "test-controller";
+        p4_control_profile_.simulator_identity = "test-simulator";
+        p4_control_profile_.code_version = "test-code";
+      }
     }
     void setPlanningVisualizationForTest(PlanningVisualization::Ptr visualization)
     {
@@ -1554,6 +1564,8 @@ namespace ego_planner
       std::optional<P4SuccessorPreparationResult> prepared_route;
     };
     P4SuccessorScheduleState p4_successor_schedule_;
+    bool p4_lineage_telemetry_fault_ = false;
+    P4ActualCurveCertificationResult p4_last_actual_curve_certification_;
     std::vector<Eigen::Vector3d> p4_latched_guide_;
     Eigen::Vector3d p4_latched_anchor_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());

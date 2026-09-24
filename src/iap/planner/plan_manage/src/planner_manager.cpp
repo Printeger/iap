@@ -5431,7 +5431,13 @@ namespace ego_planner
              "compute_latency_ms,trajectory_id,trajectory_start_ns,"
              "control_points_hash,knot_vector_hash,trajectory_duration_s,"
              "approved_endpoint_x,approved_endpoint_y,approved_endpoint_z,"
-             "terminal_speed_mps,terminal_acceleration_mps2,refinement_diagnostics,"
+             "terminal_speed_mps,terminal_acceleration_mps2,"
+             "actual_curve_typed_failure,actual_curve_failure_detail,"
+             "lineage_io_status,parent_execution_instance_id,"
+             "parent_trajectory_id,parent_start_ns,parent_curve_hash,"
+             "child_execution_instance_id,child_trajectory_id,child_start_ns,"
+             "child_curve_hash,terminal_deceleration_start_s,"
+             "latest_rolling_switch_elapsed_s,refinement_diagnostics,"
              "actual_curve_certification_status,actual_curve_first_failure_index,"
              "actual_curve_common_satellite_ids,actual_curve_core_policy,"
              "actual_curve_window_layout_hash,actual_curve_window_count,"
@@ -5748,7 +5754,23 @@ namespace ego_planner
         << ',' << knot_hash << ',' << trajectory_duration << ','
         << approved_endpoint.x() << ',' << approved_endpoint.y() << ','
         << approved_endpoint.z() << ',' << terminal_speed << ','
-        << terminal_acceleration << ',' << refinement_diagnostics.str()
+        << terminal_acceleration << ','
+        << p4PreparedCurveFailureName(
+            p4_last_actual_curve_certification_.failure) << ','
+        << p4_last_actual_curve_certification_.detail << ','
+        << "ok" << ','
+        << local_data_.parent_execution_instance_id_ << ','
+        << local_data_.parent_traj_id_ << ','
+        << local_data_.parent_start_time_.nanoseconds() << ','
+        << local_data_.parent_curve_hash_ << ','
+        << local_data_.execution_instance_id_ << ','
+        << local_data_.traj_id_ << ','
+        << local_data_.start_time_.nanoseconds() << ','
+        << local_data_.curve_hash_ << ','
+        << p4_last_actual_curve_certification_.terminal_deceleration_start_s
+        << ','
+        << p4_last_actual_curve_certification_.latest_rolling_switch_elapsed_s
+        << ',' << refinement_diagnostics.str()
         << ',' << p4ActualCurveCertificationStatusName(
             p4_direct_risk_evidence_.certification_status)
         << ',' << p4_direct_risk_evidence_.first_failure_index
@@ -6248,6 +6270,8 @@ namespace ego_planner
   bool EGOPlannerManager::recordP4VerticalSliceLineage(
       const std::string &stage, const double stamp_s)
   {
+    p4_last_actual_curve_certification_ =
+        P4ActualCurveCertificationResult{};
     if (!bspline_optimizer_)
       return false;
     const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
@@ -6314,8 +6338,9 @@ namespace ego_planner
       }
       const bool written = appendP4ForwardDecision(
           last_p4_forward_decision_, stage, stamp_s);
-      if (!written || !publish_authorization_stage)
-        return written;
+      p4_lineage_telemetry_fault_ = !written;
+      if (!publish_authorization_stage)
+        return true;
 
       // The expensive curve, braking-library, local-assurance and direct-risk
       // checks were completed once before P5.  Publishing promotes that exact
@@ -6418,6 +6443,7 @@ namespace ego_planner
               stage + "_identity_rejected", stamp_s);
           return false;
         };
+    P4ActualCurveCertificationResult actual_curve_certification;
     const bool selected_route =
         last_p4_forward_decision_.executable_intent ==
             P4ExecutableIntent::FINAL_CHANNEL &&
@@ -6644,6 +6670,26 @@ namespace ego_planner
             P4GeometryCommitVerdict::INVALID_PATH,
             strict_global ? "final_certified_integrity_unsafe"
                           : "final_slam_registration_unhealthy");
+    }
+
+    const bool certification_stage =
+        stage == "final_bspline_before_p5" ||
+        stage == "successor_curve_before_p5" ||
+        stage == "normal_selected_bundle_latest_reauthorization" ||
+        stage == "p5_final_pass_before_publish" ||
+        publish_authorization_stage;
+    if (certification_stage)
+    {
+      actual_curve_certification = P4ActualCurveCertifier{}.certify(
+          {local_data_, p4_control_profile_, pp_.feasibility_tolerance_});
+      p4_last_actual_curve_certification_ = actual_curve_certification;
+      if (!actual_curve_certification.complete)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            std::string("actual_curve_certification_failed:") +
+                p4PreparedCurveFailureName(
+                    actual_curve_certification.failure) + ":" +
+                actual_curve_certification.detail);
     }
 
     std::vector<Eigen::Vector3d> executable_trajectory;
@@ -7816,9 +7862,9 @@ namespace ego_planner
         stage == "final_bspline_before_p5";
     const bool normal_selected_reauthorization_stage =
         stage == "normal_selected_bundle_latest_reauthorization";
-    if (written && (publish_authorization_stage ||
-                    prepared_successor_stage || prepared_nominal_stage ||
-                    normal_selected_reauthorization_stage))
+    p4_lineage_telemetry_fault_ = !written;
+    if (publish_authorization_stage || prepared_successor_stage ||
+        prepared_nominal_stage || normal_selected_reauthorization_stage)
     {
       published_p4_forward_decision_ = last_p4_forward_decision_;
       const auto published_occupancy =
@@ -7881,6 +7927,10 @@ namespace ego_planner
           committed_terminal_speed;
       p4_execution_certificate_.terminal_acceleration_mps2 =
           committed_terminal_acceleration;
+      p4_execution_certificate_.terminal_deceleration_start_s =
+          actual_curve_certification.terminal_deceleration_start_s;
+      p4_execution_certificate_.latest_rolling_switch_elapsed_s =
+          actual_curve_certification.latest_rolling_switch_elapsed_s;
       p4_execution_certificate_.braking_distance_m =
           last_p4_forward_decision_.stopping_distance_m;
       p4_execution_certificate_.snapshot_identity =
@@ -8068,7 +8118,7 @@ namespace ego_planner
         appendP4ExecutionEvent("AUTHORIZED", stamp_s, authorized);
       }
     }
-    return written;
+    return certification_stage ? true : written;
   }
 
   std::optional<P4GeometryCommitResult>
