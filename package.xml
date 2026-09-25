@@ -24,6 +24,8 @@
   <depend condition="$ROS_VERSION == 2">quadrotor_msgs</depend>
   <exec_depend condition="$ROS_VERSION == 2">rclpy</exec_depend>
   <exec_depend condition="$ROS_VERSION == 2">python3-psutil</exec_depend>
+  <exec_depend condition="$ROS_VERSION == 2">python3-pil</exec_depend>
+  <exec_depend condition="$ROS_VERSION == 2">python3-yaml</exec_depend>
   <exec_depend condition="$ROS_VERSION == 2">tf2_ros</exec_depend>
   <member_of_group condition="$ROS_VERSION == 2">rosidl_interface_packages</member_of_group>
 

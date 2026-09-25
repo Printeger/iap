@@ -787,6 +787,32 @@ class TestRunnerLifecycle(unittest.TestCase):
             self.assertIn("[icra] LOG ", stdout)
             self.assertIn("/full-r01/stdout.log", stdout)
 
+    def test_rviz_run_loads_installed_test_icra_config(self):
+        install_root = Path("/workspace/install")
+
+        path = MODULE.icra_rviz_config_path(install_root)
+
+        self.assertEqual(
+            path,
+            Path("/workspace/install/iap/share/iap/config/sim_demo11/"
+                 "test_icra.rviz"))
+
+    def test_rviz_config_path_preserves_symlink_install_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source/test_icra.rviz"
+            installed = root / "install/iap/share/iap/config/sim_demo11/"
+            installed.mkdir(parents=True)
+            source.parent.mkdir(parents=True)
+            source.write_text("Visualization Manager: {}\n")
+            installed_config = installed / "test_icra.rviz"
+            installed_config.symlink_to(source)
+
+            path = MODULE.icra_rviz_config_path(root / "install").absolute()
+
+            self.assertEqual(path, installed_config.absolute())
+            self.assertNotEqual(path, installed_config.resolve())
+
     def test_cli_forwards_explicit_raw_evidence_retention(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

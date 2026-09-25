@@ -1141,6 +1141,15 @@ python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
   --stage full --repetitions 1 --rviz
 ```
 
+`--rviz` 会显式加载已安装的
+`share/iap/config/sim_demo11/test_icra.rviz`，并并行运行只读 ROS graph/message
+探针。探针在所有必需图层首次收到数据后再等待至少 2 秒，以最终
+`/test_planner_rviz` endpoint 的 QoS、非空 PointCloud2 和有限 MarkerArray
+几何写出 `rviz_runtime.json`；启动期 incompatible-QoS warning 仅作计数诊断。
+当前执行轨迹的 endpoint 始终检查，但仅在正式 B-spline 已发布时要求其 Marker
+payload 非空。探针在同一稳定时刻保存 `rviz_visual_proof.png`，并把图片路径、
+SHA256 和像素尺寸写入运行时 JSON；最终仍须打开图片进行人工可见性确认。
+
 可切换的茂密森林开发场景为 `icra_dense_forest_four_fork_v1`。它冻结
 `forest_random_seed=41021` 和 `fork_risk_seed=21`，四段开阔低风险侧依次为
 右、左、右、左；两侧都是由真实点云清出的 2.4 m 可通行曲线分支。GNSS 使用

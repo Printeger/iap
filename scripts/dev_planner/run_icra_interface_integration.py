@@ -37,6 +37,8 @@ DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
 MIRROR_SCENARIO = "icra072_p4_selection_trigger_mirror_v1"
 FOREST_V1_SCENARIO = "icra_dense_forest_four_fork_v1"
 FOREST_SCENARIO = "icra_dense_forest_four_fork_v2"
+RVIZ_CONFIG_RELATIVE_PATH = Path(
+    "iap/share/iap/config/sim_demo11/test_icra.rviz")
 P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v1",
     "p4_forward_route_decision_v2",
@@ -4363,6 +4365,11 @@ def _launch_shell(install_root: Path, launch_args: dict[str, str]) -> str:
     )
 
 
+def icra_rviz_config_path(install_root: Path) -> Path:
+    """Return the one installed RViz configuration used by ICRA live runs."""
+    return install_root / RVIZ_CONFIG_RELATIVE_PATH
+
+
 def _run_one_impl(
         stage: str, run_root: Path, install_root: Path,
         start_rviz: bool, shutdown_variant: str | None,
@@ -4432,6 +4439,9 @@ def _run_one_impl(
         "p4.debug_csv_path": str(
             run_root / "exports/planner_p4_risk_astar_debug.csv"),
     })
+    if start_rviz:
+        launch_args["rviz_config"] = str(
+            icra_rviz_config_path(install_root).absolute())
     shell_command = _launch_shell(install_root, launch_args)
     _json_write(run_root / "launch_command.json", {
         "stage": stage,
@@ -4449,6 +4459,26 @@ def _run_one_impl(
     stdout_path = run_root / "stdout.log"
     launch_stream = stdout_path.open("x")
     owned_streams["launch"] = launch_stream
+    rviz_probe = None
+    if start_rviz:
+        rviz_probe_command = [
+            sys.executable,
+            str(Path(__file__).resolve().with_name(
+                "verify_icra_rviz_runtime.py")),
+            "--output", str(run_root / "rviz_runtime.json"),
+            "--source-config",
+            str(REPOSITORY / "config/sim_demo11/test_icra.rviz"),
+            "--install-config", str(icra_rviz_config_path(install_root)),
+            "--startup-log", str(stdout_path),
+            "--visual-proof", str(run_root / "rviz_visual_proof.png"),
+            "--timeout", str(max(5.0, duration_s - 3.0)),
+            "--settle-seconds", "2.0",
+        ]
+        rviz_probe = subprocess.Popen(
+            rviz_probe_command, cwd=REPOSITORY, env=environment,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        owned_processes["rviz_probe"] = rviz_probe
     launch = subprocess.Popen(
         ["bash", "-lc", shell_command], cwd=REPOSITORY, env=environment,
         stdout=launch_stream, stderr=subprocess.STDOUT,
@@ -4499,6 +4529,16 @@ def _run_one_impl(
     _json_write(run_root / "process_resources.json", process_resources)
     capture_code, capture_cleared, capture_escalated = _stop_group(
         capture, 3.0, run_root / "capture_stacks.txt")
+    rviz_probe_code = None
+    rviz_probe_cleared = True
+    rviz_probe_escalated = False
+    if rviz_probe is not None:
+        try:
+            rviz_probe.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            pass
+        rviz_probe_code, rviz_probe_cleared, rviz_probe_escalated = (
+            _stop_group(rviz_probe, 2.0))
     launch_stream.close()
     capture_stream.close()
     time.sleep(0.5)
@@ -4549,6 +4589,27 @@ def _run_one_impl(
                 [*summary["failures"], *local_map_failures],
                 **{key: value for key, value in summary.items()
                    if key not in ("result", "failures")})
+    rviz_runtime = None
+    if start_rviz:
+        rviz_runtime_path = run_root / "rviz_runtime.json"
+        if rviz_runtime_path.is_file():
+            try:
+                rviz_runtime = json.loads(rviz_runtime_path.read_text())
+            except json.JSONDecodeError:
+                rviz_runtime = {
+                    "result": "FAIL",
+                    "failures": ["rviz_runtime_json_invalid"],
+                }
+        else:
+            rviz_runtime = {
+                "result": "FAIL",
+                "failures": ["rviz_runtime_evidence_missing"],
+            }
+        if rviz_runtime.get("result") != "PASS":
+            summary = _result(
+                [*summary["failures"], *rviz_runtime.get("failures", [])],
+                **{key: value for key, value in summary.items()
+                   if key not in ("result", "failures")})
     summary.update({
         "stage": stage,
         "scenario": scenario,
@@ -4573,6 +4634,10 @@ def _run_one_impl(
         "capture_group_cleared": capture_cleared,
         "launch_runner_escalated": launch_escalated,
         "capture_runner_escalated": capture_escalated,
+        "rviz_probe_exit_code": rviz_probe_code,
+        "rviz_probe_group_cleared": rviz_probe_cleared,
+        "rviz_probe_runner_escalated": rviz_probe_escalated,
+        "rviz_runtime": rviz_runtime,
         "residual_nodes": residual_nodes,
         "elapsed_s": time.monotonic() - started,
     })
@@ -4609,7 +4674,8 @@ def _run_one(
                         "escalated": False},
         }
         cleanup_failures = []
-        for role, timeout_s in (("launch", 5.0), ("capture", 3.0)):
+        for role, timeout_s in (
+                ("launch", 5.0), ("capture", 3.0), ("rviz_probe", 2.0)):
             process = owned_processes.get(role)
             if process is None:
                 continue

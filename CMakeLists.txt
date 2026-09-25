@@ -637,6 +637,7 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_planner/gate0_disk_audit.py
       scripts/dev_planner/run_gate0_qualification.py
       scripts/dev_planner/run_icra_interface_integration.py
+      scripts/dev_planner/verify_icra_rviz_runtime.py
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap

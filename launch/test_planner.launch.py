@@ -5098,7 +5098,10 @@ def _launch_setup(context):
         rviz_config_path = Path(requested_rviz_config).expanduser()
         if not rviz_config_path.is_absolute():
             rviz_config_path = Path(iap_share) / rviz_config_path
-        rviz_config_path = rviz_config_path.resolve()
+        # Keep the lexical installed-package path in RViz's argv.  Resolving a
+        # symlink-install path here makes runtime provenance falsely look like
+        # RViz loaded the source-tree config directly.
+        rviz_config_path = rviz_config_path.absolute()
         if not rviz_config_path.is_file():
             raise RuntimeError(
                 f"rviz_config does not exist: {rviz_config_path}"

@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-rviz-runtime-verification): IAP-RQ-003 / IAP-RQ-320 — make the
+  interface runner bind and prove the single installed `test_icra.rviz`
+  profile instead of relying on the launch wrapper's relative default. A
+  read-only runtime probe waits two seconds after required overlay data first
+  arrives, then verifies the final RViz ROS
+  endpoints, QoS compatibility, non-empty point clouds, finite planning-marker
+  geometry, and source/install/loaded config identity. Startup QoS warnings are
+  diagnostic only. The same settled probe captures one checksummed visual-proof
+  PNG for human inspection; no publisher QoS, planner decision, safety
+  threshold, or visualization message protocol changes.
 - fix(local-map-startup-recovery): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 —
   make registered active-window generation advance only for semantic frame,
   pose, source-health, or completeness changes, so unchanged complete windows
