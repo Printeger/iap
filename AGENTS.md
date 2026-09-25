@@ -49,6 +49,44 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
 - `tests/`、`test/`：单元测试和回归测试
 - `docs/`：长期有效的规范、设计与用户文档
 
+### 3.1 第一性原理与奥卡姆剃刀（强制设计准则）
+
+分析问题和提出实现前，必须先从物理目标与系统事实出发，不得先从现有状态机、历史补丁或日志名称反推需求：
+
+1. 明确系统本轮必须产生的真实结果，例如“发布一条可执行且可安全停车的轨迹”，而不是“让某个中间状态变绿”。
+2. 分开记录事实、推断和策略：传感器实际观测属于事实；风险模型输出属于推断；STRICT/MISSION 是否接受风险属于策略。不得把 unknown 等同于已知障碍，也不得把诊断字段当作执行授权。
+3. 先区分硬安全条件与优化目标。碰撞、净空、动力学、控制能力、本地状态可信度和制动能力属于硬条件；在本地运动仍可控时，GNSS、任务进度和路线偏好按任务模式参与风险分组与选择，不得无条件把困难等同于永久 HOLD。
+4. 找到最小充分修复点：优先删除矛盾规则、合并重复语义、复用现有证书与状态；只有现有概念无法准确表达独立语义和生命周期时才新增类型、状态、协议或缓存。
+5. 每个新模块或特殊分支都必须通过删除检验：删除后若复杂性不会重新出现在多个调用者中，它通常没有存在价值。禁止用 observation、retry、fallback、lineage 等新名词包装同一个已有决策。
+6. 一个事实只计算一次，一个安全结论只由一个权威 seam 授予。生成器可以接收冻结的修改意见，最终审核器负责判定；审核器不得在优化器迭代过程中不断改变问题，优化器也不得自行降低最终门限。
+7. 修复必须改善端到端结果，而不只是把失败推到下一个阶段。提交前应说明旧结果、预期新结果、未改变的不变量和可回退检查点；若没有证据证明范围扩大是必要的，保持改动有界。
+
+### 3.2 通道、guide 与可执行轨迹的职责
+
+- **通道（channel）**是具有稳定身份的拓扑自由走廊，回答“从哪一侧或哪一类连通区域前进”。
+- **guide** 是通道内的粗略空间参考，回答“优化器大致往哪里求解”。guide 不是飞行中心线，不得直接取得执行授权，也不得在 actual curve 生成前充当最终碰撞、净空、GNSS 或制动 hard gate。
+- **actual trajectory** 是带时间参数和完整身份的 B-spline，回答“飞行器接下来具体怎样运动”。只有 actual trajectory、其真实 swept envelope 和全部 braking curves 通过适用认证后才能发布。
+
+采用两层而非混合决策：
+
+1. 使用冻结的同一地图、GNSS epoch、任务范围和切换锚点，对稳定通道做可行性筛选和风险排序。这个阶段产生的是 **channel preference**，用于决定 actual trajectory 的求解顺序，不是最终执行授权。
+2. 在优先通道内生成 bounded、可终端停车的 actual trajectory，并使用统一最终审核器认证。如果失败，使用 typed failure 转向下一已排序通道；不得反复修补或锁定首选通道。
+3. 最终 **channel selection** 以已认证 actual bundle 为依据。若需求要求证明全局最优或比较 winner/runner-up，则必须在同一冻结快照上准备所有相关通道的 actual bundle 后再比较；若需求只要求尽快得到一个安全可行解，可以按排序顺序逐个求解并在首个合格 bundle 处停止，但必须明确这是“首个可行”而非“全局最优”。
+4. 通道排名不能绕过 actual trajectory 的碰撞、净空、动力学、制动、身份、新鲜度和适用完整性检查；actual trajectory 的局部失败也不能倒推出整个通道永久不可行，只能否定该快照、锚点和参数下的这次求解。
+
+默认生产链保持单一：
+
+```text
+enumerate stable channels
+→ screen and rank channel preferences
+→ generate bounded actual trajectory in rank order
+→ certify actual trajectory + swept envelope + braking curves
+→ compare certified bundles when the task requires comparison
+→ publish one winner or return one typed HOLD reason
+```
+
+不得为公共前缀、GNSS 降级或求解失败另建与上述链并行的执行协议；它们应由现有 actual bundle、任务模式、typed failure 和执行权限表达。
+
 ## 4. Pipeline（顶层模块拆分）
 
 建议模块（可按需调整）：
