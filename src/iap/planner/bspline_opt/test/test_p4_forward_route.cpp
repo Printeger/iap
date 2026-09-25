@@ -252,7 +252,7 @@ TEST(P4SuccessorProgressPolicy,
 }
 
 TEST(P4BoundedExecutionGuide,
-     UsesLocalSupportStoppingRollingAndExposureFrontiers)
+     UsesLocalSupportStoppingAndRollingFrontiers)
 {
   const std::vector<Eigen::Vector3d> guide{
     {0.0, 0.0, 1.0}, {2.0, 0.0, 1.0},
@@ -264,7 +264,6 @@ TEST(P4BoundedExecutionGuide,
   input.start_acceleration.setZero();
   input.decision_horizon_m = 6.0;
   input.local_support_frontier_m = 5.0;
-  input.exposure_affordable_frontier_m = 4.0;
   input.successor_max_parent_execution_s = 2.5;
 
   const auto bounded = ego_planner::p4BoundExecutionGuide(input);
@@ -296,15 +295,9 @@ TEST(P4BoundedExecutionGuide, ReportsTheFrontierThatPreventsMinimumProgress)
   input.start_acceleration.setZero();
   input.decision_horizon_m = 4.0;
   input.local_support_frontier_m = 4.0;
-  input.exposure_affordable_frontier_m = 0.20;
   input.successor_max_parent_execution_s = 2.5;
 
   auto bounded = ego_planner::p4BoundExecutionGuide(input);
-  EXPECT_FALSE(bounded.valid);
-  EXPECT_EQ(bounded.failure,
-            ego_planner::P4BoundedExecutionFailure::EXPOSURE_BUDGET);
-
-  input.exposure_affordable_frontier_m = 4.0;
   input.local_support_frontier_m = 1.0;
   bounded = ego_planner::p4BoundExecutionGuide(input);
   EXPECT_FALSE(bounded.valid);

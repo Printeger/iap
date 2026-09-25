@@ -152,8 +152,8 @@ def generate_launch_description():
     p4_assurance_task_mode = LaunchConfiguration(
         'p4_assurance_task_mode', default='mission_best_effort')
     p4_assurance_maximum_global_ratio = LaunchConfiguration('p4_assurance_maximum_global_ratio', default=1.05)
-    p4_assurance_maximum_continuous_exceedance_s = LaunchConfiguration('p4_assurance_maximum_continuous_exceedance_s', default=1.0)
-    p4_assurance_maximum_exceedance_integral_ratio_s = LaunchConfiguration('p4_assurance_maximum_exceedance_integral_ratio_s', default=0.025)
+    p4_assurance_maximum_continuous_exceedance_s = LaunchConfiguration('p4_assurance_maximum_continuous_exceedance_s', default=2.3)
+    p4_assurance_maximum_exceedance_integral_ratio_s = LaunchConfiguration('p4_assurance_maximum_exceedance_integral_ratio_s', default=0.115)
     p4_assurance_recovery_horizon_s = LaunchConfiguration('p4_assurance_recovery_horizon_s', default=2.0)
     p4_assurance_recovered_ratio = LaunchConfiguration('p4_assurance_recovered_ratio', default=0.95)
     p4_assurance_recovered_hold_s = LaunchConfiguration('p4_assurance_recovered_hold_s', default=0.5)

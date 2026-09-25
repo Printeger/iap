@@ -88,7 +88,6 @@ namespace ego_planner
     INVALID_INPUT,
     LOCAL_SUPPORT,
     STOPPING,
-    EXPOSURE_BUDGET,
     FROZEN_GUIDE_MISMATCH,
   };
 
@@ -523,8 +522,8 @@ namespace ego_planner
     iap::GlobalNavigationTaskMode task_mode =
       iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
     double maximum_global_ratio = 1.05;
-    double maximum_global_continuous_exceedance_s = 1.0;
-    double maximum_global_exceedance_integral_ratio_s = 0.025;
+    double maximum_global_continuous_exceedance_s = 2.3;
+    double maximum_global_exceedance_integral_ratio_s = 0.115;
   };
 
   struct P4BoundedExecutionGuideInput
@@ -548,8 +547,6 @@ namespace ego_planner
       std::numeric_limits<double>::quiet_NaN();
     double decision_horizon_m = std::numeric_limits<double>::quiet_NaN();
     double local_support_frontier_m =
-      std::numeric_limits<double>::quiet_NaN();
-    double exposure_affordable_frontier_m =
       std::numeric_limits<double>::quiet_NaN();
     double successor_max_parent_execution_s =
       std::numeric_limits<double>::quiet_NaN();

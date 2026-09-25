@@ -33,6 +33,7 @@
 #include <ego_planner/direct_trajectory_risk_evidence.h>
 #include <ego_planner/p4_execution_risk_window.h>
 #include <ego_planner/p4_actual_curve_certifier.h>
+#include <ego_planner/p4_terminal_stop.h>
 
 namespace ego_planner
 {
@@ -55,14 +56,8 @@ namespace ego_planner
       const double guide_length_m, const double requested_spacing_m,
       const double maximum_velocity_mps)
   {
-    if (!std::isfinite(guide_length_m) || guide_length_m <= 1.0e-6 ||
-        !std::isfinite(requested_spacing_m) || requested_spacing_m <= 0.0 ||
-        !std::isfinite(maximum_velocity_mps) ||
-        maximum_velocity_mps <= 1.0e-6)
-      return std::numeric_limits<double>::quiet_NaN();
-    const double resampled_spacing_m = std::min(
-        std::max(0.05, requested_spacing_m), guide_length_m / 6.0);
-    return 1.5 * resampled_spacing_m / maximum_velocity_mps;
+    return p4TerminalStopSeedInterval(
+        guide_length_m, requested_spacing_m, maximum_velocity_mps);
   }
 
 

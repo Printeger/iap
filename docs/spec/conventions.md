@@ -549,8 +549,8 @@
   exact nominal B-spline define global exposure; fused PL and LiDAR FIM do not
   replace this channel. The default policy permits
   `CONTROLLED_DEGRADED_EXECUTION` only when peak ratio is at most `1.05`, one
-  continuous exceedance is at most `1.0 s`, the positive exceedance integral
-  is at most `0.025 ratio*s`, and either recovery is predicted within `2.0 s`
+  continuous exceedance is at most `2.3 s`, the positive exceedance integral
+  is at most `0.115 ratio*s`, and either recovery is predicted within `2.0 s`
   or a currently certified braking curve remains available. The public task
   contract is `p4.assurance.task_mode`: `STRICT_GLOBAL` retains strict
   `GNSS PL < AL`, while `MISSION_BEST_EFFORT` permits only degraded motion
@@ -564,10 +564,23 @@
 - Every immediate actual trajectory is bounded before B-spline resampling.
   Its frontier is the minimum of guide length, decision horizon and consecutive
   fresh local support; the committed endpoint additionally reserves stopping
-  distance, the rolling cap and the exposure-affordable frontier. The actual
-  is rebuilt from the true start `p/v/a` with terminal velocity and
-  acceleration zero. The full guide remains only a channel/successor
-  reference and cannot obtain execution authority.
+  distance and the rolling cap. Exposure never becomes a distance proxy.
+  For a degraded MISSION candidate, the generator computes remaining exposure
+  in seconds, generates the actual from the true start `p/v/a`, applies the
+  production terminal-stop time law, and uses a fixed 16-step monotone
+  endpoint search until the real duration fits that same time budget. Every
+  regenerated curve receives new control points, knots and identity before
+  collision, clearance, dynamics, braking and P5 certification. The full guide
+  remains only a channel/successor reference and cannot obtain execution
+  authority.
+- The MISSION exposure values are an explicit risk-acceptance policy, not PL
+  fabrication or permission to treat unknown as free. The zero-speed
+  production fixture for `min_creep_progress_m=0.25` requires
+  `T_min=2.280084270 s` and `0.114004213 ratio*s` at ratio `1.05`; defaults
+  `2.3 s` and `0.115 ratio*s` add only numerical tolerance. Startup rejects an
+  incompatible MISSION configuration with the typed detail
+  `mission_exposure_policy_incompatible_with_minimum_terminal_stop`.
+  `STRICT_GLOBAL` is unchanged.
 - A received GNSS epoch certifies reception only at the exact receiver
   reference; no measured-support radius grants future candidate positions
   synthetic map support. Every candidate LOS records its sample count,

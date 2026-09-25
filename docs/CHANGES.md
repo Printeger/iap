@@ -3,6 +3,21 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(exposure-duration-generation-seam): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — remove `max_observe_speed * affordable_time` from bounded-guide
+  execution authority and close MISSION generation over the real production
+  terminal-stop duration. A fixed 16-step endpoint search regenerates a fresh
+  curve identity on the same frozen geometry, while final
+  `TrajectoryAssurance` continues charging the exact actual duration.
+  Persistent episode state and duplicate-evidence deduplication are unchanged.
+  The production 0.25 m zero-speed fixture measures
+  `T_min=2.280084270 s` and required integral `0.114004213 ratio*s` at the
+  unchanged maximum ratio `1.05`; MISSION defaults are therefore explicitly
+  calibrated to `2.3 s` and `0.115 ratio*s`. Smaller full-fresh policies fail
+  startup or generation with
+  `mission_exposure_policy_incompatible_with_minimum_terminal_stop` rather
+  than entering an ordinary replan loop. STRICT, PL/AL, unknown, collision,
+  clearance, dynamics, braking, freshness and P5 semantics are unchanged.
 - refactor(unified-actual-curve-certification): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — route normal, `LIMITED_PREFIX`, local-recovery and rolling-child
   curves through one immutable actual-curve certification seam with typed

@@ -155,6 +155,58 @@ ego_planner::P4ControlCapabilityProfile permissiveTestControlProfile()
   return profile;
 }
 
+ego_planner::P4ControlCapabilityProfile missionExposureControlProfile()
+{
+  ego_planner::P4ControlCapabilityProfile profile;
+  profile.maximum_velocity_mps = Eigen::Vector3d::Constant(2.0);
+  profile.maximum_acceleration_mps2 = Eigen::Vector3d::Constant(3.0);
+  profile.maximum_jerk_mps3 = Eigen::Vector3d::Constant(4.0);
+  profile.position_tracking_bound_m = Eigen::Vector3d::Constant(0.125);
+  profile.velocity_tracking_bound_mps = Eigen::Vector3d::Constant(0.25);
+  profile.controller_identity = "unit-controller";
+  profile.simulator_identity = "unit-simulator";
+  profile.code_version = "unit-code";
+  return profile;
+}
+
+iap::TrajectoryAssuranceRequest locallySafeIncompleteRequest(
+    ego_planner::UniformBspline trajectory, const std::string &identity)
+{
+  iap::TrajectoryAssuranceRequest request;
+  const double duration_s = trajectory.getTimeSum();
+  request.global_samples = {
+      {0.0, NAN, NAN, 20.0, 40.0, false},
+      {duration_s, NAN, NAN, 20.0, 40.0, false}};
+  request.conservative_incomplete_global_navigation = true;
+  request.committed_duration_s = duration_s;
+  request.global_evidence_identity = identity;
+  request.local_evidence.complete = true;
+  request.local_evidence.support_fresh = true;
+  request.local_evidence.registration_health_valid = true;
+  request.local_evidence.icp_degenerate = false;
+  request.local_evidence.icp_rmse_m = 0.01;
+  request.local_evidence.icp_gamma = 1.0;
+  request.local_evidence.certified_empty_clearance_m = 5.0;
+  request.local_evidence.identity = "local-clear";
+  iap::LocalMotionCurve nominal;
+  nominal.curve_id = "nominal";
+  const int sample_count = std::max(
+      1, static_cast<int>(std::ceil(duration_s / 0.1)));
+  for (int index = 0; index <= sample_count; ++index)
+  {
+    const double time_s = duration_s *
+        static_cast<double>(index) / sample_count;
+    nominal.samples.push_back(
+        {time_s, trajectory.evaluateDeBoorT(time_s), 0.05});
+  }
+  auto braking = nominal;
+  braking.curve_id = "brake";
+  braking.braking_curve = true;
+  request.local_curves = {nominal, braking};
+  request.certified_braking_available = true;
+  return request;
+}
+
 }  // namespace
 
 TEST(P4TerminalStopProductionTest,
@@ -230,6 +282,314 @@ TEST(P4ForwardSeedTiming,
   EXPECT_NEAR(
       ego_planner::p4ForwardSeedTimeInterval(4.0, 0.4, 1.0),
       0.6, 1.0e-12);
+}
+
+TEST(P4ExposureDurationSeam,
+     DistanceProxyWouldAcceptButActualDurationExceedsBudget)
+{
+  ego_planner::P4ForwardLimits limits;
+  limits.min_creep_progress_m = 0.25;
+  limits.max_observe_speed_mps = 0.5;
+  ego_planner::P4BoundedExecutionGuideInput bounded_input;
+  bounded_input.frozen_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.5),
+      Eigen::Vector3d(2.0, 0.0, 1.5)};
+  bounded_input.start_position = bounded_input.frozen_guide.front();
+  bounded_input.start_velocity.setZero();
+  bounded_input.start_acceleration.setZero();
+  bounded_input.decision_horizon_m = 2.0;
+  bounded_input.local_support_frontier_m = 2.0;
+  const double affordable_duration_s = 0.5;
+  const double legacy_distance_proxy_m =
+      limits.max_observe_speed_mps * affordable_duration_s;
+  bounded_input.successor_max_parent_execution_s = affordable_duration_s;
+  bounded_input.limits = limits;
+
+  const auto bounded = ego_planner::p4BoundExecutionGuide(bounded_input);
+  ASSERT_TRUE(bounded.valid) << bounded.reason;
+  ASSERT_NEAR(bounded.target_station_m, legacy_distance_proxy_m, 1.0e-12);
+
+  std::vector<Eigen::Vector3d> samples;
+  for (int index = 0; index <= 6; ++index)
+    samples.push_back(bounded.guide.front() +
+        static_cast<double>(index) / 6.0 *
+            (bounded.guide.back() - bounded.guide.front()));
+  const std::vector<Eigen::Vector3d> derivatives{
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
+  const double interval_s = ego_planner::p4ForwardSeedTimeInterval(
+      bounded.target_station_m, 0.4, limits.max_observe_speed_mps);
+  Eigen::MatrixXd control_points;
+  ego_planner::UniformBspline::parameterizeToBspline(
+      interval_s, samples, derivatives, control_points);
+  ASSERT_EQ(control_points.rows(), 3);
+  ASSERT_GT(control_points.cols(), 3);
+  ego_planner::UniformBspline actual(control_points, 3, interval_s);
+  ego_planner::P4ControlCapabilityProfile profile;
+  profile.maximum_velocity_mps = Eigen::Vector3d::Constant(2.0);
+  profile.maximum_acceleration_mps2 = Eigen::Vector3d::Constant(3.0);
+  profile.maximum_jerk_mps3 = Eigen::Vector3d::Constant(4.0);
+  profile.position_tracking_bound_m = Eigen::Vector3d::Constant(0.125);
+  profile.velocity_tracking_bound_mps = Eigen::Vector3d::Constant(0.25);
+  profile.controller_identity = "unit-controller";
+  profile.simulator_identity = "unit-simulator";
+  profile.code_version = "unit-code";
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &actual,
+      {bounded_input.start_position, bounded_input.start_velocity,
+       bounded_input.start_acceleration},
+      profile, 0.05);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 1.0;
+  policy.maximum_exceedance_integral_ratio_s = 0.025;
+  const auto budget = ego_planner::p4MissionExposureDurationBudget(
+      policy, iap::GlobalNavigationEpisodeState{});
+  auto fitted = actual;
+  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
+      &fitted,
+      {bounded_input.start_position, bounded_input.start_velocity,
+       bounded_input.start_acceleration},
+      profile, 0.05, 0.4, limits.max_observe_speed_mps,
+      0.237, budget);
+
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = {
+      {0.0, NAN, NAN, 20.0, 40.0, false},
+      {actual.getTimeSum(), NAN, NAN, 20.0, 40.0, false}};
+  request.conservative_incomplete_global_navigation = true;
+  request.committed_duration_s = actual.getTimeSum();
+  request.global_evidence_identity = "distance-proxy-red";
+  request.local_evidence.complete = true;
+  request.local_evidence.support_fresh = true;
+  request.local_evidence.registration_health_valid = true;
+  request.local_evidence.icp_degenerate = false;
+  request.local_evidence.icp_rmse_m = 0.01;
+  request.local_evidence.icp_gamma = 1.0;
+  request.local_evidence.certified_empty_clearance_m = 5.0;
+  request.local_evidence.identity = "local-clear";
+  iap::LocalMotionCurve nominal;
+  nominal.curve_id = "nominal";
+  constexpr int kSampleCount = 40;
+  for (int index = 0; index <= kSampleCount; ++index)
+  {
+    const double time_s = actual.getTimeSum() *
+        static_cast<double>(index) / kSampleCount;
+    nominal.samples.push_back(
+        {time_s, actual.evaluateDeBoorT(time_s), 0.05});
+  }
+  auto braking = nominal;
+  braking.curve_id = "brake";
+  braking.braking_curve = true;
+  request.local_curves = {nominal, braking};
+  request.certified_braking_available = true;
+  const auto assurance = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  ASSERT_GT(actual.getTimeSum(), affordable_duration_s);
+  ASSERT_EQ(assurance.local.status, iap::LocalMotionAssuranceStatus::SAFE)
+      << assurance.local.reason;
+  ASSERT_FALSE(assurance.authorized());
+  ASSERT_EQ(assurance.reason,
+            "global_navigation_exposure_budget_exhausted");
+  EXPECT_FALSE(fit.success);
+  EXPECT_EQ(fit.failure,
+            ego_planner::P4ExposureDurationFailure::POLICY_INCOMPATIBLE);
+  EXPECT_EQ(fit.reason,
+            "mission_exposure_policy_incompatible_with_minimum_terminal_stop")
+      << "actual_progress=" << fit.original_progress_m;
+  EXPECT_GT(fit.minimum_terminal_stop_duration_s,
+            budget.full_fresh_affordable_duration_s);
+}
+
+TEST(P4ExposureDurationSeam,
+     MissionBoundedActualFitsRealExposureDuration)
+{
+  ego_planner::P4ForwardLimits limits;
+  limits.min_creep_progress_m = 0.25;
+  limits.max_observe_speed_mps = 0.5;
+  ego_planner::P4BoundedExecutionGuideInput bounded_input;
+  bounded_input.frozen_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.5),
+      Eigen::Vector3d(4.0, 0.0, 1.5)};
+  bounded_input.start_position = bounded_input.frozen_guide.front();
+  bounded_input.start_velocity.setZero();
+  bounded_input.start_acceleration.setZero();
+  bounded_input.decision_horizon_m = 4.0;
+  bounded_input.local_support_frontier_m = 4.0;
+  bounded_input.successor_max_parent_execution_s = 2.5;
+  bounded_input.limits = limits;
+  const auto bounded = ego_planner::p4BoundExecutionGuide(bounded_input);
+  ASSERT_TRUE(bounded.valid) << bounded.reason;
+  ASSERT_NEAR(bounded.target_station_m, 1.25, 1.0e-12);
+
+  std::vector<Eigen::Vector3d> samples;
+  for (int index = 0; index <= 6; ++index)
+    samples.push_back(bounded.guide.front() +
+        static_cast<double>(index) / 6.0 *
+            (bounded.guide.back() - bounded.guide.front()));
+  const std::vector<Eigen::Vector3d> derivatives{
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
+  const double interval_s = ego_planner::p4ForwardSeedTimeInterval(
+      bounded.target_station_m, 0.4, limits.max_observe_speed_mps);
+  Eigen::MatrixXd control_points;
+  ego_planner::UniformBspline::parameterizeToBspline(
+      interval_s, samples, derivatives, control_points);
+  ego_planner::UniformBspline actual(control_points, 3, interval_s);
+  const auto profile = missionExposureControlProfile();
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &actual,
+      {bounded_input.start_position, bounded_input.start_velocity,
+       bounded_input.start_acceleration},
+      profile, 0.05);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 2.3;
+  policy.maximum_exceedance_integral_ratio_s = 0.115;
+  const auto budget = ego_planner::p4MissionExposureDurationBudget(
+      policy, iap::GlobalNavigationEpisodeState{});
+  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
+      &actual,
+      {bounded_input.start_position, bounded_input.start_velocity,
+       bounded_input.start_acceleration},
+      profile, 0.05, 0.4, limits.max_observe_speed_mps,
+      limits.min_creep_progress_m, budget);
+
+  ASSERT_TRUE(fit.success) << fit.reason
+      << " T_min=" << fit.minimum_terminal_stop_duration_s
+      << " affordable=" << fit.affordable_duration_s;
+  RecordProperty("minimum_terminal_stop_duration_s",
+                 fit.minimum_terminal_stop_duration_s);
+  RecordProperty("required_minimum_integral_ratio_s",
+                 fit.required_minimum_integral_ratio_s);
+  EXPECT_TRUE(fit.duration_adjusted);
+  EXPECT_GE(fit.selected_progress_m, limits.min_creep_progress_m);
+  EXPECT_LE(actual.getTimeSum(), budget.affordable_duration_s + 1.0e-9);
+  const double duration_s = actual.getTimeSum();
+  EXPECT_LE(actual.getDerivative().evaluateDeBoorT(duration_s).norm(),
+            1.0e-9);
+  EXPECT_LE(actual.getDerivative().getDerivative()
+                .evaluateDeBoorT(duration_s).norm(), 1.0e-8);
+
+  auto request = locallySafeIncompleteRequest(
+      actual, "mission-duration-fit");
+  const auto assurance = iap::TrajectoryAssurance(policy).evaluate(request);
+  ASSERT_TRUE(assurance.authorized()) << assurance.reason;
+  EXPECT_EQ(assurance.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_LE(assurance.global.maximum_continuous_exceedance_s,
+            policy.maximum_continuous_exceedance_s + 1.0e-9);
+  EXPECT_LE(assurance.global.exceedance_integral_ratio_s,
+            policy.maximum_exceedance_integral_ratio_s + 1.0e-9);
+}
+
+TEST(P4ExposureDurationSeam, IncompatiblePolicyReportsTypedFailure)
+{
+  auto actual = makeMovingCurvedP4Trajectory(0.2);
+  const auto profile = missionExposureControlProfile();
+  const auto start = terminalStartState(actual);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &actual, start, profile, 0.05);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 0.2;
+  policy.maximum_exceedance_integral_ratio_s = 0.01;
+  const auto budget = ego_planner::p4MissionExposureDurationBudget(
+      policy, iap::GlobalNavigationEpisodeState{});
+
+  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
+      &actual, start, profile, 0.05, 0.4, 0.5, 0.25, budget);
+
+  EXPECT_FALSE(fit.success);
+  EXPECT_EQ(fit.failure,
+            ego_planner::P4ExposureDurationFailure::POLICY_INCOMPATIBLE);
+  EXPECT_EQ(fit.reason,
+            "mission_exposure_policy_incompatible_with_minimum_terminal_stop");
+  EXPECT_EQ(fit.generation_count, 1);
+}
+
+TEST(P4ExposureDurationSeam, ExistingEpisodeBudgetIsNotReset)
+{
+  const auto profile = missionExposureControlProfile();
+  ego_planner::UniformBspline actual;
+  const auto terminal = ego_planner::buildP4MinimumTerminalStopFixture(
+      1.25, 0.4, 0.5, profile, 0.05, &actual);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  const ego_planner::P4TerminalStartState start;
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 2.3;
+  policy.maximum_exceedance_integral_ratio_s = 0.115;
+  iap::GlobalNavigationEpisodeState episode;
+  episode.active = true;
+  episode.current_continuous_exceedance_s = 1.0;
+  episode.exceedance_integral_ratio_s = 0.06;
+  const auto budget = ego_planner::p4MissionExposureDurationBudget(
+      policy, episode);
+
+  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
+      &actual, start, profile, 0.05, 0.4, 0.5, 0.25, budget);
+
+  EXPECT_FALSE(fit.success);
+  EXPECT_EQ(fit.failure,
+            ego_planner::P4ExposureDurationFailure::REMAINING_BUDGET);
+  EXPECT_EQ(fit.reason, "mission_exposure_remaining_budget_insufficient");
+  EXPECT_LT(fit.affordable_duration_s,
+            fit.minimum_terminal_stop_duration_s);
+  EXPECT_GT(fit.full_fresh_affordable_duration_s,
+            fit.minimum_terminal_stop_duration_s);
+}
+
+TEST(P4ExposureDurationSeam, StrictGlobalStillRejectsIncompleteGnss)
+{
+  auto actual = makeMovingCurvedP4Trajectory(0.2);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &actual, terminalStartState(actual),
+      missionExposureControlProfile(), 0.05);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  auto request = locallySafeIncompleteRequest(actual, "strict-incomplete");
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+  policy.maximum_continuous_exceedance_s = 2.3;
+  policy.maximum_exceedance_integral_ratio_s = 0.115;
+
+  const auto assurance = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_FALSE(assurance.authorized());
+  EXPECT_EQ(assurance.mode,
+            iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_EQ(assurance.reason, "global_navigation_evidence_incomplete");
+}
+
+TEST(P4ExposureDurationSeam, CollisionOrBrakeFailureStillRejects)
+{
+  auto actual = makeMovingCurvedP4Trajectory(0.2);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &actual, terminalStartState(actual),
+      missionExposureControlProfile(), 0.05);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  auto request = locallySafeIncompleteRequest(actual, "missing-brake");
+  request.local_curves.erase(request.local_curves.begin() + 1);
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  policy.maximum_continuous_exceedance_s = 2.3;
+  policy.maximum_exceedance_integral_ratio_s = 0.115;
+
+  const auto assurance = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_FALSE(assurance.authorized());
+  EXPECT_EQ(assurance.local.reason, "braking_curve_missing");
+  EXPECT_EQ(assurance.mode,
+            iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
 }
 
 TEST(P4TerminalStopProductionTest,

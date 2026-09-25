@@ -255,13 +255,14 @@ For each candidate trajectory τ:
   contracts. GNSS advisory is evaluated on the actual curve as task-position
   exposure (peak, continuous duration, positive integral, 0.5 s rolling worst
   section, time-weighted CVaR90 and predicted recovery). The default controlled
-  budget is `r<=1.05`, `continuous<=1.0 s`, `integral<=0.025 ratio*s`, with
+  budget is `r<=1.05`, `continuous<=2.3 s`, `integral<=0.115 ratio*s`, with
   recovery within `2.0 s` or an immediately usable certified brake. A
   `STRICT_GLOBAL` mission never uses this exception. The default
   `MISSION_BEST_EFFORT` mode uses the bounds to classify and order candidates;
-  beyond-budget or globally incomplete evidence becomes
-  `MISSION_DEGRADED_EXECUTION` when and only when local motion and certified
-  braking remain valid. It does not claim global integrity. Replanning cannot reset an
+  whitelisted globally incomplete evidence becomes
+  `MISSION_DEGRADED_EXECUTION` only while local motion, certified braking and
+  the exposure budget all remain valid. It does not claim global integrity.
+  Replanning cannot reset an
   active episode; `0.5 s` below `0.95*AL` is required to end it.
   Predicted recovery uses that same sustained `0.95*AL` condition; merely
   crossing back below AL for one sample is not recovery. Candidate admission
@@ -309,6 +310,13 @@ For each candidate trajectory τ:
   progress and a stable bundle hash, with the old stable channel used only as
   a true-key tie-break. Complete locally safe bundles are therefore still
   orderable when their GNSS intervals overlap.
+  The generator expresses remaining MISSION exposure only as time. It applies
+  the production terminal-stop timing law and performs a deterministic,
+  bounded endpoint search on the exact actual curve; `maximum speed * time`
+  is not execution authority. The calibrated 0.25 m zero-speed fixture has
+  `T_min=2.280084270 s` and requires `0.114004213 ratio*s` at ratio `1.05`, so
+  the explicit defaults are `2.3 s` and `0.115 ratio*s`. An incompatible
+  launch configuration is rejected explicitly; STRICT remains unchanged.
   Winner, runner-up, actual endpoints, unevaluated suffixes and the full
   geometry/time/risk decomposition are retained. Execution remains a rolling
   reaction-and-stop envelope and is re-evaluated on every new immutable

@@ -34,8 +34,8 @@ struct GlobalNavigationExposurePolicy {
   GlobalNavigationTaskMode task_mode =
       GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
   double maximum_ratio = 1.05;
-  double maximum_continuous_exceedance_s = 1.0;
-  double maximum_exceedance_integral_ratio_s = 0.025;
+  double maximum_continuous_exceedance_s = 2.3;
+  double maximum_exceedance_integral_ratio_s = 0.115;
   double recovery_horizon_s = 2.0;
   double recovered_ratio = 0.95;
   double recovered_hold_s = 0.5;

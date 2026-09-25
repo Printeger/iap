@@ -3797,8 +3797,6 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
     input.decision_horizon_m <= 0.0 ||
     !std::isfinite(input.local_support_frontier_m) ||
     input.local_support_frontier_m < 0.0 ||
-    !std::isfinite(input.exposure_affordable_frontier_m) ||
-    input.exposure_affordable_frontier_m < 0.0 ||
     !std::isfinite(input.successor_max_parent_execution_s) ||
     input.successor_max_parent_execution_s <= 0.0)
   {
@@ -3817,17 +3815,11 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
   result.minimum_progress_m = std::max(
     input.limits.min_creep_progress_m,
     p4KinematicStoppingProgress(current_speed_mps, input.limits));
-  result.target_station_m = std::min({
-    result.usable_progress_m, result.rolling_cap_m,
-    input.exposure_affordable_frontier_m});
+  result.target_station_m = std::min(
+    result.usable_progress_m, result.rolling_cap_m);
 
   if (result.target_station_m + kEpsilon < result.minimum_progress_m) {
-    if (input.exposure_affordable_frontier_m + kEpsilon <
-      result.minimum_progress_m)
-    {
-      result.failure = P4BoundedExecutionFailure::EXPOSURE_BUDGET;
-      result.reason = "bounded_execution_exposure_budget";
-    } else if (input.local_support_frontier_m <=
+    if (input.local_support_frontier_m <=
       input.decision_horizon_m + kEpsilon &&
       input.local_support_frontier_m <= guide_length_m + kEpsilon &&
       result.local_frontier_m + kEpsilon <

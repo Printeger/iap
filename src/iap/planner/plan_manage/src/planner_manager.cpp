@@ -3467,9 +3467,9 @@ namespace ego_planner
         "p4.assurance.task_mode", "mission_best_effort");
     node->declare_parameter("p4.assurance.maximum_global_ratio", 1.05);
     node->declare_parameter(
-        "p4.assurance.maximum_continuous_exceedance_s", 1.0);
+        "p4.assurance.maximum_continuous_exceedance_s", 2.3);
     node->declare_parameter(
-        "p4.assurance.maximum_exceedance_integral_ratio_s", 0.025);
+        "p4.assurance.maximum_exceedance_integral_ratio_s", 0.115);
     node->declare_parameter("p4.assurance.recovery_horizon_s", 2.0);
     node->declare_parameter("p4.assurance.recovered_ratio", 0.95);
     node->declare_parameter("p4.assurance.recovered_hold_s", 0.5);
@@ -3719,6 +3719,59 @@ namespace ego_planner
       throw std::invalid_argument(
           "P4 control capability profile is invalid or exceeds the 0.15 m "
           "tracking envelope");
+    if (p4_global_exposure_policy_.task_mode ==
+        iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT)
+    {
+      UniformBspline minimum_terminal_stop;
+      const auto minimum = buildP4MinimumTerminalStopFixture(
+          p4_forward_limits_.min_creep_progress_m, pp_.ctrl_pt_dist,
+          p4_forward_limits_.max_observe_speed_mps,
+          p4_control_profile_, pp_.feasibility_tolerance_,
+          &minimum_terminal_stop);
+      const auto fresh_budget = p4MissionExposureDurationBudget(
+          p4_global_exposure_policy_,
+          iap::GlobalNavigationEpisodeState{});
+      const double minimum_duration_s = minimum.success
+          ? minimum_terminal_stop.getTimeSum()
+          : std::numeric_limits<double>::infinity();
+      const double required_integral =
+          std::max(0.0, p4_global_exposure_policy_.maximum_ratio - 1.0) *
+          minimum_duration_s;
+      RCLCPP_INFO(
+          node->get_logger(),
+          "P4 MISSION exposure fixture minimum_progress=%.6f "
+          "T_min=%.9f affordable=%.9f ratio=%.6f continuous=%.9f "
+          "integral=%.9f required_integral=%.9f",
+          p4_forward_limits_.min_creep_progress_m, minimum_duration_s,
+          fresh_budget.full_fresh_affordable_duration_s,
+          p4_global_exposure_policy_.maximum_ratio,
+          p4_global_exposure_policy_.maximum_continuous_exceedance_s,
+          p4_global_exposure_policy_.maximum_exceedance_integral_ratio_s,
+          required_integral);
+      if (!minimum.success || !fresh_budget.valid ||
+          minimum_duration_s >
+              fresh_budget.full_fresh_affordable_duration_s + 1.0e-9)
+      {
+        std::ostringstream reason;
+        reason <<
+            "mission_exposure_policy_incompatible_with_minimum_terminal_stop"
+            ":minimum_progress_m=" <<
+            p4_forward_limits_.min_creep_progress_m <<
+            ":minimum_terminal_stop_duration_s=" << minimum_duration_s <<
+            ":affordable_duration_s=" <<
+            fresh_budget.full_fresh_affordable_duration_s <<
+            ":maximum_ratio=" <<
+            p4_global_exposure_policy_.maximum_ratio <<
+            ":continuous_limit_s=" <<
+            p4_global_exposure_policy_.maximum_continuous_exceedance_s <<
+            ":integral_limit_ratio_s=" <<
+            p4_global_exposure_policy_.
+                maximum_exceedance_integral_ratio_s <<
+            ":required_minimum_integral_ratio_s=" << required_integral <<
+            ":fixture_reason=" << minimum.reason;
+        throw std::invalid_argument(reason.str());
+      }
+    }
     if (!std::isfinite(p4_local_tracking_error_bound_m_) ||
         p4_local_tracking_error_bound_m_ < 0.0 ||
         p4_local_tracking_error_bound_m_ > p4_max_tracking_error_m_)
@@ -14598,6 +14651,8 @@ namespace ego_planner
     int64_t frozen_handoff_start_time_ns =
         frozen_candidate_start_time_ns;
     bool frozen_successor_curve_preparation = false;
+    std::optional<P4MissionExposureDurationBudget>
+        p4_mission_exposure_duration_budget;
     // This value is part of the immutable parent/child handoff contract.  It
     // must be captured at the same instant as the p/v/a boundary used to
     // construct the child; a later controller trace may legitimately map the
@@ -14850,7 +14905,6 @@ namespace ego_planner
             guide_length_m +=
                 (p4_forward_seed[index] - p4_forward_seed[index - 1u]).norm();
           double local_support_frontier_m = guide_length_m;
-          double exposure_frontier_m = guide_length_m;
           if (selected_candidate != last_p4_forward_decision_.candidates.end())
           {
             if (!selected_candidate->risk_samples.empty())
@@ -14871,26 +14925,26 @@ namespace ego_planner
                  selected_candidate->mission_degraded_candidate);
             if (degraded_preference)
             {
-              const auto &episode = p4_global_exposure_ledger_.state();
-              const double remaining_continuous_s = std::max(
-                  0.0,
-                  p4_global_exposure_policy_.maximum_continuous_exceedance_s -
-                      (episode.active
-                          ? episode.current_continuous_exceedance_s : 0.0));
-              const double excess_ratio = std::max(
-                  1.0e-9, p4_global_exposure_policy_.maximum_ratio - 1.0);
-              const double remaining_integral_s = std::max(
-                  0.0,
-                  (p4_global_exposure_policy_.
-                      maximum_exceedance_integral_ratio_s -
-                   episode.exceedance_integral_ratio_s) / excess_ratio);
-              const double affordable_s = episode.budget_exhausted
-                  ? 0.0
-                  : std::min(remaining_continuous_s,
-                             remaining_integral_s);
-              exposure_frontier_m = std::min(
-                  guide_length_m,
-                  p4_forward_limits_.max_observe_speed_mps * affordable_s);
+              p4_mission_exposure_duration_budget =
+                  p4MissionExposureDurationBudget(
+                      p4_global_exposure_policy_,
+                      p4_global_exposure_ledger_.state());
+              if (!p4_mission_exposure_duration_budget->valid)
+              {
+                last_p4_forward_decision_.planning_disposition =
+                    P4PlanningDisposition::HOLD_REQUIRED;
+                last_p4_forward_decision_.selection_authority =
+                    P4ForwardSelectionAuthority::NONE;
+                last_p4_forward_decision_.formal_support = false;
+                last_p4_forward_decision_.reason =
+                    p4_mission_exposure_duration_budget->reason;
+                appendP4ForwardDecision(
+                    last_p4_forward_decision_,
+                    "bounded_actual_duration_budget_invalid",
+                    plannerNow().seconds());
+                continous_failures_count_++;
+                return false;
+              }
               planning_max_vel = std::min(
                   planning_max_vel,
                   p4_forward_limits_.max_observe_speed_mps);
@@ -14908,8 +14962,6 @@ namespace ego_planner
               : guide_length_m;
           bounded_input.local_support_frontier_m =
               local_support_frontier_m;
-          bounded_input.exposure_affordable_frontier_m =
-              exposure_frontier_m;
           bounded_input.successor_max_parent_execution_s =
               p4_successor_deadline_policy_.
                   maximum_parent_execution_before_switch_s;
@@ -16504,6 +16556,68 @@ namespace ego_planner
             rclcpp::get_logger("ego_planner"),
             "P4 terminal stop retimed final spline from %.3f s to %.3f s",
             terminal.original_duration_s, terminal.final_duration_s);
+      }
+      if (p4_mission_exposure_duration_budget &&
+          !preparingP4SuccessorCurve())
+      {
+        const auto exposure_fit = fitP4TerminalStopToExposureDuration(
+            &pos, P4TerminalStartState{start_pt, start_vel, start_acc},
+            p4_control_profile_, pp_.feasibility_tolerance_,
+            pp_.ctrl_pt_dist, planning_max_vel,
+            p4_forward_limits_.min_creep_progress_m,
+            *p4_mission_exposure_duration_budget);
+        if (!exposure_fit.success)
+        {
+          p4_last_actual_curve_certification_ = {};
+          p4_last_actual_curve_certification_.failure =
+              P4PreparedCurveFailure::EXPOSURE_BUDGET;
+          std::ostringstream detail;
+          detail << exposure_fit.reason << ":minimum_progress_m="
+                 << exposure_fit.minimum_progress_m
+                 << ":minimum_terminal_stop_duration_s="
+                 << exposure_fit.minimum_terminal_stop_duration_s
+                 << ":affordable_duration_s="
+                 << exposure_fit.affordable_duration_s
+                 << ":maximum_ratio=" << exposure_fit.maximum_ratio
+                 << ":continuous_limit_s="
+                 << exposure_fit.continuous_limit_s
+                 << ":integral_limit_ratio_s="
+                 << exposure_fit.integral_limit_ratio_s
+                 << ":required_minimum_integral_ratio_s="
+                 << exposure_fit.required_minimum_integral_ratio_s;
+          p4_last_actual_curve_certification_.detail = detail.str();
+          last_p4_forward_decision_.planning_disposition =
+              P4PlanningDisposition::HOLD_REQUIRED;
+          last_p4_forward_decision_.selection_authority =
+              P4ForwardSelectionAuthority::NONE;
+          last_p4_forward_decision_.formal_support = false;
+          last_p4_forward_decision_.reason = detail.str();
+          p4_planning_disposition_ =
+              P4PlanningDisposition::HOLD_REQUIRED;
+          appendP4ForwardDecision(
+              last_p4_forward_decision_,
+              "bounded_actual_duration_rejected", plannerNow().seconds());
+          RCLCPP_WARN(
+              rclcpp::get_logger("ego_planner"),
+              "P4 bounded actual rejected by exposure duration: %s",
+              detail.str().c_str());
+          continous_failures_count_++;
+          return false;
+        }
+        if (exposure_fit.duration_adjusted)
+        {
+          local_target_pt = pos.evaluateDeBoorT(pos.getTimeSum());
+          RCLCPP_INFO(
+              rclcpp::get_logger("ego_planner"),
+              "P4 actual exposure-duration fit progress %.3f->%.3f m "
+              "duration %.3f->%.3f s budget=%.3f s generations=%d",
+              exposure_fit.original_progress_m,
+              exposure_fit.selected_progress_m,
+              exposure_fit.original_duration_s,
+              exposure_fit.final_duration_s,
+              exposure_fit.affordable_duration_s,
+              exposure_fit.generation_count);
+        }
       }
       const auto final_limits = pos.checkDerivativeLimits(
           p4_control_profile_, pp_.feasibility_tolerance_);

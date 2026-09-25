@@ -1087,6 +1087,8 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.fallback_to_original_when_risk_not_ready": "false",
     "p4.forward.reaction_time_s": "1.2",
     "p4.assurance.task_mode": "mission_best_effort",
+    "p4.assurance.maximum_continuous_exceedance_s": "2.3",
+    "p4.assurance.maximum_exceedance_integral_ratio_s": "0.115",
     "p4.forward.braking_accel_mps2": "1.5",
     "p4.forward.vehicle_radius_m": "0.35",
     "p4.forward.safety_margin_m": "0.5",
@@ -2231,6 +2233,8 @@ ARG_DEFAULTS = [
     ("p4.cost_query_policy", "LEGACY_STRICT"),
     ("p4.forward.reaction_time_s", "1.2"),
     ("p4.assurance.task_mode", "mission_best_effort"),
+    ("p4.assurance.maximum_continuous_exceedance_s", "2.3"),
+    ("p4.assurance.maximum_exceedance_integral_ratio_s", "0.115"),
     ("p4.forward.braking_accel_mps2", "1.5"),
     ("p4.forward.vehicle_radius_m", "0.35"),
     ("p4.forward.safety_margin_m", "0.5"),
@@ -3433,6 +3437,10 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_to
             {"p4.cost_query_policy": p4_cost_query_policy},
             {"p4.forward.reaction_time_s": _param_float(context, "p4.forward.reaction_time_s")},
             {"p4.assurance.task_mode": LaunchConfiguration("p4.assurance.task_mode")},
+            {"p4.assurance.maximum_continuous_exceedance_s": _param_float(
+                context, "p4.assurance.maximum_continuous_exceedance_s")},
+            {"p4.assurance.maximum_exceedance_integral_ratio_s": _param_float(
+                context, "p4.assurance.maximum_exceedance_integral_ratio_s")},
             {"p4.forward.braking_accel_mps2": _param_float(context, "p4.forward.braking_accel_mps2")},
             {"p4.forward.vehicle_radius_m": _param_float(context, "p4.forward.vehicle_radius_m")},
             {"p4.forward.safety_margin_m": _param_float(context, "p4.forward.safety_margin_m")},
