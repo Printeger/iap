@@ -652,12 +652,12 @@ namespace ego_planner
     // interval.  Requiring it to strictly dominate the parent's remaining
     // risk eventually makes every safe finite prefix stop at a benign local
     // variation.  It still has to provide complete comparable risk evidence
-    // (finite values here), pass the unchanged task risk policy upstream, and
+    // (a finite candidate value here), pass the unchanged task risk policy
+    // upstream, and
     // extend the frozen corridor by the required amount above.
     if (input.rolling_successor)
     {
-      if (!std::isfinite(input.candidate_worst_risk) ||
-          !std::isfinite(input.incumbent_worst_remaining_risk))
+      if (!std::isfinite(input.candidate_worst_risk))
         return finish(false, "successor_risk_comparison_incomplete");
       return finish(true, "certified_rolling_successor_extension");
     }
@@ -667,6 +667,41 @@ namespace ego_planner
             input.incumbent_worst_remaining_risk + 1.0e-12)
       return finish(false, "candidate_does_not_strictly_dominate");
     return finish(true, "strictly_dominating_safe_extension");
+  }
+
+  P4RollingSuccessorExposureBridge p4RollingSuccessorExposureBridge(
+      const double sample_ros_stamp_s,
+      const double current_parent_elapsed_s,
+      const double switch_parent_elapsed_s,
+      const double parent_duration_s)
+  {
+    P4RollingSuccessorExposureBridge bridge;
+    const auto reject = [&bridge](const char *reason) {
+      bridge.reason = reason;
+      return bridge;
+    };
+    if (!std::isfinite(sample_ros_stamp_s) ||
+        !std::isfinite(current_parent_elapsed_s) ||
+        !std::isfinite(switch_parent_elapsed_s) ||
+        !std::isfinite(parent_duration_s) || parent_duration_s < 0.0)
+      return reject("rolling_successor_exposure_non_finite");
+    if (switch_parent_elapsed_s < 0.0 ||
+        switch_parent_elapsed_s > parent_duration_s + 1.0e-9)
+      return reject("rolling_successor_switch_outside_parent");
+    bridge.begin_parent_elapsed_s = std::clamp(
+        current_parent_elapsed_s, 0.0, parent_duration_s);
+    bridge.end_parent_elapsed_s = switch_parent_elapsed_s;
+    if (bridge.begin_parent_elapsed_s >
+        bridge.end_parent_elapsed_s + 1.0e-9)
+      return reject("rolling_successor_switch_already_passed");
+    bridge.duration_s = std::max(
+        0.0, bridge.end_parent_elapsed_s -
+            bridge.begin_parent_elapsed_s);
+    bridge.execution_time_origin_s =
+        sample_ros_stamp_s - current_parent_elapsed_s;
+    bridge.valid = true;
+    bridge.reason = "ok";
+    return bridge;
   }
 
   bool p4CommonCorridorEndpointProgress(
@@ -1609,8 +1644,9 @@ namespace ego_planner
       return maximum;
     }
 
-    bool sampleTrajectoryForGeometryCommit(
+    bool sampleTrajectoryIntervalForGeometryCommit(
         LocalTrajData *trajectory, const double start_time,
+        const double end_time,
         std::vector<Eigen::Vector3d> *points,
         std::vector<double> *times = nullptr,
         const std::chrono::steady_clock::time_point deadline =
@@ -1620,8 +1656,9 @@ namespace ego_planner
           ? trajectory->position_traj_.getTimeSum()
           : std::numeric_limits<double>::quiet_NaN();
       if (!trajectory || !points || !std::isfinite(start_time) ||
-          !std::isfinite(duration) ||
-          start_time < 0.0 || start_time >= duration)
+          !std::isfinite(end_time) || !std::isfinite(duration) ||
+          start_time < 0.0 || end_time <= start_time ||
+          end_time > duration + 1.0e-9)
         return false;
       constexpr double kMaximumChordLengthM = 0.05;
       constexpr double kCurveApproximationErrorM = 0.002;
@@ -1639,7 +1676,7 @@ namespace ego_planner
       if (!std::isfinite(step_s) || step_s <= 0.0)
         return false;
       const int sample_count = std::max(2, static_cast<int>(std::ceil(
-          (duration - start_time) / step_s)));
+          (end_time - start_time) / step_s)));
       if (sample_count > kMaximumSamples)
         return false;
       points->clear();
@@ -1655,7 +1692,7 @@ namespace ego_planner
           return false;
         const double alpha = static_cast<double>(index) / sample_count;
         const double time = start_time + alpha *
-            (duration - start_time);
+            (end_time - start_time);
         const Eigen::Vector3d point =
             trajectory->position_traj_.evaluateDeBoorT(time);
         if (!point.allFinite())
@@ -1665,6 +1702,18 @@ namespace ego_planner
           times->push_back(time);
       }
       return true;
+    }
+
+    bool sampleTrajectoryForGeometryCommit(
+        LocalTrajData *trajectory, const double start_time,
+        std::vector<Eigen::Vector3d> *points,
+        std::vector<double> *times = nullptr,
+        const std::chrono::steady_clock::time_point deadline =
+            std::chrono::steady_clock::time_point::max())
+    {
+      return trajectory && sampleTrajectoryIntervalForGeometryCommit(
+          trajectory, start_time, trajectory->position_traj_.getTimeSum(),
+          points, times, deadline);
     }
 
     std::string p4DirectRiskRequestIdentity(
@@ -6751,6 +6800,82 @@ namespace ego_planner
           P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
           "final_bspline_curve_sampling_failed");
 
+    // A rolling child replaces the parent only at its immutable switch
+    // state.  Prospective exposure therefore consists of the unconsumed
+    // parent bridge [latest executed sample, switch] followed by the whole
+    // child.  The parent's switch-to-end suffix is obsolete and must never be
+    // charged alongside the child.
+    std::vector<Eigen::Vector3d> rolling_parent_bridge_points;
+    std::vector<double> rolling_parent_bridge_parent_times;
+    double rolling_parent_bridge_begin_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double rolling_parent_bridge_duration_s = 0.0;
+    double rolling_parent_bridge_time_origin_s =
+        std::numeric_limits<double>::quiet_NaN();
+    const bool rolling_successor_certification =
+        stage == "successor_curve_before_p5" &&
+        p4_execution_commitment_backup_.active &&
+        p4_execution_commitment_backup_.has_local_data &&
+        local_data_.parent_traj_id_ ==
+            p4_execution_commitment_backup_.local_data.traj_id_ &&
+        local_data_.parent_start_time_.nanoseconds() ==
+            p4_execution_commitment_backup_.local_data.start_time_.nanoseconds() &&
+        local_data_.parent_curve_hash_ ==
+            p4_execution_commitment_backup_.local_data.curve_hash_;
+    if (rolling_successor_certification)
+    {
+      auto &parent = p4_execution_commitment_backup_.local_data;
+      const double switch_elapsed_s = local_data_.parent_switch_elapsed_s_;
+      const auto &sample = active_trajectory_execution_sample_;
+      const bool sample_matches = sample.valid &&
+          sample.received_from_server &&
+          sample.execution_instance_id == parent.execution_instance_id_ &&
+          sample.trajectory_id == parent.traj_id_ &&
+          sample.start_time_ns == parent.start_time_.nanoseconds() &&
+          sample.curve_hash == parent.curve_hash_ &&
+          std::isfinite(sample.trajectory_elapsed_s);
+      if (!std::isfinite(switch_elapsed_s) || switch_elapsed_s < 0.0 ||
+          switch_elapsed_s > parent.duration_ + 1.0e-9)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "successor_parent_switch_exposure_interval_invalid",
+            P4PreparedCurveFailure::IDENTITY);
+      if (!sample_matches && switch_elapsed_s > 1.0e-9)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "successor_parent_execution_sample_unavailable",
+            P4PreparedCurveFailure::FRESHNESS);
+      if (sample_matches)
+      {
+        const auto bridge = p4RollingSuccessorExposureBridge(
+            sample.sample_ros_stamp_s, sample.trajectory_elapsed_s,
+            switch_elapsed_s, parent.duration_);
+        if (!bridge.valid)
+          return reject_final_identity(
+              P4GeometryCommitVerdict::INVALID_PATH,
+              bridge.reason,
+              P4PreparedCurveFailure::IDENTITY);
+        rolling_parent_bridge_begin_s = bridge.begin_parent_elapsed_s;
+        rolling_parent_bridge_duration_s = bridge.duration_s;
+        rolling_parent_bridge_time_origin_s =
+            bridge.execution_time_origin_s;
+      }
+      else
+      {
+        rolling_parent_bridge_begin_s = switch_elapsed_s;
+        rolling_parent_bridge_time_origin_s = parent.start_time_.seconds();
+      }
+      if (rolling_parent_bridge_duration_s > 1.0e-9 &&
+          !sampleTrajectoryIntervalForGeometryCommit(
+              &parent, rolling_parent_bridge_begin_s, switch_elapsed_s,
+              &rolling_parent_bridge_points,
+              &rolling_parent_bridge_parent_times))
+        return reject_final_identity(
+            P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
+            "successor_parent_bridge_sampling_failed",
+            P4PreparedCurveFailure::COMPUTE_BUDGET);
+    }
+
     // Position support is a separate contract from GNSS LOS support. Check
     // the exact curve here as well as in the execution watchdog so an
     // unsupported spline is held before publication instead of immediately
@@ -7361,6 +7486,62 @@ namespace ego_planner
                     direct_result.failure_reason)
               : P4PreparedCurveFailure::SNAPSHOT_MISMATCH);
     }
+    std::vector<iap::GlobalNavigationExposureSample>
+        rolling_parent_bridge_global_samples;
+    bool rolling_parent_bridge_global_degraded = false;
+    std::string rolling_exposure_identity = direct_identity;
+    if (!rolling_parent_bridge_points.empty())
+    {
+      const auto &parent = p4_execution_commitment_backup_.local_data;
+      std::ostringstream bridge_identity;
+      bridge_identity << direct_identity << ";parent_bridge="
+                      << parent.curve_hash_ << ':' << std::hexfloat
+                      << rolling_parent_bridge_begin_s << ':'
+                      << local_data_.parent_switch_elapsed_s_;
+      rolling_exposure_identity = bridge_identity.str();
+      const auto bridge_request = makeP4CurveRiskRequest(
+          rolling_exposure_identity, snapshot, execution_snapshot, stamp_s,
+          rolling_parent_bridge_time_origin_s,
+          rolling_parent_bridge_points,
+          rolling_parent_bridge_parent_times,
+          p4_forward_limits_.compute_budget_ms,
+          p4_global_exposure_policy_.task_mode);
+      const auto bridge_result = direct_risk_batch(bridge_request);
+      const bool bridge_global_evidence_degradable =
+          p4GlobalEvidenceFailureWhitelisted(
+              bridge_result, rolling_parent_bridge_points.size());
+      rolling_parent_bridge_global_degraded =
+          p4_global_exposure_policy_.task_mode ==
+              iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+          bridge_global_evidence_degradable && !bridge_result.complete;
+      const bool bridge_identity_matches =
+          bridge_result.combined_snapshot_identity ==
+              bridge_request.combined_snapshot_identity;
+      if ((!bridge_result.complete &&
+           !bridge_global_evidence_degradable) ||
+          !bridge_identity_matches ||
+          bridge_result.points.size() !=
+              rolling_parent_bridge_points.size())
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "successor_parent_bridge_direct_risk_incomplete",
+            bridge_identity_matches
+                ? p4PreparedCurveFailureForForwardRisk(
+                      bridge_result.failure_reason)
+                : P4PreparedCurveFailure::SNAPSHOT_MISMATCH);
+      std::vector<double> bridge_relative_times;
+      bridge_relative_times.reserve(
+          rolling_parent_bridge_parent_times.size());
+      for (const double parent_time_s :
+           rolling_parent_bridge_parent_times)
+        bridge_relative_times.push_back(
+            parent_time_s - rolling_parent_bridge_begin_s);
+      rolling_parent_bridge_global_samples =
+          iap::globalNavigationSamplesFromForwardRisk(
+              bridge_result.points, bridge_relative_times,
+              final_risk_policy.alert_limit_h_m,
+              final_risk_policy.alert_limit_v_m);
+    }
     p4_direct_risk_evidence_ = makeP4DirectRiskEvidence(
         local_data_, snapshot, execution_snapshot, stamp_s,
         direct_points, direct_times, direct_request, direct_result,
@@ -7393,13 +7574,40 @@ namespace ego_planner
             final_risk_policy.alert_limit_h_m,
             final_risk_policy.alert_limit_v_m,
             p4_direct_risk_evidence_.nominal_sample_rows);
+    if (rolling_successor_certification)
+    {
+      for (auto &sample : assurance_request.global_samples)
+        sample.relative_time_s += rolling_parent_bridge_duration_s;
+      if (!rolling_parent_bridge_global_samples.empty() &&
+          !assurance_request.global_samples.empty() &&
+          std::abs(rolling_parent_bridge_global_samples.back().relative_time_s -
+              assurance_request.global_samples.front().relative_time_s) <=
+              1.0e-9)
+      {
+        auto &boundary = rolling_parent_bridge_global_samples.back();
+        const auto &child_boundary =
+            assurance_request.global_samples.front();
+        boundary.hpl_m = std::max(boundary.hpl_m, child_boundary.hpl_m);
+        boundary.vpl_m = std::max(boundary.vpl_m, child_boundary.vpl_m);
+        boundary.complete = boundary.complete && child_boundary.complete;
+        assurance_request.global_samples.erase(
+            assurance_request.global_samples.begin());
+      }
+      rolling_parent_bridge_global_samples.insert(
+          rolling_parent_bridge_global_samples.end(),
+          assurance_request.global_samples.begin(),
+          assurance_request.global_samples.end());
+      assurance_request.global_samples =
+          std::move(rolling_parent_bridge_global_samples);
+    }
     assurance_request.conservative_incomplete_global_navigation =
-        final_global_only_degradation && !direct_result.complete;
+        (final_global_only_degradation && !direct_result.complete) ||
+        rolling_parent_bridge_global_degraded;
     assurance_request.committed_duration_s = executable_times.empty()
         ? std::numeric_limits<double>::quiet_NaN()
-        : executable_times.back();
+        : rolling_parent_bridge_duration_s + executable_times.back();
     assurance_request.global_evidence_identity =
-        p4_direct_risk_evidence_.request_identity;
+        rolling_exposure_identity;
     assurance_request.certified_braking_available =
         !prepared_braking_anchors.empty();
     // A newly generated curve must retain the planning reserve after spline
@@ -9431,8 +9639,19 @@ namespace ego_planner
     if (p4_successor_preparation_state_ !=
             P4SuccessorPreparationState::CURVE_PREPARING)
       return;
-    const P4SuccessorFailure failure =
-        p4SuccessorFailureForPreparedCurve(curve_failure);
+    // reboundReplan can already have rejected the exact child through a
+    // lower-level GNSS/exposure/local gate before the FSM observes its false
+    // return.  Preserve that first typed result: the FSM's generic
+    // optimization wrapper has no evidence that the failure was dynamics.
+    const bool preserve_first_typed_failure =
+        last_p4_forward_decision_.successor_failure !=
+            P4SuccessorFailure::NONE;
+    const P4SuccessorFailure failure = preserve_first_typed_failure
+        ? last_p4_forward_decision_.successor_failure
+        : p4SuccessorFailureForPreparedCurve(curve_failure);
+    const std::string failure_reason = preserve_first_typed_failure
+        ? last_p4_forward_decision_.reason
+        : "successor_curve_preparation_failed:" + detail;
     // A failed immutable child is terminal for this rolling attempt.  Keep
     // executing the already-certified parent to its stop; do not reinterpret
     // the failure as permission to search another channel or regenerate the
@@ -9446,8 +9665,7 @@ namespace ego_planner
     last_p4_forward_decision_.successor_failure = failure;
     last_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
-    last_p4_forward_decision_.reason =
-        "successor_curve_preparation_failed:" + detail;
+    last_p4_forward_decision_.reason = failure_reason;
     appendP4ForwardDecision(
         last_p4_forward_decision_, "successor_curve_preparation_failed",
         now_s);
@@ -17030,21 +17248,23 @@ namespace ego_planner
             ? iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE
             : iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
         request.task_mode = p4_global_exposure_policy_.task_mode;
-        request.points.reserve(
-            candidate_points.size() + incumbent_points.size());
+        request.points.reserve(candidate_points.size() +
+            (successor_curve_preparation ? 0u : incumbent_points.size()));
         for (std::size_t index = 0; index < candidate_points.size(); ++index)
           request.points.push_back(iap::ForwardRiskQueryPoint{
               candidate_points[index],
               candidate_start_time_s + candidate_times[index],
               candidate_times[index], 1u,
               static_cast<std::uint64_t>(index + 1u), 1u});
-        for (std::size_t index = 0; index < incumbent_points.size(); ++index)
-          request.points.push_back(iap::ForwardRiskQueryPoint{
-              incumbent_points[index],
-              local_data_.start_time_.seconds() + incumbent_times[index],
-              std::max(0.0, incumbent_times[index] - incumbent_t), 2u,
-              static_cast<std::uint64_t>(candidate_points.size() + index + 1u),
-              2u});
+        if (!successor_curve_preparation)
+          for (std::size_t index = 0; index < incumbent_points.size(); ++index)
+            request.points.push_back(iap::ForwardRiskQueryPoint{
+                incumbent_points[index],
+                local_data_.start_time_.seconds() + incumbent_times[index],
+                std::max(0.0, incumbent_times[index] - incumbent_t), 2u,
+                static_cast<std::uint64_t>(
+                    candidate_points.size() + index + 1u),
+                2u});
         const auto successor_query_start = std::chrono::steady_clock::now();
         const auto result = execution->forward_risk_batch(request);
         successor_batch_failure = result.failure_reason;
@@ -17126,7 +17346,8 @@ namespace ego_planner
         if (comparable && all_points_global_only_degraded)
           candidate_worst = incumbent_worst = 0.0;
         comparable = comparable && std::isfinite(candidate_worst) &&
-            std::isfinite(incumbent_worst);
+            (successor_curve_preparation ||
+             std::isfinite(incumbent_worst));
       }
       double endpoint_progress = -std::numeric_limits<double>::infinity();
       std::string corridor_progress_reason;

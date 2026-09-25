@@ -174,6 +174,25 @@ namespace ego_planner
     bool rolling_successor = false;
   };
 
+  struct P4RollingSuccessorExposureBridge
+  {
+    bool valid = false;
+    double begin_parent_elapsed_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double end_parent_elapsed_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double duration_s = std::numeric_limits<double>::quiet_NaN();
+    double execution_time_origin_s =
+        std::numeric_limits<double>::quiet_NaN();
+    std::string reason;
+  };
+
+  P4RollingSuccessorExposureBridge p4RollingSuccessorExposureBridge(
+      double sample_ros_stamp_s,
+      double current_parent_elapsed_s,
+      double switch_parent_elapsed_s,
+      double parent_duration_s);
+
   struct P4PreparedSuccessor
   {
     int parent_trajectory_id = 0;

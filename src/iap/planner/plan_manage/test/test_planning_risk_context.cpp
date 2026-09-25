@@ -549,6 +549,127 @@ TEST(P4ExposureDurationSeam, ExistingEpisodeBudgetIsNotReset)
             fit.minimum_terminal_stop_duration_s);
 }
 
+TEST(P4RollingExposureSeam,
+     LatestRunParentBridgeStopsAtFrozenSwitchInsteadOfObsoleteSuffix)
+{
+  Eigen::MatrixXd parent_points(3, 9);
+  parent_points.col(0) = Eigen::Vector3d(
+      -18.000670604039204, -0.0010126850874649168,
+      1.4983101401433108);
+  parent_points.col(1) = Eigen::Vector3d(
+      -17.999317966434766, 0.00033233709773325344,
+      1.4997561166531113);
+  parent_points.col(2) = Eigen::Vector3d(
+      -17.99796532883033, 0.0016773592829314235,
+      1.5012020931629118);
+  parent_points.col(3) = Eigen::Vector3d(
+      -17.891101654454154, -0.048399342131870256,
+      1.4962239918803968);
+  parent_points.col(4) = Eigen::Vector3d(
+      -17.871747016063118, -0.05831146489314394,
+      1.4946414147251026);
+  parent_points.col(5) = Eigen::Vector3d(
+      -17.838261897932693, -0.07415321230898549,
+      1.4929786052617458);
+  for (int column = 6; column < 9; ++column)
+    parent_points.col(column) = Eigen::Vector3d(
+        -17.75149769034698, -0.11575667996159422,
+        1.4880336598538921);
+  constexpr double kParentIntervalS = 0.38333089360842637;
+  ego_planner::UniformBspline parent(parent_points, 3, kParentIntervalS);
+  ASSERT_EQ(ego_planner::p4ControlPointHash(parent.getControlPoint()),
+            "e0066bc871a34c6f");
+  ASSERT_EQ(ego_planner::p4KnotVectorHash(parent.getKnot()),
+            "bede9e93a0129239");
+  ASSERT_NEAR(parent.getTimeSum(), 2.2999853616505583, 1.0e-12);
+
+  constexpr double kSampleRosStampS = 1657065614.9372745;
+  constexpr double kCurrentParentElapsedS = 0.0399845989887;
+  constexpr double kSwitchParentElapsedS = 1.4;
+  const auto bridge = ego_planner::p4RollingSuccessorExposureBridge(
+      kSampleRosStampS, kCurrentParentElapsedS,
+      kSwitchParentElapsedS, parent.getTimeSum());
+
+  ASSERT_TRUE(bridge.valid) << bridge.reason;
+  EXPECT_NEAR(bridge.begin_parent_elapsed_s,
+              kCurrentParentElapsedS, 1.0e-12);
+  EXPECT_NEAR(bridge.end_parent_elapsed_s,
+              kSwitchParentElapsedS, 1.0e-12);
+  EXPECT_NEAR(bridge.duration_s,
+              kSwitchParentElapsedS - kCurrentParentElapsedS, 1.0e-12);
+  EXPECT_NEAR(bridge.execution_time_origin_s +
+                  bridge.begin_parent_elapsed_s,
+              kSampleRosStampS, 1.0e-9);
+  EXPECT_NEAR(bridge.execution_time_origin_s +
+                  bridge.end_parent_elapsed_s,
+              kSampleRosStampS + kSwitchParentElapsedS -
+                  kCurrentParentElapsedS,
+              1.0e-9);
+  EXPECT_LT(bridge.end_parent_elapsed_s, parent.getTimeSum())
+      << "the child replaces the parent switch-to-end suffix";
+
+  const auto switch_position =
+      parent.evaluateDeBoorT(kSwitchParentElapsedS);
+  const auto switch_velocity =
+      parent.getDerivative().evaluateDeBoorT(kSwitchParentElapsedS);
+  const auto switch_acceleration = parent.getDerivative().getDerivative()
+      .evaluateDeBoorT(kSwitchParentElapsedS);
+  EXPECT_TRUE(switch_position.isApprox(
+      Eigen::Vector3d(-17.847345591384983, -0.069876119808011602,
+                      1.4934046178683538), 1.0e-12));
+  EXPECT_TRUE(switch_velocity.isApprox(
+      Eigen::Vector3d(0.11468390935705852, -0.054684141293560196,
+                      -0.0061461346054752135), 1.0e-12));
+  EXPECT_TRUE(switch_acceleration.isApprox(
+      Eigen::Vector3d(0.26992239645754795, -0.12837709662191921,
+                      -0.014757498111183666), 1.0e-12));
+}
+
+TEST(P4RollingExposureSeam,
+     PriorConsumedPlusBridgePlusChildStillRejectsTrueBudgetExhaustion)
+{
+  auto trajectory = makeMovingCurvedP4Trajectory(0.2);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &trajectory, terminalStartState(trajectory),
+      missionExposureControlProfile(), 0.05);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  auto request = locallySafeIncompleteRequest(
+      trajectory, "rolling-continuous-exposure");
+  request.conservative_incomplete_global_navigation = false;
+  request.has_prior_global_episode = true;
+  request.prior_global_episode.active = true;
+  request.prior_global_episode.peak_ratio = 1.05;
+  request.prior_global_episode.current_continuous_exceedance_s = 1.0;
+  request.prior_global_episode.continuous_exceedance_s = 1.0;
+  request.prior_global_episode.exceedance_integral_ratio_s = 0.06;
+  request.certified_braking_available = true;
+
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 2.3;
+  policy.maximum_exceedance_integral_ratio_s = 0.115;
+
+  request.global_samples = {
+      {0.0, 21.0, 42.0, 20.0, 40.0, true},
+      {0.7, 21.0, 42.0, 20.0, 40.0, true}};
+  request.committed_duration_s = 0.7;
+  const auto child_only = iap::TrajectoryAssurance(policy).evaluate(request);
+  ASSERT_TRUE(child_only.authorized()) << child_only.reason;
+  EXPECT_NEAR(child_only.global.exceedance_integral_ratio_s,
+              0.095, 1.0e-12);
+
+  request.global_samples.back().relative_time_s = 1.2;
+  request.committed_duration_s = 1.2;
+  const auto continuous = iap::TrajectoryAssurance(policy).evaluate(request);
+  EXPECT_FALSE(continuous.authorized());
+  EXPECT_EQ(continuous.reason,
+            "global_navigation_episode_budget_exceeded");
+  EXPECT_TRUE(continuous.global.exceedance_integral_exceeded);
+  EXPECT_NEAR(continuous.global.exceedance_integral_ratio_s,
+              0.12, 1.0e-12);
+}
+
 TEST(P4ExposureDurationSeam, StrictGlobalStillRejectsIncompleteGnss)
 {
   auto actual = makeMovingCurvedP4Trajectory(0.2);
@@ -8514,7 +8635,12 @@ TEST(P4PreparedSuccessorPolicy,
       ->frame_contract_id = "map:test";
   const auto snapshot = makeP4SelectionSnapshot(
       10.0, frozen_occupancy->geometry_id, true);
-  const auto safe_risk = directRiskCallback(0.5);
+  std::vector<iap::ForwardRiskBatchRequest> observed_risk_requests;
+  const auto safe_risk = [&observed_risk_requests](
+      const iap::ForwardRiskBatchRequest &request) {
+    observed_risk_requests.push_back(request);
+    return directRiskCallback(0.5)(request);
+  };
   auto execution = makeP4ExecutionSnapshot(
       snapshot, safe_risk, 10.0, 919u);
   auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
@@ -8632,6 +8758,19 @@ TEST(P4PreparedSuccessorPolicy,
       << manager.lastP4ActualCurveCertification().detail
       << ":actual_endpoint="
       << manager.lastP4ForwardDecision().selected_actual_endpoint.transpose();
+  const auto replacement_request = std::find_if(
+      observed_risk_requests.begin(), observed_risk_requests.end(),
+      [](const iap::ForwardRiskBatchRequest &request) {
+        return request.combined_snapshot_identity.find(
+            "p4_limited_prefix_replacement_v1") != std::string::npos;
+      });
+  ASSERT_NE(replacement_request, observed_risk_requests.end());
+  EXPECT_TRUE(std::all_of(
+      replacement_request->points.begin(), replacement_request->points.end(),
+      [](const iap::ForwardRiskQueryPoint &point) {
+        return point.satellite_window_id == 1u;
+      })) << "a rolling child replaces the parent suffix; the comparison "
+             "request must not query that obsolete suffix as window 2";
   EXPECT_NE(manager.lastP4ForwardDecision().reason,
             "candidate_endpoint_outside_common_corridor");
   EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
@@ -8723,6 +8862,22 @@ TEST(P4PreparedSuccessorPolicy,
       fast_path_manager.p4SuccessorFullSearchFallbackPendingForTest());
   EXPECT_EQ(fast_path_manager.lastP4ForwardDecision().successor_failure,
             ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED);
+
+  ego_planner::EGOPlannerManager first_failure_manager;
+  first_failure_manager.setP4SuccessorPreparationBoundaryForTest(
+      20, 13000000000LL, 14.0);
+  ego_planner::P4ForwardDecision gnss_failure;
+  gnss_failure.successor_failure =
+      ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+  gnss_failure.reason = "successor_gnss_limit_exceeded";
+  first_failure_manager.setP4ForwardDecisionForTest(gnss_failure);
+  first_failure_manager.recordPreparedP4SuccessorCurveFailure(
+      13.5, ego_planner::P4PreparedCurveFailure::DYNAMICS,
+      "terminal_bspline_refinement_collision_or_dynamics");
+  EXPECT_EQ(first_failure_manager.lastP4ForwardDecision().successor_failure,
+            ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED);
+  EXPECT_EQ(first_failure_manager.lastP4ForwardDecision().reason,
+            "successor_gnss_limit_exceeded");
 }
 
 TEST(P4PreparedSuccessorPolicy,
