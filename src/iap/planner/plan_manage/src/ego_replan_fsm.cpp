@@ -179,6 +179,7 @@ namespace ego_planner
                                   message->feedback_acceleration.z),
                   message->saturated);
             }, controller_trace_options);
+    planner_manager_->setControllerTraceRequired(true);
     // std::bind(&EGOReplanFSM::odometryCallback, this, std::placeholders::_1));
 
     if (planner_manager_->pp_.drone_id >= 1)

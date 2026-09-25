@@ -188,7 +188,7 @@ namespace ego_planner
   };
 
   P4RollingSuccessorExposureBridge p4RollingSuccessorExposureBridge(
-      double sample_ros_stamp_s,
+      double receive_ros_stamp_s,
       double current_parent_elapsed_s,
       double switch_parent_elapsed_s,
       double parent_duration_s);
@@ -816,6 +816,10 @@ namespace ego_planner
     using SteadyTimeProvider = std::function<int64_t()>;
     void setTimeProvider(TimeProvider provider);
     void setSteadyTimeProvider(SteadyTimeProvider provider);
+    void setControllerTraceRequired(const bool required)
+    {
+      controller_trace_required_ = required;
+    }
     rclcpp::Time plannerNow() const;
     int allocateTrajectoryId();
     uint64_t executionInstanceId() const { return execution_instance_id_; }
@@ -1379,6 +1383,7 @@ namespace ego_planner
     int last_activated_trajectory_id_ = 0;
     int64_t last_activated_start_time_ns_ = 0;
     std::string last_activated_curve_hash_;
+    int64_t last_activated_receive_steady_ns_ = 0;
     struct ActiveTrajectoryExecutionSample
     {
       bool valid = false;
@@ -1388,6 +1393,8 @@ namespace ego_planner
       int64_t start_time_ns = 0;
       std::string curve_hash;
       double sample_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      double receive_ros_stamp_s =
+          std::numeric_limits<double>::quiet_NaN();
       int64_t receive_steady_ns = 0;
       double trajectory_elapsed_s =
           std::numeric_limits<double>::quiet_NaN();
@@ -1415,6 +1422,7 @@ namespace ego_planner
       bool saturated = false;
     } trajectory_controller_trace_sample_;
     mutable std::mutex trajectory_controller_trace_mutex_;
+    bool controller_trace_required_ = false;
     std::chrono::steady_clock::time_point last_trajectory_publish_steady_;
     std::chrono::steady_clock::time_point
         last_trajectory_candidate_build_steady_;

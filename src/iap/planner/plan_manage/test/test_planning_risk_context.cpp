@@ -2639,6 +2639,7 @@ ActivatedRuntimeFeedbackFixture makeActivatedRuntimeFeedbackFixture(
   occupancy->frozen_grid_map_epoch = frozen_occupancy;
 
   auto &manager = *fixture.manager;
+  manager.setControllerTraceRequired(true);
   manager.pp_.max_vel_ = 20.0;
   manager.pp_.max_acc_ = 100.0;
   auto control_profile = permissiveTestControlProfile();
@@ -2784,6 +2785,34 @@ TEST(TrajectoryExecutionFeedbackTest,
   EXPECT_TRUE(stale_result.guard_braking_preschedule_requested);
   EXPECT_TRUE(stale.manager->pendingP4GuardBrakingCommand().has_value());
 
+  auto trace_only_stale = makeActivatedRuntimeFeedbackFixture(
+      "runtime_controller_trace_only_stale", 937);
+  seed_feedback(&trace_only_stale, false, 0.0);
+  *trace_only_stale.steady_now_ns += 201'000'000LL;
+  auto trace_only_trajectory =
+      trace_only_stale.manager->local_data_.position_traj_;
+  auto trace_only_velocity = trace_only_trajectory.getDerivative();
+  auto trace_only_acceleration = trace_only_velocity.getDerivative();
+  constexpr double refreshed_elapsed_s = 0.6;
+  const Eigen::Vector3d refreshed_position =
+      trace_only_trajectory.evaluateDeBoorT(refreshed_elapsed_s);
+  ASSERT_TRUE(trace_only_stale.manager->recordTrajectoryExecutionSample(
+      trace_only_stale.manager->local_data_.execution_instance_id_,
+      trace_only_stale.manager->local_data_.traj_id_,
+      trace_only_stale.manager->local_data_.start_time_.nanoseconds(),
+      trace_only_stale.manager->local_data_.curve_hash_,
+      1'725'000'000.2, refreshed_elapsed_s, refreshed_position,
+      trace_only_velocity.evaluateDeBoorT(refreshed_elapsed_s),
+      trace_only_acceleration.evaluateDeBoorT(refreshed_elapsed_s)));
+  const auto trace_only_stale_result =
+      trace_only_stale.manager->validateCommittedP4TrajectoryExecution(
+          trace_only_stale.evaluation_ros_s, refreshed_position);
+  EXPECT_NE(trace_only_stale_result.reason.find(
+                "controller_execution_trace_stale"),
+            std::string::npos) << trace_only_stale_result.reason;
+  EXPECT_TRUE(
+      trace_only_stale_result.guard_braking_preschedule_requested);
+
   auto saturated = makeActivatedRuntimeFeedbackFixture(
       "runtime_feedback_saturated", 933);
   const Eigen::Vector3d saturated_position =
@@ -2881,7 +2910,6 @@ TEST(P4ActualCurveClearanceCertification,
   manager.local_data_.traj_id_ = 919;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = stopped.getTimeSum();
-
   EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(gnss_calls, 0u);
@@ -6174,12 +6202,14 @@ TEST(PlanningTimeProviderTest,
   constexpr int parent_id = 92;
   constexpr int64_t planned_start_ns = 10'000'000'000LL;
   constexpr double activation_s = 12.0;
-  constexpr double trace_stamp_s = 12.4;
+  constexpr double trace_receive_ros_s = 12.4;
+  constexpr double sender_wall_stamp_s = 1'725'000'000.0;
   constexpr double trace_elapsed_s = 0.4;
   constexpr int64_t child_start_ns = 13'000'000'000LL;
-  manager.setTimeProvider([]() {
+  double local_ros_s = activation_s;
+  manager.setTimeProvider([&local_ros_s]() {
     return rclcpp::Time(
-        static_cast<int64_t>(activation_s * 1.0e9), RCL_ROS_TIME);
+        static_cast<int64_t>(local_ros_s * 1.0e9), RCL_ROS_TIME);
   });
   manager.local_data_.execution_instance_id_ = instance;
   manager.local_data_.traj_id_ = parent_id;
@@ -6197,10 +6227,11 @@ TEST(PlanningTimeProviderTest,
       instance, parent_id, planned_start_ns, "delayed-parent-92"));
   ASSERT_TRUE(manager.recordTrajectoryActivated(
       instance, parent_id, planned_start_ns, "delayed-parent-92"));
+  local_ros_s = trace_receive_ros_s;
   const Eigen::Vector3d unused = Eigen::Vector3d::Zero();
   ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
       instance, parent_id, planned_start_ns, "delayed-parent-92",
-      trace_stamp_s, trace_elapsed_s, unused, unused, unused));
+      sender_wall_stamp_s, trace_elapsed_s, unused, unused, unused));
   manager.setP4SuccessorPreparationBoundaryForTest(
       parent_id, planned_start_ns,
       static_cast<double>(child_start_ns) * 1.0e-9,
@@ -6217,8 +6248,9 @@ TEST(PlanningTimeProviderTest,
   auto parent = manager.local_data_.position_traj_;
   auto parent_velocity = parent.getDerivative();
   auto parent_acceleration = parent_velocity.getDerivative();
-  // 0.4 s was observed at 12.4, then 0.6 s elapses to the absolute child
-  // switch. The old planned-start mapping incorrectly sampled t=3.0.
+  // 0.4 s was received on the planner ROS clock at 12.4, then 0.6 s elapses
+  // to the absolute child switch. The sender header deliberately uses wall
+  // time and must not force the old planned-start t=3.0 fallback.
   EXPECT_TRUE(position.isApprox(parent.evaluateDeBoorT(1.0), 1.0e-9));
   EXPECT_TRUE(velocity.isApprox(
       parent_velocity.evaluateDeBoorT(1.0), 1.0e-9));
@@ -6231,7 +6263,7 @@ TEST(PlanningTimeProviderTest,
   // child boundary or the elapsed anchor later serialized to traj_server.
   ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
       instance, parent_id, planned_start_ns, "delayed-parent-92",
-      12.8, 0.75, unused, unused, unused));
+      sender_wall_stamp_s + 0.4, 0.75, unused, unused, unused));
   Eigen::Vector3d repeated_position;
   Eigen::Vector3d repeated_velocity;
   Eigen::Vector3d repeated_acceleration;
@@ -6246,6 +6278,11 @@ TEST(PlanningTimeProviderTest,
 TEST(PlanningTimeProviderTest,
      OrdinaryChildSerializesTheSameFrozenParentAnchorUsedForItsBoundary) {
   ego_planner::EGOPlannerManager manager;
+  double local_ros_s = 12.0;
+  manager.setTimeProvider([&local_ros_s]() {
+    return rclcpp::Time(
+        static_cast<int64_t>(local_ros_s * 1.0e9), RCL_ROS_TIME);
+  });
   const auto instance = manager.executionInstanceId();
   constexpr int parent_id = 93;
   constexpr int64_t parent_start_ns = 10'000'000'000LL;
@@ -6266,6 +6303,7 @@ TEST(PlanningTimeProviderTest,
       instance, parent_id, parent_start_ns, "ordinary-parent-93"));
   ASSERT_TRUE(manager.recordTrajectoryActivated(
       instance, parent_id, parent_start_ns, "ordinary-parent-93"));
+  local_ros_s = 12.4;
   const Eigen::Vector3d unused = Eigen::Vector3d::Zero();
   ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
       instance, parent_id, parent_start_ns, "ordinary-parent-93",
@@ -6284,6 +6322,7 @@ TEST(PlanningTimeProviderTest,
   // Simulate a trace arriving while the child is optimized. Recomputing the
   // metadata now would map the same absolute start to 0.95 s and make the
   // server compare the child against a boundary it was not built from.
+  local_ros_s = 12.8;
   ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
       instance, parent_id, parent_start_ns, "ordinary-parent-93",
       12.8, 0.75, unused, unused, unused));
@@ -9574,9 +9613,13 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.velocity_traj_ = stopped.getDerivative();
   manager.local_data_.acceleration_traj_ =
       manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
   manager.local_data_.traj_id_ = 92;
-  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.start_time_ =
+      rclcpp::Time(10'010'000'000LL, RCL_ROS_TIME);
   manager.local_data_.duration_ = stopped.getTimeSum();
+  manager.local_data_.curve_hash_ = ego_planner::p4ControlPointHash(
+      stopped.getControlPoint());
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
@@ -10462,6 +10505,13 @@ TEST(P4PreparedSuccessorPolicy,
 
   ego_planner::LocalTrajData incumbent = manager.local_data_;
   incumbent.traj_id_ = 91;
+  incumbent.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.parent_execution_instance_id_ =
+      incumbent.execution_instance_id_;
+  manager.local_data_.parent_traj_id_ = incumbent.traj_id_;
+  manager.local_data_.parent_start_time_ = incumbent.start_time_;
+  manager.local_data_.parent_curve_hash_ = incumbent.curve_hash_;
+  manager.local_data_.parent_switch_elapsed_s_ = 0.01;
   ego_planner::P4PreparedSuccessor prepared;
   prepared.parent_trajectory_id = incumbent.traj_id_;
   prepared.parent_start_time_ns = incumbent.start_time_.nanoseconds();
@@ -10536,7 +10586,7 @@ TEST(P4PreparedSuccessorPolicy,
 
   // Isolate snapshot reauthorization from the scheduling assertions above:
   // this child and parent share their exact t=0 boundary at the fixed anchor.
-  prepared.planned_switch_time_s = 10.0;
+  prepared.planned_switch_time_s = 10.01;
   manager.setPreparedP4SuccessorForTest(prepared);
 
   // Handoff-time authorization is recomputed even when the immutable input
@@ -10554,13 +10604,34 @@ TEST(P4PreparedSuccessorPolicy,
       *execution_b);
   bound_execution_b->occupancy = occupancy_b;
   int latest_snapshot_direct_queries = 0;
+  std::vector<iap::ForwardRiskBatchRequest> latest_snapshot_requests;
   const auto latest_snapshot_callback = directRiskCallback(0.5);
   bound_execution_b->forward_risk_batch =
-      [&latest_snapshot_direct_queries, latest_snapshot_callback](
+      [&latest_snapshot_direct_queries, &latest_snapshot_requests,
+       latest_snapshot_callback](
           const iap::ForwardRiskBatchRequest &request) {
         ++latest_snapshot_direct_queries;
+        latest_snapshot_requests.push_back(request);
         return latest_snapshot_callback(request);
       };
+  manager.setTimeProvider([]() {
+    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  });
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      incumbent.execution_instance_id_, incumbent.traj_id_,
+      incumbent.start_time_.nanoseconds(), incumbent.curve_hash_));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      incumbent.execution_instance_id_, incumbent.traj_id_,
+      incumbent.start_time_.nanoseconds(), incumbent.curve_hash_));
+  auto incumbent_velocity = incumbent.position_traj_.getDerivative();
+  auto incumbent_acceleration = incumbent_velocity.getDerivative();
+  ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+      incumbent.execution_instance_id_, incumbent.traj_id_,
+      incumbent.start_time_.nanoseconds(), incumbent.curve_hash_,
+      1'725'000'000.0, 0.0,
+      incumbent.position_traj_.evaluateDeBoorT(0.0),
+      incumbent_velocity.evaluateDeBoorT(0.0),
+      incumbent_acceleration.evaluateDeBoorT(0.0)));
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy_b, directRiskCallback(0.5),
       bound_execution_b);
@@ -10568,6 +10639,16 @@ TEST(P4PreparedSuccessorPolicy,
       incumbent, 10.0, &reason)) << reason;
   EXPECT_EQ(same_snapshot_direct_queries, queries_before_handoff);
   EXPECT_GT(latest_snapshot_direct_queries, 0);
+  const auto bridge_request = std::find_if(
+      latest_snapshot_requests.begin(), latest_snapshot_requests.end(),
+      [](const iap::ForwardRiskBatchRequest &request) {
+        return request.combined_snapshot_identity.find(
+            ";parent_bridge=") != std::string::npos;
+      });
+  ASSERT_NE(bridge_request, latest_snapshot_requests.end());
+  ASSERT_FALSE(bridge_request->points.empty());
+  EXPECT_NEAR(bridge_request->points.front().query_time_s, 10.0, 1.0e-9);
+  EXPECT_NEAR(bridge_request->points.back().query_time_s, 10.01, 1.0e-9);
   EXPECT_EQ(reason, "prepared_successor_publish_revalidated");
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_snapshot_id,
             bound_execution_b->execution_snapshot_id);

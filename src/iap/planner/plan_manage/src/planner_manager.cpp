@@ -670,7 +670,7 @@ namespace ego_planner
   }
 
   P4RollingSuccessorExposureBridge p4RollingSuccessorExposureBridge(
-      const double sample_ros_stamp_s,
+      const double receive_ros_stamp_s,
       const double current_parent_elapsed_s,
       const double switch_parent_elapsed_s,
       const double parent_duration_s)
@@ -680,7 +680,7 @@ namespace ego_planner
       bridge.reason = reason;
       return bridge;
     };
-    if (!std::isfinite(sample_ros_stamp_s) ||
+    if (!std::isfinite(receive_ros_stamp_s) ||
         !std::isfinite(current_parent_elapsed_s) ||
         !std::isfinite(switch_parent_elapsed_s) ||
         !std::isfinite(parent_duration_s) || parent_duration_s < 0.0)
@@ -698,7 +698,7 @@ namespace ego_planner
         0.0, bridge.end_parent_elapsed_s -
             bridge.begin_parent_elapsed_s);
     bridge.execution_time_origin_s =
-        sample_ros_stamp_s - current_parent_elapsed_s;
+        receive_ros_stamp_s - current_parent_elapsed_s;
     bridge.valid = true;
     bridge.reason = "ok";
     return bridge;
@@ -2797,9 +2797,9 @@ namespace ego_planner
         sample.trajectory_id == local_data_.traj_id_ &&
         sample.start_time_ns == local_data_.start_time_.nanoseconds() &&
         sample.curve_hash == local_data_.curve_hash_ &&
-        std::isfinite(sample.sample_ros_stamp_s) &&
+        std::isfinite(sample.receive_ros_stamp_s) &&
         std::isfinite(sample.trajectory_elapsed_s) &&
-        absolute_time_s + 1.0e-9 >= sample.sample_ros_stamp_s;
+        absolute_time_s + 1.0e-9 >= sample.receive_ros_stamp_s;
     if (sample_matches)
     {
       // Map the future absolute switch from the controller/traj_server
@@ -2807,7 +2807,7 @@ namespace ego_planner
       // curve at t=0; the planned identity stamp must not make boundary
       // construction jump ahead by that activation delay.
       parent_t_s = sample.trajectory_elapsed_s +
-          (absolute_time_s - sample.sample_ros_stamp_s);
+          (absolute_time_s - sample.receive_ros_stamp_s);
     }
     parent_t_s = std::clamp(parent_t_s, 0.0, local_data_.duration_);
     if (trajectory_elapsed_s)
@@ -2856,6 +2856,8 @@ namespace ego_planner
     active_trajectory_execution_sample_.start_time_ns = start_time_ns;
     active_trajectory_execution_sample_.curve_hash = curve_hash;
     active_trajectory_execution_sample_.sample_ros_stamp_s = sample_stamp_s;
+    active_trajectory_execution_sample_.receive_ros_stamp_s =
+        plannerNow().seconds();
     active_trajectory_execution_sample_.receive_steady_ns = steadyNowNs();
     active_trajectory_execution_sample_.trajectory_elapsed_s =
         trajectory_elapsed_s;
@@ -3051,6 +3053,7 @@ namespace ego_planner
       last_activated_trajectory_id_ = trajectory_id;
       last_activated_start_time_ns_ = start_time_ns;
       last_activated_curve_hash_ = curve_hash;
+      last_activated_receive_steady_ns_ = steadyNowNs();
       trajectory_controller_trace_sample_ =
           TrajectoryControllerTraceSample{};
     }
@@ -3089,6 +3092,8 @@ namespace ego_planner
         active_trajectory_execution_sample_.curve_hash = curve_hash;
         active_trajectory_execution_sample_.sample_ros_stamp_s =
             plannerNow().seconds();
+        active_trajectory_execution_sample_.receive_ros_stamp_s =
+            active_trajectory_execution_sample_.sample_ros_stamp_s;
         active_trajectory_execution_sample_.receive_steady_ns =
             steadyNowNs();
         active_trajectory_execution_sample_.trajectory_elapsed_s = 0.0;
@@ -6848,7 +6853,7 @@ namespace ego_planner
       if (sample_matches)
       {
         const auto bridge = p4RollingSuccessorExposureBridge(
-            sample.sample_ros_stamp_s, sample.trajectory_elapsed_s,
+            sample.receive_ros_stamp_s, sample.trajectory_elapsed_s,
             switch_elapsed_s, parent.duration_);
         if (!bridge.valid)
           return reject_final_identity(
@@ -11051,10 +11056,11 @@ namespace ego_planner
     // not to the watchdog callback time. A late (but still accepted) callback
     // compares parent(anchor) with child(0); elapsed child motion must never be
     // invented before the atomic handoff.
-    const double switch_time_s = current.planned_switch_time_s;
-    const double parent_t = std::clamp(
-        switch_time_s - incumbent.start_time_.seconds(), 0.0,
-        std::max(0.0, incumbent.duration_));
+    const double parent_t = local_data_.parent_switch_elapsed_s_;
+    if (!std::isfinite(parent_t) || parent_t < 0.0 ||
+        parent_t > incumbent.duration_ + 1.0e-9)
+      return finish(false, "successor_parent_switch_anchor_invalid",
+                    P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
     constexpr double successor_t = 0.0;
     UniformBspline incumbent_position = incumbent.position_traj_;
     UniformBspline incumbent_velocity = incumbent.velocity_traj_;
@@ -11134,6 +11140,53 @@ namespace ego_planner
               &local_data_, 0.0, &points, &times) || points.empty())
         return finish(false, "successor_actual_curve_sampling_failed",
                       P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
+      std::vector<Eigen::Vector3d> parent_bridge_points;
+      std::vector<double> parent_bridge_times;
+      double parent_bridge_duration_s = 0.0;
+      double parent_bridge_time_origin_s =
+          std::numeric_limits<double>::quiet_NaN();
+      const double parent_switch_elapsed_s =
+          local_data_.parent_switch_elapsed_s_;
+      if (!std::isfinite(parent_switch_elapsed_s) ||
+          parent_switch_elapsed_s < 0.0 ||
+          parent_switch_elapsed_s > incumbent.duration_ + 1.0e-9)
+        return finish(false, "successor_parent_switch_anchor_invalid",
+                      P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
+      const auto &parent_sample = active_trajectory_execution_sample_;
+      const bool parent_sample_matches = parent_sample.valid &&
+          parent_sample.received_from_server &&
+          parent_sample.execution_instance_id ==
+              incumbent.execution_instance_id_ &&
+          parent_sample.trajectory_id == incumbent.traj_id_ &&
+          parent_sample.start_time_ns ==
+              incumbent.start_time_.nanoseconds() &&
+          parent_sample.curve_hash == incumbent.curve_hash_;
+      if (!parent_sample_matches && parent_switch_elapsed_s > 1.0e-9)
+        return finish(false, "successor_parent_execution_sample_unavailable",
+                      P4SuccessorFailure::INTEGRITY_STALE);
+      if (parent_sample_matches)
+      {
+        const auto bridge = p4RollingSuccessorExposureBridge(
+            parent_sample.receive_ros_stamp_s,
+            parent_sample.trajectory_elapsed_s,
+            parent_switch_elapsed_s, incumbent.duration_);
+        if (!bridge.valid)
+          return finish(false, bridge.reason,
+                        P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
+        parent_bridge_duration_s = bridge.duration_s;
+        parent_bridge_time_origin_s = bridge.execution_time_origin_s;
+        if (parent_bridge_duration_s > 1.0e-9)
+        {
+          LocalTrajData parent_for_sampling = incumbent;
+          if (!sampleTrajectoryIntervalForGeometryCommit(
+                  &parent_for_sampling,
+                  bridge.begin_parent_elapsed_s,
+                  bridge.end_parent_elapsed_s,
+                  &parent_bridge_points, &parent_bridge_times))
+            return finish(false, "successor_parent_bridge_sampling_failed",
+                          P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
+        }
+      }
       const auto nominal_points = points;
       const auto nominal_times = times;
       P4ExecutionRiskWindowLayout successor_layout;
@@ -11169,6 +11222,17 @@ namespace ego_planner
                       P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
       if (execution->occupancy->trusted_local_map_support)
       {
+        for (std::size_t index = 0;
+             index < parent_bridge_points.size(); ++index)
+        {
+          const auto support = queryP0LocalMapSupport(
+              *execution->occupancy, parent_bridge_points[index], now_s,
+              parent_bridge_time_origin_s + parent_bridge_times[index]);
+          if (!support.complete())
+            return finish(false, "successor_parent_bridge_support_changed:" +
+                std::string(iap::localMapSupportStatusName(support.status)),
+                P4SuccessorFailure::SUPPORT_INCOMPLETE);
+        }
         for (std::size_t index = 0; index < points.size(); ++index)
         {
           const auto support = queryP0LocalMapSupport(
@@ -11233,6 +11297,48 @@ namespace ego_planner
                         P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
         }
       }
+      std::vector<iap::GlobalNavigationExposureSample>
+          parent_bridge_global_samples;
+      bool parent_bridge_global_degraded = false;
+      std::string continuous_exposure_identity = request_identity;
+      if (!parent_bridge_points.empty())
+      {
+        std::ostringstream identity;
+        identity << request_identity << ";parent_bridge="
+                 << incumbent.curve_hash_ << ':' << std::hexfloat
+                 << parent_bridge_times.front() << ':'
+                 << parent_switch_elapsed_s;
+        continuous_exposure_identity = identity.str();
+        const auto bridge_request = makeP4CurveRiskRequest(
+            continuous_exposure_identity, risk_snapshot, execution, now_s,
+            parent_bridge_time_origin_s, parent_bridge_points,
+            parent_bridge_times, p4_forward_limits_.compute_budget_ms,
+            p4_global_exposure_policy_.task_mode);
+        const auto bridge_result =
+            execution->forward_risk_batch(bridge_request);
+        const bool bridge_degradable = p4GlobalEvidenceFailureWhitelisted(
+            bridge_result, parent_bridge_points.size());
+        parent_bridge_global_degraded =
+            p4_global_exposure_policy_.task_mode ==
+                iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+            bridge_degradable && !bridge_result.complete;
+        if ((!bridge_result.complete && !bridge_degradable) ||
+            bridge_result.combined_snapshot_identity !=
+                bridge_request.combined_snapshot_identity ||
+            bridge_result.points.size() != parent_bridge_points.size())
+          return finish(false, "successor_parent_bridge_query_incomplete",
+                        P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
+        std::vector<double> bridge_relative_times;
+        bridge_relative_times.reserve(parent_bridge_times.size());
+        for (const double parent_time_s : parent_bridge_times)
+          bridge_relative_times.push_back(
+              parent_time_s - parent_bridge_times.front());
+        parent_bridge_global_samples =
+            iap::globalNavigationSamplesFromForwardRisk(
+                bridge_result.points, bridge_relative_times,
+                execution->risk_policy.alert_limit_h_m,
+                execution->risk_policy.alert_limit_v_m);
+      }
       p4_direct_risk_evidence_ = makeP4DirectRiskEvidence(
           local_data_, risk_snapshot, execution, now_s, points, times,
           request, result, duration_ms);
@@ -11254,12 +11360,37 @@ namespace ego_planner
               result.points, times, execution->risk_policy.alert_limit_h_m,
               execution->risk_policy.alert_limit_v_m,
               p4_direct_risk_evidence_.nominal_sample_rows);
+      for (auto &sample : assurance_request.global_samples)
+        sample.relative_time_s += parent_bridge_duration_s;
+      if (!parent_bridge_global_samples.empty() &&
+          !assurance_request.global_samples.empty() &&
+          std::abs(parent_bridge_global_samples.back().relative_time_s -
+              assurance_request.global_samples.front().relative_time_s) <=
+              1.0e-9)
+      {
+        auto &boundary = parent_bridge_global_samples.back();
+        const auto &child_boundary = assurance_request.global_samples.front();
+        boundary.hpl_m = std::max(boundary.hpl_m, child_boundary.hpl_m);
+        boundary.vpl_m = std::max(boundary.vpl_m, child_boundary.vpl_m);
+        boundary.complete = boundary.complete && child_boundary.complete;
+        assurance_request.global_samples.erase(
+            assurance_request.global_samples.begin());
+      }
+      parent_bridge_global_samples.insert(
+          parent_bridge_global_samples.end(),
+          assurance_request.global_samples.begin(),
+          assurance_request.global_samples.end());
+      assurance_request.global_samples =
+          std::move(parent_bridge_global_samples);
       assurance_request.conservative_incomplete_global_navigation =
-          successor_global_only_degradation && !result.complete;
+          (successor_global_only_degradation && !result.complete) ||
+          parent_bridge_global_degraded;
       assurance_request.committed_duration_s = times.empty()
           ? std::numeric_limits<double>::quiet_NaN()
-          : *std::max_element(times.begin(), times.end());
-      assurance_request.global_evidence_identity = request_identity;
+          : parent_bridge_duration_s +
+              *std::max_element(times.begin(), times.end());
+      assurance_request.global_evidence_identity =
+          continuous_exposure_identity;
       assurance_request.has_prior_global_episode =
           p4_global_exposure_ledger_.state().active;
       assurance_request.prior_global_episode =
@@ -12112,6 +12243,28 @@ namespace ego_planner
         &trace_commanded_acceleration, &control_actual_position,
         &control_actual_velocity, &control_actual_acceleration,
         &controller_saturated);
+    bool waiting_for_first_matching_controller_trace = false;
+    if (!controller_trace_matches)
+    {
+      std::lock_guard<std::mutex> lock(
+          trajectory_controller_trace_mutex_);
+      const auto &trace = trajectory_controller_trace_sample_;
+      const bool matching_trace_seen = trace.valid &&
+          trace.execution_instance_id ==
+              local_data_.execution_instance_id_ &&
+          trace.trajectory_id == local_data_.traj_id_ &&
+          trace.start_time_ns ==
+              local_data_.start_time_.nanoseconds() &&
+          trace.curve_hash == local_data_.curve_hash_;
+      waiting_for_first_matching_controller_trace = !matching_trace_seen &&
+          executionFeedbackFresh(
+              last_activated_receive_steady_ns_,
+              requiredTrajectoryLeadTimeSeconds());
+    }
+    if (controller_trace_required_ && !controller_trace_matches &&
+        !waiting_for_first_matching_controller_trace)
+      return activate_failsafe_braking(
+          "controller_execution_trace_stale", current_t);
     // Tracking is a controller property. A same-cycle command/feedback trace
     // must take precedence over localization odometry, whose estimation error
     // and callback skew belong to the navigation-integrity contract instead.
@@ -12371,6 +12524,8 @@ namespace ego_planner
         active_trajectory_execution_sample_.curve_hash =
             local_data_.curve_hash_;
         active_trajectory_execution_sample_.sample_ros_stamp_s =
+            evaluation_now_s;
+        active_trajectory_execution_sample_.receive_ros_stamp_s =
             evaluation_now_s;
         active_trajectory_execution_sample_.receive_steady_ns =
             steadyNowNs();
@@ -18051,13 +18206,13 @@ namespace ego_planner
         execution_sample.trajectory_id == parent_id &&
         execution_sample.start_time_ns == parent_start.nanoseconds() &&
         execution_sample.curve_hash == parent_hash &&
-        std::isfinite(execution_sample.sample_ros_stamp_s) &&
+        std::isfinite(execution_sample.receive_ros_stamp_s) &&
         std::isfinite(execution_sample.trajectory_elapsed_s) &&
         candidate_start_s + 1.0e-9 >=
-            execution_sample.sample_ros_stamp_s)
+            execution_sample.receive_ros_stamp_s)
     {
       parent_switch_elapsed_s = execution_sample.trajectory_elapsed_s +
-          (candidate_start_s - execution_sample.sample_ros_stamp_s);
+          (candidate_start_s - execution_sample.receive_ros_stamp_s);
     }
     if (!std::isfinite(frozen_parent_switch_elapsed_s) &&
         p4PreparingSuccessorCandidate() && std::isfinite(
