@@ -3055,44 +3055,6 @@ P4ObservationSegmentResult P4ObservationSegmentPlanner::plan(
   return result;
 }
 
-bool applyP4RollingSuccessorGuide(
-  const P4BoundedExecutionGuide & bounded, const bool force_full_search,
-  const uint64_t incumbent_channel_id, P4ForwardRequest * request)
-{
-  if (!request || !bounded.valid || bounded.guide.size() < 2u ||
-    std::any_of(
-      bounded.guide.begin(), bounded.guide.end(),
-      [](const Eigen::Vector3d & point) {return !point.allFinite();}))
-  {
-    return false;
-  }
-
-  request->local_target = bounded.guide.back();
-  request->nominal_local_reference = bounded.guide;
-  request->successor_fast_path = !force_full_search;
-  if (!force_full_search) {
-    request->incumbent_channel_id = incumbent_channel_id;
-    request->successor_reuse_guide = bounded.guide;
-  } else {
-    request->incumbent_channel_id = 0u;
-    request->successor_reuse_guide.clear();
-  }
-  return true;
-}
-
-P4BoundedExecutionGuide selectP4RollingSuccessorGuide(
-  const P4BoundedExecutionGuide & newly_bounded,
-  const P4BoundedExecutionGuide & fixed_for_parent,
-  const bool force_full_search)
-{
-  if (force_full_search && fixed_for_parent.valid &&
-    fixed_for_parent.guide.size() >= 2u)
-  {
-    return fixed_for_parent;
-  }
-  return newly_bounded;
-}
-
 const char * p4SuccessorFailureName(const P4SuccessorFailure failure)
 {
   switch (failure) {
@@ -3743,12 +3705,35 @@ double p4StoppingDistance(
          limits.vehicle_radius_m + limits.safety_margin_m;
 }
 
+double p4StoppingDistance(
+  const Eigen::Vector3d & velocity, const Eigen::Vector3d & acceleration,
+  const P4ForwardLimits & limits)
+{
+  return p4KinematicStoppingProgress(velocity, acceleration, limits) +
+         limits.vehicle_radius_m + limits.safety_margin_m;
+}
+
 double p4KinematicStoppingProgress(
   const double speed_mps, const P4ForwardLimits & limits)
 {
   const double speed = std::max(0.0, speed_mps);
   return speed * limits.reaction_time_s +
          speed * speed / (2.0 * limits.braking_accel_mps2);
+}
+
+double p4KinematicStoppingProgress(
+  const Eigen::Vector3d & velocity, const Eigen::Vector3d & acceleration,
+  const P4ForwardLimits & limits)
+{
+  const double speed = velocity.norm();
+  const double acceleration_bound = acceleration.norm();
+  const double reaction_exit_speed =
+    speed + acceleration_bound * limits.reaction_time_s;
+  return speed * limits.reaction_time_s +
+         0.5 * acceleration_bound * limits.reaction_time_s *
+           limits.reaction_time_s +
+         reaction_exit_speed * reaction_exit_speed /
+           (2.0 * limits.braking_accel_mps2);
 }
 
 P4BoundedExecutionGuide p4BoundExecutionGuide(
@@ -3794,19 +3779,20 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
   {
     return result;
   }
-  const double current_speed_mps = input.start_velocity.norm();
   const double guide_length_m = pathLength(input.frozen_guide);
   result.local_frontier_m = std::min({
     guide_length_m, input.decision_horizon_m,
     input.local_support_frontier_m});
   result.usable_progress_m = result.local_frontier_m -
-    p4StoppingDistance(current_speed_mps, input.limits);
+    p4StoppingDistance(
+      input.start_velocity, input.start_acceleration, input.limits);
   if (input.parent_approved_endpoint.allFinite())
   {
     auto bounded = p4BoundRollingSuccessorGuide(
       cropPrefixToDistance(input.frozen_guide, result.local_frontier_m),
       input.parent_approved_endpoint,
-      p4KinematicStoppingProgress(current_speed_mps, input.limits),
+      p4StoppingDistance(
+        input.start_velocity, input.start_acceleration, input.limits),
       input.minimum_continuation_progress_m,
       input.maximum_endpoint_projection_distance_m);
     bounded.local_frontier_m = result.local_frontier_m;
@@ -3814,7 +3800,8 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
   }
   result.minimum_progress_m = std::max(
     input.limits.min_creep_progress_m,
-    p4KinematicStoppingProgress(current_speed_mps, input.limits));
+    p4KinematicStoppingProgress(
+      input.start_velocity, input.start_acceleration, input.limits));
   result.target_station_m = result.usable_progress_m;
 
   if (result.target_station_m + kEpsilon < result.minimum_progress_m) {
@@ -3822,7 +3809,8 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
       input.decision_horizon_m + kEpsilon &&
       input.local_support_frontier_m <= guide_length_m + kEpsilon &&
       result.local_frontier_m + kEpsilon <
-        p4StoppingDistance(current_speed_mps, input.limits) +
+        p4StoppingDistance(
+          input.start_velocity, input.start_acceleration, input.limits) +
           result.minimum_progress_m)
     {
       result.failure = P4BoundedExecutionFailure::LOCAL_SUPPORT;
@@ -3976,7 +3964,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
 
   const ComputeBudget budget(request.limits.route_compute_budget_ms);
   decision.stopping_distance_m = p4StoppingDistance(
-    request.velocity.norm(), request.limits);
+    request.velocity, request.acceleration, request.limits);
   const auto finalize = [&request, &record_latency](P4ForwardDecision output) {
     output.result_status = P4ForwardResultStatus::READY;
       if (!output.first_failed_position.allFinite()) {

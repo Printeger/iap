@@ -155,6 +155,25 @@ namespace ego_planner
       return P4SuccessorFailure::SUPPORT_INCOMPLETE;
     }
 
+    bool p4CollisionObserved(const CollisionScanStatus status)
+    {
+      return status == CollisionScanStatus::CLOSED_SEGMENTS ||
+          status == CollisionScanStatus::OPEN_ENDED_COLLISION;
+    }
+
+    P4PreparedCurveFailure p4PreparedFailureForCollisionScan(
+        const CollisionScanStatus status)
+    {
+      if (p4CollisionObserved(status))
+        return P4PreparedCurveFailure::COLLISION;
+      if (status == CollisionScanStatus::NATIVE_ASTAR_NO_PATH)
+        return P4PreparedCurveFailure::LOCAL_GEOMETRY;
+      if (status == CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT ||
+          status == CollisionScanStatus::INVALID_INPUT)
+        return P4PreparedCurveFailure::INCOMPLETE;
+      return P4PreparedCurveFailure::DYNAMICS;
+    }
+
     bool p4SlamRegistrationHealthValid(
         const iap::CurrentIntegrityState &integrity)
     {
@@ -5179,43 +5198,22 @@ namespace ego_planner
       if (reuse_guide.size() < 2u)
         reuse_guide = last_p4_forward_decision_.geometry_common_corridor;
       reuse_guide = p4RemainingPath(reuse_guide, request.position);
-      P4BoundedExecutionGuideInput successor_bound_input;
-      successor_bound_input.frozen_guide = reuse_guide;
-      successor_bound_input.start_position = request.position;
-      successor_bound_input.start_velocity = request.velocity;
-      successor_bound_input.start_acceleration = request.acceleration;
-      successor_bound_input.parent_approved_endpoint =
-          p4_execution_certificate_.approved_endpoint;
-      successor_bound_input.minimum_continuation_progress_m = std::max(
-          p4_forward_limits_.min_creep_progress_m,
-          p4_successor_progress_jitter_floor_m_);
-      successor_bound_input.maximum_endpoint_projection_distance_m =
-          std::max(
-              p4_local_tracking_error_bound_m_ +
-                  p4_planning_clearance_buffer_m_,
-              p4RefinementCorridorRadius(request.limits));
-      const double successor_guide_length_m = p4PolylineLength(reuse_guide);
-      successor_bound_input.decision_horizon_m = std::min(
-          request.limits.max_lookahead_m, successor_guide_length_m);
-      // This is only the route-worker seed. The worker re-evaluates current
-      // local support, and the selected actual curve is bounded again by its
-      // consecutive fresh risk samples before publication.
-      successor_bound_input.local_support_frontier_m =
-          successor_guide_length_m;
-      successor_bound_input.limits = request.limits;
-      const auto newly_bounded_successor =
-          p4BoundExecutionGuide(successor_bound_input);
-      if (!p4_successor_schedule_.force_full_search &&
-          newly_bounded_successor.valid)
-        p4_successor_schedule_.fixed_bounded_guide =
-            newly_bounded_successor;
-      const auto bounded_successor = selectP4RollingSuccessorGuide(
-          newly_bounded_successor,
-          p4_successor_schedule_.fixed_bounded_guide,
-          p4_successor_schedule_.force_full_search);
-      applyP4RollingSuccessorGuide(
-          bounded_successor, p4_successor_schedule_.force_full_search,
-          incumbent_channel_id, &request);
+      // Route search owns the complete frozen horizon. Endpoint, stopping and
+      // exposure bounds are applied only after a channel is selected, to the
+      // actual B-spline seed that may receive execution authority.
+      const bool reuse_complete_guide =
+          !p4_successor_schedule_.force_full_search &&
+          reuse_guide.size() >= 2u;
+      request.successor_fast_path = reuse_complete_guide;
+      request.incumbent_channel_id =
+          reuse_complete_guide ? incumbent_channel_id : 0u;
+      request.successor_reuse_guide =
+          reuse_complete_guide ? reuse_guide : std::vector<Eigen::Vector3d>{};
+      if (reuse_complete_guide)
+      {
+        request.local_target = reuse_guide.back();
+        request.nominal_local_reference = reuse_guide;
+      }
 
       if (auto pending_channel = consume_pending_channel_work_item(true))
         return std::move(*pending_channel);
@@ -12339,7 +12337,7 @@ namespace ego_planner
     Eigen::Vector3d control_actual_position = actual_position;
     Eigen::Vector3d control_actual_velocity = actual_velocity;
     Eigen::Vector3d control_actual_acceleration = actual_acceleration;
-    double trace_execution_t = current_t;
+    double trace_execution_elapsed_s = current_t;
     Eigen::Vector3d trace_commanded_position;
     Eigen::Vector3d trace_commanded_velocity;
     Eigen::Vector3d trace_commanded_acceleration;
@@ -12348,7 +12346,7 @@ namespace ego_planner
         local_data_.execution_instance_id_, local_data_.traj_id_,
         local_data_.start_time_.nanoseconds(), local_data_.curve_hash_,
         evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS,
-        &trace_execution_t,
+        &trace_execution_elapsed_s,
         &trace_commanded_position, &trace_commanded_velocity,
         &trace_commanded_acceleration, &control_actual_position,
         &control_actual_velocity, &control_actual_acceleration,
@@ -12392,7 +12390,7 @@ namespace ego_planner
       if (!current_t_from_server || execution_clock_stale)
       {
         current_t = std::clamp(
-            trace_execution_t, 0.0,
+            trace_execution_elapsed_s, 0.0,
             p4_execution_certificate_.duration_s);
         out.remaining_time_s = std::max(
             0.0, p4_execution_certificate_.duration_s - current_t);
@@ -15200,6 +15198,7 @@ namespace ego_planner
     double p4_exposure_minimum_progress_m =
         p4_forward_limits_.min_creep_progress_m;
     double p4_exposure_parent_to_switch_s = 0.0;
+    bool p4_selected_candidate_is_degraded = false;
     // This value is part of the immutable parent/child handoff contract.  It
     // must be captured at the same instant as the p/v/a boundary used to
     // construct the child; a later controller trace may legitimately map the
@@ -15465,11 +15464,11 @@ namespace ego_planner
                   local_support_frontier_m, sample.arc_length_m);
             }
           }
-          const bool degraded_preference =
+          p4_selected_candidate_is_degraded =
               !selected_candidate->safety_gate_passed &&
               (selected_candidate->controlled_degraded_candidate ||
                selected_candidate->mission_degraded_candidate);
-          if (degraded_preference)
+          if (p4_selected_candidate_is_degraded)
           {
             if (!preparing_successor)
             {
@@ -15701,19 +15700,7 @@ namespace ego_planner
     if (frozen_successor_curve_preparation &&
         !p4_mission_exposure_duration_budget)
     {
-      const auto selected_candidate = std::find_if(
-          last_p4_forward_decision_.candidates.begin(),
-          last_p4_forward_decision_.candidates.end(),
-          [this](const P4ForwardCandidate &candidate) {
-            return candidate.candidate_id ==
-                last_p4_forward_decision_.selected_candidate_id;
-          });
-      const bool degraded_preference =
-          selected_candidate != last_p4_forward_decision_.candidates.end() &&
-          !selected_candidate->safety_gate_passed &&
-          (selected_candidate->controlled_degraded_candidate ||
-           selected_candidate->mission_degraded_candidate);
-      if (degraded_preference)
+      if (p4_selected_candidate_is_degraded)
       {
         auto budget = p4MissionExposureDurationBudget(
             p4_global_exposure_policy_,
@@ -17126,14 +17113,13 @@ namespace ego_planner
     if (!flag_step_1_success)
     {
       const auto &failed_scan = bspline_optimizer_->lastCollisionScanResult();
-      const bool collision_observed =
-          failed_scan.status == CollisionScanStatus::CLOSED_SEGMENTS ||
-          collisionScanFailsClosed(failed_scan.status);
+      const bool collision_observed = p4CollisionObserved(failed_scan.status);
       record_prepared_curve_failure(
-          collision_observed ? P4PreparedCurveFailure::COLLISION
-                             : P4PreparedCurveFailure::DYNAMICS,
+          p4PreparedFailureForCollisionScan(failed_scan.status),
           std::string("rebound_optimizer_failed:collision_scan_status=") +
-              collisionScanStatusName(failed_scan.status));
+              collisionScanStatusName(failed_scan.status) +
+              ":collision_observed=" +
+              (collision_observed ? "1" : "0"));
       visualization_->displayOptimalList(ctrl_pts, 0);
       continous_failures_count_++;
       return false;
@@ -17177,13 +17163,13 @@ namespace ego_planner
         const auto &failed_scan =
             bspline_optimizer_->lastCollisionScanResult();
         const bool collision_observed =
-            failed_scan.status == CollisionScanStatus::CLOSED_SEGMENTS ||
-            collisionScanFailsClosed(failed_scan.status);
+            p4CollisionObserved(failed_scan.status);
         record_prepared_curve_failure(
-            collision_observed ? P4PreparedCurveFailure::COLLISION
-                               : P4PreparedCurveFailure::DYNAMICS,
+            p4PreparedFailureForCollisionScan(failed_scan.status),
             std::string("terminal_refinement_failed:collision_scan_status=") +
-                collisionScanStatusName(failed_scan.status));
+                collisionScanStatusName(failed_scan.status) +
+                ":collision_observed=" +
+                (collision_observed ? "1" : "0"));
         if (gate0_writer_ && gate0_writer_->enabled())
         {
           Gate0QualificationEvent refinement_event;
@@ -17256,6 +17242,10 @@ namespace ego_planner
     // a delayed worker can never leave the controller with an open-ended
     // prefix. This happens before all final P1/P4 checks, so those checks see
     // the exact curve that may be published.
+    const double required_stopping_reserve_m = p4StoppingDistance(
+        start_vel, start_acc, p4_forward_limits_);
+    double required_terminal_stop_duration_s =
+        std::numeric_limits<double>::quiet_NaN();
     if (p4_runtime_config.enable_risk_aware_astar)
     {
       const P4TerminalStopResult terminal = imposeP4TerminalStop(
@@ -17264,9 +17254,19 @@ namespace ego_planner
           pp_.feasibility_tolerance_);
       if (!terminal.success)
       {
+        std::ostringstream detail;
+        detail << "terminal_stop_failed:" << terminal.reason
+               << ":start_p=" << start_pt.transpose()
+               << ":start_v=" << start_vel.transpose()
+               << ":start_a=" << start_acc.transpose()
+               << ":target_distance_m="
+               << (local_target_pt - start_pt).norm()
+               << ":required_stopping_reserve_m="
+               << required_stopping_reserve_m
+               << ":attempted_duration_s=" << terminal.final_duration_s;
         record_prepared_curve_failure(
             P4PreparedCurveFailure::TERMINAL_CONTRACT,
-            std::string("terminal_stop_failed:") + terminal.reason);
+            detail.str());
         last_p4_forward_decision_.planning_disposition =
             P4PlanningDisposition::HOLD_REQUIRED;
         last_p4_forward_decision_.reason = terminal.reason;
@@ -17277,6 +17277,7 @@ namespace ego_planner
         continous_failures_count_++;
         return false;
       }
+      required_terminal_stop_duration_s = terminal.final_duration_s;
       if (terminal.duration_adjusted)
       {
         RCLCPP_INFO(
@@ -17395,7 +17396,11 @@ namespace ego_planner
                << ":start_v=" << start_vel.transpose()
                << ":start_a=" << start_acc.transpose()
                << ":target_distance_m="
-               << (local_target_pt - start_pt).norm();
+               << (local_target_pt - start_pt).norm()
+               << ":required_stopping_reserve_m="
+               << required_stopping_reserve_m
+               << ":required_terminal_stop_duration_s="
+               << required_terminal_stop_duration_s;
         record_prepared_curve_failure(
             P4PreparedCurveFailure::DYNAMICS, detail.str());
         last_p4_forward_decision_.planning_disposition =

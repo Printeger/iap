@@ -572,9 +572,11 @@
   integrity satisfaction. An exposure episode survives trajectory ID changes
   and ends only after `0.5 s` continuously below `0.95*AL`.
 - Every immediate actual trajectory is bounded before B-spline resampling.
+  Route generation, channel comparison and topology freezing consume the full
+  decision horizon; only the selected actual execution seed is cropped.
   Its frontier is the minimum of guide length, decision horizon and consecutive
   fresh local support; its target is the farthest point before that frontier
-  that still reserves the complete current-state stopping distance. The
+  that still reserves the complete current `p/v/a` stopping distance. The
   successor switch cadence (normally at most `2.5 s`) never caps that endpoint,
   and required successor progress is only an acceptance floor, not a target
   distance. Exposure never becomes a distance proxy.

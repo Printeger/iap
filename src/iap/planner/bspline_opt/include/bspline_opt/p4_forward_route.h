@@ -792,22 +792,6 @@ namespace ego_planner
     bool valid(std::string * reason = nullptr) const;
   };
 
-  // Apply the immutable rolling-child extent to either preparation path.
-  // A full topology fallback may choose another corridor, but it must search
-  // toward the same fixed child endpoint instead of silently expanding back
-  // to the ordinary long-horizon local target.
-  bool applyP4RollingSuccessorGuide(
-    const P4BoundedExecutionGuide & bounded, bool force_full_search,
-    uint64_t incumbent_channel_id, P4ForwardRequest * request);
-
-  // Once a parent has a fixed rolling-child extent, failure diagnostics must
-  // not make a full topology retry reconstruct a different (usually longer)
-  // extent from mutable decision state.
-  P4BoundedExecutionGuide selectP4RollingSuccessorGuide(
-    const P4BoundedExecutionGuide & newly_bounded,
-    const P4BoundedExecutionGuide & fixed_for_parent,
-    bool force_full_search);
-
   struct P4ForwardDecision
   {
     std::string schema_version = kP4ForwardDecisionSchema;
@@ -934,8 +918,16 @@ namespace ego_planner
     P4ForwardDecision * decision);
 
   double p4StoppingDistance(double speed_mps, const P4ForwardLimits & limits);
+  double p4StoppingDistance(
+    const Eigen::Vector3d & velocity,
+    const Eigen::Vector3d & acceleration,
+    const P4ForwardLimits & limits);
   double p4KinematicStoppingProgress(
     double speed_mps, const P4ForwardLimits & limits);
+  double p4KinematicStoppingProgress(
+    const Eigen::Vector3d & velocity,
+    const Eigen::Vector3d & acceleration,
+    const P4ForwardLimits & limits);
   double p4RefinementCorridorRadius(const P4ForwardLimits & limits);
   std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
     const std::vector<P4ForwardCandidate> & candidates, double resolution);

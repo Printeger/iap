@@ -14,6 +14,8 @@
 - fix(rolling-endpoint-switch-decoupling): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — select both initial and rolling-child endpoints at the farthest
   fresh local-support frontier that retains the complete current-state stop.
+  Full-horizon route generation/comparison precedes this actual-seed crop, and
+  the unified stopping reserve includes current velocity and acceleration.
   The `2.5 s` parent-execution value now controls only switch scheduling, and
   dynamic/minimum successor progress is only an acceptance floor. MISSION
   endpoint fitting deducts the persistent ledger and parent-to-switch bridge

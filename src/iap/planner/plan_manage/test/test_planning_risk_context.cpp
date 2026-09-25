@@ -597,6 +597,58 @@ TEST(P4ExposureDurationSeam,
               affordable.affordable_duration_s - 0.5, 1.0e-12);
 }
 
+TEST(P4ExposureDurationSeam,
+     SuccessorSelectsTheFarthestAffordableStoppedEndpointAfterParentBridge)
+{
+  const auto profile = missionExposureControlProfile();
+  ego_planner::UniformBspline minimum_child;
+  const auto minimum_terminal =
+      ego_planner::buildP4MinimumTerminalStopFixture(
+          1.5, 0.4, 0.5, profile, 0.05, &minimum_child);
+  ASSERT_TRUE(minimum_terminal.success) << minimum_terminal.reason;
+  ego_planner::UniformBspline farthest_child;
+  const auto farthest_terminal =
+      ego_planner::buildP4MinimumTerminalStopFixture(
+          4.0, 0.4, 0.5, profile, 0.05, &farthest_child);
+  ASSERT_TRUE(farthest_terminal.success) << farthest_terminal.reason;
+  ASSERT_GT(farthest_child.getTimeSum(), minimum_child.getTimeSum());
+
+  constexpr double parent_bridge_s = 0.5;
+  const double child_budget_s = 0.5 *
+      (minimum_child.getTimeSum() + farthest_child.getTimeSum());
+  ego_planner::P4MissionExposureDurationBudget before_bridge;
+  before_bridge.valid = true;
+  before_bridge.remaining_continuous_s =
+      child_budget_s + parent_bridge_s;
+  before_bridge.remaining_integral_duration_s =
+      child_budget_s + parent_bridge_s;
+  before_bridge.affordable_duration_s =
+      child_budget_s + parent_bridge_s;
+  before_bridge.full_fresh_affordable_duration_s =
+      child_budget_s + parent_bridge_s;
+  const auto after_bridge =
+      ego_planner::p4MissionExposureDurationBudgetAfterBridge(
+          before_bridge, parent_bridge_s);
+  ASSERT_TRUE(after_bridge.valid) << after_bridge.reason;
+
+  const ego_planner::P4TerminalStartState start;
+  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
+      &farthest_child, start, profile, 0.05, 0.4, 0.5, 1.5,
+      after_bridge);
+
+  ASSERT_TRUE(fit.success) << fit.reason;
+  EXPECT_TRUE(fit.duration_adjusted);
+  EXPECT_GE(fit.selected_progress_m, 1.5);
+  EXPECT_LT(fit.selected_progress_m, fit.original_progress_m);
+  EXPECT_LE(farthest_child.getTimeSum(), child_budget_s + 1.0e-9);
+  EXPECT_LE(farthest_child.getDerivative()
+                .evaluateDeBoorT(farthest_child.getTimeSum()).norm(),
+            1.0e-9);
+  EXPECT_LE(farthest_child.getDerivative().getDerivative()
+                .evaluateDeBoorT(farthest_child.getTimeSum()).norm(),
+            1.0e-8);
+}
+
 TEST(P4RollingExposureSeam,
      LatestRunParentBridgeStopsAtFrozenSwitchInsteadOfObsoleteSuffix)
 {
@@ -8882,7 +8934,7 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
-     RejectsWhenFarthestEndpointCannotRetainStopAndProgress)
+     FarthestEndpointBuildsAContinuousStoppedSuccessor)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -8893,7 +8945,12 @@ TEST(P4PreparedSuccessorPolicy,
       ->frame_contract_id = "map:test";
   const auto snapshot = makeP4SelectionSnapshot(
       10.0, frozen_occupancy->geometry_id, true);
-  const auto safe_risk = directRiskCallback(0.5);
+  std::vector<iap::ForwardRiskBatchRequest> observed_risk_requests;
+  const auto safe_risk = [&observed_risk_requests](
+      const iap::ForwardRiskBatchRequest &request) {
+    observed_risk_requests.push_back(request);
+    return directRiskCallback(0.5)(request);
+  };
   auto execution = makeP4ExecutionSnapshot(
       snapshot, safe_risk, 10.0, 919u);
   auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
@@ -8931,10 +8988,7 @@ TEST(P4PreparedSuccessorPolicy,
   Eigen::MatrixXd parent_points = p4StoppedControlPoints();
   parent_points.row(0).array() -= 12.0;
   parent_points.row(2).array() += 1.5;
-  parent_points(1, 0) = -0.25;
-  parent_points(1, 1) = 0.0;
-  parent_points(1, 2) = 0.32;
-  ego_planner::UniformBspline parent(parent_points, 3, 0.5);
+  ego_planner::UniformBspline parent(parent_points, 3, 2.0);
   const auto parent_terminal = ego_planner::imposeP4TerminalStop(
       &parent, terminalStartState(parent), 20.0, 100.0, 0.0);
   ASSERT_TRUE(parent_terminal.success) << parent_terminal.reason;
@@ -8990,7 +9044,7 @@ TEST(P4PreparedSuccessorPolicy,
 
   const Eigen::Vector3d switch_position = parent.evaluateDeBoorT(0.0);
   const Eigen::Vector3d successor_target =
-      switch_position + Eigen::Vector3d(7.82419, 0.0, 0.0);
+      switch_position + Eigen::Vector3d(14.0, 0.0, 0.0);
   auto decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
   decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
@@ -8999,11 +9053,11 @@ TEST(P4PreparedSuccessorPolicy,
   decision.request_position = switch_position;
   decision.local_target = successor_target;
   decision.common_anchor = decision.local_target;
+  decision.decision_horizon_m = 14.0;
   decision.selected_guide = {
       switch_position,
-      switch_position + Eigen::Vector3d(2.0, 0.57, 0.0),
-      switch_position + Eigen::Vector3d(5.0, 1.25, 0.0),
-      switch_position + Eigen::Vector3d(6.17, 1.41, 0.0),
+      switch_position + Eigen::Vector3d(5.0, 0.0, 0.0),
+      switch_position + Eigen::Vector3d(10.0, 0.0, 0.0),
       decision.local_target};
   decision.selected_candidate_id = 101u;
   decision.selected_channel_id = 201u;
@@ -9012,6 +9066,7 @@ TEST(P4PreparedSuccessorPolicy,
   decision.candidates.front().channel_id = decision.selected_channel_id;
   decision.candidates.front().path = decision.selected_guide;
   decision.candidates.front().topology_path = decision.selected_guide;
+  decision.candidates.front().risk_samples.clear();
   decision.candidates.front().path_hash = "rolling-sharp-turn-guide";
   decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
   decision.map_inflation_m = map->getObstacleInflation();
@@ -9025,13 +9080,43 @@ TEST(P4PreparedSuccessorPolicy,
       successor_target,
       Eigen::Vector3d::Zero(), true, false, switch_position);
 
-  EXPECT_FALSE(prepared);
-  EXPECT_EQ(manager.lastP4ForwardDecision().reason,
-            "frozen_guide_has_insufficient_successor_progress");
+  ASSERT_TRUE(prepared)
+      << manager.lastP4ForwardDecision().reason << ":"
+      << manager.lastP4ActualCurveCertification().detail;
   EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
-            ego_planner::P4SuccessorFailure::PROGRESS_INSUFFICIENT);
-  EXPECT_EQ(manager.lastP4ForwardDecision().planning_disposition,
-            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+            ego_planner::P4SuccessorFailure::NONE);
+  ASSERT_GE(manager.lastP4ForwardDecision().selected_guide.size(), 2u);
+  EXPECT_TRUE(manager.lastP4ForwardDecision().selected_guide.back().isApprox(
+      successor_target, 1.0e-9))
+      << "the frozen channel must retain the full route horizon";
+  const auto replacement_request = std::find_if(
+      observed_risk_requests.begin(), observed_risk_requests.end(),
+      [](const iap::ForwardRiskBatchRequest &request) {
+        return request.combined_snapshot_identity.find(
+            "p4_limited_prefix_replacement_v1") != std::string::npos;
+      });
+  ASSERT_NE(replacement_request, observed_risk_requests.end());
+  auto child = manager.local_data_.position_traj_;
+  auto child_velocity = child.getDerivative();
+  auto child_acceleration = child_velocity.getDerivative();
+  EXPECT_TRUE(child.evaluateDeBoorT(0.0).isApprox(
+      parent.evaluateDeBoorT(0.0), 1.0e-8));
+  EXPECT_TRUE(child_velocity.evaluateDeBoorT(0.0).isApprox(
+      parent.getDerivative().evaluateDeBoorT(0.0), 1.0e-8));
+  EXPECT_TRUE(child_acceleration.evaluateDeBoorT(0.0).isApprox(
+      parent.getDerivative().getDerivative().evaluateDeBoorT(0.0),
+      1.0e-7));
+  EXPECT_LE(child_velocity.evaluateDeBoorT(child.getTimeSum()).norm(),
+            1.0e-9);
+  EXPECT_LE(child_acceleration.evaluateDeBoorT(child.getTimeSum()).norm(),
+            1.0e-8);
+  EXPECT_GT(
+      (child.evaluateDeBoorT(child.getTimeSum()) - switch_position).norm(),
+      1.85);
+  EXPECT_LT(
+      (child.evaluateDeBoorT(child.getTimeSum()) - switch_position).norm(),
+      (successor_target - switch_position).norm())
+      << "only the executable child seed should be cropped for stopping";
 }
 
 TEST(P4PreparedSuccessorPolicy,

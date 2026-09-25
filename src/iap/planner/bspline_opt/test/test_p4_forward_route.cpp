@@ -356,10 +356,41 @@ TEST(P4RollingSuccessorGuide,
   EXPECT_NEAR(
       bounded.target_station_m,
       4.0 -
-          ego_planner::p4KinematicStoppingProgress(0.5, input.limits),
+          ego_planner::p4StoppingDistance(
+              input.start_velocity, input.start_acceleration, input.limits),
       1.0e-12);
   EXPECT_TRUE(bounded.guide.back().isApprox(
       Eigen::Vector3d(bounded.target_station_m, 0.0, 1.0), 1.0e-12));
+}
+
+TEST(P4BoundedExecutionGuide,
+     CurrentAccelerationIncreasesTheUnifiedStoppingReserve)
+{
+  ego_planner::P4BoundedExecutionGuideInput coasting;
+  coasting.frozen_guide = {
+    {0.0, 0.0, 1.0}, {4.0, 0.0, 1.0}, {8.0, 0.0, 1.0}};
+  coasting.start_position = coasting.frozen_guide.front();
+  coasting.start_velocity = Eigen::Vector3d(0.5, 0.0, 0.0);
+  coasting.start_acceleration.setZero();
+  coasting.decision_horizon_m = 8.0;
+  coasting.local_support_frontier_m = 8.0;
+
+  auto accelerating = coasting;
+  accelerating.start_acceleration = Eigen::Vector3d(0.25, 0.0, 0.0);
+  const auto coast_bound = ego_planner::p4BoundExecutionGuide(coasting);
+  const auto accelerating_bound =
+      ego_planner::p4BoundExecutionGuide(accelerating);
+
+  ASSERT_TRUE(coast_bound.valid) << coast_bound.reason;
+  ASSERT_TRUE(accelerating_bound.valid) << accelerating_bound.reason;
+  EXPECT_LT(accelerating_bound.target_station_m,
+            coast_bound.target_station_m);
+  EXPECT_NEAR(
+      accelerating_bound.target_station_m,
+      8.0 - ego_planner::p4StoppingDistance(
+          accelerating.start_velocity, accelerating.start_acceleration,
+          accelerating.limits),
+      1.0e-12);
 }
 
 TEST(P4RollingSuccessorGuide,
@@ -388,55 +419,6 @@ TEST(P4RollingSuccessorGuide, RejectsParentEndpointOutsideFrozenGuide)
   EXPECT_FALSE(bounded.valid);
   EXPECT_EQ(bounded.reason, "approved_endpoint_outside_frozen_guide");
   EXPECT_TRUE(bounded.guide.empty());
-}
-
-TEST(P4RollingSuccessorGuide,
-     FullTopologyFallbackKeepsTheFrozenBoundedChildTarget)
-{
-  ego_planner::P4ForwardRequest request;
-  request.local_target = Eigen::Vector3d(8.0, 3.0, 1.0);
-  request.nominal_local_reference = {
-    Eigen::Vector3d::Zero(), request.local_target};
-  ego_planner::P4BoundedExecutionGuide bounded;
-  bounded.valid = true;
-  bounded.guide = {
-    Eigen::Vector3d(0.0, 0.0, 1.0),
-    Eigen::Vector3d(1.4, -0.2, 1.0)};
-
-  ASSERT_TRUE(ego_planner::applyP4RollingSuccessorGuide(
-    bounded, true, 17u, &request));
-  EXPECT_FALSE(request.successor_fast_path);
-  EXPECT_TRUE(request.successor_reuse_guide.empty());
-  EXPECT_EQ(request.incumbent_channel_id, 0u);
-  ASSERT_EQ(request.nominal_local_reference.size(), 2u);
-  EXPECT_TRUE(request.nominal_local_reference.back().isApprox(
-    bounded.guide.back(), 1.0e-12));
-  EXPECT_TRUE(request.local_target.isApprox(
-    bounded.guide.back(), 1.0e-12));
-}
-
-TEST(P4RollingSuccessorGuide,
-     FullTopologyFallbackRetainsTheFirstFixedGuideAfterFailureEvidence)
-{
-  ego_planner::P4BoundedExecutionGuide fixed;
-  fixed.valid = true;
-  fixed.reason = "ok";
-  fixed.guide = {
-    Eigen::Vector3d(0.0, 0.0, 1.0),
-    Eigen::Vector3d(1.4, -0.2, 1.0)};
-  fixed.target_station_m = 1.42;
-  ego_planner::P4BoundedExecutionGuide rebuilt_after_failure;
-  rebuilt_after_failure.reason =
-    "frozen_guide_has_insufficient_successor_reserve";
-
-  const auto selected = ego_planner::selectP4RollingSuccessorGuide(
-    rebuilt_after_failure, fixed, true);
-
-  ASSERT_TRUE(selected.valid);
-  ASSERT_EQ(selected.guide.size(), fixed.guide.size());
-  EXPECT_TRUE(selected.guide.back().isApprox(
-    fixed.guide.back(), 1.0e-12));
-  EXPECT_DOUBLE_EQ(selected.target_station_m, fixed.target_station_m);
 }
 
 TEST(P4RollingSuccessorGuide,
