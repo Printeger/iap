@@ -1275,13 +1275,18 @@ namespace ego_planner
       p4_forward_limits_.task_mode = task_mode;
       p4_global_exposure_ledger_ =
           iap::GlobalNavigationExposureLedger(p4_global_exposure_policy_);
+      p4_global_exposure_last_observation_stamp_s_ =
+          std::numeric_limits<double>::quiet_NaN();
     }
     bool updateP4GlobalExposureForTest(
         const double stamp_s, const double ratio,
         const std::string &evidence_identity)
     {
-      return p4_global_exposure_ledger_.update(
+      const bool updated = p4_global_exposure_ledger_.update(
           stamp_s, ratio, evidence_identity);
+      if (updated)
+        p4_global_exposure_last_observation_stamp_s_ = stamp_s;
+      return updated;
     }
     void setP4VerticalSliceOptimizerForTest(
         BsplineOptimizer::Ptr optimizer, GridMap::Ptr grid_map)
@@ -1457,6 +1462,8 @@ namespace ego_planner
     double p4_successor_progress_stability_margin_m_ = 0.05;
     iap::GlobalNavigationExposurePolicy p4_global_exposure_policy_;
     iap::GlobalNavigationExposureLedger p4_global_exposure_ledger_;
+    double p4_global_exposure_last_observation_stamp_s_ =
+        std::numeric_limits<double>::quiet_NaN();
     iap::LocalMotionAssurancePolicy p4_local_motion_policy_;
     double p4_planning_clearance_buffer_m_ = 0.05;
     std::shared_ptr<const iap::LocalClearanceEvaluator>

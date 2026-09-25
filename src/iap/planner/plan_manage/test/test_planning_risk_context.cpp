@@ -2743,10 +2743,7 @@ TEST(TrajectoryExecutionFeedbackTest,
 
   auto waiting = makeActivatedRuntimeFeedbackFixture(
       "runtime_feedback_waiting", 935);
-  const double waiting_bound_s =
-      waiting.manager->requiredTrajectoryLeadTimeSeconds();
-  *waiting.steady_now_ns += static_cast<int64_t>(std::llround(
-      waiting_bound_s * 1.0e9));
+  *waiting.steady_now_ns += 200'000'000LL;
   const Eigen::Vector3d waiting_position =
       waiting.manager->local_data_.position_traj_.evaluateDeBoorT(0.0);
   const auto waiting_result =
@@ -2757,9 +2754,7 @@ TEST(TrajectoryExecutionFeedbackTest,
 
   auto waiting_expired = makeActivatedRuntimeFeedbackFixture(
       "runtime_feedback_waiting_expired", 936);
-  *waiting_expired.steady_now_ns += static_cast<int64_t>(std::llround(
-      waiting_expired.manager->requiredTrajectoryLeadTimeSeconds() *
-      1.0e9)) + 10;
+  *waiting_expired.steady_now_ns += 200'000'010LL;
   const Eigen::Vector3d waiting_expired_position =
       waiting_expired.manager->local_data_.position_traj_.evaluateDeBoorT(
           0.0);
@@ -2812,6 +2807,33 @@ TEST(TrajectoryExecutionFeedbackTest,
             std::string::npos) << trace_only_stale_result.reason;
   EXPECT_TRUE(
       trace_only_stale_result.guard_braking_preschedule_requested);
+
+  auto first_trace_missing = makeActivatedRuntimeFeedbackFixture(
+      "runtime_first_controller_trace_missing", 938);
+  *first_trace_missing.steady_now_ns += 201'000'000LL;
+  auto first_trace_trajectory =
+      first_trace_missing.manager->local_data_.position_traj_;
+  auto first_trace_velocity = first_trace_trajectory.getDerivative();
+  auto first_trace_acceleration = first_trace_velocity.getDerivative();
+  constexpr double first_trace_elapsed_s = 0.4;
+  const Eigen::Vector3d first_trace_position =
+      first_trace_trajectory.evaluateDeBoorT(first_trace_elapsed_s);
+  ASSERT_TRUE(first_trace_missing.manager->recordTrajectoryExecutionSample(
+      first_trace_missing.manager->local_data_.execution_instance_id_,
+      first_trace_missing.manager->local_data_.traj_id_,
+      first_trace_missing.manager->local_data_.start_time_.nanoseconds(),
+      first_trace_missing.manager->local_data_.curve_hash_,
+      1'725'000'000.4, first_trace_elapsed_s, first_trace_position,
+      first_trace_velocity.evaluateDeBoorT(first_trace_elapsed_s),
+      first_trace_acceleration.evaluateDeBoorT(first_trace_elapsed_s)));
+  const auto first_trace_missing_result =
+      first_trace_missing.manager->validateCommittedP4TrajectoryExecution(
+          first_trace_missing.evaluation_ros_s, first_trace_position);
+  EXPECT_NE(first_trace_missing_result.reason.find(
+                "controller_execution_trace_stale"),
+            std::string::npos) << first_trace_missing_result.reason;
+  EXPECT_TRUE(
+      first_trace_missing_result.guard_braking_preschedule_requested);
 
   auto saturated = makeActivatedRuntimeFeedbackFixture(
       "runtime_feedback_saturated", 933);
@@ -10614,8 +10636,11 @@ TEST(P4PreparedSuccessorPolicy,
         latest_snapshot_requests.push_back(request);
         return latest_snapshot_callback(request);
       };
-  manager.setTimeProvider([]() {
-    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  double reauthorization_ros_s = 10.0;
+  manager.setTimeProvider([&reauthorization_ros_s]() {
+    return rclcpp::Time(
+        static_cast<int64_t>(reauthorization_ros_s * 1.0e9),
+        RCL_ROS_TIME);
   });
   ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
       incumbent.execution_instance_id_, incumbent.traj_id_,
@@ -10632,11 +10657,16 @@ TEST(P4PreparedSuccessorPolicy,
       incumbent.position_traj_.evaluateDeBoorT(0.0),
       incumbent_velocity.evaluateDeBoorT(0.0),
       incumbent_acceleration.evaluateDeBoorT(0.0)));
+  manager.setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+  reauthorization_ros_s = 10.005;
+  ASSERT_TRUE(manager.updateP4GlobalExposureForTest(
+      reauthorization_ros_s, 1.02, "parent-runtime-ledger-at-5ms"));
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy_b, directRiskCallback(0.5),
       bound_execution_b);
   EXPECT_TRUE(manager.validatePreparedP4SuccessorBeforePublish(
-      incumbent, 10.0, &reason)) << reason;
+      incumbent, reauthorization_ros_s, &reason)) << reason;
   EXPECT_EQ(same_snapshot_direct_queries, queries_before_handoff);
   EXPECT_GT(latest_snapshot_direct_queries, 0);
   const auto bridge_request = std::find_if(
@@ -10647,8 +10677,9 @@ TEST(P4PreparedSuccessorPolicy,
       });
   ASSERT_NE(bridge_request, latest_snapshot_requests.end());
   ASSERT_FALSE(bridge_request->points.empty());
-  EXPECT_NEAR(bridge_request->points.front().query_time_s, 10.0, 1.0e-9);
+  EXPECT_NEAR(bridge_request->points.front().query_time_s, 10.005, 1.0e-9);
   EXPECT_NEAR(bridge_request->points.back().query_time_s, 10.01, 1.0e-9);
+  EXPECT_LT(bridge_request->compute_budget_ms, 150.0);
   EXPECT_EQ(reason, "prepared_successor_publish_revalidated");
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_snapshot_id,
             bound_execution_b->execution_snapshot_id);
@@ -10667,10 +10698,10 @@ TEST(P4PreparedSuccessorPolicy,
       snapshot, 10.0, occupancy_c, directRiskCallback(1.01),
       bound_execution_c);
   EXPECT_FALSE(manager.validatePreparedP4SuccessorBeforePublish(
-      incumbent, 10.0, &reason));
+      incumbent, reauthorization_ros_s, &reason));
   EXPECT_EQ(reason,
             "successor_latest_trajectory_assurance_changed:"
-            "global_navigation_budget_exceeded:safe");
+            "global_navigation_exposure_budget_exhausted:safe");
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
   EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->state,
             ego_planner::P4SuccessorPreparationState::FAILED);

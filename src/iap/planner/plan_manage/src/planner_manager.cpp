@@ -28,6 +28,15 @@
 
 namespace ego_planner
 {
+  namespace
+  {
+    // This is the existing PositionCommand/controller-trace freshness bound.
+    // Keep first-sample activation grace on the same measured contract; the
+    // trajectory publication lead time additionally contains optimizer WCET
+    // and is not a control-feedback latency bound.
+    constexpr double kExecutionFeedbackFreshnessTimeoutS = 0.2;
+  }
+
   bool p4RequiresFullSuccessorChannelSearch(
       const P4ForwardDecision &parent_decision,
       const P4ExecutionAuthority parent_authority)
@@ -3818,6 +3827,8 @@ namespace ego_planner
     (void)iap::LocalMotionAssurance(p4_local_motion_policy_);
     p4_global_exposure_ledger_ =
         iap::GlobalNavigationExposureLedger(p4_global_exposure_policy_);
+    p4_global_exposure_last_observation_stamp_s_ =
+        std::numeric_limits<double>::quiet_NaN();
     if (!validP4TrackingErrorLimit(p4_max_tracking_error_m_))
       throw std::invalid_argument(
           "p4.execution.max_tracking_error_m must be finite, positive, and "
@@ -11160,15 +11171,36 @@ namespace ego_planner
           parent_sample.trajectory_id == incumbent.traj_id_ &&
           parent_sample.start_time_ns ==
               incumbent.start_time_.nanoseconds() &&
-          parent_sample.curve_hash == incumbent.curve_hash_;
+          parent_sample.curve_hash == incumbent.curve_hash_ &&
+          executionFeedbackFresh(
+              parent_sample.receive_steady_ns,
+              kExecutionFeedbackFreshnessTimeoutS);
       if (!parent_sample_matches && parent_switch_elapsed_s > 1.0e-9)
         return finish(false, "successor_parent_execution_sample_unavailable",
                       P4SuccessorFailure::INTEGRITY_STALE);
       if (parent_sample_matches)
       {
+        double bridge_begin_ros_s = parent_sample.receive_ros_stamp_s;
+        double bridge_begin_parent_elapsed_s =
+            parent_sample.trajectory_elapsed_s;
+        const double ledger_stamp_s =
+            p4_global_exposure_last_observation_stamp_s_;
+        if (std::isfinite(ledger_stamp_s))
+        {
+          const double ledger_parent_elapsed_s =
+              parent_sample.trajectory_elapsed_s +
+              (ledger_stamp_s - parent_sample.receive_ros_stamp_s);
+          if (!std::isfinite(ledger_parent_elapsed_s) ||
+              ledger_parent_elapsed_s < -1.0e-9 ||
+              ledger_parent_elapsed_s > parent_switch_elapsed_s + 1.0e-9)
+            return finish(false, "successor_exposure_ledger_anchor_invalid",
+                          P4SuccessorFailure::INTEGRITY_STALE);
+          bridge_begin_ros_s = ledger_stamp_s;
+          bridge_begin_parent_elapsed_s =
+              std::max(0.0, ledger_parent_elapsed_s);
+        }
         const auto bridge = p4RollingSuccessorExposureBridge(
-            parent_sample.receive_ros_stamp_s,
-            parent_sample.trajectory_elapsed_s,
+            bridge_begin_ros_s, bridge_begin_parent_elapsed_s,
             parent_switch_elapsed_s, incumbent.duration_);
         if (!bridge.valid)
           return finish(false, bridge.reason,
@@ -11309,10 +11341,20 @@ namespace ego_planner
                  << parent_bridge_times.front() << ':'
                  << parent_switch_elapsed_s;
         continuous_exposure_identity = identity.str();
+        const double elapsed_authorization_ms =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started).count();
+        const double remaining_authorization_ms =
+            p4_forward_limits_.compute_budget_ms -
+            elapsed_authorization_ms;
+        if (!std::isfinite(remaining_authorization_ms) ||
+            remaining_authorization_ms <= 0.0)
+          return finish(false, "successor_parent_bridge_query_timeout",
+                        P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
         const auto bridge_request = makeP4CurveRiskRequest(
             continuous_exposure_identity, risk_snapshot, execution, now_s,
             parent_bridge_time_origin_s, parent_bridge_points,
-            parent_bridge_times, p4_forward_limits_.compute_budget_ms,
+            parent_bridge_times, remaining_authorization_ms,
             p4_global_exposure_policy_.task_mode);
         const auto bridge_result =
             execution->forward_risk_batch(bridge_request);
@@ -12186,7 +12228,8 @@ namespace ego_planner
     bool current_t_from_server = false;
     bool execution_clock_stale = false;
     if (activeTrajectoryExecutionState(
-            evaluation_now_s, 0.2, &server_execution_t,
+            evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS,
+            &server_execution_t,
             &server_position, &server_velocity, &server_acceleration))
     {
       current_t_from_server = true;
@@ -12238,7 +12281,7 @@ namespace ego_planner
     const bool controller_trace_matches = trajectoryControllerTrace(
         local_data_.execution_instance_id_, local_data_.traj_id_,
         local_data_.start_time_.nanoseconds(), local_data_.curve_hash_,
-        evaluation_now_s, 0.2, nullptr,
+        evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS, nullptr,
         &trace_commanded_position, &trace_commanded_velocity,
         &trace_commanded_acceleration, &control_actual_position,
         &control_actual_velocity, &control_actual_acceleration,
@@ -12259,7 +12302,7 @@ namespace ego_planner
       waiting_for_first_matching_controller_trace = !matching_trace_seen &&
           executionFeedbackFresh(
               last_activated_receive_steady_ns_,
-              requiredTrajectoryLeadTimeSeconds());
+              kExecutionFeedbackFreshnessTimeoutS);
     }
     if (controller_trace_required_ && !controller_trace_matches &&
         !waiting_for_first_matching_controller_trace)
@@ -13366,9 +13409,12 @@ namespace ego_planner
           ";trajectory_time_ms=" + std::to_string(static_cast<long long>(
               std::llround(current_t * 1000.0)));
       const auto episode_before_update = p4_global_exposure_ledger_.state();
-      if ((current_global_ratio_complete &&
-           !p4_global_exposure_ledger_.update(
-               evaluation_now_s, current_global_ratio, episode_identity)) ||
+      const bool exposure_ledger_updated = current_global_ratio_complete &&
+          p4_global_exposure_ledger_.update(
+              evaluation_now_s, current_global_ratio, episode_identity);
+      if (exposure_ledger_updated)
+        p4_global_exposure_last_observation_stamp_s_ = evaluation_now_s;
+      if ((current_global_ratio_complete && !exposure_ledger_updated) ||
           p4_global_exposure_ledger_.state().budget_exhausted)
       {
         if (p4_global_exposure_ledger_.state().budget_exhausted)
