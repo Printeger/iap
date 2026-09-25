@@ -12,7 +12,6 @@ namespace ego_planner
 {
   namespace
   {
-    constexpr int kP5FinalGateGlobalTrajTrialLimit = 1;
     constexpr int kDefaultGlobalTrajTrialLimit = 10;
 
     double activeTrajectoryTime(
@@ -729,8 +728,7 @@ namespace ego_planner
     }
 
     const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
-        (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
-         planner_manager_->p5_integrity_gate_->finalGateEnabled());
+        planner_manager_->p5_integrity_gate_->runtimeEnabled();
     // The attempt identity belongs to the executing incumbent. Its original
     // planning snapshot can legitimately age beyond the one-second P0
     // admission freshness limit before the vehicle reaches the checkpoint, so
@@ -791,7 +789,7 @@ namespace ego_planner
         if (have_odom_ && have_target_ && have_trigger_)
         {
           bool success =
-              planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
+              planFromGlobalTraj(kDefaultGlobalTrajTrialLimit);
           if (success)
           {
             changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -800,8 +798,7 @@ namespace ego_planner
           }
           else
           {
-            if (!p4_waiting_for_risk_grid_ready_ &&
-                !p5_waiting_for_p0_ready_)
+            if (!p4_waiting_for_risk_grid_ready_)
             {
               RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
             }
@@ -821,7 +818,7 @@ namespace ego_planner
     case GEN_NEW_TRAJ:
     {
 
-      bool success = planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
+      bool success = planFromGlobalTraj(kDefaultGlobalTrajTrialLimit);
       if (success)
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -838,12 +835,6 @@ namespace ego_planner
                  P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
         {
           changeFSMExecState(EXEC_TRAJ, "P4_COMMIT");
-        }
-        else if (p5_final_gate_emergency_candidate_)
-        {
-          p5_final_gate_emergency_candidate_ = false;
-          flag_escape_emergency_ = true;
-          changeFSMExecState(EMERGENCY_STOP, "P5_FINAL");
         }
         else
         {
@@ -881,12 +872,6 @@ namespace ego_planner
                  P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
         {
           changeFSMExecState(EXEC_TRAJ, "P4_COMMIT");
-        }
-        else if (p5_final_gate_emergency_candidate_)
-        {
-          p5_final_gate_emergency_candidate_ = false;
-          flag_escape_emergency_ = true;
-          changeFSMExecState(EMERGENCY_STOP, "P5_FINAL");
         }
         else
         {
@@ -1038,34 +1023,6 @@ namespace ego_planner
     }
   }
 
-  bool EGOReplanFSM::shouldDeferP5FinalGateForP0Ready()
-  {
-    if (!planner_manager_ || !planner_manager_->p0_risk_grid_runtime_ ||
-        !planner_manager_->p5_integrity_gate_ ||
-        !planner_manager_->p5_integrity_gate_->finalGateEnabled())
-    {
-      p5_waiting_for_p0_ready_ = false;
-      return false;
-    }
-    const double now_s = plannerNow().seconds();
-    const auto execution = planner_manager_->p0_risk_grid_runtime_->
-        acquireExecutionRiskSnapshotForEvaluation(now_s);
-    if (planner_manager_->p0_risk_grid_runtime_->
-            executionSnapshotLocalFreshAt(
-            execution, now_s))
-    {
-      p5_waiting_for_p0_ready_ = false;
-      return false;
-    }
-    p5_waiting_for_p0_ready_ = true;
-    RCLCPP_WARN_THROTTLE(
-        node_->get_logger(), *node_->get_clock(), 1000,
-        "Deferring P5 final-gate planning until execution risk authority is ready: execution_snapshot_id=%lu",
-        static_cast<unsigned long>(execution
-            ? execution->execution_snapshot_id : 0u));
-    return true;
-  }
-
   bool EGOReplanFSM::shouldDeferP4PlanningForRiskGridReady()
   {
     if (!planner_manager_ || !planner_manager_->p0_risk_grid_runtime_)
@@ -1108,26 +1065,10 @@ namespace ego_planner
     return false;
   }
 
-  int EGOReplanFSM::globalTrajTrialLimitForP5FinalGate() const
-  {
-    if (planner_manager_ && planner_manager_->p5_integrity_gate_ &&
-        planner_manager_->p5_integrity_gate_->finalGateEnabled())
-    {
-      return kP5FinalGateGlobalTrajTrialLimit;
-    }
-    return kDefaultGlobalTrajTrialLimit;
-  }
-
   bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
   {
     if (shouldDeferP4PlanningForRiskGridReady())
       return false;
-
-    if (shouldDeferP5FinalGateForP0Ready())
-    {
-      p5_final_gate_emergency_candidate_ = false;
-      return false;
-    }
 
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
@@ -1145,10 +1086,6 @@ namespace ego_planner
       {
         return true;
       }
-      if (p5_final_gate_emergency_candidate_)
-      {
-        return false;
-      }
     }
     return false;
   }
@@ -1159,7 +1096,7 @@ namespace ego_planner
     // A certified braking spline is already the bounded response to stale
     // data. It owns the vehicle until its endpoint or an execution/collision
     // gate revokes it; running the ordinary planner in parallel can mutate
-    // LocalTrajData before a candidate reaches its final gate and split the
+    // LocalTrajData before a candidate reaches publication and split the
     // braking certificate from the curve being executed.
     const auto &execution_certificate =
         planner_manager_->p4ExecutionCertificate();
@@ -1205,10 +1142,6 @@ namespace ego_planner
 
     if (p4PlanningCycleMayRetry(cycle_result))
     {
-      if (p5_final_gate_emergency_candidate_)
-      {
-        return P4PlanningCycleResult::EXECUTION_REVOKED;
-      }
       success = callReboundReplan(true, false);
       cycle_result = classifyP4PlanningCycle(
           success, planner_manager_->p4PlanningDisposition(),
@@ -1217,10 +1150,6 @@ namespace ego_planner
           planner_manager_->p4ExecutionRevoked());
       if (p4PlanningCycleMayRetry(cycle_result))
       {
-        if (p5_final_gate_emergency_candidate_)
-        {
-          return P4PlanningCycleResult::EXECUTION_REVOKED;
-        }
         for (int i = 0; i < trial_times; i++)
         {
           success = callReboundReplan(true, true);
@@ -1231,10 +1160,6 @@ namespace ego_planner
               planner_manager_->p4ExecutionRevoked());
           if (!p4PlanningCycleMayRetry(cycle_result))
             break;
-          if (p5_final_gate_emergency_candidate_)
-          {
-            return P4PlanningCycleResult::EXECUTION_REVOKED;
-          }
         }
       }
     }
@@ -1631,12 +1556,10 @@ namespace ego_planner
     if (planner_manager_->trajectoryCommandAwaitingActivation())
       return false;
 
-    p5_final_gate_emergency_candidate_ = false;
     const LocalTrajData previous_local_data = planner_manager_->local_data_;
 
     const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
-        (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
-         planner_manager_->p5_integrity_gate_->finalGateEnabled());
+        planner_manager_->p5_integrity_gate_->runtimeEnabled();
     std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot =
         p4_require_risk_grid_ready_before_planning_
             ? p4_admitted_risk_grid_snapshot_
@@ -1877,18 +1800,12 @@ namespace ego_planner
         return false;
       }
 
-      // Default construction is the explicit P5-disabled outcome
-      // (OK/DISABLED).  The companion flag distinguishes that valid outcome
-      // from an enabled gate that still needs evaluation.
-      P5GateStatus p5_final_status;
-      bool p5_final_status_evaluated = false;
       if (using_cached_successor)
       {
-        P5GateStatus rebound_p5;
         std::string reauthorization_reason;
         if (!planner_manager_->validatePreparedP4SuccessorBeforePublish(
                 previous_local_data, plannerNow().seconds(),
-                &reauthorization_reason, emergency_time_, &rebound_p5))
+                &reauthorization_reason))
         {
           RCLCPP_WARN(node_->get_logger(),
                       "Cached P4 successor reauthorization failed: %s",
@@ -1896,106 +1813,15 @@ namespace ego_planner
           reject_candidate();
           return false;
         }
-        if (rebound_p5.action == P5GateAction::OK)
-        {
-          p5_final_status = rebound_p5;
-          p5_final_status_evaluated = true;
-        }
       }
       if (p5_pre_evaluation_hook_for_test_)
         p5_pre_evaluation_hook_for_test_();
-      if (planner_manager_->p5_integrity_gate_ &&
-          planner_manager_->p5_integrity_gate_->finalGateEnabled() &&
-          !p5_final_status_evaluated)
-      {
-        const double now_s = plannerNow().seconds();
-        const auto &direct_evidence =
-            planner_manager_->latestP4DirectRiskEvidence();
-        const auto &execution_certificate =
-            planner_manager_->p4ExecutionCertificate();
-        auto snapshot = direct_evidence.risk_snapshot;
-        const uint64_t planning_generation_id =
-            planner_manager_->currentPlanningGenerationId();
-        const uint64_t final_gate_generation_id =
-            snapshot ? snapshot->generation_id() : 0;
-        if (planning_generation_id != final_gate_generation_id)
-        {
-          RCLCPP_WARN(node_->get_logger(),
-                      "P5 final gate using latest risk snapshot: planning_generation_id=%lu final_gate_generation_id=%lu",
-                      static_cast<unsigned long>(planning_generation_id),
-                      static_cast<unsigned long>(final_gate_generation_id));
-        }
-        const P5GateStatus p5_status =
-            (preparing_successor_curve ||
-             preparing_normal_multi_channel_curve)
-            ? planner_manager_->p5_integrity_gate_->evaluateFinalPreview(
-                *info, snapshot, now_s, emergency_time_,
-                &direct_evidence,
-                execution_certificate.gnss_core_policy,
-                execution_certificate.window_layout_hash,
-                execution_certificate.window_point_satellite_sets_hash)
-            : planner_manager_->p5_integrity_gate_->evaluateFinal(
-                *info, snapshot, now_s, emergency_time_,
-                &direct_evidence,
-                execution_certificate.gnss_core_policy,
-                execution_certificate.window_layout_hash,
-                execution_certificate.window_point_satellite_sets_hash);
-        if (p5_status.action != P5GateAction::OK)
-        {
-          if (p5_status.action ==
-              P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE)
-          {
-            p5_final_gate_emergency_candidate_ = true;
-          }
-          RCLCPP_WARN(node_->get_logger(),
-                      "P5 final gate blocked trajectory: action=%s reason=%s planning_generation_id=%lu final_gate_generation_id=%lu",
-                      P5RuntimeIntegrityGate::actionName(p5_status.action),
-                      P5RuntimeIntegrityGate::reasonName(p5_status.reason),
-                      static_cast<unsigned long>(planning_generation_id),
-                      static_cast<unsigned long>(final_gate_generation_id));
-          planner_manager_->certifyP4ActualCurve(
-              "p5_final_rejected", plannerNow().seconds());
-          if (preparing_successor_curve)
-            planner_manager_->recordPreparedP4SuccessorCurveFailure(
-                plannerNow().seconds(),
-                P4PreparedCurveFailure::P5_PREVIEW,
-                std::string("p5_preview_rejected:") +
-                    P5RuntimeIntegrityGate::reasonName(p5_status.reason));
-          P4NormalChannelPreparationDisposition normal_failure_disposition =
-              P4NormalChannelPreparationDisposition::NOT_APPLICABLE;
-          if (preparing_normal_multi_channel_curve)
-            normal_failure_disposition =
-                planner_manager_->recordP4NormalChannelCurveFailure(
-                    plannerNow().seconds(),
-                    P4PreparedCurveFailure::P5_PREVIEW,
-                    std::string("p5_preview_rejected:") +
-                        P5RuntimeIntegrityGate::reasonName(
-                            p5_status.reason),
-                    nullptr);
-          reject_candidate();
-          (void)normal_failure_disposition;
-          return false;
-        }
-        p5_final_status = p5_status;
-        p5_final_status_evaluated = true;
-        if (!preparing_successor_curve &&
-            !preparing_normal_multi_channel_curve &&
-            !planner_manager_->certifyP4ActualCurve(
-                "p5_final_pass_before_publish",
-                plannerNow().seconds()))
-        {
-          RCLCPP_ERROR(node_->get_logger(),
-                       "P4-v2 P5-pass lineage write failed before publish");
-          reject_candidate();
-          return false;
-        }
-      }
 
       if (preparing_successor_curve)
       {
         std::string cache_reason;
         if (!planner_manager_->cachePreparedP4SuccessorBundle(
-                plannerNow().seconds(), p5_final_status, &cache_reason))
+                plannerNow().seconds(), &cache_reason))
         {
           RCLCPP_WARN(node_->get_logger(),
                       "P4 successor full-curve cache rejected: %s",
@@ -2018,8 +1844,7 @@ namespace ego_planner
         std::string comparison_reason;
         const auto comparison_disposition =
             planner_manager_->prepareP4NormalChannelComparison(
-                plannerNow().seconds(), p5_final_status,
-                &comparison_reason);
+                plannerNow().seconds(), &comparison_reason);
         if (comparison_disposition ==
                 P4NormalChannelPreparationDisposition::
                     NEXT_CHANNEL_PENDING ||
@@ -2069,58 +1894,11 @@ namespace ego_planner
           return false;
         }
         info = &planner_manager_->local_data_;
-        if (preparing_normal_multi_channel_curve &&
-            planner_manager_->p5_integrity_gate_ &&
-            planner_manager_->p5_integrity_gate_->finalGateEnabled())
-        {
-          const double now_s = plannerNow().seconds();
-          const auto &direct_evidence =
-              planner_manager_->latestP4DirectRiskEvidence();
-          const auto &execution_certificate =
-              planner_manager_->p4ExecutionCertificate();
-          const auto snapshot = direct_evidence.risk_snapshot;
-          p5_final_status =
-              planner_manager_->p5_integrity_gate_->evaluateFinal(
-                  *info, snapshot, now_s, emergency_time_,
-                  &direct_evidence,
-                  execution_certificate.gnss_core_policy,
-                  execution_certificate.window_layout_hash,
-                  execution_certificate.window_point_satellite_sets_hash);
-          p5_final_status_evaluated = true;
-          if (p5_final_status.action != P5GateAction::OK)
-          {
-            if (p5_final_status.action ==
-                P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE)
-              p5_final_gate_emergency_candidate_ = true;
-            RCLCPP_WARN(
-                node_->get_logger(),
-                "P5 final gate blocked selected multi-channel bundle: "
-                "action=%s reason=%s",
-                P5RuntimeIntegrityGate::actionName(
-                    p5_final_status.action),
-                P5RuntimeIntegrityGate::reasonName(
-                    p5_final_status.reason));
-            planner_manager_->certifyP4ActualCurve(
-                "p5_final_rejected", now_s);
-            reject_candidate();
-            return false;
-          }
-          if (!planner_manager_->certifyP4ActualCurve(
-                  "p5_final_pass_before_publish", now_s))
-          {
-            RCLCPP_ERROR(
-                node_->get_logger(),
-                "P4-v2 selected multi-channel P5-pass lineage write "
-                "failed before publish");
-            reject_candidate();
-            return false;
-          }
-        }
       }
 
-      // P5 intentionally evaluates its own latest snapshot semantics above.
-      // P1 publication is different: it must remain bound to the immutable
-      // snapshot used to optimize this exact candidate.
+      // P1 freshness remains bound to the immutable snapshot used to optimize
+      // this exact candidate. P4 publication validation below then checks the
+      // certificate issued for that same actual curve.
       std::string freshness_reason;
       if (!using_cached_successor &&
           !planner_manager_->preparePlanningRiskPublish(
@@ -2141,15 +1919,14 @@ namespace ego_planner
       }
 
       std::string successor_publish_reason;
-      // Successor preparation may be followed by a slow final-risk or P5
-      // gate. Revalidate against the still-executing parent and the newest
+      // Successor preparation may be followed by other callback work.
+      // Revalidate against the still-executing parent and the newest
       // execution authority at the actual publication boundary; a late or
       // relabelled child is discarded without interrupting the parent.
       if (!using_cached_successor &&
           !planner_manager_->validatePreparedP4SuccessorBeforePublish(
               previous_local_data, plannerNow().seconds(),
-              &successor_publish_reason, emergency_time_,
-              p5_final_status_evaluated ? &p5_final_status : nullptr))
+              &successor_publish_reason))
       {
         RCLCPP_WARN(node_->get_logger(),
                     "P4 prepared successor rejected before publish: %s",
@@ -2157,6 +1934,49 @@ namespace ego_planner
         reject_candidate();
         return false;
       }
+
+      P4PreparedCurveFailure publication_failure =
+          P4PreparedCurveFailure::INCOMPLETE;
+      std::string publication_reason;
+      double publication_now_s = plannerNow().seconds();
+      bool publication_valid =
+          planner_manager_->validateP4PublicationCertificate(
+              *info, publication_now_s, &publication_failure,
+              &publication_reason);
+      if (!publication_valid &&
+          (publication_failure == P4PreparedCurveFailure::FRESHNESS ||
+           publication_failure ==
+               P4PreparedCurveFailure::SNAPSHOT_MISMATCH))
+      {
+        // An expired ticket or changed execution snapshot is sent back
+        // through the existing P4 certifier for the exact same immutable
+        // actual curve. P5 never reconstructs or reinterprets planning
+        // evidence.
+        if (planner_manager_->certifyP4ActualCurve(
+                "normal_selected_bundle_latest_reauthorization",
+                publication_now_s))
+        {
+          publication_valid =
+              planner_manager_->validateP4PublicationCertificate(
+                  *info, publication_now_s, &publication_failure,
+                  &publication_reason);
+        }
+      }
+      if (!publication_valid)
+      {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "P4 publication certificate rejected: failure=%s reason=%s",
+            p4PreparedCurveFailureName(publication_failure),
+            publication_reason.c_str());
+        reject_candidate();
+        return false;
+      }
+
+      RCLCPP_INFO(
+          node_->get_logger(),
+          "P4 publication certificate accepted: traj_id=%d reason=%s",
+          info->traj_id_, publication_reason.c_str());
 
       if (!planner_manager_->trajectoryQueueDeadlineAvailable(
               plannerSchedulingNow().seconds(),
@@ -2178,8 +1998,7 @@ namespace ego_planner
       const bool publication_committed = using_cached_successor
           ? planner_manager_->commitP4PreparedBundle(
                 plannerNow().seconds(), &successor_publish_reason)
-          : planner_manager_->certifyP4ActualCurve(
-                "normal_publish_authorized",
+          : planner_manager_->commitP4CertifiedPublication(
                 plannerNow().seconds());
       if (!publication_committed)
       {
@@ -2190,17 +2009,10 @@ namespace ego_planner
         return false;
       }
 
-      if (p5_final_status_evaluated &&
-          planner_manager_->p5_integrity_gate_)
-      {
-        planner_manager_->p5_integrity_gate_->publishFinalAdmission(
-            p5_final_status, plannerNow().seconds());
-      }
-
       /* 1. publish traj to traj_server */
-      // Serialize only after every final gate and certificate check accepted
-      // the current LocalTrajData. This makes the published message a direct
-      // projection of the exact spline those checks inspected.
+      // Serialize only after the publication-certificate check accepted the
+      // current LocalTrajData. This makes the message a direct projection of
+      // the exact spline that P4 certified.
       const traj_utils::msg::Bspline bspline = makeTrajectoryCommand(*info);
       if (!planner_manager_->recordTrajectoryCommandPublished(
               bspline.execution_instance_id, bspline.traj_id,

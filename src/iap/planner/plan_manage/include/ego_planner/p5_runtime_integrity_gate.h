@@ -33,7 +33,6 @@ enum class P5GateReason {
   FUTURE_BAD,
   FUTURE_UNKNOWN,
   AL_INVALID,
-  FINAL_GATE_FAILED,
   SNAPSHOT_UNAVAILABLE,
 };
 
@@ -134,21 +133,6 @@ struct P5GateStatus {
   double current_stale_duration_s = 0.0;
   double current_low_margin_duration_s = 0.0;
   double future_unknown_duration_s = 0.0;
-  int final_gate_fail_count = 0;
-  double final_gate_fail_duration_s = 0.0;
-  std::string final_gate_last_reason;
-  int final_candidate_traj_id = -1;
-  double final_candidate_start_time_s =
-      std::numeric_limits<double>::quiet_NaN();
-  int64_t final_candidate_start_time_ns =
-      std::numeric_limits<int64_t>::min();
-  double final_candidate_duration_s =
-      std::numeric_limits<double>::quiet_NaN();
-  bool final_candidate_rejected = false;
-  double final_evaluation_stamp_s =
-      std::numeric_limits<double>::quiet_NaN();
-  double final_publish_authorization_stamp_s =
-      std::numeric_limits<double>::quiet_NaN();
   std::string pred_al_mode;
   double pred_hal_min = std::numeric_limits<double>::quiet_NaN();
   double pred_val_min = std::numeric_limits<double>::quiet_NaN();
@@ -167,7 +151,6 @@ class P5RuntimeIntegrityGate {
  public:
   struct Config {
     bool enable_runtime_gate = false;
-    bool enable_final_gate = false;
     bool debug_metrics_enable = false;
     // Test-fixture compatibility only. Production construction leaves this
     // false so an interpolated RiskGrid value can never become P5 authority.
@@ -178,8 +161,6 @@ class P5RuntimeIntegrityGate {
     double current_stale_to_emergency_s = 2.0;
     double current_low_margin_to_emergency_s = 2.0;
     double future_unknown_to_emergency_s = 2.0;
-    int final_gate_max_consecutive_failures = 3;
-    double final_gate_max_failure_duration_s = 1.0;
     double current_replan_margin_m = 0.3;
     double current_emergency_margin_m = -0.2;
     double future_replan_margin_m = 0.3;
@@ -202,7 +183,6 @@ class P5RuntimeIntegrityGate {
                          bool create_ros_interfaces = true);
 
   bool runtimeEnabled() const { return config_.enable_runtime_gate; }
-  bool finalGateEnabled() const { return config_.enable_final_gate; }
 
   P5GateStatus evaluateRuntime(
       LocalTrajData& local_data,
@@ -218,31 +198,6 @@ class P5RuntimeIntegrityGate {
       double runtime_trajectory_time_s =
           std::numeric_limits<double>::quiet_NaN());
 
-  P5GateStatus evaluateFinal(
-      LocalTrajData& local_data,
-      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-      double now_s,
-      double emergency_time_s,
-      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
-      const std::string& required_gnss_core_policy = {},
-      const std::string& required_window_layout_hash = {},
-      const std::string& required_window_point_satellite_sets_hash = {});
-
-  // Read-only final-gate evaluation for a future successor. It must not
-  // advance debounce/exposure state or publish a gate decision.
-  P5GateStatus evaluateFinalPreview(
-      LocalTrajData& local_data,
-      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-      double now_s,
-      double emergency_time_s,
-      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
-      const std::string& required_gnss_core_policy = {},
-      const std::string& required_window_layout_hash = {},
-      const std::string& required_window_point_satellite_sets_hash = {});
-
-  void publishFinalAdmission(P5GateStatus status,
-                             double publish_authorization_stamp_s);
-
   void publishStatus(const P5GateStatus& status, const std::string& phase);
 
   void setCurrentIntegrityForTest(const iap::msg::IntegrityReport& msg);
@@ -250,7 +205,6 @@ class P5RuntimeIntegrityGate {
       PredAlertLimitProvider::OccupancyQuery occupancy_query,
       PredAlertLimitProvider::MapRegionQuery map_region_query,
       PredAlertLimitProvider::ResolutionQuery resolution_query);
-  void resetFinalGateFailureState();
 
   static const char* actionName(P5GateAction action);
   static const char* reasonName(P5GateReason reason);
@@ -268,7 +222,6 @@ class P5RuntimeIntegrityGate {
   };
 
   struct EvalContext {
-    bool final_gate = false;
     double now_s = std::numeric_limits<double>::quiet_NaN();
     double emergency_time_s = 1.0;
     const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr;
@@ -300,7 +253,6 @@ class P5RuntimeIntegrityGate {
       const EvalContext& context);
   P5GateStatus merge(const P5GateStatus& a, const P5GateStatus& b) const;
   P5GateStatus applyDebounce(const P5GateStatus& raw, double now_s);
-  P5GateStatus applyFinalGateBudget(const P5GateStatus& raw, double now_s);
   std::string toJson(const P5GateStatus& status,
                      const std::string& phase) const;
 
@@ -321,10 +273,6 @@ class P5RuntimeIntegrityGate {
   double future_unknown_started_s_ = std::numeric_limits<double>::quiet_NaN();
   int bad_ticks_ = 0;
   int good_ticks_ = 0;
-  int final_gate_fail_count_ = 0;
-  double final_gate_first_failure_s_ =
-      std::numeric_limits<double>::quiet_NaN();
-  P5GateReason final_gate_last_reason_ = P5GateReason::OK;
 };
 
 }  // namespace ego_planner

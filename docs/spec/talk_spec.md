@@ -57,14 +57,16 @@ For each candidate trajectory τ:
   prediction-source topology and report normal geometry. Topology changes
   request a direct ForwardRisk recheck; degenerate geometry is an explicit
   invalid state with non-finite PL, never a huge finite interpolation value.
-  Final, P5 and runtime authority comes from direct batched ForwardRisk samples
-  of the actual published B-spline and its actual arrival times. They consume a
+  P4 pre-execution authority comes from direct batched ForwardRisk samples of
+  the actual B-spline and its actual arrival times. It consumes a
   lightweight immutable execution-risk snapshot published from a complete
   occupancy/support + GNSS epoch + certified-Integrity tuple before the dense
   RiskGrid. RiskGrid is a bounded, discard-on-timeout background search
   product; its delay or absence is not execution revocation evidence. A cached
-  direct batch is reusable only for the same curve and execution snapshot and
-  never replaces current-time freshness checks. The execution snapshot path is
+  direct batch is reusable only for the same curve and execution snapshot.
+  Publication validates the P4 certificate identity, freshness, deadline,
+  mode and exposure without replaying that batch. P5 begins after ACTIVATED
+  and monitors current-time evidence. The execution snapshot path is
   occupancy-generation-driven, single-slot/latest-wins; its 50 ms timer is
   only a missed-notification watchdog. Commit callbacks execute outside the
   occupancy writer lock with lifetime-safe weak ownership; a newer request
@@ -99,16 +101,16 @@ For each candidate trajectory τ:
   pass on identical transition samples. Far-future support loss therefore
   cannot remove a satellite from the current stopping envelope. An identical
   set in adjacent windows reuses exact GNSS calculations but does
-  not merge their logical window IDs or safety certificates. Every P5 sample
+  not merge their logical window IDs or safety certificates. Every runtime P5 sample
   must still resolve to its original window and matching canonical set hash.
   An insufficient local core is UNKNOWN, never an interpolated PL, and RiskGrid
   remains search-only. The explicit legacy A/B policy retains the old
   whole-curve intersection. In the final 0.2 s after the last discrete guard
   anchor, the exact hard-terminal spline remainder is registered as the only
   reachable suffix braking curve and can be activated without extending its
-  approved endpoint or deadline. P4 and P5 bind both the deterministic window
-  layout and the exact satellite IDs used by every window; policy/layout/set
-  mismatches fail closed, including successor reauthorization.
+  approved endpoint or deadline. P4 certificates bind both the deterministic
+  window layout and exact per-point satellite sets; policy/layout/set mismatches
+  fail closed during successor reauthorization and runtime monitoring.
   Window responsibility is frozen once, when that exact curve is committed:
   absolute sample times, braking anchors, evidence IDs, original window IDs
   and the layout hash do not move during execution. The watchdog projects all
@@ -186,13 +188,12 @@ For each candidate trajectory τ:
   terminates that child attempt without a full-channel fallback, alternate
   guide, crop or retiming; the parent continues to its certified stop.
   Ordinary P4 rate limiting does not apply.
-  Preparation is not motion authority and cannot alter the parent or P5
-  debounce state; its P5-preview summary remains in the cached bundle for
-  audit. At handoff the planner does not rerun route search, A* or
+  Preparation is not motion authority and cannot alter the parent or runtime
+  P5 state. At handoff the planner does not rerun route search, A* or
   optimization; it only reauthorizes the exact cached curve and braking
   evidence once against the latest execution snapshot. That reauthorization
   is mandatory even when the snapshot ID is unchanged, so elapsed exposure
-  budget and the final P5 decision cannot be inherited from prepare time.
+  budget. Publication then validates the rebound P4 certificate once.
   Shared-corridor risk must not worsen and the extension is independently
   certified. The successor is published
   only if parent identity, switch window, position/velocity/acceleration
@@ -297,7 +298,7 @@ For each candidate trajectory τ:
 - Every locally feasible channel is converted before resampling into a
   bounded actual terminal-stop
   B-spline and a side-effect-free prepared bundle (dynamics, tracking,
-  braking, fixed-window, local-motion, direct GNSS and P5 preview evidence).
+  braking, fixed-window, local-motion and direct GNSS evidence).
   Prepared curves are rebound to one latest immutable snapshot before the
   winner is installed. Hard failures are eliminated first; incomplete work is
   reported as `PARTIAL_COMPARISON` and can authorize only the already
@@ -358,8 +359,8 @@ For each candidate trajectory τ:
   still apply. A
   current scan can supersede old provenance only for the exact same occupied
   surface voxel and never fabricates observed free space. A successor rebound
-  to a newer execution snapshot rebuilds local and global assurance, reruns P5,
-  and publishes the rebound P5 mode/hash rather than the stale admission.
+  to a newer execution snapshot rebuilds local and global P4 assurance and
+  publishes the rebound P4 mode/hash rather than the stale admission.
   The controller loss-of-control threshold (`0.75 m`) and stopping-distance
   margin (`0.5 m`) are not silently reused as per-point uncertainty. The local
   certificate has independent tracking (`0.15 m`) and fixed-clearance
@@ -414,7 +415,7 @@ For each candidate trajectory τ:
   ordinary `LIMITED_PREFIX` with zero candidate/channel IDs and no route-winner
   authority. It reserves the complete stopping distance and uses the standard
   stopped-B-spline collision, clearance, dynamics, direct-risk, brake,
-  assurance, P5, publication, and runtime chain.
+  assurance, P4-certificate publication, and post-activation P5 runtime chain.
 - The observation planner may score earlier stop points by minimum normalized
   information gain across channels, using frozen raw occluders and the
   registered sensor model. That score is diagnostic only: it may shorten a

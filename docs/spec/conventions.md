@@ -130,12 +130,13 @@
   comparison tolerance for ROS floating-point conversion; it does not extend
   the configured freshness window. Unsafe or invalid newer causal samples must
   not be hidden by older valid samples.
-- P5 consumes that same execution-snapshot-bound direct batch. It does not
-  require a matching or newly published RiskGrid; acquiring a newer grid
-  generation between P4 and P5 does not by itself invalidate a completed
-  coherent result. Ordinary RiskGrid PL is never a P5 authority. The existing
-  P5-4/P5-7 fixture overlay remains an explicit test policy, not a production
-  interpolation fallback.
+- P4 is the sole pre-execution authority for the actual B-spline, its local
+  envelope, braking library, GNSS evidence and exposure. Publication only
+  validates the resulting `P4ExecutionCertificate` identity, freshness,
+  deadline, task/execution mode and remaining exposure; it never replays the
+  direct batch. P5 starts only after a full-identity `ACTIVATED` acknowledgement
+  and evaluates newly reachable runtime evidence. Ordinary RiskGrid PL is
+  never a publication or P5 authority.
 - Planner-side GNSS geometry uses all four constellations
   `GPS+BDS+GAL+GLO` in formal and forest launch defaults. This changes neither
   the PL equation nor AL. The full information matrix is factored once;
@@ -168,7 +169,7 @@
   the deadline nor move the approved endpoint. Every admission certificate
   binds the window-layout hash and each request-ordered window sequence hash of
   `(evidence_point_id, local_satellite_set_hash)` pairs.
-  Successor reauthorization and P5 must reject a policy/layout/set mismatch;
+  P4 successor reauthorization and runtime P5 reject a policy/layout/set mismatch;
   a legacy common-core result cannot be relabelled as a window certificate.
   The window layout is constructed exactly once when the actual B-spline is
   committed. Its absolute trajectory times, evidence-point IDs, original
@@ -263,23 +264,21 @@
   acceleration at that absolute anchor after the asynchronous route result is
   delivered, and takes the selected guide endpoint as the curve terminal,
   builds the final terminal-stop B-spline, braking library and risk-window
-  layout, and completes dynamics, collision, local-clearance, direct-GNSS and
-  P5-preview certification while the parent keeps executing.
+  layout, and completes dynamics, collision, local-clearance and direct-GNSS
+  certification while the parent keeps executing.
   The lane is single-flight/latest-wins and bypasses ordinary P4 rate limiting.
   It consumes one already-generated frozen guide. Any geometry, clearance,
-  corridor, GNSS, support, freshness, P5 or budget failure terminates that
+  corridor, GNSS, support, freshness or budget failure terminates that
   child attempt; it does not launch topology/A*, switch channels or regenerate
   the immutable child. The parent retains authority and stops on its certified
   curve.
   While it runs, ordinary periodic planning cannot reset the parent. The
-  prepare-only pass has no publication authority and may not mutate P5
-  debounce/exposure or the parent's runtime certificate. Its complete child
+  prepare-only pass has no publication authority and may not mutate runtime
+  P5 state, exposure or the parent's runtime certificate. Its complete child
   bundle is cached by exact control-point, knot, braking, window, snapshot and
-  policy identities. `PREPARED_CERTIFIED` is emitted only after the P5 preview
-  and atomic bundle cache succeed; a refined curve alone is
-  `successor_curve_before_p5`, not a certificate. The cached bundle retains
-  the preview action and reason for audit; preview state is not motion
-  authority and final P5 still runs at handoff.
+  policy identities. `PREPARED_CERTIFIED` is emitted only after P4 actual-curve
+  certification and atomic bundle cache succeed; a refined curve alone is not
+  a certificate. Publication validates the cached P4 certificate once.
   Replacement still requires at least 1.0 s of execution. Its minimum endpoint
   advance is dynamic: the motion needed to cover the next switch + generation
   + authorization cycle plus 0.05 m stability margin, with a 0.10 m jitter
@@ -303,8 +302,8 @@
 - At the fixed switch anchor, a cached successor never reruns topology search,
   A*, B-spline optimization or braking-window construction. It loads the exact
   prepared curve, obtains one latest execution snapshot and performs only
-  freshness, Integrity, incremental collision, local-clearance, direct-GNSS
-  and final-P5 reauthorization. A successful recheck atomically rebinds the
+  freshness, Integrity, incremental collision, local-clearance and direct-GNSS
+  P4 reauthorization. A successful recheck atomically rebinds the
   certificate; a failure leaves the parent endpoint and deadline unchanged.
   It may not activate before the absolute anchor. A callback no more than
   0.2 s late compares `parent(anchor)` with `child(0)`, never parent/child at
@@ -313,8 +312,8 @@
   search hint rather than a second execution veto.
   This exact-curve reauthorization also runs when the snapshot ID is unchanged,
   because evaluation time and the already-consumed global-exposure episode can
-  advance without changing the sensor tuple. The final P5 gate is never reused
-  from prepare time.
+  advance without changing the sensor tuple. Runtime P5 begins only after the
+  child is activated.
 - A successor is computed against one immutable execution snapshot. At the
   serialization boundary, a newer snapshot ID by itself is not a rejection:
   the manager samples the exact child B-spline once, rechecks current
@@ -350,7 +349,7 @@
   guides, then converts every locally feasible stable channel into an actual
   stopping B-spline and side-effect-free prepared bundle. Each bundle includes
   its real braking library, fixed execution window, local/dynamic/tracking
-  checks, direct GNSS evidence and P5 preview. Before ranking, cached curves
+  checks and direct GNSS/exposure assurance. Before ranking, cached curves
   are re-certified against the same latest immutable snapshot. The comparison
   removes any candidate that fails local collision, clearance,
   dynamics, tracking, support freshness or braking proof. Refined channel
@@ -479,8 +478,8 @@
   collision, hard occlusion, tracking loss or current Integrity failure are
   HARD and schedule braking immediately. Once a brake is scheduled for a HARD
   condition or actually activated, it cannot be canceled.
-- Candidate mutation and final lineage/P5/publication form one execution-
-  commitment transaction. If a final gate rejects the candidate, both the
+- Candidate mutation, P4 certification and publication form one execution-
+  commitment transaction. If certificate validation rejects the candidate, both the
   incumbent B-spline and its execution certificate/evidence are restored.
   While `LIMITED_PREFIX_BRAKING` is active, ordinary replanning cannot replace
   or relabel that curve; only endpoint completion or an explicit runtime /
@@ -490,7 +489,7 @@
   or pairwise tube overlap alone are not enough: every executable nominal
   sample must lie in every candidate's vehicle/tracking/topology tube. It must
   retain the normal stopping/tracking reserve and pass the same immutable
-  actual-curve, braking-library, P5 and publication certification seam as a
+  actual-curve, braking-library and P4-certificate publication seam as a
   final channel or rolling successor. Certification failure never crops,
   shifts, retimes or reinterprets that curve. Local-clearance recovery is only
   a generation diagnostic for an ordinary `LIMITED_PREFIX`; it receives no
@@ -570,7 +569,7 @@
   production terminal-stop time law, and uses a fixed 16-step monotone
   endpoint search until the real duration fits that same time budget. Every
   regenerated curve receives new control points, knots and identity before
-  collision, clearance, dynamics, braking and P5 certification. The full guide
+  collision, clearance, dynamics, braking and P4 certification. The full guide
   remains only a channel/successor reference and cannot obtain execution
   authority.
 - The MISSION exposure values are an explicit risk-acceptance policy, not PL
@@ -696,12 +695,12 @@
   terminal-stop curve passes this unified assurance. RiskGrid, LiDAR FIM,
   GNSS exposure, recovery trend and mission progress may rank alternatives,
   but only the current reaction/braking envelope receives execution authority.
-  P4 final admission, P5, successors and runtime reuse the same curve-bound
-  assurance hash and execution mode; P5 may reinterpret a GNSS-only low margin
-  only for a complete locally SAFE controlled-degradation certificate. A
-  newer-snapshot successor must rebuild that complete certificate and repeat
-  P5; the rebound P5 result, execution mode, assurance hash, and snapshot
-  identity are atomically carried into final admission. A GNSS-only recheck
+  P4 final admission and successor reauthorization produce the curve-bound
+  assurance hash and execution mode. Publication verifies that immutable
+  certificate rather than reinterpreting its GNSS result; runtime P5 may revoke
+  only from post-activation facts. A newer-snapshot successor must rebuild that
+  complete P4 certificate; its execution mode, assurance hash, and snapshot
+  identity are atomically carried into publication. A GNSS-only recheck
   cannot reuse the old local-motion hash. New route
   authorization consumes the active episode's remaining duration/integral
   budget before publication, not only on the next runtime watchdog tick.

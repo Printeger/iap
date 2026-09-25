@@ -106,8 +106,6 @@ const char *p4PreparedCurveFailureName(
       return "gnss_risk";
     case P4PreparedCurveFailure::EXPOSURE_BUDGET:
       return "exposure_budget";
-    case P4PreparedCurveFailure::P5_PREVIEW:
-      return "p5_preview";
     case P4PreparedCurveFailure::COMPUTE_BUDGET:
       return "compute_budget";
     case P4PreparedCurveFailure::SNAPSHOT_MISMATCH:

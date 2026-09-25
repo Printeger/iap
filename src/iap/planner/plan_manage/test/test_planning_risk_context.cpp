@@ -2569,6 +2569,206 @@ TEST(P4ActualCurveClearanceCertification,
   EXPECT_FALSE(manager.p4ExecutionCertificate().valid);
 }
 
+TEST(P4PublicationCertificate,
+     MissionDegradedActualCertificateIsSolePublicationAuthority) {
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  const auto incomplete_gnss = gnssAnchorInconsistentRiskCallback();
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, incomplete_gnss, 10.0, 920u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  execution->occupancy = occupancy;
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("mission_publication_certificate.csv").string(), 1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 2.0;
+  manager.pp_.max_acc_ = 3.0;
+  manager.setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+  manager.setP4ControlCapabilityProfileForTest(
+      missionExposureControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, incomplete_gnss, execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  decision.executable_intent = ego_planner::P4ExecutableIntent::FINAL_CHANNEL;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::FORMAL;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  ego_planner::UniformBspline stopped;
+  const auto terminal = ego_planner::buildP4MinimumTerminalStopFixture(
+      0.25, 0.4, 0.5, missionExposureControlProfile(), 0.05, &stopped);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  decision.selected_guide.clear();
+  for (int index = 0; index <= 20; ++index) {
+    decision.selected_guide.push_back(stopped.evaluateDeBoorT(
+        stopped.getTimeSum() * static_cast<double>(index) / 20.0));
+  }
+  decision.candidates.front().path = decision.selected_guide;
+  decision.candidates.front().topology_path = decision.selected_guide;
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.velocity_traj_ = stopped.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+  manager.local_data_.traj_id_ = 920;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0))
+      << manager.lastP4ActualCurveCertification().detail;
+  const auto &certificate = manager.p4ExecutionCertificate();
+  ASSERT_TRUE(certificate.valid);
+  ASSERT_EQ(certificate.execution_mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  ASSERT_EQ(manager.latestP4DirectRiskEvidence().trajectory_assurance.local.status,
+            iap::LocalMotionAssuranceStatus::SAFE);
+  ASSERT_FALSE(manager.latestP4DirectRiskEvidence().points.empty());
+  ASSERT_EQ(manager.latestP4DirectRiskEvidence().points.front().failure_reason,
+            iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT);
+
+  ego_planner::P4PreparedCurveFailure failure =
+      ego_planner::P4PreparedCurveFailure::INCOMPLETE;
+  std::string reason;
+  EXPECT_TRUE(manager.validateP4PublicationCertificate(
+      manager.local_data_, 10.2, &failure, &reason))
+      << reason;
+  EXPECT_EQ(failure, ego_planner::P4PreparedCurveFailure::NONE);
+  EXPECT_EQ(reason, "p4_publication_certificate_valid");
+
+  const auto valid_certificate = certificate;
+  const auto valid_trajectory = manager.local_data_;
+  const auto expect_rejected = [&manager, &failure, &reason](
+      const ego_planner::LocalTrajData &trajectory, const double now_s,
+      const ego_planner::P4PreparedCurveFailure expected_failure,
+      const char *expected_reason) {
+    failure = ego_planner::P4PreparedCurveFailure::NONE;
+    reason.clear();
+    EXPECT_FALSE(manager.validateP4PublicationCertificate(
+        trajectory, now_s, &failure, &reason));
+    EXPECT_EQ(failure, expected_failure);
+    EXPECT_EQ(reason, expected_reason);
+  };
+
+  auto mutated_trajectory = valid_trajectory;
+  Eigen::MatrixXd mutated_points =
+      mutated_trajectory.position_traj_.getControlPoint();
+  mutated_points(1, mutated_points.cols() / 2) += 0.01;
+  auto mutated_curve = ego_planner::UniformBspline(
+      mutated_points, 3, 0.5);
+  mutated_curve.setKnot(mutated_trajectory.position_traj_.getKnot());
+  mutated_trajectory.position_traj_ = mutated_curve;
+  mutated_trajectory.curve_hash_ = ego_planner::trajectoryCurveHash(
+      mutated_trajectory.position_traj_, mutated_trajectory.start_time_);
+  expect_rejected(
+      mutated_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::IDENTITY,
+      "p4_publication_curve_identity_mismatch");
+
+  auto mutated_certificate = valid_certificate;
+  mutated_certificate.knot_vector_hash += "-tampered";
+  manager.setP4ExecutionCertificateForTest(mutated_certificate);
+  expect_rejected(
+      valid_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::IDENTITY,
+      "p4_publication_curve_identity_mismatch");
+  manager.setP4ExecutionCertificateForTest(valid_certificate);
+
+  mutated_trajectory = valid_trajectory;
+  ++mutated_trajectory.traj_id_;
+  expect_rejected(
+      mutated_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::IDENTITY,
+      "p4_publication_trajectory_identity_mismatch");
+  mutated_trajectory = valid_trajectory;
+  mutated_trajectory.start_time_ = rclcpp::Time(10, 1, RCL_ROS_TIME);
+  expect_rejected(
+      mutated_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::IDENTITY,
+      "p4_publication_trajectory_identity_mismatch");
+
+  mutated_certificate = valid_certificate;
+  mutated_certificate.snapshot_identity.execution_snapshot_id += 1u;
+  manager.setP4ExecutionCertificateForTest(mutated_certificate);
+  expect_rejected(
+      valid_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::SNAPSHOT_MISMATCH,
+      "p4_publication_snapshot_identity_invalid");
+
+  manager.setP4ExecutionCertificateForTest(valid_certificate);
+  expect_rejected(
+      valid_trajectory, 11.01,
+      ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "p4_publication_certificate_requires_recertification");
+
+  mutated_certificate = valid_certificate;
+  mutated_certificate.evidence_fresh_until_s =
+      std::numeric_limits<double>::infinity();
+  manager.setP4ExecutionCertificateForTest(mutated_certificate);
+  expect_rejected(
+      valid_trajectory, valid_certificate.execution_deadline_s + 0.01,
+      ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "p4_publication_execution_deadline_expired");
+
+  mutated_certificate = valid_certificate;
+  mutated_certificate.global_exposure_within_budget = false;
+  manager.setP4ExecutionCertificateForTest(mutated_certificate);
+  expect_rejected(
+      valid_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET,
+      "p4_publication_exposure_budget_exhausted");
+
+  manager.setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
+  mutated_certificate = valid_certificate;
+  mutated_certificate.task_mode =
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+  manager.setP4ExecutionCertificateForTest(mutated_certificate);
+  expect_rejected(
+      valid_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::GNSS_RISK,
+      "p4_publication_execution_mode_not_authorized");
+
+  manager.setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+  mutated_certificate = valid_certificate;
+  mutated_certificate.valid = false;
+  manager.setP4ExecutionCertificateForTest(mutated_certificate);
+  expect_rejected(
+      valid_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::IDENTITY,
+      "p4_publication_certificate_missing");
+
+  manager.setP4ExecutionCertificateForTest(valid_certificate);
+  ASSERT_TRUE(manager.updateP4GlobalExposureForTest(
+      10.2, 1.06, "post-certificate-exposure"));
+  expect_rejected(
+      valid_trajectory, 10.2,
+      ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET,
+      "p4_publication_exposure_budget_exhausted");
+}
+
 TEST(P4ExecutionIntegrityTest,
      CertifiedCurrentIntegrityOwnsTheLiveCurrentSafetyGate) {
   iap::CurrentIntegrityState current;
@@ -2647,10 +2847,7 @@ TEST(P4ForwardTerminalLineageTest,
             ego_planner::P4ForwardAction::RISK_SELECTED);
   EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
             ego_planner::P4ForwardSelectionAuthority::FORMAL);
-  EXPECT_TRUE(manager.certifyP4ActualCurve(
-      "p5_final_pass_before_publish", 10.1));
-  EXPECT_TRUE(manager.certifyP4ActualCurve(
-      "normal_publish_authorized", 10.2));
+  EXPECT_TRUE(manager.commitP4CertifiedPublication(10.2));
   ASSERT_TRUE(manager.p4ExecutionCertificate().valid);
   EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 29);
   EXPECT_FALSE(manager.p4ExecutionCertificate().knot_vector_hash.empty());
@@ -2677,7 +2874,7 @@ TEST(P4ForwardTerminalLineageTest,
 
   const auto rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
-  ASSERT_EQ(rows.size(), 4U);
+  ASSERT_EQ(rows.size(), 3U);
   EXPECT_EQ(rows[0].at("schema_version"),
             ego_planner::kP4ForwardDecisionSchema);
   EXPECT_EQ(rows[0].at("decision_event_id"), "901");
@@ -2686,10 +2883,10 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(rows[0].at("trajectory_id"), "29");
   ASSERT_FALSE(rows[0].at("control_points_hash").empty());
   EXPECT_EQ(rows[0].at("control_points_hash"),
-            rows[2].at("control_points_hash"));
-  EXPECT_EQ(rows[3].at("stage"), "p5_runtime_committed");
-  EXPECT_EQ(rows[3].at("trajectory_id"), "29");
-  EXPECT_EQ(rows[3].at("control_points_hash"),
+            rows[1].at("control_points_hash"));
+  EXPECT_EQ(rows[2].at("stage"), "p5_runtime_committed");
+  EXPECT_EQ(rows[2].at("trajectory_id"), "29");
+  EXPECT_EQ(rows[2].at("control_points_hash"),
             rows[0].at("control_points_hash"));
 
   const auto endpoint_check = manager.validateCommittedP4TrajectoryExecution(
@@ -2856,8 +3053,7 @@ TEST(P4ForwardTerminalLineageTest,
   manager->local_data_.duration_ = stopped.getTimeSum();
   ASSERT_TRUE(manager->certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ASSERT_TRUE(manager->certifyP4ActualCurve(
-      "normal_publish_authorized", 10.0));
+  ASSERT_TRUE(manager->commitP4CertifiedPublication(10.0));
   const auto incumbent_certificate = manager->p4ExecutionCertificate();
   const auto incumbent_control_points =
       manager->local_data_.position_traj_.getControlPoint();
@@ -3047,7 +3243,6 @@ TEST(P4PreparedChannelPreparation,
   manager->setPlanningVisualizationForTest(
       std::make_shared<ego_planner::PlanningVisualization>(node));
   ego_planner::P5RuntimeIntegrityGate::Config p5_config;
-  p5_config.enable_final_gate = true;
   p5_config.test_only_allow_grid_risk_authority = true;
   manager->p5_integrity_gate_ =
       std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
@@ -3256,7 +3451,7 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
-     GuideUnknownDoesNotBlockActualCurvePreparation) {
+     TruthfulIncompleteMissionCertificatePublishesWithoutP5Readjudgment) {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureTwoForkNoCollision(map.get());
@@ -3268,15 +3463,13 @@ TEST(P4PreparedChannelPreparation,
       100.0, frozen_occupancy->geometry_id, true);
   auto hard_gate_queries =
       std::make_shared<std::vector<Eigen::Vector3d>>();
-  const auto actual_risk = [hard_gate_queries](
+  const auto truthful_incomplete = gnssAnchorInconsistentRiskCallback();
+  const auto actual_risk = [hard_gate_queries, truthful_incomplete](
       const iap::ForwardRiskBatchRequest &request) {
-    double signed_lateral_sum = 0.0;
     for (const auto &point : request.points) {
-      signed_lateral_sum += point.position_map.y();
       hard_gate_queries->push_back(point.position_map);
     }
-    return directRiskCallback(
-        signed_lateral_sum < 0.0 ? 0.6 : 0.3)(request);
+    return truthful_incomplete(request);
   };
   const auto execution = makeP4ExecutionSnapshot(
       snapshot, actual_risk, 10.0, 918u);
@@ -3300,6 +3493,8 @@ TEST(P4PreparedChannelPreparation,
   manager->pp_.max_vel_ = 20.0;
   manager->pp_.max_acc_ = 100.0;
   manager->pp_.use_distinctive_trajs = false;
+  manager->setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
   manager->setP4ControlCapabilityProfileForTest(
       permissiveTestControlProfile());
   manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
@@ -3408,7 +3603,6 @@ TEST(P4PreparedChannelPreparation,
   manager->setPlanningVisualizationForTest(
       std::make_shared<ego_planner::PlanningVisualization>(node));
   ego_planner::P5RuntimeIntegrityGate::Config p5_config;
-  p5_config.enable_final_gate = true;
   p5_config.test_only_allow_grid_risk_authority = true;
   manager->p5_integrity_gate_ =
       std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
@@ -3461,7 +3655,7 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(selected.action, ego_planner::P4ForwardAction::RISK_SELECTED);
   EXPECT_EQ(selected.selection_authority,
             ego_planner::P4ForwardSelectionAuthority::FORMAL);
-  EXPECT_TRUE(selected.formal_support);
+  EXPECT_FALSE(selected.formal_support);
   EXPECT_TRUE(selected.selected_actual_endpoint.allFinite());
   EXPECT_TRUE(selected.runner_up_actual_endpoint.allFinite());
   EXPECT_EQ(selected.channel_comparison_state,
@@ -3479,7 +3673,7 @@ TEST(P4PreparedChannelPreparation,
     EXPECT_NE(row.at("actual_endpoint_x"), "nan");
     EXPECT_EQ(row.at("unknown_support_fraction"), "0");
     EXPECT_EQ(row.at("combined_conservative_kappa"), "0");
-    EXPECT_EQ(row.at("final_curve_status"), "SAFE");
+    EXPECT_EQ(row.at("final_curve_status"), "INCOMPLETE");
   }
   ASSERT_FALSE(hard_gate_queries->empty());
   const double furthest_hard_query_x = std::max_element(
@@ -3532,7 +3726,6 @@ TEST(P4LimitedPrefixPublication,
   });
 
   ego_planner::P5RuntimeIntegrityGate::Config p5_config;
-  p5_config.enable_final_gate = true;
   p5_config.test_only_allow_grid_risk_authority = true;
   manager->p5_integrity_gate_ =
       std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
@@ -3740,9 +3933,6 @@ TEST(P4LimitedPrefixPublication,
     return row.at("stage") == "final_bspline_before_p5";
   }));
   EXPECT_TRUE(std::any_of(rows.begin(), rows.end(), [](const auto &row) {
-    return row.at("stage") == "p5_final_pass_before_publish";
-  }));
-  EXPECT_TRUE(std::any_of(rows.begin(), rows.end(), [](const auto &row) {
     return row.at("stage") == "normal_publish_authorized";
   }));
 }
@@ -3838,8 +4028,7 @@ TEST(P4ForwardTerminalLineageTest,
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0))
       << manager.lastP4ActualCurveCertification().detail;
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "normal_publish_authorized", 10.0));
+  ASSERT_TRUE(manager.commitP4CertifiedPublication(10.0));
   ASSERT_EQ(manager.p4ExecutionCertificate().authority,
             ego_planner::P4ExecutionAuthority::LIMITED_PREFIX);
 
@@ -4067,8 +4256,7 @@ TEST(P4ForwardTerminalLineageTest,
       "final_bspline_before_p5", 10.0))
       << manager.lastP4ForwardDecision().geometry_commit.reason << ":"
       << manager.lastP4ForwardDecision().reason;
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "normal_publish_authorized", 10.0));
+  ASSERT_TRUE(manager.commitP4CertifiedPublication(10.0));
   const auto certificate = manager.p4ExecutionCertificate();
   ASSERT_TRUE(certificate.valid);
   EXPECT_EQ(certificate.authority,
@@ -4629,8 +4817,7 @@ TEST(P4ForwardTerminalLineageTest,
 
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "normal_publish_authorized", 10.0));
+  ASSERT_TRUE(manager.commitP4CertifiedPublication(10.0));
   EXPECT_EQ(manager.lastP4ForwardDecision().action,
             ego_planner::P4ForwardAction::RISK_SELECTED);
   EXPECT_EQ(manager.p4ExecutionCertificate().authority,
@@ -7316,7 +7503,6 @@ ProductionEvidenceReplayOutcome runProductionEvidenceReplay(
       record.clearance_passed = true;
       record.braking_passed = true;
       record.gnss_exposure_complete = risk.complete;
-      record.p5_preview_passed = true;
       record.failure = risk.complete
           ? ego_planner::P4PreparedCurveFailure::NONE
           : ego_planner::P4PreparedCurveFailure::GNSS_RISK;
@@ -7427,7 +7613,6 @@ TEST(P4PreparedChannelComparison,
       value.clearance_passed = true;
       value.braking_passed = true;
       value.gnss_exposure_complete = true;
-      value.p5_preview_passed = true;
       value.failure = ego_planner::P4PreparedCurveFailure::NONE;
       return value;
     };
@@ -7508,7 +7693,6 @@ TEST(P4PreparedChannelComparison,
   complete.clearance_passed = true;
   complete.braking_passed = true;
   complete.gnss_exposure_complete = true;
-  complete.p5_preview_passed = true;
   complete.failure = ego_planner::P4PreparedCurveFailure::NONE;
 
   auto missing_endpoint = complete;
@@ -7528,7 +7712,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     RequiresEverySuccessfulChannelToCarryACompleteFinalBundle)
+     CompleteP4ActualBundleNeedsNoSecondP5Preview)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -7569,21 +7753,14 @@ TEST(P4PreparedChannelComparison,
   record.clearance_passed = true;
   record.braking_passed = true;
   record.gnss_exposure_complete = true;
-  record.p5_preview_passed = false;
   record.failure = ego_planner::P4PreparedCurveFailure::NONE;
 
   auto comparison = ego_planner::compareP4PreparedChannels(
       {record}, snapshot, 1u);
   EXPECT_EQ(comparison.state,
-            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
-  EXPECT_EQ(comparison.feasible_count, 0u);
-  EXPECT_EQ(comparison.hard_failure_count, 0u);
-
-  record.p5_preview_passed = true;
-  comparison = ego_planner::compareP4PreparedChannels(
-      {record}, snapshot, 1u);
-  EXPECT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.feasible_count, 1u);
+  EXPECT_EQ(comparison.hard_failure_count, 0u);
   EXPECT_EQ(comparison.winner_channel_id, record.channel_id);
 }
 
@@ -7633,7 +7810,6 @@ TEST(P4PreparedChannelComparison,
       value.clearance_passed = true;
       value.braking_passed = true;
       value.gnss_exposure_complete = true;
-      value.p5_preview_passed = true;
       value.failure = ego_planner::P4PreparedCurveFailure::NONE;
       return value;
     };
@@ -7814,14 +7990,14 @@ TEST(P4PreparedSuccessorPolicy,
   ASSERT_TRUE(manager.preparingP4SuccessorCurve());
 
   manager.recordPreparedP4SuccessorCurveFailure(
-      10.95, ego_planner::P4PreparedCurveFailure::P5_PREVIEW,
-      "p5_preview_rejected:future_bad");
+      10.95, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "publication_certificate_stale");
 
   EXPECT_FALSE(manager.preparingP4SuccessorCurve());
   EXPECT_EQ(manager.lastP4ForwardDecision().planning_disposition,
             ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
   EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
-            ego_planner::P4SuccessorFailure::INTEGRITY_UNSAFE);
+            ego_planner::P4SuccessorFailure::LOCAL_MAP_STALE);
   EXPECT_NE(manager.lastP4ForwardDecision().reason.find(
                 "successor_curve_preparation_failed"),
             std::string::npos);
@@ -8192,10 +8368,9 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_FALSE(waiting);
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ego_planner::P5GateStatus disabled_preview;
   ASSERT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -8207,7 +8382,7 @@ TEST(P4PreparedChannelPreparation,
       "final_bspline_before_p5", 10.0));
   ASSERT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
 
@@ -8558,11 +8733,10 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
-  ego_planner::P5GateStatus disabled_preview;
   std::string reason;
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -8592,7 +8766,7 @@ TEST(P4PreparedChannelPreparation,
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
   EXPECT_EQ(reason, "normal_channel_comparison_complete");
@@ -8684,7 +8858,6 @@ TEST(P4PreparedChannelPreparation,
   const uint64_t preferred_channel_id = decision.selected_channel_id;
   manager.setP4ForwardDecisionForTest(std::move(decision));
 
-  ego_planner::P5GateStatus disabled_preview;
   std::string reason;
   EXPECT_EQ(
       manager.recordP4NormalChannelCurveFailure(
@@ -8722,7 +8895,7 @@ TEST(P4PreparedChannelPreparation,
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
   EXPECT_EQ(reason, "normal_channel_comparison_complete");
@@ -8811,11 +8984,10 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
-  ego_planner::P5GateStatus disabled_preview;
   std::string reason;
   ASSERT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -8882,7 +9054,7 @@ TEST(P4PreparedChannelPreparation,
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
   EXPECT_EQ(reason, "normal_channel_comparison_complete");
@@ -8976,11 +9148,10 @@ TEST(P4PreparedChannelPreparation,
   }
   manager.setP4DirectRiskEvidenceForTest(std::move(first_evidence));
 
-  ego_planner::P5GateStatus disabled_preview;
   std::string reason;
   ASSERT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -9034,7 +9205,7 @@ TEST(P4PreparedChannelPreparation,
   manager.setP4DirectRiskEvidenceForTest(std::move(second_evidence));
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+          10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           READY_TO_PUBLISH)
       << reason;
@@ -9190,9 +9361,8 @@ TEST(P4PreparedChannelPreparation,
     if (!manager.certifyP4ActualCurve(
             "final_bspline_before_p5", start_s))
       return ego_planner::P4NormalChannelPreparationDisposition::REJECTED;
-    ego_planner::P5GateStatus disabled_preview;
     return manager.prepareP4NormalChannelComparison(
-        start_s, disabled_preview, reason);
+        start_s, reason);
   };
 
   const auto fork_one_risk = risk_by_lateral_sign(true);
@@ -9441,8 +9611,7 @@ TEST(P4PreparedSuccessorPolicy,
   manager.local_data_.duration_ = stopped.getTimeSum();
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "normal_publish_authorized", 10.0));
+  ASSERT_TRUE(manager.commitP4CertifiedPublication(10.0));
 
   ego_planner::LocalTrajData incumbent = manager.local_data_;
   incumbent.traj_id_ = 91;
@@ -9462,15 +9631,12 @@ TEST(P4PreparedSuccessorPolicy,
   prepared.assurance.safe = true;
   prepared.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
   manager.setPreparedP4SuccessorForTest(prepared);
-  ego_planner::P5GateStatus disabled_preview;
   std::string cache_reason;
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
-      9.9, disabled_preview, &cache_reason))
+      9.9, &cache_reason))
       << cache_reason;
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
   EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
-  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->p5_preview_reason,
-            static_cast<int>(ego_planner::P5GateReason::DISABLED));
 
   // A multi-channel route is not complete after the first actual curve.  The
   // next planning callback must receive the already-selected next channel,
@@ -9485,7 +9651,7 @@ TEST(P4PreparedSuccessorPolicy,
   multi_channel_decision.candidates.push_back(second_channel);
   manager.setP4ForwardDecisionForTest(std::move(multi_channel_decision));
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
-      9.9, disabled_preview, &cache_reason))
+      9.9, &cache_reason))
       << cache_reason;
   EXPECT_EQ(cache_reason, "successor_next_channel_curve_pending");
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
@@ -9499,31 +9665,18 @@ TEST(P4PreparedSuccessorPolicy,
   manager.clearP4PendingChannelWorkItemForTest();
   manager.setP4ForwardDecisionForTest(single_channel_decision);
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
-      9.9, disabled_preview, &cache_reason))
+      9.9, &cache_reason))
       << cache_reason;
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
 
-  // An enabled final gate overwrites the explicit disabled preview summary
-  // with its actual OK admission without changing the cached curve.
-  ego_planner::P5GateStatus preview;
-  preview.action = ego_planner::P5GateAction::OK;
-  preview.reason = ego_planner::P5GateReason::OK;
-  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
-      9.9, preview, &cache_reason))
-      << cache_reason;
-  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
-  EXPECT_TRUE(
-      manager.preparedP4SuccessorBundleForTest()->p5_preview_complete);
-  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->p5_preview_action,
-            static_cast<int>(ego_planner::P5GateAction::OK));
-  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->p5_preview_reason,
-            static_cast<int>(ego_planner::P5GateReason::OK));
+  // The complete P4 actual bundle is sufficient for candidate completeness;
+  // there is no second P5 preview admission to cache.
   EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.5));
 
   prepared.planned_switch_time_s = 11.0;
   manager.setPreparedP4SuccessorForTest(prepared);
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
-      9.9, preview, &cache_reason))
+      9.9, &cache_reason))
       << cache_reason;
   // A cached child is released early enough to complete latest-snapshot
   // reauthorization, DDS delivery and traj_server queueing before its fixed

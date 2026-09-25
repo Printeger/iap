@@ -292,6 +292,9 @@ namespace ego_planner
     int64_t start_time_ns = 0;
     double duration_s = 0.0;
     double execution_deadline_s = 0.0;
+    double certified_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double evidence_fresh_until_s =
+        std::numeric_limits<double>::quiet_NaN();
     std::string control_points_hash;
     std::string knot_vector_hash;
     std::string risk_query_lattice_hash;
@@ -325,6 +328,7 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN();
     double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
     double global_exposure_integral_ratio_s = 0.0;
+    bool global_exposure_within_budget = false;
     // Immutable successor geometry captured with the execution certificate.
     // Runtime planning must not reconstruct this from a later decision row.
     uint64_t successor_channel_id = 0;
@@ -462,7 +466,6 @@ namespace ego_planner
     bool clearance_passed = false;
     bool braking_passed = false;
     bool gnss_exposure_complete = false;
-    bool p5_preview_passed = false;
     P4PreparedCurveFailure failure = P4PreparedCurveFailure::INCOMPLETE;
 
     bool feasible() const
@@ -473,7 +476,7 @@ namespace ego_planner
           std::isfinite(duration_s) && duration_s > 0.0 &&
           final_curve_evaluated && local_geometry_passed &&
           dynamics_passed && collision_passed && clearance_passed &&
-          braking_passed && gnss_exposure_complete && p5_preview_passed &&
+          braking_passed && gnss_exposure_complete &&
           (!route_evidence_evaluated || route_evidence_complete) &&
           failure == P4PreparedCurveFailure::NONE;
     }
@@ -516,10 +519,6 @@ namespace ego_planner
     std::shared_ptr<const FrozenOccupancyEpoch> bound_occupancy;
     uint64_t checked_generation = 0;
     std::string curve_identity;
-    bool p5_preview_complete = false;
-    int p5_preview_action = -1;
-    int p5_preview_reason = -1;
-    std::string p5_preview_reason_name;
     P4PreparedChannelRecord channel_record;
 
     // A prepared child can reserve its ID before a safety guard is published.
@@ -536,8 +535,7 @@ namespace ego_planner
           trajectory.traj_id_ > 0 && certificate.valid &&
           boundary.assurance.complete && boundary.assurance.safe &&
           direct_risk_evidence.admissionComplete() &&
-          !braking_anchors.empty() &&
-          p5_preview_complete && p5_preview_action == 0;
+          !braking_anchors.empty();
     }
   };
 
@@ -969,6 +967,11 @@ namespace ego_planner
     void recordGate0NormalBsplinePublish(double stamp_s);
     bool certifyP4ActualCurve(const std::string &stage,
                                       double stamp_s);
+    bool validateP4PublicationCertificate(
+        const LocalTrajData &trajectory, double now_s,
+        P4PreparedCurveFailure *failure = nullptr,
+        std::string *reason = nullptr) const;
+    bool commitP4CertifiedPublication(double stamp_s);
     bool p4LineageTelemetryFault() const {
       return p4_lineage_telemetry_fault_;
     }
@@ -1056,11 +1059,9 @@ namespace ego_planner
     void commitP4ExecutionCandidate();
     void stageP4ExecutionCandidateForActivation();
     bool cachePreparedP4SuccessorBundle(
-        double now_s, const P5GateStatus &p5_preview,
-        std::string *reason = nullptr);
+        double now_s, std::string *reason = nullptr);
     P4NormalChannelPreparationDisposition prepareP4NormalChannelComparison(
-        double now_s, const P5GateStatus &p5_preview,
-        std::string *reason = nullptr);
+        double now_s, std::string *reason = nullptr);
     P4NormalChannelPreparationDisposition recordP4NormalChannelCurveFailure(
         double now_s, P4PreparedCurveFailure failure,
         const std::string &detail, std::string *reason = nullptr);
@@ -1141,8 +1142,7 @@ namespace ego_planner
     }
     bool validatePreparedP4SuccessorBeforePublish(
       const LocalTrajData &incumbent, double now_s,
-      std::string *reason = nullptr, double emergency_time_s = 1.0,
-      P5GateStatus *revalidated_p5_status = nullptr);
+      std::string *reason = nullptr);
     const std::optional<P4ForwardDecision>&
     pendingP4ChannelWorkItemForTest() const
     {
@@ -1237,6 +1237,13 @@ namespace ego_planner
       p4_forward_limits_.task_mode = task_mode;
       p4_global_exposure_ledger_ =
           iap::GlobalNavigationExposureLedger(p4_global_exposure_policy_);
+    }
+    bool updateP4GlobalExposureForTest(
+        const double stamp_s, const double ratio,
+        const std::string &evidence_identity)
+    {
+      return p4_global_exposure_ledger_.update(
+          stamp_s, ratio, evidence_identity);
     }
     void setP4VerticalSliceOptimizerForTest(
         BsplineOptimizer::Ptr optimizer, GridMap::Ptr grid_map)

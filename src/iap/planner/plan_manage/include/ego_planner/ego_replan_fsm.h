@@ -244,8 +244,6 @@ namespace ego_planner
     int current_wp_;
 
     bool flag_escape_emergency_ = false;
-  bool p5_final_gate_emergency_candidate_ = false;
-    bool p5_waiting_for_p0_ready_ = false;
     bool p4_waiting_for_risk_grid_ready_ = false;
     bool p4_require_risk_grid_ready_before_planning_ = false;
     P4EndpointRetryScheduler p4_endpoint_retry_scheduler_;
@@ -294,8 +292,6 @@ namespace ego_planner
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
     bool shouldDeferP4PlanningForRiskGridReady();
-    bool shouldDeferP5FinalGateForP0Ready();
-    int globalTrajTrialLimitForP5FinalGate() const;
     void getLocalTarget();
     rclcpp::Time plannerNow() const;
     rclcpp::Time plannerSchedulingNow() const;

@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-publication-authority): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 —
+  make `P4ExecutionCertificate` the sole pre-execution authorization seam.
+  Publication now verifies only executable authority, full trajectory and
+  snapshot identity, the unchanged one-second freshness window, execution
+  deadline, task/execution mode and exposure state. It no longer asks P5 to
+  replay direct-risk points, GNSS windows, unknown support or PL/AL for the
+  same frozen planning evidence. Remove P5 final/preview admission and bundle
+  preview fields; P5 remains the post-`ACTIVATED` runtime monitor for new map,
+  tracking, freshness, exposure and braking facts. Expired or changed-snapshot
+  tickets return the same immutable actual curve to the existing P4 certifier.
 - fix(exposure-duration-generation-seam): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — remove `max_observe_speed * affordable_time` from bounded-guide
   execution authority and close MISSION generation over the real production

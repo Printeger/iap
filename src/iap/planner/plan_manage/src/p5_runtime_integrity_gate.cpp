@@ -128,62 +128,6 @@ bool isFutureCoverageLimit(const iap::PredictedPLSample& sample) {
   return sample.reason == "time_out_of_horizon";
 }
 
-bool isUnknownOnlyFinalGateBlock(const P5GateStatus& status) {
-  if (status.action != P5GateAction::REQUEST_REPLAN) {
-    return false;
-  }
-  if (status.reason != P5GateReason::SNAPSHOT_UNAVAILABLE &&
-      status.reason != P5GateReason::FUTURE_UNKNOWN &&
-      status.reason != P5GateReason::AL_INVALID) {
-    return false;
-  }
-  if (status.bad_count > 0 || status.bad_ratio > 0.0) {
-    return false;
-  }
-  return !std::isfinite(status.future_min_im) ||
-         status.future_min_im >= 0.0;
-}
-
-bool isTransientCurrentStaleFinalGateBlock(const P5GateStatus& status,
-                                           double emergency_duration_s) {
-  if (status.action != P5GateAction::REQUEST_REPLAN ||
-      status.reason != P5GateReason::CURRENT_STALE) {
-    return false;
-  }
-  if (status.bad_count > 0 || status.bad_ratio > 0.0) {
-    return false;
-  }
-  if (std::isfinite(status.current_im_min) && status.current_im_min < 0.0) {
-    return false;
-  }
-  if (std::isfinite(status.future_min_im) && status.future_min_im < 0.0) {
-    return false;
-  }
-  return status.current_stale_duration_s < emergency_duration_s;
-}
-
-bool isLightRiskCurrentLowMarginFinalGateBlock(
-    const P5GateStatus& status,
-    double current_low_margin_to_emergency_s) {
-  if (status.action != P5GateAction::REQUEST_REPLAN ||
-      status.reason != P5GateReason::CURRENT_LOW_MARGIN) {
-    return false;
-  }
-  if (status.bad_count > 0 || status.bad_ratio > 0.0) {
-    return false;
-  }
-  if (!std::isfinite(status.future_min_im) || status.future_min_im < 0.0) {
-    return false;
-  }
-  if (status.pred_al_invalid_count > 0 ||
-      !std::isfinite(status.pred_hal_min) ||
-      !std::isfinite(status.pred_val_min)) {
-    return false;
-  }
-  return status.current_low_margin_duration_s <
-         current_low_margin_to_emergency_s;
-}
-
 bool pointInsideRegion(const Eigen::Vector3d& p,
                        const Eigen::Vector3d& origin,
                        const Eigen::Vector3d& size) {
@@ -444,8 +388,9 @@ P5RuntimeIntegrityGate::Config P5RuntimeIntegrityGate::declareAndReadConfig(
   Config config;
   config.enable_runtime_gate =
       node->declare_parameter<bool>("p5.enable_runtime_gate", false);
-  config.enable_final_gate =
-      node->declare_parameter<bool>("p5.enable_final_gate", false);
+  // Parse-only compatibility: P4 certificates now own all pre-publication
+  // admission and P5 has no final-gate code path.
+  (void)node->declare_parameter<bool>("p5.enable_final_gate", false);
   config.horizon_s = node->declare_parameter<double>("p5.horizon_s", 2.0);
   config.sample_dt_s =
       node->declare_parameter<double>("p5.sample_dt_s", 0.2);
@@ -458,11 +403,10 @@ P5RuntimeIntegrityGate::Config P5RuntimeIntegrityGate::declareAndReadConfig(
                                       2.0);
   config.future_unknown_to_emergency_s =
       node->declare_parameter<double>("p5.future_unknown_to_emergency_s", 2.0);
-  config.final_gate_max_consecutive_failures =
-      node->declare_parameter<int>("p5.final_gate_max_consecutive_failures", 3);
-  config.final_gate_max_failure_duration_s =
-      node->declare_parameter<double>("p5.final_gate_max_failure_duration_s",
-                                      1.0);
+  (void)node->declare_parameter<int>(
+      "p5.final_gate_max_consecutive_failures", 3);
+  (void)node->declare_parameter<double>(
+      "p5.final_gate_max_failure_duration_s", 1.0);
   config.current_replan_margin_m =
       node->declare_parameter<double>("p5.current_replan_margin_m", 0.3);
   config.current_emergency_margin_m =
@@ -519,7 +463,7 @@ P5RuntimeIntegrityGate::Config P5RuntimeIntegrityGate::declareAndReadConfig(
 std::unique_ptr<P5RuntimeIntegrityGate> P5RuntimeIntegrityGate::createIfEnabled(
     const rclcpp::Node::SharedPtr& node) {
   Config config = declareAndReadConfig(node);
-  if (!config.enable_runtime_gate && !config.enable_final_gate) {
+  if (!config.enable_runtime_gate) {
     return nullptr;
   }
   return std::make_unique<P5RuntimeIntegrityGate>(node, std::move(config));
@@ -544,10 +488,6 @@ P5RuntimeIntegrityGate::P5RuntimeIntegrityGate(rclcpp::Node::SharedPtr node,
       std::max(0.0, config_.current_low_margin_to_emergency_s);
   config_.future_unknown_to_emergency_s =
       std::max(0.0, config_.future_unknown_to_emergency_s);
-  config_.final_gate_max_consecutive_failures =
-      std::max(1, config_.final_gate_max_consecutive_failures);
-  config_.final_gate_max_failure_duration_s =
-      std::max(0.0, config_.final_gate_max_failure_duration_s);
   config_.max_bad_ratio = std::clamp(config_.max_bad_ratio, 0.0, 1.0);
   config_.max_unknown_ratio = std::clamp(config_.max_unknown_ratio, 0.0, 1.0);
   config_.bad_tick_to_replan = std::max(1, config_.bad_tick_to_replan);
@@ -581,7 +521,7 @@ P5RuntimeIntegrityGate::P5RuntimeIntegrityGate(rclcpp::Node::SharedPtr node,
 }
 
 void P5RuntimeIntegrityGate::createRosInterfaces() {
-  if (!node_ || (!config_.enable_runtime_gate && !config_.enable_final_gate)) {
+  if (!node_ || !config_.enable_runtime_gate) {
     return;
   }
   callback_group_ =
@@ -595,10 +535,8 @@ void P5RuntimeIntegrityGate::createRosInterfaces() {
       },
       subscription_options);
   if (config_.debug_metrics_enable) {
-    // Final-gate and first-runtime records can be emitted immediately after
-    // the planner node starts. Retain the bounded debug history so integration
-    // evidence subscribers cannot miss the selected trajectory during DDS
-    // discovery.
+    // Retain bounded runtime debug history so evidence subscribers cannot
+    // miss the first activated-trajectory sample during DDS discovery.
     status_pub_ = node_->create_publisher<std_msgs::msg::String>(
         config_.status_topic,
         rclcpp::QoS(rclcpp::KeepLast(200)).reliable().transient_local());
@@ -631,12 +569,6 @@ void P5RuntimeIntegrityGate::setPredAlertLimitEnvironment(
                                             std::move(resolution_query));
 }
 
-void P5RuntimeIntegrityGate::resetFinalGateFailureState() {
-  final_gate_fail_count_ = 0;
-  final_gate_first_failure_s_ = std::numeric_limits<double>::quiet_NaN();
-  final_gate_last_reason_ = P5GateReason::OK;
-}
-
 P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
     LocalTrajData& local_data,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
@@ -655,7 +587,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
   }
   P5GateStatus status = evaluate(
       local_data, snapshot,
-      EvalContext{false, now_s, emergency_time_s, direct_risk,
+      EvalContext{now_s, emergency_time_s, direct_risk,
                   required_gnss_core_policy, required_window_layout_hash,
                   required_window_point_satellite_sets_hash,
                   runtime_authority_end_s, runtime_trajectory_time_s});
@@ -664,120 +596,12 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
   return status;
 }
 
-P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
-    LocalTrajData& local_data,
-    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-    double now_s,
-    double emergency_time_s,
-    const P4DirectTrajectoryRiskEvidence* direct_risk,
-    const std::string& required_gnss_core_policy,
-    const std::string& required_window_layout_hash,
-    const std::string& required_window_point_satellite_sets_hash) {
-  if (!config_.enable_final_gate) {
-    resetFinalGateFailureState();
-    P5GateStatus status;
-    status.reason = P5GateReason::DISABLED;
-    return status;
-  }
-  P5GateStatus status = evaluate(
-      local_data, snapshot,
-      EvalContext{true, now_s, emergency_time_s, direct_risk,
-                  required_gnss_core_policy, required_window_layout_hash,
-                  required_window_point_satellite_sets_hash,
-                  std::numeric_limits<double>::infinity()});
-  status = applyFinalGateBudget(status, now_s);
-  status.final_evaluation_stamp_s = now_s;
-  status.final_candidate_rejected =
-      status.action != P5GateAction::OK &&
-      status.final_candidate_traj_id >= 0;
-  publishStatus(status, "final");
-  return status;
-}
-
-P5GateStatus P5RuntimeIntegrityGate::evaluateFinalPreview(
-    LocalTrajData& local_data,
-    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-    const double now_s,
-    const double emergency_time_s,
-    const P4DirectTrajectoryRiskEvidence* direct_risk,
-    const std::string& required_gnss_core_policy,
-    const std::string& required_window_layout_hash,
-    const std::string& required_window_point_satellite_sets_hash) {
-  if (!config_.enable_final_gate) {
-    P5GateStatus status;
-    status.reason = P5GateReason::DISABLED;
-    return status;
-  }
-  // A prepare-only successor preview is an observational query.  The
-  // evaluator historically reused the final-gate path, whose healthy
-  // branches clear the runtime debounce clocks even though final gates do
-  // not start them.  Preserve every runtime clock explicitly so preparing a
-  // child cannot heal (or otherwise alter) the executing parent's state.
-  const double saved_current_problem_started_s = current_problem_started_s_;
-  const double saved_current_low_margin_started_s =
-      current_low_margin_started_s_;
-  const double saved_future_unknown_started_s = future_unknown_started_s_;
-  P5GateStatus status = evaluate(
-      local_data, snapshot,
-      EvalContext{true, now_s, emergency_time_s, direct_risk,
-                  required_gnss_core_policy, required_window_layout_hash,
-                  required_window_point_satellite_sets_hash,
-                  std::numeric_limits<double>::infinity()});
-  current_problem_started_s_ = saved_current_problem_started_s;
-  current_low_margin_started_s_ = saved_current_low_margin_started_s;
-  future_unknown_started_s_ = saved_future_unknown_started_s;
-  status.final_evaluation_stamp_s = now_s;
-  status.final_candidate_rejected =
-      status.action != P5GateAction::OK && status.final_candidate_traj_id >= 0;
-  return status;
-}
-
-void P5RuntimeIntegrityGate::publishFinalAdmission(
-    P5GateStatus status, const double publish_authorization_stamp_s) {
-  if (status.action != P5GateAction::OK ||
-      status.reason != P5GateReason::OK ||
-      !std::isfinite(status.final_evaluation_stamp_s) ||
-      !std::isfinite(publish_authorization_stamp_s) ||
-      publish_authorization_stamp_s < status.final_evaluation_stamp_s) {
-    return;
-  }
-  status.final_publish_authorization_stamp_s =
-      publish_authorization_stamp_s;
-  if (!status_pub_) {
-    return;
-  }
-  std::ostringstream oss;
-  oss << "{\"phase\":\"final_publish_authorized\""
-      << ",\"action\":\"OK\",\"raw_action\":\"OK\""
-      << ",\"reason\":\"ok\",\"raw_reason\":\"ok\""
-      << ",\"active_reasons\":[],\"current_reason\":\"\""
-      << ",\"future_reason\":\"\""
-      << ",\"final_candidate_rejected\":false"
-      << ",\"current_integrity_source\":"
-      << jsonString(status.current_integrity_source)
-      << ",\"final_candidate_traj_id\":"
-      << status.final_candidate_traj_id
-      << ",\"final_candidate_start_time_ns\":"
-      << status.final_candidate_start_time_ns
-      << ",\"final_evaluation_stamp_s\":"
-      << jsonNumber(status.final_evaluation_stamp_s)
-      << ",\"final_publish_authorization_stamp_s\":"
-      << jsonNumber(status.final_publish_authorization_stamp_s)
-      << ",\"execution_mode\":"
-      << jsonString(iap::trajectoryExecutionModeName(status.execution_mode))
-      << ",\"trajectory_assurance_hash\":"
-      << jsonString(status.trajectory_assurance_hash) << "}";
-  std_msgs::msg::String msg;
-  msg.data = oss.str();
-  status_pub_->publish(msg);
-}
-
 P5GateStatus P5RuntimeIntegrityGate::evaluate(
     LocalTrajData& local_data,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     const EvalContext& context) {
   P5GateStatus current_status =
-      evaluateCurrentGate(context.now_s, !context.final_gate);
+      evaluateCurrentGate(context.now_s, true);
   CurrentIntegrity current;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -949,10 +773,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     status.unknown_count = 1;
     status.unknown_ratio = 1.0;
     status.action = P5GateAction::REQUEST_REPLAN;
-    if (!context.final_gate) {
-      future_unknown_started_s_ =
-          std::numeric_limits<double>::quiet_NaN();
-    }
+    future_unknown_started_s_ =
+        std::numeric_limits<double>::quiet_NaN();
     status.future_unknown_duration_s = 0.0;
     status.raw_action = status.action;
     return status;
@@ -973,14 +795,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   const double trajectory_start_time_s = local_data.start_time_.seconds();
   const int64_t trajectory_start_time_ns = local_data.start_time_.nanoseconds();
   const double duration = std::max(0.0, local_data.duration_);
-  if (context.final_gate) {
-    status.final_candidate_traj_id = local_data.traj_id_;
-    status.final_candidate_start_time_s = trajectory_start_time_s;
-    status.final_candidate_start_time_ns = trajectory_start_time_ns;
-    status.final_candidate_duration_s = duration;
-  }
-  double t_cur = !context.final_gate && finite(
-      context.runtime_trajectory_time_s)
+  double t_cur = finite(context.runtime_trajectory_time_s)
       ? context.runtime_trajectory_time_s
       : context.now_s - trajectory_start_time_s;
   t_cur = std::clamp(t_cur, 0.0, duration);
@@ -991,7 +806,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   // cancel the safe child just before activation. If the start passes without
   // a matching ACK, the empty window still takes the fail-closed diagnostic
   // path below.
-  if (!context.final_gate && finite(context.runtime_authority_end_s)) {
+  if (finite(context.runtime_authority_end_s)) {
     const double authority_end_t = std::clamp(
         context.runtime_authority_end_s - trajectory_start_time_s,
         0.0, duration);
@@ -1002,8 +817,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   // own exact time lattice.
   const double dt = std::max(0.01, config_.sample_dt_s);
   const double time_remaining = std::max(0.0, duration - t_cur);
-  const std::string sample_source =
-      context.final_gate ? "final_candidate" : "runtime_committed";
+  const std::string sample_source = "runtime_committed";
 
   auto fill_timing = [&](SafetyVizTrajectorySample* sample) {
     if (!sample) {
@@ -1365,9 +1179,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
        sample_index < future_samples.size(); ++sample_index) {
     const auto& future = future_samples[sample_index];
     const double tau = future.tau_s;
-    const double actual_query_time_s = context.final_gate
-        ? trajectory_start_time_s + future.trajectory_time_s
-        : context.now_s + tau;
+    const double actual_query_time_s = context.now_s + tau;
     const Eigen::Vector3d& p = future.position;
     SafetyVizTrajectorySample viz_sample;
     fill_timing(&viz_sample);
@@ -1375,7 +1187,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     viz_sample.tau_s = tau;
     iap::PredictedPLSample grid_pl;
     const bool grid_pl_ok = snapshot && snapshot->queryPredictedPL(
-        p, actual_query_time_s, &grid_pl, tau, context.final_gate);
+        p, actual_query_time_s, &grid_pl, tau, false);
     iap::PredictedPLSample pl;
     bool pl_ok = false;
     if (grid_pl.fixture_match) {
@@ -1518,7 +1330,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   const bool debounce_eligible_unknown =
       unknown_high && !emitted_trajectory_timing_failure;
   if (debounce_eligible_unknown) {
-    if (!context.final_gate && !finite(future_unknown_started_s_)) {
+    if (!finite(future_unknown_started_s_)) {
       future_unknown_started_s_ = context.now_s;
     }
     status.future_unknown_duration_s =
@@ -1573,11 +1385,6 @@ P5GateStatus P5RuntimeIntegrityGate::merge(const P5GateStatus& a,
   out.current_stale_duration_s = a.current_stale_duration_s;
   out.current_low_margin_duration_s = a.current_low_margin_duration_s;
   out.future_unknown_duration_s = b.future_unknown_duration_s;
-  out.final_candidate_traj_id = b.final_candidate_traj_id;
-  out.final_candidate_start_time_s = b.final_candidate_start_time_s;
-  out.final_candidate_start_time_ns = b.final_candidate_start_time_ns;
-  out.final_candidate_duration_s = b.final_candidate_duration_s;
-  out.final_candidate_rejected = b.final_candidate_rejected;
   out.pred_al_mode = b.pred_al_mode;
   out.pred_hal_min = b.pred_hal_min;
   out.pred_val_min = b.pred_val_min;
@@ -1655,73 +1462,6 @@ P5GateStatus P5RuntimeIntegrityGate::applyDebounce(const P5GateStatus& raw,
   return status;
 }
 
-P5GateStatus P5RuntimeIntegrityGate::applyFinalGateBudget(
-    const P5GateStatus& raw,
-    double now_s) {
-  P5GateStatus status = raw;
-  status.raw_action = raw.action;
-  status.raw_reason = raw.reason;
-
-  if (raw.action == P5GateAction::OK) {
-    resetFinalGateFailureState();
-    status.final_gate_fail_count = 0;
-    status.final_gate_fail_duration_s = 0.0;
-    status.final_gate_last_reason.clear();
-    return status;
-  }
-
-  if (isUnknownOnlyFinalGateBlock(raw)) {
-    resetFinalGateFailureState();
-    status.final_gate_fail_count = 0;
-    status.final_gate_fail_duration_s = 0.0;
-    status.final_gate_last_reason.clear();
-    return status;
-  }
-
-  if (isTransientCurrentStaleFinalGateBlock(
-          raw, config_.current_stale_to_emergency_s)) {
-    resetFinalGateFailureState();
-    status.final_gate_fail_count = 0;
-    status.final_gate_fail_duration_s = 0.0;
-    status.final_gate_last_reason.clear();
-    return status;
-  }
-
-  if (isLightRiskCurrentLowMarginFinalGateBlock(
-          raw, config_.current_low_margin_to_emergency_s)) {
-    resetFinalGateFailureState();
-    status.final_gate_fail_count = 0;
-    status.final_gate_fail_duration_s = 0.0;
-    status.final_gate_last_reason.clear();
-    return status;
-  }
-
-  if (!finite(final_gate_first_failure_s_)) {
-    final_gate_first_failure_s_ = now_s;
-  }
-  final_gate_fail_count_++;
-  final_gate_last_reason_ = raw.reason;
-
-  status.final_gate_fail_count = final_gate_fail_count_;
-  status.final_gate_fail_duration_s =
-      finite(final_gate_first_failure_s_)
-          ? std::max(0.0, now_s - final_gate_first_failure_s_)
-          : 0.0;
-  status.final_gate_last_reason = reasonName(final_gate_last_reason_);
-
-  const bool count_exceeded =
-      final_gate_fail_count_ >= config_.final_gate_max_consecutive_failures;
-  const bool duration_exceeded =
-      status.final_gate_fail_duration_s >=
-      config_.final_gate_max_failure_duration_s;
-  if (raw.action != P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE &&
-      (count_exceeded || duration_exceeded)) {
-    status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
-    status.reason = P5GateReason::FINAL_GATE_FAILED;
-  }
-  return status;
-}
-
 void P5RuntimeIntegrityGate::publishStatus(const P5GateStatus& status,
                                            const std::string& phase) {
   if (safety_viz_) {
@@ -1783,25 +1523,6 @@ std::string P5RuntimeIntegrityGate::toJson(
       << jsonNumber(status.current_low_margin_duration_s)
       << ",\"future_unknown_duration_s\":"
       << jsonNumber(status.future_unknown_duration_s)
-      << ",\"final_gate_fail_count\":" << status.final_gate_fail_count
-      << ",\"final_gate_fail_duration_s\":"
-      << jsonNumber(status.final_gate_fail_duration_s)
-      << ",\"final_gate_last_reason\":"
-      << jsonString(status.final_gate_last_reason)
-      << ",\"final_candidate_traj_id\":"
-      << status.final_candidate_traj_id
-      << ",\"final_candidate_start_time_s\":"
-      << jsonNumber(status.final_candidate_start_time_s)
-      << ",\"final_candidate_start_time_ns\":"
-      << status.final_candidate_start_time_ns
-      << ",\"final_candidate_duration_s\":"
-      << jsonNumber(status.final_candidate_duration_s)
-      << ",\"final_candidate_rejected\":"
-      << (status.final_candidate_rejected ? "true" : "false")
-      << ",\"final_evaluation_stamp_s\":"
-      << jsonNumber(status.final_evaluation_stamp_s)
-      << ",\"final_publish_authorization_stamp_s\":"
-      << jsonNumber(status.final_publish_authorization_stamp_s)
       << ",\"pred_al_mode\":" << jsonString(status.pred_al_mode)
       << ",\"pred_hal_min\":" << jsonNumber(status.pred_hal_min)
       << ",\"pred_val_min\":" << jsonNumber(status.pred_val_min)
@@ -1874,8 +1595,6 @@ const char* P5RuntimeIntegrityGate::reasonName(P5GateReason reason) {
       return "future_unknown";
     case P5GateReason::AL_INVALID:
       return "al_invalid";
-    case P5GateReason::FINAL_GATE_FAILED:
-      return "final_gate_failed";
     case P5GateReason::SNAPSHOT_UNAVAILABLE:
       return "snapshot_unavailable";
   }
