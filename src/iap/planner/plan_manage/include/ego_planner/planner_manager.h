@@ -794,7 +794,9 @@ namespace ego_planner
 
     void initPlanModules(rclcpp::Node::SharedPtr &node, PlanningVisualization::Ptr vis = NULL);
     using TimeProvider = std::function<rclcpp::Time()>;
+    using SteadyTimeProvider = std::function<int64_t()>;
     void setTimeProvider(TimeProvider provider);
+    void setSteadyTimeProvider(SteadyTimeProvider provider);
     rclcpp::Time plannerNow() const;
     int allocateTrajectoryId();
     uint64_t executionInstanceId() const { return execution_instance_id_; }
@@ -1326,6 +1328,9 @@ namespace ego_planner
     P3ReferenceBiasConfig p3_config_;
 
   private:
+    int64_t steadyNowNs() const;
+    bool executionFeedbackFresh(
+        int64_t receive_steady_ns, double maximum_age_s) const;
     bool finalChildBoundaryMatchesFrozenParent(
         const UniformBspline &position_traj,
         double frozen_parent_switch_elapsed_s,
@@ -1358,11 +1363,13 @@ namespace ego_planner
     struct ActiveTrajectoryExecutionSample
     {
       bool valid = false;
+      bool received_from_server = false;
       uint64_t execution_instance_id = 0;
       int trajectory_id = 0;
       int64_t start_time_ns = 0;
       std::string curve_hash;
-      double sample_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      double sample_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      int64_t receive_steady_ns = 0;
       double trajectory_elapsed_s =
           std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d position = Eigen::Vector3d::Zero();
@@ -1376,7 +1383,8 @@ namespace ego_planner
       int trajectory_id = 0;
       int64_t start_time_ns = 0;
       std::string curve_hash;
-      double sample_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      double sample_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      int64_t receive_steady_ns = 0;
       double trajectory_elapsed_s =
           std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d commanded_position = Eigen::Vector3d::Zero();
@@ -1408,6 +1416,7 @@ namespace ego_planner
     int gate0_bspline_publish_count_{0};
     PlanningRiskContext planning_risk_context_;
     TimeProvider time_provider_;
+    SteadyTimeProvider steady_time_provider_;
     std::shared_ptr<const iap::RiskGridSnapshot>
         latest_risk_snapshot_for_test_;
     std::string trajectory_frame_id_{"map"};

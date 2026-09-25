@@ -2482,7 +2482,212 @@ ego_planner::P4ForwardDecision makeForwardDecision(
   return decision;
 }
 
+struct ActivatedRuntimeFeedbackFixture
+{
+  std::unique_ptr<ego_planner::EGOPlannerManager> manager;
+  std::shared_ptr<int64_t> steady_now_ns;
+  double evaluation_ros_s = 10.5;
+};
+
+ActivatedRuntimeFeedbackFixture makeActivatedRuntimeFeedbackFixture(
+    const std::string &name, const int trajectory_id,
+    const double certified_position_tracking_bound_m = 0.125)
+{
+  ActivatedRuntimeFeedbackFixture fixture;
+  fixture.manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  fixture.steady_now_ns = std::make_shared<int64_t>(1'000'000'000LL);
+  fixture.manager->setSteadyTimeProvider(
+      [steady_now_ns = fixture.steady_now_ns]() {
+        return *steady_now_ns;
+      });
+
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  EXPECT_NE(frozen_occupancy, nullptr);
+  const auto snapshot = makeP4SelectionSnapshot(
+      100.0, frozen_occupancy->geometry_id);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, p4LineageTestPath(name + ".csv").string(), 1);
+  const auto safe_direct = directRiskCallback(0.5);
+  const auto execution_snapshot = makeP4ExecutionSnapshot(
+      snapshot, safe_direct, 10.0,
+      static_cast<uint64_t>(900 + trajectory_id));
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution_snapshot->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+
+  auto &manager = *fixture.manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  auto control_profile = permissiveTestControlProfile();
+  control_profile.position_tracking_bound_m =
+      Eigen::Vector3d::Constant(certified_position_tracking_bound_m);
+  manager.setP4ControlCapabilityProfileForTest(control_profile);
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, safe_direct, execution_snapshot);
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  auto trajectory = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &trajectory, terminalStartState(trajectory), 20.0, 100.0, 0.0);
+  EXPECT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = trajectory;
+  manager.local_data_.traj_id_ = trajectory_id;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = trajectory.getTimeSum();
+  EXPECT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_TRUE(manager.commitP4CertifiedPublication(10.0));
+  manager.local_data_.duration_ =
+      manager.p4ExecutionCertificate().duration_s;
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+  manager.local_data_.curve_hash_ = ego_planner::trajectoryCurveHash(
+      manager.local_data_.position_traj_, manager.local_data_.start_time_);
+  EXPECT_TRUE(manager.recordTrajectoryCommandPublished(
+      manager.local_data_.execution_instance_id_, trajectory_id,
+      manager.local_data_.start_time_.nanoseconds(),
+      manager.local_data_.curve_hash_));
+  EXPECT_TRUE(manager.recordTrajectoryActivated(
+      manager.local_data_.execution_instance_id_, trajectory_id,
+      manager.local_data_.start_time_.nanoseconds(),
+      manager.local_data_.curve_hash_));
+  return fixture;
+}
+
 }  // namespace
+
+TEST(TrajectoryExecutionFeedbackTest,
+     RuntimeUsesSteadyFreshnessAndPreservesHardControllerBrakes)
+{
+  const auto seed_feedback = [](
+      ActivatedRuntimeFeedbackFixture *fixture, const bool saturated,
+      const double feedback_offset_m) {
+    auto &manager = *fixture->manager;
+    constexpr double elapsed_s = 0.5;
+    auto trajectory = manager.local_data_.position_traj_;
+    auto velocity = trajectory.getDerivative();
+    auto acceleration = velocity.getDerivative();
+    const Eigen::Vector3d command_position =
+        trajectory.evaluateDeBoorT(elapsed_s);
+    const Eigen::Vector3d command_velocity =
+        velocity.evaluateDeBoorT(elapsed_s);
+    const Eigen::Vector3d command_acceleration =
+        acceleration.evaluateDeBoorT(elapsed_s);
+    constexpr double sender_wall_stamp_s = 1'725'000'000.0;
+    EXPECT_TRUE(manager.recordTrajectoryExecutionSample(
+        manager.local_data_.execution_instance_id_,
+        manager.local_data_.traj_id_,
+        manager.local_data_.start_time_.nanoseconds(),
+        manager.local_data_.curve_hash_, sender_wall_stamp_s, elapsed_s,
+        command_position, command_velocity, command_acceleration));
+    EXPECT_TRUE(manager.recordTrajectoryControllerTrace(
+        manager.local_data_.execution_instance_id_,
+        manager.local_data_.traj_id_,
+        manager.local_data_.start_time_.nanoseconds(),
+        manager.local_data_.curve_hash_, sender_wall_stamp_s, elapsed_s,
+        command_position, command_velocity, command_acceleration,
+        command_position + Eigen::Vector3d(feedback_offset_m, 0.0, 0.0),
+        command_velocity, command_acceleration, saturated));
+    return command_position;
+  };
+
+  auto fresh = makeActivatedRuntimeFeedbackFixture(
+      "runtime_feedback_fresh", 931);
+  const Eigen::Vector3d fresh_position =
+      seed_feedback(&fresh, false, 0.0);
+  const auto fresh_result =
+      fresh.manager->validateCommittedP4TrajectoryExecution(
+          fresh.evaluation_ros_s - 0.01,
+          fresh_position + Eigen::Vector3d(0.0, 0.0, 0.2));
+  EXPECT_TRUE(fresh_result.allowed) << fresh_result.reason;
+  EXPECT_EQ(fresh_result.reason, "runtime_execution_contract_valid");
+  EXPECT_NEAR(fresh_result.tracking_error_m, 0.0, 1.0e-12);
+  EXPECT_FALSE(fresh_result.guard_braking_preschedule_requested);
+  EXPECT_FALSE(fresh.manager->pendingP4GuardBrakingCommand().has_value());
+
+  auto waiting = makeActivatedRuntimeFeedbackFixture(
+      "runtime_feedback_waiting", 935);
+  const double waiting_bound_s =
+      waiting.manager->requiredTrajectoryLeadTimeSeconds();
+  *waiting.steady_now_ns += static_cast<int64_t>(std::llround(
+      waiting_bound_s * 1.0e9));
+  const Eigen::Vector3d waiting_position =
+      waiting.manager->local_data_.position_traj_.evaluateDeBoorT(0.0);
+  const auto waiting_result =
+      waiting.manager->validateCommittedP4TrajectoryExecution(
+          waiting.evaluation_ros_s - 0.01, waiting_position);
+  EXPECT_TRUE(waiting_result.allowed) << waiting_result.reason;
+  EXPECT_EQ(waiting_result.reason, "runtime_execution_contract_valid");
+
+  auto waiting_expired = makeActivatedRuntimeFeedbackFixture(
+      "runtime_feedback_waiting_expired", 936);
+  *waiting_expired.steady_now_ns += static_cast<int64_t>(std::llround(
+      waiting_expired.manager->requiredTrajectoryLeadTimeSeconds() *
+      1.0e9)) + 10;
+  const Eigen::Vector3d waiting_expired_position =
+      waiting_expired.manager->local_data_.position_traj_.evaluateDeBoorT(
+          0.0);
+  const auto waiting_expired_result =
+      waiting_expired.manager->validateCommittedP4TrajectoryExecution(
+          waiting_expired.evaluation_ros_s - 0.01,
+          waiting_expired_position);
+  EXPECT_NE(waiting_expired_result.reason.find(
+                "controller_execution_trace_stale"),
+            std::string::npos) << waiting_expired_result.reason;
+  EXPECT_TRUE(waiting_expired_result.guard_braking_preschedule_requested);
+
+  auto stale = makeActivatedRuntimeFeedbackFixture(
+      "runtime_feedback_stale", 932);
+  const Eigen::Vector3d stale_position =
+      seed_feedback(&stale, false, 0.0);
+  *stale.steady_now_ns += 201'000'000LL;
+  const auto stale_result =
+      stale.manager->validateCommittedP4TrajectoryExecution(
+          stale.evaluation_ros_s - 0.01, stale_position);
+  EXPECT_NE(stale_result.reason.find("controller_execution_trace_stale"),
+            std::string::npos) << stale_result.reason;
+  EXPECT_TRUE(stale_result.guard_braking_preschedule_requested);
+  EXPECT_TRUE(stale.manager->pendingP4GuardBrakingCommand().has_value());
+
+  auto saturated = makeActivatedRuntimeFeedbackFixture(
+      "runtime_feedback_saturated", 933);
+  const Eigen::Vector3d saturated_position =
+      seed_feedback(&saturated, true, 0.0);
+  const auto saturated_result =
+      saturated.manager->validateCommittedP4TrajectoryExecution(
+          saturated.evaluation_ros_s, saturated_position);
+  EXPECT_NE(saturated_result.reason.find("controller_output_saturated"),
+            std::string::npos) << saturated_result.reason;
+  EXPECT_TRUE(saturated_result.guard_braking_preschedule_requested);
+  EXPECT_TRUE(
+      saturated.manager->pendingP4GuardBrakingCommand().has_value());
+
+  auto tracking = makeActivatedRuntimeFeedbackFixture(
+      "runtime_feedback_tracking", 934, 0.20);
+  const Eigen::Vector3d tracking_position =
+      seed_feedback(&tracking, false, 0.16);
+  const auto tracking_result =
+      tracking.manager->validateCommittedP4TrajectoryExecution(
+          tracking.evaluation_ros_s, tracking_position);
+  EXPECT_FALSE(tracking_result.allowed);
+  EXPECT_EQ(tracking_result.reason,
+            "recovery_braking_not_certified:"
+            "recovery_braking_inputs_unavailable");
+}
 
 TEST(P4ActualCurveClearanceCertification,
      LocalFailureIsTypedAndSkipsGnssRiskComputation) {
@@ -4307,37 +4512,6 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_NE(continuing.runtime_window_evidence_sequence_id, 0u);
   EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
-  auto committed_velocity = manager.local_data_.position_traj_.getDerivative();
-  auto committed_acceleration = committed_velocity.getDerivative();
-  const double trace_t =
-      during_execution_s - manager.local_data_.start_time_.seconds();
-  const Eigen::Vector3d controller_feedback_position =
-      commanded_position + Eigen::Vector3d(0.03, 0.0, 0.0);
-  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
-      manager.local_data_.execution_instance_id_,
-      manager.local_data_.traj_id_, committed_start,
-      manager.local_data_.curve_hash_, during_execution_s, trace_t,
-      commanded_position, committed_velocity.evaluateDeBoorT(trace_t),
-      committed_acceleration.evaluateDeBoorT(trace_t),
-      controller_feedback_position,
-      committed_velocity.evaluateDeBoorT(trace_t),
-      committed_acceleration.evaluateDeBoorT(trace_t), false));
-  // Navigation odometry can carry localization error relative to the control
-  // feedback frame. It must not be misclassified as controller tracking error
-  // when a fresh, full-identity command/feedback trace exists.
-  const auto cached_continuing =
-      manager.validateCommittedP4TrajectoryExecution(
-          during_execution_s + 0.01,
-          commanded_position + Eigen::Vector3d(0.0, 0.0, 0.2));
-  EXPECT_TRUE(cached_continuing.allowed) << cached_continuing.reason;
-  EXPECT_NEAR(cached_continuing.tracking_error_m, 0.03, 1.0e-9);
-  EXPECT_EQ(cached_continuing.reason, "runtime_execution_contract_valid");
-  // The occupancy snapshot is unchanged, so the immutable source-row cache
-  // is projected to the later reachable view without issuing another query.
-  EXPECT_EQ(cached_continuing.runtime_window_evidence_sequence_id,
-            continuing.runtime_window_evidence_sequence_id);
-  EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
-
   auto marginal_nominal = manager.local_data_.position_traj_;
   const double marginal_start_s = manager.local_data_.start_time_.seconds();
   const double marginal_threshold_t = 1.5;
@@ -6059,6 +6233,10 @@ TEST(TrajectoryCommandQosTest,
 TEST(TrajectoryActivationTest,
      WatchdogUsesFreshIdentityMatchedServerExecutionSample) {
   ego_planner::EGOPlannerManager manager;
+  int64_t steady_now_ns = 1'000'000'000LL;
+  manager.setSteadyTimeProvider([&steady_now_ns]() {
+    return steady_now_ns;
+  });
   const auto instance = manager.executionInstanceId();
   constexpr int trajectory_id = 92;
   constexpr int64_t start_ns = 1657065601000000000LL;
@@ -6088,6 +6266,7 @@ TEST(TrajectoryActivationTest,
   EXPECT_TRUE(sampled_position.isApprox(position, 0.0));
   EXPECT_TRUE(sampled_velocity.isApprox(velocity, 0.0));
   EXPECT_TRUE(sampled_acceleration.isApprox(acceleration, 0.0));
+  steady_now_ns += 210'000'000LL;
   EXPECT_FALSE(manager.activeTrajectoryExecutionState(
       1657065602.21, 0.2, &elapsed_s, &sampled_position,
       &sampled_velocity, &sampled_acceleration));
@@ -6097,6 +6276,7 @@ TEST(TrajectoryActivationTest,
 
   const Eigen::Vector3d feedback_position =
       position + Eigen::Vector3d(0.03, 0.0, 0.0);
+  steady_now_ns = 2'000'000'000LL;
   ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
       instance, trajectory_id, start_ns, "execution-sample-92",
       1657065602.1, 0.5, position, velocity, acceleration,
@@ -6122,14 +6302,13 @@ TEST(TrajectoryActivationTest,
   EXPECT_TRUE(trace_command_position.isApprox(position, 0.0));
   EXPECT_TRUE(trace_feedback_position.isApprox(feedback_position, 0.0));
   EXPECT_FALSE(trace_saturated);
-  // Controller output is normally newer than the latest 10 Hz navigation
-  // odometry stamp used by the watchdog. A bounded future sample is the
-  // freshest same-cycle command/feedback evidence, not a clock violation.
+  // ROS evaluation order and sender timestamps have no bearing on local
+  // receive freshness.
   EXPECT_TRUE(manager.trajectoryControllerTrace(
       instance, trajectory_id, start_ns, "execution-sample-92",
       1657065602.05, 0.2, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr));
-  EXPECT_FALSE(manager.trajectoryControllerTrace(
+  EXPECT_TRUE(manager.trajectoryControllerTrace(
       instance, trajectory_id, start_ns, "execution-sample-92",
       1657065601.89, 0.2, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr));
@@ -6137,10 +6316,178 @@ TEST(TrajectoryActivationTest,
       instance, trajectory_id + 1, start_ns, "execution-sample-92",
       1657065602.15, 0.2, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr));
+  steady_now_ns += 210'000'000LL;
   EXPECT_FALSE(manager.trajectoryControllerTrace(
       instance, trajectory_id, start_ns, "execution-sample-92",
       1657065602.31, 0.2, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr));
+}
+
+TEST(TrajectoryActivationTest,
+     FeedbackFreshnessIgnoresSenderClockAndRosCallbackOrder) {
+  ego_planner::EGOPlannerManager manager;
+  int64_t steady_now_ns = 5'000'000'000LL;
+  manager.setSteadyTimeProvider([&steady_now_ns]() {
+    return steady_now_ns;
+  });
+  const auto instance = manager.executionInstanceId();
+  constexpr int trajectory_id = 93;
+  constexpr int64_t start_ns = 10'000'000'000LL;
+  manager.local_data_.execution_instance_id_ = instance;
+  manager.local_data_.traj_id_ = trajectory_id;
+  manager.local_data_.start_time_ = rclcpp::Time(start_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = "mixed-clock-trajectory-93";
+  manager.local_data_.position_traj_ = makeMovingCurvedP4Trajectory(0.2);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  manager.setTimeProvider([]() {
+    return rclcpp::Time(10'100'000'000LL, RCL_ROS_TIME);
+  });
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93"));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93"));
+
+  const Eigen::Vector3d position(1.0, 2.0, 3.0);
+  const Eigen::Vector3d velocity(0.4, -0.2, 0.1);
+  const Eigen::Vector3d acceleration(0.1, 0.2, -0.1);
+  // The sender uses wall time while planner/odom use simulated ROS time.
+  constexpr double sender_wall_stamp_s = 1'725'000'000.0;
+  ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      sender_wall_stamp_s, 0.42, position, velocity, acceleration));
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      sender_wall_stamp_s, 0.42, position, velocity, acceleration,
+      position, velocity, acceleration, false));
+
+  double elapsed_s = 0.0;
+  Eigen::Vector3d sampled_position;
+  Eigen::Vector3d sampled_velocity;
+  Eigen::Vector3d sampled_acceleration;
+  EXPECT_TRUE(manager.activeTrajectoryExecutionState(
+      10.05, 0.2, &elapsed_s, &sampled_position, &sampled_velocity,
+      &sampled_acceleration));
+  EXPECT_TRUE(manager.trajectoryControllerTrace(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      10.05, 0.2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr));
+
+  // A later callback may carry an older ROS header. Its newer execution
+  // progress must win, because callback receipt order and elapsed are the
+  // execution evidence; sender ROS stamp ordering is not freshness.
+  steady_now_ns += 10'000'000LL;
+  ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      sender_wall_stamp_s - 1.0, 0.43, position, velocity, acceleration));
+  EXPECT_TRUE(manager.recordTrajectoryControllerTrace(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      sender_wall_stamp_s - 1.0, 0.43, position, velocity, acceleration,
+      position, velocity, acceleration, false));
+  ASSERT_TRUE(manager.activeTrajectoryExecutionState(
+      9.95, 0.2, &elapsed_s, &sampled_position, &sampled_velocity,
+      &sampled_acceleration));
+  EXPECT_DOUBLE_EQ(elapsed_s, 0.43);
+
+  // Neither an old identity nor a same-identity elapsed regression may
+  // replace the current sample or refresh its steady receive age.
+  steady_now_ns += 100'000'000LL;
+  EXPECT_FALSE(manager.recordTrajectoryExecutionSample(
+      instance, trajectory_id + 1, start_ns, "mixed-clock-trajectory-93",
+      sender_wall_stamp_s + 2.0, 0.50, position, velocity, acceleration));
+  EXPECT_FALSE(manager.recordTrajectoryControllerTrace(
+      instance, trajectory_id, start_ns, "wrong-hash",
+      sender_wall_stamp_s + 2.0, 0.50, position, velocity, acceleration,
+      position, velocity, acceleration, false));
+  EXPECT_FALSE(manager.recordTrajectoryExecutionSample(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      sender_wall_stamp_s + 3.0, 0.40, position, velocity, acceleration));
+  steady_now_ns += 100'000'010LL;
+  EXPECT_FALSE(manager.activeTrajectoryExecutionState(
+      5000.0, 0.2, &elapsed_s, &sampled_position, &sampled_velocity,
+      &sampled_acceleration));
+  EXPECT_FALSE(manager.trajectoryControllerTrace(
+      instance, trajectory_id, start_ns, "mixed-clock-trajectory-93",
+      -5000.0, 0.2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr));
+}
+
+TEST(TrajectoryActivationTest,
+     WaitsForFirstMatchingSampleOnlyWithinMeasuredPipelineBound) {
+  ego_planner::EGOPlannerManager manager;
+  int64_t steady_now_ns = 8'000'000'000LL;
+  manager.setSteadyTimeProvider([&steady_now_ns]() {
+    return steady_now_ns;
+  });
+  const auto instance = manager.executionInstanceId();
+  constexpr int trajectory_id = 94;
+  constexpr int64_t start_ns = 20'000'000'000LL;
+  manager.local_data_.execution_instance_id_ = instance;
+  manager.local_data_.traj_id_ = trajectory_id;
+  manager.local_data_.start_time_ = rclcpp::Time(start_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = "waiting-for-feedback-94";
+  manager.local_data_.position_traj_ = makeMovingCurvedP4Trajectory(0.2);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      instance, trajectory_id, start_ns, "waiting-for-feedback-94"));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      instance, trajectory_id, start_ns, "waiting-for-feedback-94"));
+
+  double elapsed_s = -1.0;
+  Eigen::Vector3d position;
+  Eigen::Vector3d velocity;
+  Eigen::Vector3d acceleration;
+  const double waiting_bound_s = manager.requiredTrajectoryLeadTimeSeconds();
+  steady_now_ns += static_cast<int64_t>(std::llround(
+      waiting_bound_s * 1.0e9));
+  ASSERT_TRUE(manager.activeTrajectoryExecutionState(
+      1000.0, 0.2, &elapsed_s, &position, &velocity, &acceleration));
+  EXPECT_DOUBLE_EQ(elapsed_s, 0.0);
+
+  steady_now_ns += 10;
+  EXPECT_FALSE(manager.activeTrajectoryExecutionState(
+      -1000.0, 0.2, &elapsed_s, &position, &velocity, &acceleration));
+}
+
+TEST(TrajectoryActivationTest,
+     RosPauseCannotAdvanceOrStaleContinuouslyReceivedExecutionProgress) {
+  ego_planner::EGOPlannerManager manager;
+  int64_t steady_now_ns = 12'000'000'000LL;
+  manager.setSteadyTimeProvider([&steady_now_ns]() {
+    return steady_now_ns;
+  });
+  const auto instance = manager.executionInstanceId();
+  constexpr int trajectory_id = 95;
+  constexpr int64_t start_ns = 30'000'000'000LL;
+  manager.local_data_.execution_instance_id_ = instance;
+  manager.local_data_.traj_id_ = trajectory_id;
+  manager.local_data_.start_time_ = rclcpp::Time(start_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = "paused-ros-trajectory-95";
+  manager.local_data_.position_traj_ = makeMovingCurvedP4Trajectory(0.2);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      instance, trajectory_id, start_ns, "paused-ros-trajectory-95"));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      instance, trajectory_id, start_ns, "paused-ros-trajectory-95"));
+
+  const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+  double sampled_elapsed_s = -1.0;
+  Eigen::Vector3d position;
+  Eigen::Vector3d velocity;
+  Eigen::Vector3d acceleration;
+  for (const double elapsed_s : {0.40, 0.41, 0.42}) {
+    ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+        instance, trajectory_id, start_ns, "paused-ros-trajectory-95",
+        30.0, elapsed_s, zero, zero, zero));
+    ASSERT_TRUE(manager.activeTrajectoryExecutionState(
+        30.0, 0.2, &sampled_elapsed_s, &position, &velocity,
+        &acceleration));
+    EXPECT_DOUBLE_EQ(sampled_elapsed_s, elapsed_s);
+    steady_now_ns += 100'000'000LL;
+  }
+  EXPECT_DOUBLE_EQ(sampled_elapsed_s, 0.42);
 }
 
 TEST(PlanningTimeProviderTest,

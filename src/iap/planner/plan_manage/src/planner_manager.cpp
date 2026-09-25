@@ -2748,9 +2748,9 @@ namespace ego_planner
         sample.trajectory_id == local_data_.traj_id_ &&
         sample.start_time_ns == local_data_.start_time_.nanoseconds() &&
         sample.curve_hash == local_data_.curve_hash_ &&
-        std::isfinite(sample.sample_stamp_s) &&
+        std::isfinite(sample.sample_ros_stamp_s) &&
         std::isfinite(sample.trajectory_elapsed_s) &&
-        absolute_time_s + 1.0e-9 >= sample.sample_stamp_s;
+        absolute_time_s + 1.0e-9 >= sample.sample_ros_stamp_s;
     if (sample_matches)
     {
       // Map the future absolute switch from the controller/traj_server
@@ -2758,7 +2758,7 @@ namespace ego_planner
       // curve at t=0; the planned identity stamp must not make boundary
       // construction jump ahead by that activation delay.
       parent_t_s = sample.trajectory_elapsed_s +
-          (absolute_time_s - sample.sample_stamp_s);
+          (absolute_time_s - sample.sample_ros_stamp_s);
     }
     parent_t_s = std::clamp(parent_t_s, 0.0, local_data_.duration_);
     if (trajectory_elapsed_s)
@@ -2789,13 +2789,25 @@ namespace ego_planner
         !position.allFinite() || !velocity.allFinite() ||
         !acceleration.allFinite())
       return false;
+    if (active_trajectory_execution_sample_.valid &&
+        active_trajectory_execution_sample_.received_from_server &&
+        active_trajectory_execution_sample_.execution_instance_id ==
+            execution_instance_id &&
+        active_trajectory_execution_sample_.trajectory_id == trajectory_id &&
+        active_trajectory_execution_sample_.start_time_ns == start_time_ns &&
+        active_trajectory_execution_sample_.curve_hash == curve_hash &&
+        trajectory_elapsed_s + 1.0e-9 <
+            active_trajectory_execution_sample_.trajectory_elapsed_s)
+      return false;
     active_trajectory_execution_sample_.valid = true;
+    active_trajectory_execution_sample_.received_from_server = true;
     active_trajectory_execution_sample_.execution_instance_id =
         execution_instance_id;
     active_trajectory_execution_sample_.trajectory_id = trajectory_id;
     active_trajectory_execution_sample_.start_time_ns = start_time_ns;
     active_trajectory_execution_sample_.curve_hash = curve_hash;
-    active_trajectory_execution_sample_.sample_stamp_s = sample_stamp_s;
+    active_trajectory_execution_sample_.sample_ros_stamp_s = sample_stamp_s;
+    active_trajectory_execution_sample_.receive_steady_ns = steadyNowNs();
     active_trajectory_execution_sample_.trajectory_elapsed_s =
         trajectory_elapsed_s;
     active_trajectory_execution_sample_.position = position;
@@ -2815,7 +2827,14 @@ namespace ego_planner
       const Eigen::Vector3d &feedback_velocity,
       const Eigen::Vector3d &feedback_acceleration, const bool saturated)
   {
-    if (execution_instance_id == 0 || trajectory_id <= 0 ||
+    std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+    const bool identity_matches =
+        execution_instance_id == last_activated_execution_instance_id_ &&
+        trajectory_id == last_activated_trajectory_id_ &&
+        start_time_ns == last_activated_start_time_ns_ &&
+        curve_hash == last_activated_curve_hash_;
+    if (!identity_matches || execution_instance_id == 0 ||
+        trajectory_id <= 0 ||
         start_time_ns <= 0 || curve_hash.empty() ||
         !std::isfinite(sample_stamp_s) ||
         !std::isfinite(trajectory_elapsed_s) || trajectory_elapsed_s < 0.0 ||
@@ -2825,17 +2844,14 @@ namespace ego_planner
         !feedback_position.allFinite() || !feedback_velocity.allFinite() ||
         !feedback_acceleration.allFinite())
       return false;
-    std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
     if (trajectory_controller_trace_sample_.valid &&
         trajectory_controller_trace_sample_.execution_instance_id ==
             execution_instance_id &&
-        (sample_stamp_s + 1.0e-9 <
-             trajectory_controller_trace_sample_.sample_stamp_s ||
-         (trajectory_controller_trace_sample_.trajectory_id == trajectory_id &&
-          trajectory_controller_trace_sample_.start_time_ns == start_time_ns &&
-          trajectory_controller_trace_sample_.curve_hash == curve_hash &&
-          trajectory_elapsed_s + 1.0e-9 <
-              trajectory_controller_trace_sample_.trajectory_elapsed_s)))
+        trajectory_controller_trace_sample_.trajectory_id == trajectory_id &&
+        trajectory_controller_trace_sample_.start_time_ns == start_time_ns &&
+        trajectory_controller_trace_sample_.curve_hash == curve_hash &&
+        trajectory_elapsed_s + 1.0e-9 <
+            trajectory_controller_trace_sample_.trajectory_elapsed_s)
       return false;
     trajectory_controller_trace_sample_.valid = true;
     trajectory_controller_trace_sample_.execution_instance_id =
@@ -2843,7 +2859,8 @@ namespace ego_planner
     trajectory_controller_trace_sample_.trajectory_id = trajectory_id;
     trajectory_controller_trace_sample_.start_time_ns = start_time_ns;
     trajectory_controller_trace_sample_.curve_hash = curve_hash;
-    trajectory_controller_trace_sample_.sample_stamp_s = sample_stamp_s;
+    trajectory_controller_trace_sample_.sample_ros_stamp_s = sample_stamp_s;
+    trajectory_controller_trace_sample_.receive_steady_ns = steadyNowNs();
     trajectory_controller_trace_sample_.trajectory_elapsed_s =
         trajectory_elapsed_s;
     trajectory_controller_trace_sample_.commanded_position =
@@ -2875,15 +2892,12 @@ namespace ego_planner
   {
     std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
     const auto &sample = trajectory_controller_trace_sample_;
-    const double age_s = now_s - sample.sample_stamp_s;
     if (!sample.valid || execution_instance_id == 0 || trajectory_id <= 0 ||
         sample.execution_instance_id != execution_instance_id ||
         sample.trajectory_id != trajectory_id ||
         sample.start_time_ns != start_time_ns ||
         sample.curve_hash != curve_hash || !std::isfinite(now_s) ||
-        !std::isfinite(maximum_age_s) || maximum_age_s < 0.0 ||
-        !std::isfinite(age_s) ||
-        std::abs(age_s) > maximum_age_s + 1.0e-9)
+        !executionFeedbackFresh(sample.receive_steady_ns, maximum_age_s))
       return false;
     if (trajectory_elapsed_s)
       *trajectory_elapsed_s = sample.trajectory_elapsed_s;
@@ -2917,7 +2931,10 @@ namespace ego_planner
         sample.trajectory_id != local_data_.traj_id_ ||
         sample.start_time_ns != local_data_.start_time_.nanoseconds() ||
         sample.curve_hash != local_data_.curve_hash_ ||
-        std::abs(now_s - sample.sample_stamp_s) > maximum_age_s)
+        !executionFeedbackFresh(
+            sample.receive_steady_ns,
+            sample.received_from_server
+                ? maximum_age_s : requiredTrajectoryLeadTimeSeconds()))
       return false;
     *trajectory_elapsed_s = sample.trajectory_elapsed_s;
     *position = sample.position;
@@ -2976,10 +2993,18 @@ namespace ego_planner
         return false;
       applyP4ExecutionState(*p4_pending_activation_state_);
     }
-    last_activated_execution_instance_id_ = execution_instance_id;
-    last_activated_trajectory_id_ = trajectory_id;
-    last_activated_start_time_ns_ = start_time_ns;
-    last_activated_curve_hash_ = curve_hash;
+    {
+      // Controller traces arrive on a reentrant callback group. Publish the
+      // new active identity and clear the prior trace under the same narrow
+      // mutex so the first matching trace cannot be erased by activation.
+      std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+      last_activated_execution_instance_id_ = execution_instance_id;
+      last_activated_trajectory_id_ = trajectory_id;
+      last_activated_start_time_ns_ = start_time_ns;
+      last_activated_curve_hash_ = curve_hash;
+      trajectory_controller_trace_sample_ =
+          TrajectoryControllerTraceSample{};
+    }
     // The planned start stamp may be seconds behind the actual activation
     // when a child waits for parent progress. Until the first controller
     // trace for the new identity arrives, bind watchdog progress to the
@@ -3007,13 +3032,16 @@ namespace ego_planner
             local_data_.position_traj_.getDerivative();
         auto activated_acceleration = activated_velocity.getDerivative();
         active_trajectory_execution_sample_.valid = true;
+        active_trajectory_execution_sample_.received_from_server = false;
         active_trajectory_execution_sample_.execution_instance_id =
             execution_instance_id;
         active_trajectory_execution_sample_.trajectory_id = trajectory_id;
         active_trajectory_execution_sample_.start_time_ns = start_time_ns;
         active_trajectory_execution_sample_.curve_hash = curve_hash;
-        active_trajectory_execution_sample_.sample_stamp_s =
+        active_trajectory_execution_sample_.sample_ros_stamp_s =
             plannerNow().seconds();
+        active_trajectory_execution_sample_.receive_steady_ns =
+            steadyNowNs();
         active_trajectory_execution_sample_.trajectory_elapsed_s = 0.0;
         active_trajectory_execution_sample_.position =
             local_data_.position_traj_.evaluateDeBoorT(0.0);
@@ -3182,6 +3210,34 @@ namespace ego_planner
   void EGOPlannerManager::setTimeProvider(TimeProvider provider)
   {
     time_provider_ = std::move(provider);
+  }
+
+  void EGOPlannerManager::setSteadyTimeProvider(
+      SteadyTimeProvider provider)
+  {
+    steady_time_provider_ = std::move(provider);
+  }
+
+  int64_t EGOPlannerManager::steadyNowNs() const
+  {
+    if (steady_time_provider_)
+      return steady_time_provider_();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  bool EGOPlannerManager::executionFeedbackFresh(
+      const int64_t receive_steady_ns, const double maximum_age_s) const
+  {
+    if (receive_steady_ns <= 0 || !std::isfinite(maximum_age_s) ||
+        maximum_age_s < 0.0)
+      return false;
+    const int64_t now_steady_ns = steadyNowNs();
+    if (now_steady_ns < receive_steady_ns)
+      return false;
+    const double age_s = static_cast<double>(
+        now_steady_ns - receive_steady_ns) * 1.0e-9;
+    return age_s <= maximum_age_s + 1.0e-9;
   }
 
   rclcpp::Time EGOPlannerManager::plannerNow() const
@@ -11805,12 +11861,9 @@ namespace ego_planner
           sample.curve_hash == local_data_.curve_hash_;
       if (exact_active_sample)
       {
-        const auto estimate = estimateTrajectoryExecutionClock(
-            sample.trajectory_elapsed_s, sample.sample_stamp_s,
-            evaluation_now_s, p4_execution_certificate_.duration_s, 0.5);
         current_t_from_server = true;
         current_t = std::clamp(
-            estimate ? estimate->elapsed_s : sample.trajectory_elapsed_s,
+            sample.trajectory_elapsed_s,
             0.0, p4_execution_certificate_.duration_s);
         commanded_position =
             local_data_.position_traj_.evaluateDeBoorT(current_t);
@@ -11820,7 +11873,7 @@ namespace ego_planner
             committed_acceleration_traj.evaluateDeBoorT(current_t);
         out.remaining_time_s = std::max(
             0.0, p4_execution_certificate_.duration_s - current_t);
-        execution_clock_stale = !estimate.has_value();
+        execution_clock_stale = true;
       }
     }
     if (execution_clock_stale)
@@ -11932,7 +11985,7 @@ namespace ego_planner
                 p4_pending_braking_anchor_->trajectory_id &&
             sample.start_time_ns == guard_start_time_ns &&
             sample.curve_hash == p4_pending_braking_anchor_->curve_hash &&
-            std::abs(evaluation_now_s - sample.sample_stamp_s) <= 0.2)
+            executionFeedbackFresh(sample.receive_steady_ns, 0.2))
           guard_t = std::clamp(
               sample.trajectory_elapsed_s, 0.0,
               pending_anchor.duration_s);
@@ -12016,7 +12069,7 @@ namespace ego_planner
             sample.trajectory_id == pending.trajectory_id &&
             sample.start_time_ns == guard_start_time_ns &&
             sample.curve_hash == pending.curve_hash &&
-            std::abs(evaluation_now_s - sample.sample_stamp_s) <= 0.2)
+            executionFeedbackFresh(sample.receive_steady_ns, 0.2))
           guard_t = std::clamp(
               sample.trajectory_elapsed_s, 0.0, anchor.duration_s);
         Eigen::Vector3d guard_command =
@@ -12090,6 +12143,7 @@ namespace ego_planner
         // watchdog callback at the same ROS stamp cannot jump to the guard's
         // planned absolute end time.
         active_trajectory_execution_sample_.valid = true;
+        active_trajectory_execution_sample_.received_from_server = false;
         active_trajectory_execution_sample_.execution_instance_id =
             local_data_.execution_instance_id_;
         active_trajectory_execution_sample_.trajectory_id =
@@ -12098,8 +12152,10 @@ namespace ego_planner
             local_data_.start_time_.nanoseconds();
         active_trajectory_execution_sample_.curve_hash =
             local_data_.curve_hash_;
-        active_trajectory_execution_sample_.sample_stamp_s =
+        active_trajectory_execution_sample_.sample_ros_stamp_s =
             evaluation_now_s;
+        active_trajectory_execution_sample_.receive_steady_ns =
+            steadyNowNs();
         active_trajectory_execution_sample_.trajectory_elapsed_s = guard_t;
         active_trajectory_execution_sample_.position =
             anchor.trajectory.evaluateDeBoorT(guard_t);
@@ -17774,12 +17830,13 @@ namespace ego_planner
         execution_sample.trajectory_id == parent_id &&
         execution_sample.start_time_ns == parent_start.nanoseconds() &&
         execution_sample.curve_hash == parent_hash &&
-        std::isfinite(execution_sample.sample_stamp_s) &&
+        std::isfinite(execution_sample.sample_ros_stamp_s) &&
         std::isfinite(execution_sample.trajectory_elapsed_s) &&
-        candidate_start_s + 1.0e-9 >= execution_sample.sample_stamp_s)
+        candidate_start_s + 1.0e-9 >=
+            execution_sample.sample_ros_stamp_s)
     {
       parent_switch_elapsed_s = execution_sample.trajectory_elapsed_s +
-          (candidate_start_s - execution_sample.sample_stamp_s);
+          (candidate_start_s - execution_sample.sample_ros_stamp_s);
     }
     if (!std::isfinite(frozen_parent_switch_elapsed_s) &&
         p4PreparingSuccessorCandidate() && std::isfinite(
