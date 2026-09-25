@@ -2884,6 +2884,73 @@ TEST(TrajectoryExecutionFeedbackTest,
             "recovery_braking_inputs_unavailable");
 }
 
+TEST(TrajectoryExecutionFeedbackTest,
+     ActivatedGuardFeedbackSupersedesParentWithoutFalseStale)
+{
+  auto fixture = makeActivatedRuntimeFeedbackFixture(
+      "runtime_activated_guard_feedback", 939);
+  auto &manager = *fixture.manager;
+
+  // Reproduce the production transaction: a real loss of parent feedback
+  // schedules a certified guard, and that guard is published on the separate
+  // pending-guard topic rather than through recordTrajectoryCommandPublished.
+  *fixture.steady_now_ns += 201'000'000LL;
+  const Eigen::Vector3d parent_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(0.5);
+  const auto scheduled = manager.validateCommittedP4TrajectoryExecution(
+      fixture.evaluation_ros_s, parent_position);
+  ASSERT_TRUE(scheduled.guard_braking_preschedule_requested)
+      << scheduled.reason;
+  auto guard = manager.pendingP4GuardBrakingCommand();
+  ASSERT_TRUE(guard.has_value());
+  EXPECT_FALSE(manager.recordTrajectoryActivated(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash));
+  ASSERT_TRUE(manager.markP4GuardCommandPublished(guard->trajectory_id));
+  manager.acknowledgeP4GuardStatus(guard->trajectory_id, "QUEUED");
+
+  // guard_status_sub_ sees ACTIVATED before it records the status string.
+  // The full guard identity must nevertheless become the feedback authority.
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash));
+  manager.acknowledgeP4GuardStatus(guard->trajectory_id, "ACTIVATED");
+
+  // More than the parent freshness window has passed, while matching guard
+  // PositionCommand/controller feedback continues to arrive locally.
+  *fixture.steady_now_ns += 201'000'000LL;
+  auto guard_velocity = guard->trajectory.getDerivative();
+  auto guard_acceleration = guard_velocity.getDerivative();
+  constexpr double guard_elapsed_s = 0.05;
+  const Eigen::Vector3d guard_position =
+      guard->trajectory.evaluateDeBoorT(guard_elapsed_s);
+  const Eigen::Vector3d guard_velocity_at_sample =
+      guard_velocity.evaluateDeBoorT(guard_elapsed_s);
+  const Eigen::Vector3d guard_acceleration_at_sample =
+      guard_acceleration.evaluateDeBoorT(guard_elapsed_s);
+  ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash,
+      1'725'000'001.0, guard_elapsed_s, guard_position,
+      guard_velocity_at_sample, guard_acceleration_at_sample));
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash,
+      1'725'000'001.0, guard_elapsed_s, guard_position,
+      guard_velocity_at_sample, guard_acceleration_at_sample,
+      guard_position, guard_velocity_at_sample,
+      guard_acceleration_at_sample, false));
+
+  const auto activated = manager.validateCommittedP4TrajectoryExecution(
+      fixture.evaluation_ros_s, guard_position);
+  EXPECT_TRUE(activated.allowed) << activated.reason;
+  EXPECT_TRUE(activated.failsafe_braking_activated);
+  EXPECT_EQ(activated.reason, "failsafe_braking_activated");
+  EXPECT_EQ(manager.local_data_.traj_id_, guard->trajectory_id);
+  EXPECT_EQ(manager.p4ExecutionCertificate().authority,
+            ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING);
+}
+
 TEST(P4ActualCurveClearanceCertification,
      LocalFailureIsTypedAndSkipsGnssRiskComputation) {
   ensureRclcpp();

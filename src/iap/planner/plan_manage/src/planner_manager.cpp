@@ -3044,10 +3044,25 @@ namespace ego_planner
       const uint64_t execution_instance_id, const int trajectory_id,
       const int64_t start_time_ns, const std::string &curve_hash)
   {
-    if (execution_instance_id != last_published_execution_instance_id_ ||
-        trajectory_id != last_published_trajectory_id_ ||
-        start_time_ns != last_published_start_time_ns_ ||
-        curve_hash != last_published_curve_hash_)
+    const bool published_identity_matches =
+        execution_instance_id == last_published_execution_instance_id_ &&
+        trajectory_id == last_published_trajectory_id_ &&
+        start_time_ns == last_published_start_time_ns_ &&
+        curve_hash == last_published_curve_hash_;
+    const auto pending_guard = pendingP4GuardBrakingCommand();
+    const bool pending_guard_identity_matches = pending_guard &&
+        p4_pending_braking_anchor_ &&
+        (p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::PUBLISHED ||
+         p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::QUEUED ||
+         p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::ACTIVATED) &&
+        execution_instance_id == pending_guard->execution_instance_id &&
+        trajectory_id == pending_guard->trajectory_id &&
+        start_time_ns == pending_guard->start_time.nanoseconds() &&
+        curve_hash == pending_guard->curve_hash;
+    if (!published_identity_matches && !pending_guard_identity_matches)
       return false;
     if (execution_instance_id == last_activated_execution_instance_id_ &&
         trajectory_id == last_activated_trajectory_id_ &&
@@ -3060,7 +3075,8 @@ namespace ego_planner
       // restart successor scheduling, or emit a second activation event.
       return true;
     }
-    if (p4_candidate_awaiting_activation_)
+    if (p4_candidate_awaiting_activation_ &&
+        !pending_guard_identity_matches)
     {
       if (!p4_pending_activation_state_)
         return false;
@@ -3138,7 +3154,7 @@ namespace ego_planner
     appendP4ExecutionEvent(
         "TRAJECTORY_ACTIVATED_ACK", activation_now_s, activated);
     const bool activated_prepared_successor =
-        p4_candidate_awaiting_activation_ &&
+        !pending_guard_identity_matches && p4_candidate_awaiting_activation_ &&
         p4_pending_activation_is_prepared_successor_ &&
         p4_execution_certificate_.valid &&
         p4_execution_certificate_.trajectory_id == trajectory_id &&
@@ -12285,7 +12301,32 @@ namespace ego_planner
         execution_clock_stale = true;
       }
     }
-    if (execution_clock_stale)
+    // traj_server changes the command identity at the certified guard switch
+    // before this function installs the guard spline into local_data_.  Once
+    // that separately-published guard has an ACTIVATED ACK, fresh feedback
+    // for its exact identity supersedes the parent feedback.  Do not reject
+    // that real handoff as a stale parent merely because the atomic local
+    // curve/certificate update occurs later in this validation call.
+    bool activated_guard_controller_trace_matches = false;
+    if (p4_pending_braking_anchor_ &&
+        p4_pending_braking_anchor_->server_state ==
+            P4GuardServerState::ACTIVATED)
+    {
+      const auto activated_guard = pendingP4GuardBrakingCommand();
+      if (activated_guard)
+      {
+        activated_guard_controller_trace_matches =
+            trajectoryControllerTrace(
+                activated_guard->execution_instance_id,
+                activated_guard->trajectory_id,
+                activated_guard->start_time.nanoseconds(),
+                activated_guard->curve_hash, evaluation_now_s,
+                kExecutionFeedbackFreshnessTimeoutS, nullptr, nullptr,
+                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+      }
+    }
+    if (execution_clock_stale &&
+        !activated_guard_controller_trace_matches)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
     Eigen::Vector3d control_actual_position = actual_position;
@@ -12322,6 +12363,7 @@ namespace ego_planner
               kExecutionFeedbackFreshnessTimeoutS);
     }
     if (controller_trace_required_ && !controller_trace_matches &&
+        !activated_guard_controller_trace_matches &&
         !waiting_for_first_matching_controller_trace)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
