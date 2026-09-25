@@ -191,7 +191,9 @@ namespace ego_planner
       double receive_ros_stamp_s,
       double current_parent_elapsed_s,
       double switch_parent_elapsed_s,
-      double parent_duration_s);
+      double parent_duration_s,
+      double exposure_ledger_observation_stamp_s =
+          std::numeric_limits<double>::quiet_NaN());
 
   struct P4PreparedSuccessor
   {

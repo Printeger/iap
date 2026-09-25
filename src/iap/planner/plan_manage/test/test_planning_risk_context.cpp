@@ -608,6 +608,29 @@ TEST(P4RollingExposureSeam,
   EXPECT_LT(bridge.end_parent_elapsed_s, parent.getTimeSum())
       << "the child replaces the parent switch-to-end suffix";
 
+  constexpr double kLedgerObservationStampS =
+      kSampleRosStampS + 0.5;
+  const auto ledger_anchored_bridge =
+      ego_planner::p4RollingSuccessorExposureBridge(
+          kSampleRosStampS, kCurrentParentElapsedS,
+          kSwitchParentElapsedS, parent.getTimeSum(),
+          kLedgerObservationStampS);
+  ASSERT_TRUE(ledger_anchored_bridge.valid)
+      << ledger_anchored_bridge.reason;
+  EXPECT_NEAR(ledger_anchored_bridge.begin_parent_elapsed_s,
+              kCurrentParentElapsedS + 0.5, 1.0e-12);
+  EXPECT_NEAR(ledger_anchored_bridge.execution_time_origin_s +
+                  ledger_anchored_bridge.begin_parent_elapsed_s,
+              kLedgerObservationStampS, 1.0e-9);
+  const auto invalid_ledger_bridge =
+      ego_planner::p4RollingSuccessorExposureBridge(
+          kSampleRosStampS, kCurrentParentElapsedS,
+          kSwitchParentElapsedS, parent.getTimeSum(),
+          kSampleRosStampS + 2.0);
+  EXPECT_FALSE(invalid_ledger_bridge.valid);
+  EXPECT_EQ(invalid_ledger_bridge.reason,
+            "successor_exposure_ledger_anchor_invalid");
+
   const auto switch_position =
       parent.evaluateDeBoorT(kSwitchParentElapsedS);
   const auto switch_velocity =

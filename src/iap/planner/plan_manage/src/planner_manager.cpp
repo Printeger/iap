@@ -682,7 +682,8 @@ namespace ego_planner
       const double receive_ros_stamp_s,
       const double current_parent_elapsed_s,
       const double switch_parent_elapsed_s,
-      const double parent_duration_s)
+      const double parent_duration_s,
+      const double exposure_ledger_observation_stamp_s)
   {
     P4RollingSuccessorExposureBridge bridge;
     const auto reject = [&bridge](const char *reason) {
@@ -697,8 +698,20 @@ namespace ego_planner
     if (switch_parent_elapsed_s < 0.0 ||
         switch_parent_elapsed_s > parent_duration_s + 1.0e-9)
       return reject("rolling_successor_switch_outside_parent");
+    double bridge_begin_ros_s = receive_ros_stamp_s;
+    double bridge_begin_parent_elapsed_s = current_parent_elapsed_s;
+    if (std::isfinite(exposure_ledger_observation_stamp_s))
+    {
+      bridge_begin_parent_elapsed_s = current_parent_elapsed_s +
+          (exposure_ledger_observation_stamp_s - receive_ros_stamp_s);
+      bridge_begin_ros_s = exposure_ledger_observation_stamp_s;
+      if (!std::isfinite(bridge_begin_parent_elapsed_s) ||
+          bridge_begin_parent_elapsed_s < -1.0e-9 ||
+          bridge_begin_parent_elapsed_s > switch_parent_elapsed_s + 1.0e-9)
+        return reject("successor_exposure_ledger_anchor_invalid");
+    }
     bridge.begin_parent_elapsed_s = std::clamp(
-        current_parent_elapsed_s, 0.0, parent_duration_s);
+        bridge_begin_parent_elapsed_s, 0.0, parent_duration_s);
     bridge.end_parent_elapsed_s = switch_parent_elapsed_s;
     if (bridge.begin_parent_elapsed_s >
         bridge.end_parent_elapsed_s + 1.0e-9)
@@ -707,7 +720,7 @@ namespace ego_planner
         0.0, bridge.end_parent_elapsed_s -
             bridge.begin_parent_elapsed_s);
     bridge.execution_time_origin_s =
-        receive_ros_stamp_s - current_parent_elapsed_s;
+        bridge_begin_ros_s - bridge.begin_parent_elapsed_s;
     bridge.valid = true;
     bridge.reason = "ok";
     return bridge;
@@ -6849,7 +6862,10 @@ namespace ego_planner
           sample.trajectory_id == parent.traj_id_ &&
           sample.start_time_ns == parent.start_time_.nanoseconds() &&
           sample.curve_hash == parent.curve_hash_ &&
-          std::isfinite(sample.trajectory_elapsed_s);
+          std::isfinite(sample.trajectory_elapsed_s) &&
+          executionFeedbackFresh(
+              sample.receive_steady_ns,
+              kExecutionFeedbackFreshnessTimeoutS);
       if (!std::isfinite(switch_elapsed_s) || switch_elapsed_s < 0.0 ||
           switch_elapsed_s > parent.duration_ + 1.0e-9)
         return reject_final_identity(
@@ -6865,12 +6881,15 @@ namespace ego_planner
       {
         const auto bridge = p4RollingSuccessorExposureBridge(
             sample.receive_ros_stamp_s, sample.trajectory_elapsed_s,
-            switch_elapsed_s, parent.duration_);
+            switch_elapsed_s, parent.duration_,
+            p4_global_exposure_last_observation_stamp_s_);
         if (!bridge.valid)
           return reject_final_identity(
               P4GeometryCommitVerdict::INVALID_PATH,
               bridge.reason,
-              P4PreparedCurveFailure::IDENTITY);
+              bridge.reason == "successor_exposure_ledger_anchor_invalid"
+                  ? P4PreparedCurveFailure::FRESHNESS
+                  : P4PreparedCurveFailure::IDENTITY);
         rolling_parent_bridge_begin_s = bridge.begin_parent_elapsed_s;
         rolling_parent_bridge_duration_s = bridge.duration_s;
         rolling_parent_bridge_time_origin_s =
@@ -7515,12 +7534,24 @@ namespace ego_planner
                       << rolling_parent_bridge_begin_s << ':'
                       << local_data_.parent_switch_elapsed_s_;
       rolling_exposure_identity = bridge_identity.str();
+      const double elapsed_authorization_ms =
+          std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - direct_start).count();
+      const double remaining_authorization_ms =
+          p4_forward_limits_.compute_budget_ms -
+          elapsed_authorization_ms;
+      if (!std::isfinite(remaining_authorization_ms) ||
+          remaining_authorization_ms <= 0.0)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
+            "successor_parent_bridge_direct_risk_timeout",
+            P4PreparedCurveFailure::COMPUTE_BUDGET);
       const auto bridge_request = makeP4CurveRiskRequest(
           rolling_exposure_identity, snapshot, execution_snapshot, stamp_s,
           rolling_parent_bridge_time_origin_s,
           rolling_parent_bridge_points,
           rolling_parent_bridge_parent_times,
-          p4_forward_limits_.compute_budget_ms,
+          remaining_authorization_ms,
           p4_global_exposure_policy_.task_mode);
       const auto bridge_result = direct_risk_batch(bridge_request);
       const bool bridge_global_evidence_degradable =
@@ -11180,31 +11211,17 @@ namespace ego_planner
                       P4SuccessorFailure::INTEGRITY_STALE);
       if (parent_sample_matches)
       {
-        double bridge_begin_ros_s = parent_sample.receive_ros_stamp_s;
-        double bridge_begin_parent_elapsed_s =
-            parent_sample.trajectory_elapsed_s;
-        const double ledger_stamp_s =
-            p4_global_exposure_last_observation_stamp_s_;
-        if (std::isfinite(ledger_stamp_s))
-        {
-          const double ledger_parent_elapsed_s =
-              parent_sample.trajectory_elapsed_s +
-              (ledger_stamp_s - parent_sample.receive_ros_stamp_s);
-          if (!std::isfinite(ledger_parent_elapsed_s) ||
-              ledger_parent_elapsed_s < -1.0e-9 ||
-              ledger_parent_elapsed_s > parent_switch_elapsed_s + 1.0e-9)
-            return finish(false, "successor_exposure_ledger_anchor_invalid",
-                          P4SuccessorFailure::INTEGRITY_STALE);
-          bridge_begin_ros_s = ledger_stamp_s;
-          bridge_begin_parent_elapsed_s =
-              std::max(0.0, ledger_parent_elapsed_s);
-        }
         const auto bridge = p4RollingSuccessorExposureBridge(
-            bridge_begin_ros_s, bridge_begin_parent_elapsed_s,
-            parent_switch_elapsed_s, incumbent.duration_);
+            parent_sample.receive_ros_stamp_s,
+            parent_sample.trajectory_elapsed_s,
+            parent_switch_elapsed_s, incumbent.duration_,
+            p4_global_exposure_last_observation_stamp_s_);
         if (!bridge.valid)
           return finish(false, bridge.reason,
-                        P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
+                        bridge.reason ==
+                                "successor_exposure_ledger_anchor_invalid"
+                            ? P4SuccessorFailure::INTEGRITY_STALE
+                            : P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
         parent_bridge_duration_s = bridge.duration_s;
         parent_bridge_time_origin_s = bridge.execution_time_origin_s;
         if (parent_bridge_duration_s > 1.0e-9)
