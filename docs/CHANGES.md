@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(active-feedback-callback-skew): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — let a fresh controller trace for the exact active execution
+  identity supply elapsed time and commanded `p/v/a` while PositionCommand
+  feedback is temporarily stale. Fresh PositionCommand remains the preferred
+  execution clock; old identities and elapsed-time rollback cannot refresh
+  either source. If neither source is fresh after the existing activation
+  grace window, runtime still schedules certified braking. Saturation,
+  tracking, controllability and freshness thresholds are unchanged.
 - fix(rolling-endpoint-switch-decoupling): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — select both initial and rolling-child endpoints at the farthest
   fresh local-support frontier that retains the complete current-state stop.

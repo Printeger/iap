@@ -2879,6 +2879,65 @@ TEST(TrajectoryExecutionFeedbackTest,
   EXPECT_TRUE(
       trace_only_stale_result.guard_braking_preschedule_requested);
 
+  auto position_command_stale = makeActivatedRuntimeFeedbackFixture(
+      "runtime_position_command_stale_trace_fresh", 940);
+  seed_feedback(&position_command_stale, false, 0.0);
+  *position_command_stale.steady_now_ns += 201'000'000LL;
+  auto trace_fresh_trajectory =
+      position_command_stale.manager->local_data_.position_traj_;
+  auto trace_fresh_velocity = trace_fresh_trajectory.getDerivative();
+  auto trace_fresh_acceleration = trace_fresh_velocity.getDerivative();
+  constexpr double trace_fresh_elapsed_s = 0.7;
+  const Eigen::Vector3d trace_fresh_position =
+      trace_fresh_trajectory.evaluateDeBoorT(trace_fresh_elapsed_s);
+  const Eigen::Vector3d trace_fresh_velocity_at_sample =
+      trace_fresh_velocity.evaluateDeBoorT(trace_fresh_elapsed_s);
+  const Eigen::Vector3d trace_fresh_acceleration_at_sample =
+      trace_fresh_acceleration.evaluateDeBoorT(trace_fresh_elapsed_s);
+  ASSERT_TRUE(position_command_stale.manager->recordTrajectoryControllerTrace(
+      position_command_stale.manager->local_data_.execution_instance_id_,
+      position_command_stale.manager->local_data_.traj_id_,
+      position_command_stale.manager->local_data_.start_time_.nanoseconds(),
+      position_command_stale.manager->local_data_.curve_hash_,
+      1'725'000'000.3, trace_fresh_elapsed_s, trace_fresh_position,
+      trace_fresh_velocity_at_sample, trace_fresh_acceleration_at_sample,
+      trace_fresh_position, trace_fresh_velocity_at_sample,
+      trace_fresh_acceleration_at_sample, false));
+  EXPECT_FALSE(position_command_stale.manager->recordTrajectoryControllerTrace(
+      position_command_stale.manager->local_data_.execution_instance_id_,
+      position_command_stale.manager->local_data_.traj_id_ - 1,
+      position_command_stale.manager->local_data_.start_time_.nanoseconds(),
+      position_command_stale.manager->local_data_.curve_hash_,
+      1'725'000'000.4, trace_fresh_elapsed_s + 0.1,
+      trace_fresh_position, trace_fresh_velocity_at_sample,
+      trace_fresh_acceleration_at_sample, trace_fresh_position,
+      trace_fresh_velocity_at_sample, trace_fresh_acceleration_at_sample,
+      false));
+  EXPECT_FALSE(position_command_stale.manager->recordTrajectoryControllerTrace(
+      position_command_stale.manager->local_data_.execution_instance_id_,
+      position_command_stale.manager->local_data_.traj_id_,
+      position_command_stale.manager->local_data_.start_time_.nanoseconds(),
+      position_command_stale.manager->local_data_.curve_hash_,
+      1'725'000'000.4, trace_fresh_elapsed_s - 0.1,
+      trace_fresh_position, trace_fresh_velocity_at_sample,
+      trace_fresh_acceleration_at_sample, trace_fresh_position,
+      trace_fresh_velocity_at_sample, trace_fresh_acceleration_at_sample,
+      false));
+  const auto position_command_stale_result =
+      position_command_stale.manager->validateCommittedP4TrajectoryExecution(
+          position_command_stale.evaluation_ros_s, trace_fresh_position);
+  EXPECT_TRUE(position_command_stale_result.allowed)
+      << position_command_stale_result.reason;
+  EXPECT_EQ(position_command_stale_result.reason,
+            "runtime_execution_contract_valid");
+  EXPECT_FALSE(
+      position_command_stale_result.guard_braking_preschedule_requested);
+  EXPECT_NEAR(
+      position_command_stale_result.remaining_time_s,
+      position_command_stale.manager->local_data_.duration_ -
+          trace_fresh_elapsed_s,
+      1.0e-9);
+
   auto first_trace_missing = makeActivatedRuntimeFeedbackFixture(
       "runtime_first_controller_trace_missing", 938);
   *first_trace_missing.steady_now_ns += 201'000'000LL;

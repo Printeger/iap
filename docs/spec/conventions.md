@@ -137,6 +137,14 @@
   direct batch. P5 starts only after a full-identity `ACTIVATED` acknowledgement
   and evaluates newly reachable runtime evidence. Ordinary RiskGrid PL is
   never a publication or P5 authority.
+- Runtime execution feedback is matched by the complete active execution
+  identity. A fresh PositionCommand is the preferred execution clock. If its
+  callback is temporarily stale while the same identity's controller trace is
+  fresh, the trace supplies elapsed time plus commanded and feedback `p/v/a`;
+  callback skew alone is not a controller outage. Old identities and elapsed
+  rollback are rejected without refreshing either source. If neither source
+  is fresh after the existing activation grace window, or if trace saturation,
+  tracking or controllability fails, runtime retains its fail-closed brake.
 - Planner-side GNSS geometry uses all four constellations
   `GPS+BDS+GAL+GLO` in formal and forest launch defaults. This changes neither
   the PL equation nor AL. The full information matrix is factored once;

@@ -84,7 +84,7 @@ class TrajectoryServerHandshakeTest(unittest.TestCase):
             planner = subprocess.Popen(
                 [ARGS.planner_test,
                  "--gtest_filter=P4LimitedPrefixPublication."
-                 "DivergingCenterlinesPublishTubeIntersectionPrefixThroughStandardFlow"],
+                 "IncompleteChannelGeometryPublishesTubeIntersectionPrefix"],
                 env=environment, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True)
             deadline = time.monotonic() + 8.0

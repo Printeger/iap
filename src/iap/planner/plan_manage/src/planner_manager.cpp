@@ -12336,13 +12336,10 @@ namespace ego_planner
                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
       }
     }
-    if (execution_clock_stale &&
-        !activated_guard_controller_trace_matches)
-      return activate_failsafe_braking(
-          "controller_execution_trace_stale", current_t);
     Eigen::Vector3d control_actual_position = actual_position;
     Eigen::Vector3d control_actual_velocity = actual_velocity;
     Eigen::Vector3d control_actual_acceleration = actual_acceleration;
+    double trace_execution_t = current_t;
     Eigen::Vector3d trace_commanded_position;
     Eigen::Vector3d trace_commanded_velocity;
     Eigen::Vector3d trace_commanded_acceleration;
@@ -12350,11 +12347,16 @@ namespace ego_planner
     const bool controller_trace_matches = trajectoryControllerTrace(
         local_data_.execution_instance_id_, local_data_.traj_id_,
         local_data_.start_time_.nanoseconds(), local_data_.curve_hash_,
-        evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS, nullptr,
+        evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS,
+        &trace_execution_t,
         &trace_commanded_position, &trace_commanded_velocity,
         &trace_commanded_acceleration, &control_actual_position,
         &control_actual_velocity, &control_actual_acceleration,
         &controller_saturated);
+    if (execution_clock_stale && !controller_trace_matches &&
+        !activated_guard_controller_trace_matches)
+      return activate_failsafe_braking(
+          "controller_execution_trace_stale", current_t);
     bool waiting_for_first_matching_controller_trace = false;
     if (!controller_trace_matches)
     {
@@ -12383,6 +12385,18 @@ namespace ego_planner
     // and callback skew belong to the navigation-integrity contract instead.
     if (controller_trace_matches)
     {
+      // PositionCommand owns the execution clock while it is fresh. During
+      // bounded callback skew, the exact active controller trace is the same
+      // command identity and may carry the newer elapsed time; use it instead
+      // of treating the old PositionCommand sample as a controller outage.
+      if (!current_t_from_server || execution_clock_stale)
+      {
+        current_t = std::clamp(
+            trace_execution_t, 0.0,
+            p4_execution_certificate_.duration_s);
+        out.remaining_time_s = std::max(
+            0.0, p4_execution_certificate_.duration_s - current_t);
+      }
       commanded_position = trace_commanded_position;
       commanded_velocity = trace_commanded_velocity;
       commanded_acceleration = trace_commanded_acceleration;
