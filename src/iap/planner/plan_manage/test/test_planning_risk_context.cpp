@@ -8156,6 +8156,177 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
+     RollingSuccessorAcceptsCertifiedEndpointOutsideGuideTrackingEnvelope)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      10.0, frozen_occupancy->geometry_id, true);
+  const auto safe_risk = directRiskCallback(0.5);
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, safe_risk, 10.0, 919u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  auto bound_execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
+  bound_execution->occupancy = occupancy;
+
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("rolling_successor_topology_progress.csv").string(),
+      1u);
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.planning_horizen_ = 8.0;
+  manager.pp_.max_vel_ = 2.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.pp_.ctrl_pt_dist = 2.0;
+  manager.pp_.use_distinctive_trajs = false;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.deliverTrajToOptimizer();
+  auto node = std::make_shared<rclcpp::Node>(
+      "rolling_successor_topology_progress_test");
+  manager.setPlanningVisualizationForTest(
+      std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, safe_risk, bound_execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+  manager.setTimeProvider([] {
+    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  });
+
+  Eigen::MatrixXd parent_points = p4StoppedControlPoints();
+  parent_points.row(0).array() -= 12.0;
+  parent_points.row(2).array() += 1.5;
+  parent_points(1, 0) = -0.25;
+  parent_points(1, 1) = 0.0;
+  parent_points(1, 2) = 0.32;
+  ego_planner::UniformBspline parent(parent_points, 3, 0.5);
+  const auto parent_terminal = ego_planner::imposeP4TerminalStop(
+      &parent, terminalStartState(parent), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(parent_terminal.success) << parent_terminal.reason;
+  manager.local_data_.position_traj_ = parent;
+  manager.local_data_.velocity_traj_ = parent.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 41;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = parent.getTimeSum();
+  manager.local_data_.curve_hash_ = ego_planner::p4ControlPointHash(
+      parent.getControlPoint());
+
+  ego_planner::P4ExecutionCertificate parent_certificate;
+  parent_certificate.valid = true;
+  parent_certificate.authority =
+      ego_planner::P4ExecutionAuthority::LIMITED_PREFIX;
+  parent_certificate.trajectory_id = manager.local_data_.traj_id_;
+  parent_certificate.start_time_ns =
+      manager.local_data_.start_time_.nanoseconds();
+  parent_certificate.duration_s = manager.local_data_.duration_;
+  parent_certificate.execution_deadline_s =
+      10.0 + manager.local_data_.duration_;
+  parent_certificate.control_points_hash = manager.local_data_.curve_hash_;
+  parent_certificate.approved_endpoint =
+      parent.evaluateDeBoorT(parent.getTimeSum());
+  parent_certificate.execution_snapshot_id =
+      bound_execution->execution_snapshot_id;
+  manager.setP4ExecutionCertificateForTest(parent_certificate);
+  ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      parent_certificate.trajectory_id, parent_certificate.start_time_ns,
+      10.0, "successor_fast_path_ready",
+      parent_certificate.control_points_hash);
+
+  const Eigen::Vector3d switch_position = parent.evaluateDeBoorT(0.0);
+  const Eigen::Vector3d successor_target =
+      switch_position + Eigen::Vector3d(7.82419, 0.0, 0.0);
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+  decision.request_position = switch_position;
+  decision.local_target = successor_target;
+  decision.common_anchor = decision.local_target;
+  decision.selected_guide = {
+      switch_position,
+      switch_position + Eigen::Vector3d(2.0, 0.57, 0.0),
+      switch_position + Eigen::Vector3d(5.0, 1.25, 0.0),
+      switch_position + Eigen::Vector3d(6.17, 1.41, 0.0),
+      decision.local_target};
+  decision.selected_candidate_id = 101u;
+  decision.selected_channel_id = 201u;
+  decision.candidates.front().candidate_id = decision.selected_candidate_id;
+  decision.candidates.front().channel_id = decision.selected_channel_id;
+  decision.candidates.front().path = decision.selected_guide;
+  decision.candidates.front().topology_path = decision.selected_guide;
+  decision.candidates.front().path_hash = "rolling-sharp-turn-guide";
+  decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  manager.setP4ForwardDecisionForNextReplanForTest(std::move(decision));
+
+  const bool prepared = manager.reboundReplan(
+      switch_position, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+      successor_target,
+      Eigen::Vector3d::Zero(), true, false, switch_position);
+
+  ASSERT_TRUE(prepared)
+      << manager.lastP4ForwardDecision().reason << ":"
+      << manager.lastP4ActualCurveCertification().detail
+      << ":actual_endpoint="
+      << manager.lastP4ForwardDecision().selected_actual_endpoint.transpose();
+  EXPECT_NE(manager.lastP4ForwardDecision().reason,
+            "candidate_endpoint_outside_common_corridor");
+  EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
+            ego_planner::P4SuccessorFailure::NONE);
+  double endpoint_progress_m = 0.0;
+  std::string corridor_reason;
+  const Eigen::Vector3d actual_endpoint =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          manager.local_data_.duration_);
+  EXPECT_FALSE(ego_planner::p4CommonCorridorEndpointProgress(
+      manager.lastP4ForwardDecision().selected_guide, switch_position,
+      actual_endpoint, 0.15, &endpoint_progress_m, &corridor_reason))
+      << "actual_endpoint=" << actual_endpoint.transpose()
+      << ":guide_endpoint="
+      << manager.lastP4ForwardDecision().selected_guide.back().transpose();
+  EXPECT_EQ(corridor_reason, "candidate_endpoint_outside_common_corridor");
+  EXPECT_TRUE(ego_planner::p4TopologyCorridorStationProgress(
+      manager.lastP4ForwardDecision().selected_guide, switch_position,
+      actual_endpoint, &endpoint_progress_m, &corridor_reason));
+  EXPECT_GE(endpoint_progress_m,
+            manager.lastP4ForwardDecision().successor_required_progress_m);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "successor_curve_before_p5", 10.0))
+      << manager.lastP4ActualCurveCertification().detail << ":"
+      << manager.lastP4ForwardDecision().geometry_commit.reason << ":"
+      << manager.lastP4ForwardDecision().reason;
+  EXPECT_TRUE(manager.lastP4ActualCurveCertification().complete);
+  EXPECT_TRUE(manager.lastP4ForwardDecision().geometry_commit.accepted());
+  EXPECT_TRUE(
+      manager.latestP4DirectRiskEvidence().trajectory_assurance.authorized());
+  EXPECT_EQ(manager.lastP4ForwardDecision().planning_disposition,
+            ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY);
+  std::string cache_reason;
+  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(9.9, &cache_reason))
+      << cache_reason;
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+}
+
+TEST(P4PreparedSuccessorPolicy,
      AnySuccessorCurveRejectionLeavesPreparingState)
 {
   ego_planner::EGOPlannerManager manager;

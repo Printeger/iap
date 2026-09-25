@@ -786,11 +786,11 @@ namespace ego_planner
       const bool rolling_successor)
   {
     // A rolling child's extension is measured on the guide that produced the
-    // actual candidate curve. The endpoint projection below independently
-    // requires both the parent's approved endpoint and the child's endpoint
-    // to lie inside the unchanged tracking envelope of this guide. Using the
-    // older parent continuation here rejects every legitimate full-search
-    // extension as soon as it advances beyond that finite parent corridor.
+    // actual candidate curve. Its projection supplies only a topology station;
+    // the actual curve and swept envelope retain their independent safety
+    // certificates. Using the older parent continuation here rejects every
+    // legitimate full-search extension as soon as it advances beyond that
+    // finite parent corridor.
     if (rolling_successor && selected_guide.size() >= 2u)
       return selected_guide;
     if (decision_common_corridor.size() >= 2u)
@@ -16953,7 +16953,7 @@ namespace ego_planner
           last_p4_forward_decision_.selected_guide.size() >= 2u
           ? last_p4_forward_decision_.selected_guide
           : p4GuideReferencePath(last_p4_forward_decision_);
-      const std::vector<Eigen::Vector3d> frozen_common_corridor =
+      const std::vector<Eigen::Vector3d> successor_progress_reference =
           selectP4SuccessorComparisonCorridor(
               parent_certified_continuation,
               last_p4_forward_decision_.geometry_common_corridor,
@@ -17044,7 +17044,7 @@ namespace ego_planner
                 std::numeric_limits<double>::infinity();
             std::string point_progress_reason;
             const bool in_corridor = p4CommonCorridorEndpointProgress(
-                frozen_common_corridor, comparison_anchor,
+                successor_progress_reference, comparison_anchor,
                 candidate_points[index], p4_max_tracking_error_m_,
                 &point_progress_m, &point_progress_reason);
             comparable = p4SuccessorRiskPointComparable(
@@ -17076,10 +17076,15 @@ namespace ego_planner
       std::string corridor_progress_reason;
       const bool corridor_progress_valid = sampled &&
           !candidate_points.empty() && !incumbent_points.empty() &&
-          p4CommonCorridorEndpointProgress(
-              frozen_common_corridor, comparison_anchor,
-              candidate_points.back(), p4_max_tracking_error_m_,
-              &endpoint_progress, &corridor_progress_reason);
+          (successor_curve_preparation
+              ? p4TopologyCorridorStationProgress(
+                    successor_progress_reference, comparison_anchor,
+                    candidate_points.back(), &endpoint_progress,
+                    &corridor_progress_reason)
+              : p4CommonCorridorEndpointProgress(
+                    successor_progress_reference, comparison_anchor,
+                    candidate_points.back(), p4_max_tracking_error_m_,
+                    &endpoint_progress, &corridor_progress_reason));
       P4LimitedPrefixReplacementInput replacement;
       replacement.rolling_successor = successor_curve_preparation;
       replacement.committed_execution_s = successor_curve_preparation
@@ -17111,14 +17116,14 @@ namespace ego_planner
           // tracking envelope; the guide projection here is only a station
           // coordinate used to size the child's endpoint extension.
           (void)p4TopologyCorridorStationProgress(
-              frozen_common_corridor, comparison_anchor,
+              successor_progress_reference, comparison_anchor,
               candidate_points[coverage_index], &coverage_progress_m,
               &coverage_progress_reason);
         }
         else
         {
           (void)p4CommonCorridorEndpointProgress(
-              frozen_common_corridor, comparison_anchor,
+              successor_progress_reference, comparison_anchor,
               candidate_points[coverage_index], p4_max_tracking_error_m_,
               &coverage_progress_m, &coverage_progress_reason);
         }
@@ -17282,7 +17287,8 @@ namespace ego_planner
             candidate_worst, incumbent_worst, endpoint_progress,
             replacement.minimum_endpoint_progress_m,
             corridor_progress_reason.c_str(),
-            coverage_progress_reason.c_str(), frozen_common_corridor.size(),
+            coverage_progress_reason.c_str(),
+            successor_progress_reference.size(),
             candidate_points.size(), incumbent_points.size());
         p4_planning_disposition_ =
             P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
