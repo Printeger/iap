@@ -44,6 +44,26 @@ namespace ego_planner
     // record can be reconciled with the per-sample artifact.
     constexpr int kP1CandidateEvidenceSampleCount = 200;
 
+    bool reboundCandidateUsable(const int result, const double final_cost,
+                                const double *variables,
+                                const int variable_count)
+    {
+      // A line-search rounding stop is not a safety verdict.  Preserve its
+      // finite candidate so the existing collision, dynamics, local-motion,
+      // braking, and P5 checks can make that verdict downstream.
+      const bool accepted_result =
+          result == lbfgs::LBFGS_CONVERGENCE ||
+          result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
+          result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
+          result == lbfgs::LBFGS_STOP ||
+          result == lbfgs::LBFGSERR_ROUNDING_ERROR;
+      if (!accepted_result || !std::isfinite(final_cost) || !variables ||
+          variable_count <= 0)
+        return false;
+      return Eigen::Map<const Eigen::VectorXd>(variables, variable_count)
+          .allFinite();
+    }
+
     uint64_t fnv1aAppend(uint64_t hash, const std::string &value)
     {
       constexpr uint64_t kPrime = 1099511628211ULL;
@@ -552,25 +572,61 @@ namespace ego_planner
         GridMapOccupancyDiagnosticQuery{});
   }
 
-  void BsplineOptimizer::setP4ActualCurveClearanceQuery(
-      P4ForwardClearanceQuery clearance_query,
+  void BsplineOptimizer::setP4ActualCurveClearanceConstraints(
+      const Eigen::MatrixXd &seed_control_points, const double interval_s,
+      const std::vector<P4ActualCurveClearanceConstraintSample> &samples,
       const double planning_clearance_buffer_m)
   {
-    if (!clearance_query ||
+    clearP4ActualCurveClearanceConstraints();
+    if (seed_control_points.rows() != 3 ||
+        seed_control_points.cols() < order_ + 1 ||
+        !seed_control_points.allFinite() || !std::isfinite(interval_s) ||
+        interval_s <= 0.0 ||
         !std::isfinite(planning_clearance_buffer_m) ||
         planning_clearance_buffer_m <= 0.0)
-    {
-      clearP4ActualCurveClearanceQuery();
       return;
-    }
-    p4_actual_curve_clearance_query_ = std::move(clearance_query);
+
+    setBsplineInterval(interval_s);
     p4_actual_curve_planning_clearance_buffer_m_ =
         planning_clearance_buffer_m;
+    // Freeze the sampled half-spaces before L-BFGS starts.  In particular,
+    // neither the nearest obstacle nor its escape direction is reselected
+    // from a trial point during a line search.
+    p4_actual_curve_clearance_constraints_.reserve(samples.size());
+    for (const auto &sample : samples)
+    {
+      const double required_displacement_m =
+          planning_clearance_buffer_m - sample.signed_margin_m;
+      if (!std::isfinite(sample.time_s) ||
+          !std::isfinite(required_displacement_m) ||
+          required_displacement_m <= 0.0 ||
+          !sample.escape_direction.allFinite() ||
+          sample.escape_direction.squaredNorm() <= 1.0e-12)
+        continue;
+
+      P4ActualCurveClearanceConstraint constraint;
+      double weights[4] = {};
+      if (!cubicBasisForTime(
+              sample.time_s, static_cast<int>(seed_control_points.cols()),
+              constraint.first_control_point, weights))
+        continue;
+      std::copy(std::begin(weights), std::end(weights),
+                constraint.weights.begin());
+      for (int basis = 0; basis < 4; ++basis)
+        constraint.seed_position +=
+            constraint.weights[static_cast<std::size_t>(basis)] *
+            seed_control_points.col(
+                constraint.first_control_point + basis);
+      constraint.escape_direction = sample.escape_direction.normalized();
+      constraint.required_displacement_m = required_displacement_m;
+      p4_actual_curve_clearance_constraints_.push_back(
+          std::move(constraint));
+    }
   }
 
-  void BsplineOptimizer::clearP4ActualCurveClearanceQuery()
+  void BsplineOptimizer::clearP4ActualCurveClearanceConstraints()
   {
-    p4_actual_curve_clearance_query_ = {};
+    p4_actual_curve_clearance_constraints_.clear();
     p4_actual_curve_planning_clearance_buffer_m_ = 0.0;
   }
 
@@ -2749,68 +2805,50 @@ namespace ego_planner
     }
   }
 
-  void BsplineOptimizer::calcP4ActualCurveClearanceCost(
+  void BsplineOptimizer::calcP4ActualCurveFixedClearanceCost(
       const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
   {
     cost = 0.0;
     gradient.setZero();
-    if (!p4_actual_curve_clearance_query_ || order_ != 3 ||
-        q.cols() < order_ + 1 || !(bspline_interval_ > 0.0) ||
+    if (p4_actual_curve_clearance_constraints_.empty() || order_ != 3 ||
+        q.cols() < order_ + 1 ||
         !std::isfinite(p4_actual_curve_planning_clearance_buffer_m_) ||
         p4_actual_curve_planning_clearance_buffer_m_ <= 0.0)
       return;
 
-    const double duration =
-        static_cast<double>(q.cols() - order_) * bspline_interval_;
-    if (!(duration > 0.0) || !std::isfinite(duration))
-      return;
-
-    // The callback owns the final envelope formula.  This bounded generation
-    // lattice supplies its base signed margin to the existing L-BFGS pass;
-    // final local assurance still densely resamples the immutable result and
-    // remains the authorization boundary.  Normalizing by the reserve keeps
-    // sub-millimetre violations visible without making objective strength
-    // depend on the number of samples per knot span.
-    constexpr int subdivisions_per_span = 2;
-    const int sample_count = std::max(
-        1, static_cast<int>(q.cols() - order_) * subdivisions_per_span);
-    const double sample_weight =
-        1.0 / static_cast<double>(subdivisions_per_span);
     const double normalization_m =
         p4_actual_curve_planning_clearance_buffer_m_;
-    for (int sample_index = 0; sample_index <= sample_count; ++sample_index)
+    constexpr double sample_weight = 0.5;
+    for (const auto &constraint : p4_actual_curve_clearance_constraints_)
     {
-      const double time_s = duration *
-          static_cast<double>(sample_index) /
-          static_cast<double>(sample_count);
-      int first_control_point = 0;
-      double weights[4] = {};
-      if (!cubicBasisForTime(
-              time_s, static_cast<int>(q.cols()), first_control_point,
-              weights))
+      if (constraint.first_control_point < 0 ||
+          constraint.first_control_point + 3 >= q.cols())
         continue;
       Eigen::Vector3d point = Eigen::Vector3d::Zero();
       for (int basis = 0; basis < 4; ++basis)
-        point += weights[basis] * q.col(first_control_point + basis);
-      const auto clearance = p4_actual_curve_clearance_query_(point);
-      if (!clearance.available ||
-          !std::isfinite(clearance.signed_margin_m) ||
-          !clearance.escape_direction.allFinite() ||
-          clearance.escape_direction.squaredNorm() <= 1.0e-12)
-        continue;
+        point += constraint.weights[static_cast<std::size_t>(basis)] *
+            q.col(constraint.first_control_point + basis);
+      const double displacement_m =
+          (point - constraint.seed_position).dot(
+              constraint.escape_direction);
       const double violation_m =
-          p4_actual_curve_planning_clearance_buffer_m_ -
-          clearance.signed_margin_m;
+          constraint.required_displacement_m - displacement_m;
       if (!(violation_m > 0.0))
         continue;
       const double normalized_violation = violation_m / normalization_m;
-      cost += sample_weight * normalized_violation;
+      constexpr double smoothing = 1.0e-6;
+      const double smooth_norm = std::sqrt(
+          normalized_violation * normalized_violation +
+          smoothing * smoothing);
+      cost += sample_weight * (smooth_norm - smoothing);
       const Eigen::Vector3d point_gradient =
-          -sample_weight / normalization_m *
-          clearance.escape_direction.normalized();
+          -sample_weight * normalized_violation /
+          (normalization_m * smooth_norm) *
+          constraint.escape_direction;
       for (int basis = 0; basis < 4; ++basis)
-        gradient.col(first_control_point + basis) +=
-            weights[basis] * point_gradient;
+        gradient.col(constraint.first_control_point + basis) +=
+            constraint.weights[static_cast<std::size_t>(basis)] *
+            point_gradient;
     }
   }
 
@@ -3681,10 +3719,7 @@ namespace ego_planner
 
       /* ---------- success temporary, check collision again ---------- */
       // 收敛、达到最大迭代次数、已达到最小值或被停止，则进入碰撞检测阶段
-      if (result == lbfgs::LBFGS_CONVERGENCE ||
-          result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
-          result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
-          result == lbfgs::LBFGS_STOP)
+      if (reboundCandidateUsable(result, final_cost, q, variable_num_))
       {
         // ROS_WARN("Solver error in planning!, return = %s", lbfgs::lbfgs_strerror(result));
         flag_force_return = false;
@@ -5860,21 +5895,15 @@ namespace ego_planner
     trace.support_full_valid = pre_lattice.fullValid() && post_lattice.fullValid() &&
         pre_lattice.support_signature == post_lattice.support_signature &&
         !pre_lattice.support_signature.empty();
-    trace.optimization_success = std::isfinite(final_cost) &&
-        (result == lbfgs::LBFGS_CONVERGENCE ||
-         result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
-         result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
-         result == lbfgs::LBFGS_STOP);
+    trace.optimization_success = reboundCandidateUsable(
+        result, final_cost, x.data(), variable_num_);
     trace.selection_score = final_cost;
     trace.selection_reason = trace.optimization_success
         ? "deterministic_single_candidate" : "optimizer_failure";
     last_p1_optimization_trace_ = trace;
     captureP1PostOptimizationTrajectory(control_points, ts);
-    return std::isfinite(final_cost) &&
-        (result == lbfgs::LBFGS_CONVERGENCE ||
-         result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
-         result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
-         result == lbfgs::LBFGS_STOP);
+    return reboundCandidateUsable(
+        result, final_cost, x.data(), variable_num_);
   }
 
   double BsplineOptimizer::p1LbfgsGradientEpsilon(
@@ -5922,7 +5951,7 @@ namespace ego_planner
 
     calcSmoothnessCost(cps_.points, f_smoothness, g_smoothness);
     calcDistanceCostRebound(cps_.points, f_distance, g_distance, iter_num_, f_smoothness);
-    calcP4ActualCurveClearanceCost(
+    calcP4ActualCurveFixedClearanceCost(
         cps_.points, f_p4_actual_clearance, g_p4_actual_clearance);
     calcFeasibilityCost(cps_.points, f_feasibility, g_feasibility);
     // calcMovingObjCost(cps_.points, f_mov_objs, g_mov_objs);

@@ -61,6 +61,43 @@ namespace ego_planner
 
   namespace
   {
+    std::vector<P4ActualCurveClearanceConstraintSample>
+    freezeP4ActualCurveClearanceConstraints(
+        UniformBspline curve,
+        const iap::LocalClearanceEvaluator &clearance,
+        const double tracking_error_m)
+    {
+      std::vector<P4ActualCurveClearanceConstraintSample> samples;
+      const Eigen::MatrixXd control_points = curve.getControlPoint();
+      if (control_points.rows() != 3 || control_points.cols() < 4 ||
+          !std::isfinite(tracking_error_m) || tracking_error_m < 0.0)
+        return samples;
+      constexpr int subdivisions_per_span = 2;
+      const int sample_count = std::max(
+          1, static_cast<int>(control_points.cols() - 3) *
+                 subdivisions_per_span);
+      const double duration_s = curve.getTimeSum();
+      if (!std::isfinite(duration_s) || duration_s <= 0.0)
+        return samples;
+      samples.reserve(static_cast<std::size_t>(sample_count + 1));
+      for (int sample_index = 0; sample_index <= sample_count; ++sample_index)
+      {
+        const double time_s = duration_s *
+            static_cast<double>(sample_index) /
+            static_cast<double>(sample_count);
+        const Eigen::Vector3d point = curve.evaluateDeBoorT(time_s);
+        const auto result = clearance.query(point, tracking_error_m, 0.0);
+        if (result.status != iap::LocalClearanceStatus::VALID)
+          continue;
+        P4ActualCurveClearanceConstraintSample sample;
+        sample.time_s = time_s;
+        sample.signed_margin_m = result.signed_margin_m;
+        sample.escape_direction = result.escape_direction_map;
+        samples.push_back(std::move(sample));
+      }
+      return samples;
+    }
+
     std::string p4PreparedGuideIdentity(
         const std::vector<Eigen::Vector3d> &guide)
     {
@@ -3953,7 +3990,7 @@ namespace ego_planner
     p4_actual_curve_clearance_execution_snapshot_id_ = 0u;
     p4_actual_curve_clearance_occupancy_generation_ = 0u;
     if (bspline_optimizer_)
-      bspline_optimizer_->clearP4ActualCurveClearanceQuery();
+      bspline_optimizer_->clearP4ActualCurveClearanceConstraints();
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = now_s;
     planning_risk_context_.snapshot_acquired_s = now_s;
@@ -4061,7 +4098,7 @@ namespace ego_planner
     p4_actual_curve_clearance_execution_snapshot_id_ = 0u;
     p4_actual_curve_clearance_occupancy_generation_ = 0u;
     if (bspline_optimizer_)
-      bspline_optimizer_->clearP4ActualCurveClearanceQuery();
+      bspline_optimizer_->clearP4ActualCurveClearanceConstraints();
   }
 
   std::string EGOPlannerManager::p1PlanningContextTimelinePath() const
@@ -14624,7 +14661,7 @@ namespace ego_planner
       {
         if (optimizer)
         {
-          optimizer->clearP4ActualCurveClearanceQuery();
+          optimizer->clearP4ActualCurveClearanceConstraints();
           optimizer->releaseP4RiskSnapshot();
         }
       }
@@ -14897,6 +14934,7 @@ namespace ego_planner
       }
     }
 
+    bspline_optimizer_->clearP4ActualCurveClearanceConstraints();
     // The topology guide and the actual curve must consume one immutable
     // local-clearance model.  The query excludes the generation-only reserve;
     // the optimizer enforces that reserve explicitly, exactly as final local
@@ -14931,25 +14969,6 @@ namespace ego_planner
           execution->execution_snapshot_id;
       p4_actual_curve_clearance_occupancy_generation_ =
           execution->occupancy->generation;
-      const auto clearance = p4_actual_curve_clearance_evaluator_;
-      bspline_optimizer_->setP4ActualCurveClearanceQuery(
-          [clearance, tracking_error_m = p4_local_tracking_error_bound_m_](
-              const Eigen::Vector3d &point) {
-            P4ForwardClearanceSample sample;
-            const auto result = clearance->query(
-                point, tracking_error_m, 0.0);
-            sample.available =
-                result.status == iap::LocalClearanceStatus::VALID;
-            sample.signed_margin_m = result.signed_margin_m;
-            sample.nearest_obstacle_position =
-                result.nearest_obstacle_position_map;
-            sample.escape_direction = result.escape_direction_map;
-            sample.nearest_obstacle_identity =
-                result.nearest_obstacle_identity;
-            sample.reason = result.reason;
-            return sample;
-          },
-          p4_planning_clearance_buffer_m_);
     }
     else
     {
@@ -14957,7 +14976,6 @@ namespace ego_planner
       p4_actual_curve_clearance_evidence_ = iap::LocalMotionEvidence{};
       p4_actual_curve_clearance_execution_snapshot_id_ = 0u;
       p4_actual_curve_clearance_occupancy_generation_ = 0u;
-      bspline_optimizer_->clearP4ActualCurveClearanceQuery();
     }
     double incumbent_start_t_s = 0.0;
     if (has_existing_trajectory &&
@@ -15268,6 +15286,15 @@ namespace ego_planner
           "collision scan failed closed with status %s",
           collisionScanStatusName(collision_scan.status));
       return false;
+    }
+    if (p4_actual_curve_clearance_evaluator_)
+    {
+      const auto fixed_clearance = freezeP4ActualCurveClearanceConstraints(
+          initial_candidate, *p4_actual_curve_clearance_evaluator_,
+          p4_local_tracking_error_bound_m_);
+      bspline_optimizer_->setP4ActualCurveClearanceConstraints(
+          ctrl_pts, ts, fixed_clearance,
+          p4_planning_clearance_buffer_m_);
     }
     segments = collision_scan.closed_segments;
     if (safety_viz_)

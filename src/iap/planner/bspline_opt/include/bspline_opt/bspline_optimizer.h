@@ -1,6 +1,7 @@
 #ifndef _BSPLINE_OPTIMIZER_H_
 #define _BSPLINE_OPTIMIZER_H_
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <Eigen/Eigen>
@@ -138,6 +139,13 @@ namespace ego_planner
       //     }
       //   }
     }
+  };
+
+  struct P4ActualCurveClearanceConstraintSample
+  {
+    double time_s = std::numeric_limits<double>::quiet_NaN();
+    double signed_margin_m = std::numeric_limits<double>::quiet_NaN();
+    Eigen::Vector3d escape_direction = Eigen::Vector3d::Zero();
   };
 
   class BsplineOptimizer
@@ -468,10 +476,11 @@ namespace ego_planner
     void setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                            double query_base_time_s,
                            uint64_t planning_attempt_id);
-    void setP4ActualCurveClearanceQuery(
-        P4ForwardClearanceQuery clearance_query,
+    void setP4ActualCurveClearanceConstraints(
+        const Eigen::MatrixXd &seed_control_points, double interval_s,
+        const std::vector<P4ActualCurveClearanceConstraintSample> &samples,
         double planning_clearance_buffer_m);
-    void clearP4ActualCurveClearanceQuery();
+    void clearP4ActualCurveClearanceConstraints();
     void releaseP4RiskSnapshot();
     void clearP4RiskSnapshot();
     bool validateP4AttemptLineage(uint64_t planning_attempt_id);
@@ -703,7 +712,16 @@ namespace ego_planner
     std::shared_ptr<const GridMap::FrozenOccupancyEpoch>
         p4_occupancy_snapshot_;
     uint64_t active_p4_attempt_id_{0};
-    P4ForwardClearanceQuery p4_actual_curve_clearance_query_;
+    struct P4ActualCurveClearanceConstraint
+    {
+      int first_control_point = 0;
+      std::array<double, 4> weights{};
+      Eigen::Vector3d seed_position = Eigen::Vector3d::Zero();
+      Eigen::Vector3d escape_direction = Eigen::Vector3d::Zero();
+      double required_displacement_m = 0.0;
+    };
+    std::vector<P4ActualCurveClearanceConstraint>
+        p4_actual_curve_clearance_constraints_;
     double p4_actual_curve_planning_clearance_buffer_m_{0.0};
     void invalidateP4AttemptLineage();
     void syncP4AdmittedLineage();
@@ -756,7 +774,7 @@ namespace ego_planner
     void calcFeasibilityCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcTerminalCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcDistanceCostRebound(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient, int iter_num, double smoothness_cost);
-    void calcP4ActualCurveClearanceCost(
+    void calcP4ActualCurveFixedClearanceCost(
         const Eigen::MatrixXd &q, double &cost,
         Eigen::MatrixXd &gradient);
     void calcMovingObjCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
