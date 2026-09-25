@@ -668,6 +668,17 @@
   state; being behind an observed-but-uncommitted delta is not a rejection.
   Such a baseline remains recovery-pending and cannot make a frozen occupancy
   epoch healthy until later deltas or recovery reach the observed generation.
+  Recovery serves the last non-empty, complete committed active-window state;
+  a newer complete producer serial that has not yet been committed does not
+  invalidate that baseline or mix its pending frames into the response. A
+  producer-declared incomplete state still rejects recovery. Registered current
+  frames run on a separate data-plane callback group, while active-window
+  deltas, the recovery client response, and the recovery timer share the
+  serialized control-plane group. Deadline handling removes and retries only a
+  request with no ready response. A middleware arrival protects one existing
+  control-plane scheduling period so a queued callback can run; an unmatched
+  old arrival cannot suppress later finite timeout cleanup. An obsolete request
+  never overwrites a newer committed generation.
   `p4.execution.max_tracking_error_m` is a loss-of-control rejection threshold,
   not a future-error bound. Local envelopes use the separate certified
   `p4.assurance.local_tracking_error_bound_m` (default `0.15 m`) and

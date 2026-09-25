@@ -53,3 +53,27 @@ TEST(ActiveWindowDeltaPolicy,
   EXPECT_TRUE(iap::local_map::activeWindowDeltaChangesState(
       replacement, true));
 }
+
+TEST(ActiveWindowDeltaPolicy,
+     CompleteCommittedSnapshotSurvivesNewerPendingProposal) {
+  const iap::local_map::ActiveWindowRecoveryState state{
+      11U, 10U, 1U, 2U, true, true};
+
+  EXPECT_TRUE(iap::local_map::committedActiveWindowRecoverable(state));
+}
+
+TEST(ActiveWindowDeltaPolicy,
+     IncompleteProducerStateStillRejectsCommittedRecovery) {
+  const iap::local_map::ActiveWindowRecoveryState state{
+      11U, 10U, 1U, 2U, false, true};
+
+  EXPECT_FALSE(iap::local_map::committedActiveWindowRecoverable(state));
+}
+
+TEST(ActiveWindowDeltaPolicy,
+     RecoveryRejectsEmptyOrGenerationZeroCommittedState) {
+  EXPECT_FALSE(iap::local_map::committedActiveWindowRecoverable(
+      {11U, 10U, 0U, 2U, true, true}));
+  EXPECT_FALSE(iap::local_map::committedActiveWindowRecoverable(
+      {11U, 10U, 1U, 0U, true, true}));
+}

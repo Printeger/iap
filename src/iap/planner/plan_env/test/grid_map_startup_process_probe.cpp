@@ -20,6 +20,11 @@ namespace {
 
 using namespace std::chrono_literals;
 
+std::int64_t steadyNowNanoseconds() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 constexpr char kCurrentTopic[] = "/iap/test/local_map/current_frame";
 constexpr char kDeltaTopic[] = "/iap/test/local_map/window_delta";
 constexpr char kRecoveryService[] = "/iap/test/local_map/get_active_window";
@@ -38,13 +43,17 @@ iap::msg::RegisteredLidarFrame makeFrame(const std::int64_t frame_id) {
   frame.deskewed_hits_lidar.header.frame_id = "iap_lidar_reference";
   sensor_msgs::PointCloud2Modifier modifier(frame.deskewed_hits_lidar);
   modifier.setPointCloud2FieldsByString(1, "xyz");
-  modifier.resize(1U);
+  constexpr std::size_t kCurrentPointCount = 4000U;
+  modifier.resize(kCurrentPointCount);
   sensor_msgs::PointCloud2Iterator<float> x(frame.deskewed_hits_lidar, "x");
   sensor_msgs::PointCloud2Iterator<float> y(frame.deskewed_hits_lidar, "y");
   sensor_msgs::PointCloud2Iterator<float> z(frame.deskewed_hits_lidar, "z");
-  *x = 1.0F;
-  *y = 0.0F;
-  *z = 0.0F;
+  for (std::size_t index = 0U; index < kCurrentPointCount;
+       ++index, ++x, ++y, ++z) {
+    *x = 1.0F + 0.0001F * static_cast<float>(index % 100U);
+    *y = 0.0001F * static_cast<float>(index % 50U);
+    *z = 0.0F;
+  }
   frame.beam_evidence_complete = false;
   frame.source_is_map_reference = true;
   frame.source_health_valid = true;
@@ -60,6 +69,8 @@ enum class ProducerMode {
   NORMAL,
   RESPONSE_BEHIND_OBSERVED,
   FIRST_RESPONSE_TIMEOUT,
+  CALLBACK_STARVATION,
+  LATE_OLD_RESPONSE,
 };
 
 class Producer final : public rclcpp::Node {
@@ -84,38 +95,69 @@ class Producer final : public rclcpp::Node {
           const unsigned int request_number =
               request_count_.fetch_add(1U, std::memory_order_acq_rel) + 1U;
           std::uint64_t response_generation = 0U;
+          std::uint64_t producer_window_serial = 0U;
+          std::uint64_t active_producer_serial = 0U;
+          bool producer_window_complete = false;
+          bool active_window_complete = false;
+          double pending_source_y = 0.0;
           iap::msg::RegisteredLidarFrame response_frame;
           {
             std::lock_guard<std::mutex> lock(state_mutex_);
             response_generation = generation_;
+            producer_window_serial = producer_window_serial_;
+            active_producer_serial = active_producer_serial_;
+            producer_window_complete = producer_window_complete_;
+            active_window_complete = active_window_complete_;
+            pending_source_y = pending_source_y_;
             response_frame = active_frame_;
           }
           recovery_started_.store(true, std::memory_order_release);
           std::cerr << "TRANSITION recovery_request serial="
                     << request_number << " base=unknown response_generation="
                     << response_generation << '\n';
-          if (mode_ == ProducerMode::FIRST_RESPONSE_TIMEOUT &&
+          if ((mode_ == ProducerMode::FIRST_RESPONSE_TIMEOUT ||
+               mode_ == ProducerMode::LATE_OLD_RESPONSE) &&
               request_number == 1U) {
             std::cerr << "TRANSITION recovery_response_delayed serial=1\n";
-            std::this_thread::sleep_for(1250ms);
+            std::this_thread::sleep_for(1600ms);
+          } else if (mode_ == ProducerMode::LATE_OLD_RESPONSE &&
+                     request_number == 2U) {
+            std::cerr << "TRANSITION recovery_response_delayed serial=2\n";
+            std::this_thread::sleep_for(2000ms);
           } else if (mode_ == ProducerMode::RESPONSE_BEHIND_OBSERVED &&
                      request_number == 1U) {
             std::this_thread::sleep_for(650ms);
+          } else if (mode_ == ProducerMode::CALLBACK_STARVATION &&
+                     request_number == 1U) {
+            std::this_thread::sleep_for(850ms);
           }
           response->header.frame_id = "map";
           response->frame_contract_id = kFrameContract;
           response->generation = response_generation;
-          response->complete =
-              request->expected_frame_contract_id == kFrameContract;
-          response->reason = response->complete ? "ok" : "contract_mismatch";
+          response->complete = request->expected_frame_contract_id ==
+              kFrameContract &&
+              iap::local_map::committedActiveWindowRecoverable({
+                  producer_window_serial, active_producer_serial,
+                  response_generation, response_generation > 0U ? 1U : 0U,
+                  producer_window_complete, active_window_complete});
+          response->reason = response->complete ? "ok" :
+              (request->expected_frame_contract_id == kFrameContract
+                   ? "producer_active_window_incomplete"
+                   : "contract_mismatch");
           if (response->complete) {
             response->frames.push_back(response_frame);
           }
           std::cerr << "TRANSITION recovery_response serial="
                     << request_number << " generation="
-                    << response_generation << '\n';
+                    << response_generation << " producer_serial="
+                    << producer_window_serial << " active_serial="
+                    << active_producer_serial << " complete="
+                    << (response->complete ? 1 : 0)
+                    << " pending_source_y=" << pending_source_y
+                    << " response_sent_steady=" << steadyNowNanoseconds()
+                    << '\n';
         }, rclcpp::ServicesQoS(), service_callback_group_);
-    current_timer_ = create_wall_timer(50ms, [this]() {
+    current_timer_ = create_wall_timer(100ms, [this]() {
       if (!matched_.load(std::memory_order_acquire) &&
           current_publisher_->get_subscription_count() > 0U) {
         matched_.store(true, std::memory_order_release);
@@ -134,9 +176,15 @@ class Producer final : public rclcpp::Node {
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         ++window_update_attempts_;
+        ++producer_window_serial_;
+        producer_window_complete_ = true;
+        if (generation_ > 0U) {
+          pending_source_y_ = 0.75;
+        }
         if (generation_ == 0U) {
           delta.added.push_back(active_frame_);
-        } else if (mode_ != ProducerMode::NORMAL &&
+        } else if ((mode_ == ProducerMode::RESPONSE_BEHIND_OBSERVED ||
+                    mode_ == ProducerMode::FIRST_RESPONSE_TIMEOUT) &&
                    generation_ == 1U &&
                    recovery_started_.load(std::memory_order_acquire)) {
           active_frame_.t_map_lidar.position.y = 0.25;
@@ -151,6 +199,7 @@ class Producer final : public rclcpp::Node {
         delta.base_generation = generation_;
         delta.generation = generation_ + 1U;
         generation_ = delta.generation;
+        active_producer_serial_ = producer_window_serial_;
         active_window_complete_ = true;
       }
       delta_publisher_->publish(delta);
@@ -186,7 +235,11 @@ class Producer final : public rclcpp::Node {
   std::uint64_t window_update_attempts_ = 0U;
   std::uint64_t suppressed_empty_updates_ = 0U;
   std::uint64_t published_delta_count_ = 0U;
+  std::uint64_t producer_window_serial_ = 0U;
+  std::uint64_t active_producer_serial_ = 0U;
+  bool producer_window_complete_ = true;
   bool active_window_complete_ = false;
+  double pending_source_y_ = 0.0;
   std::int64_t next_frame_id_ = 2;
   rclcpp::Publisher<iap::msg::RegisteredLidarFrame>::SharedPtr
       current_publisher_;
@@ -226,9 +279,22 @@ rclcpp::NodeOptions consumerOptions() {
   return options;
 }
 
-int runConsumer(const double timeout_s) {
+int runConsumer(const double timeout_s, const bool controlled_default_load) {
   auto node = std::make_shared<rclcpp::Node>(
       "grid_map_startup_test_consumer", consumerOptions());
+  std::atomic<bool> load_started{false};
+  rclcpp::TimerBase::SharedPtr load_timer;
+  if (controlled_default_load) {
+    load_timer = node->create_wall_timer(50ms, [&load_started]() {
+      if (!load_started.exchange(true, std::memory_order_acq_rel)) {
+        std::cerr << "TRANSITION default_callback_load_started steady="
+                  << steadyNowNanoseconds() << '\n';
+        std::this_thread::sleep_for(1800ms);
+        std::cerr << "TRANSITION default_callback_load_finished steady="
+                  << steadyNowNanoseconds() << '\n';
+      }
+    });
+  }
   auto map = std::make_shared<GridMap>();
   map->initMap(node);
   rclcpp::executors::MultiThreadedExecutor executor(
@@ -285,7 +351,9 @@ int main(int argc, char** argv) {
   int result = 2;
   if (argc >= 2 && std::string(argv[1]) == "consumer") {
     const double timeout_s = argc >= 3 ? std::stod(argv[2]) : 7.0;
-    result = runConsumer(timeout_s);
+    const bool controlled_default_load =
+        argc >= 4 && std::string(argv[3]) == "controlled-default-load";
+    result = runConsumer(timeout_s, controlled_default_load);
   } else if (argc >= 2 && std::string(argv[1]) == "producer") {
     ProducerMode mode = ProducerMode::NORMAL;
     if (argc >= 3 && std::string(argv[2]) == "response-behind-observed") {
@@ -293,12 +361,19 @@ int main(int argc, char** argv) {
     } else if (argc >= 3 &&
                std::string(argv[2]) == "first-response-timeout") {
       mode = ProducerMode::FIRST_RESPONSE_TIMEOUT;
+    } else if (argc >= 3 &&
+               std::string(argv[2]) == "callback-starvation") {
+      mode = ProducerMode::CALLBACK_STARVATION;
+    } else if (argc >= 3 &&
+               std::string(argv[2]) == "late-old-response") {
+      mode = ProducerMode::LATE_OLD_RESPONSE;
     }
     result = runProducer(mode);
   } else {
     std::cerr << "usage: grid_map_startup_process_probe "
                  "consumer [timeout_s] | producer "
-                 "[response-behind-observed|first-response-timeout]\n";
+                 "[response-behind-observed|first-response-timeout|"
+                 "callback-starvation|late-old-response]\n";
   }
   rclcpp::shutdown();
   return result;

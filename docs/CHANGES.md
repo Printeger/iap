@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(active-window-recovery-timing): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 —
+  make `GetActiveLidarWindow` return the last non-empty complete committed
+  generation even while a newer complete producer proposal awaits the 2 Hz
+  worker. A producer-declared incomplete window remains fail-closed. GridMap
+  now isolates high-rate current frames from the delta/recovery control plane,
+  binds the recovery client and timer to that control callback group, preserves
+  an arrived in-flight response for one control dispatch cycle at its deadline,
+  and removes genuinely timed-out or uncorrelated requests before bounded
+  retry. Transition diagnostics expose producer,
+  active, request, response, deadline, and commit identities.
 - fix(icra-rviz-runtime-verification): IAP-RQ-003 / IAP-RQ-320 — make the
   interface runner bind and prove the single installed `test_icra.rviz`
   profile instead of relying on the launch wrapper's relative default. A

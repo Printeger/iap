@@ -12,6 +12,7 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <nav_msgs/msg/odometry.hpp>
 #include <queue>
@@ -442,6 +443,8 @@ private:
   rclcpp::CallbackGroup::SharedPtr independent_cloud_callback_group_;
   rclcpp::CallbackGroup::SharedPtr independent_cloud_input_callback_group_;
   rclcpp::CallbackGroup::SharedPtr independent_odom_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr registered_current_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr registered_control_callback_group_;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_inf_pub_;
@@ -495,6 +498,12 @@ private:
   // remains the committed generation used for recovery acceptance.
   std::atomic<uint64_t> registered_observed_generation_{0};
   std::atomic<int64_t> registered_recovery_deadline_ns_{0};
+  std::atomic<int64_t> registered_recovery_request_sent_ns_{0};
+  std::atomic<int64_t> registered_recovery_response_ready_ns_{0};
+  std::atomic<uint64_t> registered_recovery_request_base_generation_{0};
+  std::optional<
+      rclcpp::Client<iap::srv::GetActiveLidarWindow>::SharedFutureAndRequestId>
+      registered_recovery_future_;
   bool registered_active_window_healthy_ = false;
   bool registered_current_frame_healthy_ = false;
   std::string registered_lidar_reference_frame_id_ =

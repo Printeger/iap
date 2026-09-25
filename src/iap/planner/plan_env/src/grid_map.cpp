@@ -12,6 +12,15 @@
 namespace
 {
 
+constexpr auto kRegisteredRecoveryControlPeriod =
+    std::chrono::milliseconds(250);
+
+int64_t steadyNowNanoseconds()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 bool sourceStampSeconds(const builtin_interfaces::msg::Time &stamp,
                         double *stamp_s)
 {
@@ -500,11 +509,21 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
       rclcpp::CallbackGroupType::MutuallyExclusive);
   independent_odom_callback_group_ = node_->create_callback_group(
       rclcpp::CallbackGroupType::MutuallyExclusive);
+  registered_current_callback_group_ = node_->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
+  registered_control_callback_group_ = node_->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
   rclcpp::SubscriptionOptions independent_cloud_options;
   independent_cloud_options.callback_group =
       independent_cloud_input_callback_group_;
   rclcpp::SubscriptionOptions independent_odom_options;
   independent_odom_options.callback_group = independent_odom_callback_group_;
+  rclcpp::SubscriptionOptions registered_current_options;
+  registered_current_options.callback_group =
+      registered_current_callback_group_;
+  rclcpp::SubscriptionOptions registered_control_options;
+  registered_control_options.callback_group =
+      registered_control_callback_group_;
 
   // 使用独立的里程计和点云订阅
   if (!registered_lidar_window_enabled_)
@@ -528,21 +547,37 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
             rclcpp::SensorDataQoS().keep_last(1),
             std::bind(&GridMap::registeredCurrentFrameCallback, this,
                       std::placeholders::_1),
-            independent_cloud_options);
+            registered_current_options);
     registered_delta_sub_ =
         node_->create_subscription<iap::msg::ActiveLidarWindowDelta>(
             registered_delta_topic_, rclcpp::QoS(128).reliable(),
             std::bind(&GridMap::registeredWindowDeltaCallback, this,
                       std::placeholders::_1),
-            independent_cloud_options);
+            registered_control_options);
     registered_recovery_client_ =
         node_->create_client<iap::srv::GetActiveLidarWindow>(
-            registered_recovery_service_);
+            registered_recovery_service_, rclcpp::ServicesQoS(),
+            registered_control_callback_group_);
+    const std::weak_ptr<GridMap> recovery_owner = weak_from_this();
+    registered_recovery_client_->set_on_new_response_callback(
+        [recovery_owner](const std::size_t response_count)
+        {
+          if (response_count == 0U)
+            return;
+          const auto self = recovery_owner.lock();
+          if (!self || !self->registered_recovery_in_flight_.load(
+                           std::memory_order_acquire))
+            return;
+          int64_t not_received = 0;
+          self->registered_recovery_response_ready_ns_.compare_exchange_strong(
+              not_received, steadyNowNanoseconds(),
+              std::memory_order_acq_rel, std::memory_order_acquire);
+        });
     registered_recovery_pending_.store(true, std::memory_order_release);
     registered_recovery_timer_ = node_->create_wall_timer(
-        std::chrono::milliseconds(250),
+        kRegisteredRecoveryControlPeriod,
         std::bind(&GridMap::maintainRegisteredWindowRecovery, this),
-        independent_cloud_callback_group_);
+        registered_control_callback_group_);
     RCLCPP_INFO(
         node_->get_logger(),
         "[grid_map] registered LiDAR window enabled current=%s delta=%s "
@@ -1713,8 +1748,14 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
   {
     registered_recovery_in_flight_.store(false, std::memory_order_release);
     RCLCPP_WARN(node_->get_logger(),
-                "[grid_map] active-window recovery unavailable after %s",
-                reason.c_str());
+                "[grid_map] active-window recovery request request_serial=%lu "
+                "request_base_generation=0 observed_generation=%lu "
+                "committed_generation=0 service_ready=0 "
+                "request_sent_steady=0 reject_reason=service_unavailable "
+                "trigger=%s",
+                registered_recovery_serial_.load(std::memory_order_acquire),
+                registered_observed_generation_.load(
+                    std::memory_order_acquire), reason.c_str());
     return;
   }
   uint64_t request_base_generation = 0;
@@ -1726,18 +1767,27 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
   const uint64_t request_serial =
       registered_recovery_serial_.fetch_add(
           1U, std::memory_order_acq_rel) + 1U;
+  const int64_t request_sent_ns = steadyNowNanoseconds();
+  const int64_t deadline_ns = request_sent_ns +
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::seconds(1)).count();
+  registered_recovery_request_sent_ns_.store(
+      request_sent_ns, std::memory_order_release);
+  registered_recovery_response_ready_ns_.store(
+      0, std::memory_order_release);
+  registered_recovery_request_base_generation_.store(
+      request_base_generation, std::memory_order_release);
+  registered_recovery_deadline_ns_.store(
+      deadline_ns, std::memory_order_release);
   RCLCPP_INFO(node_->get_logger(),
-              "[grid_map] active-window recovery service ready "
-              "request_serial=%lu request_base=%lu observed=%lu",
+              "[grid_map] active-window recovery request "
+              "request_serial=%lu request_base_generation=%lu "
+              "observed_generation=%lu committed_generation=%lu "
+              "service_ready=1 request_sent_steady=%ld trigger=%s",
               request_serial, request_base_generation,
               registered_observed_generation_.load(
-                  std::memory_order_acquire));
-  const auto deadline = std::chrono::steady_clock::now() +
-      std::chrono::seconds(1);
-  registered_recovery_deadline_ns_.store(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          deadline.time_since_epoch()).count(),
-      std::memory_order_release);
+                  std::memory_order_acquire),
+              request_base_generation, request_sent_ns, reason.c_str());
   auto request =
       std::make_shared<iap::srv::GetActiveLidarWindow::Request>();
   request->expected_frame_contract_id = registered_frame_contract_id_;
@@ -1751,17 +1801,47 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
   }
   try
   {
-    registered_recovery_client_->async_send_request(
+    registered_recovery_future_ =
+      registered_recovery_client_->async_send_request(
       request,
-      [weak_self, reason, request_serial, request_base_generation](
+      [weak_self, reason, request_serial, request_base_generation,
+       request_sent_ns, deadline_ns](
           rclcpp::Client<iap::srv::GetActiveLidarWindow>::SharedFuture future)
       {
         const auto self = weak_self.lock();
         if (!self)
           return;
+        const int64_t callback_started_ns = steadyNowNanoseconds();
         if (request_serial != self->registered_recovery_serial_.load(
                                   std::memory_order_acquire))
+        {
+          RCLCPP_WARN(
+              self->node_->get_logger(),
+              "[grid_map] active-window recovery response "
+              "request_serial=%lu request_base_generation=%lu "
+              "observed_generation=%lu committed_generation=%lu "
+              "service_ready=1 request_sent_steady=%ld "
+              "response_received_steady=%ld callback_started_steady=%ld "
+              "timeout_steady=%ld response_complete=unknown "
+              "response_generation=unknown commit_result=rejected "
+              "reject_reason=stale_request_serial",
+              request_serial, request_base_generation,
+              self->registered_observed_generation_.load(
+                  std::memory_order_acquire),
+              self->registered_lidar_window_->activeGeneration(),
+              request_sent_ns, callback_started_ns, callback_started_ns,
+              deadline_ns);
           return;
+        }
+        int64_t response_received_ns =
+            self->registered_recovery_response_ready_ns_.load(
+                std::memory_order_acquire);
+        if (response_received_ns == 0)
+        {
+          response_received_ns = callback_started_ns;
+          self->registered_recovery_response_ready_ns_.store(
+              response_received_ns, std::memory_order_release);
+        }
         iap::srv::GetActiveLidarWindow::Response::SharedPtr response;
         try
         {
@@ -1773,13 +1853,32 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
               false, std::memory_order_release);
           self->registered_recovery_pending_.store(
               true, std::memory_order_release);
+          self->registered_recovery_future_.reset();
+          self->registered_recovery_deadline_ns_.store(
+              0, std::memory_order_release);
           RCLCPP_WARN(self->node_->get_logger(),
-                      "[grid_map] active-window recovery aborted after %s: %s",
-                      reason.c_str(), error.what());
+                      "[grid_map] active-window recovery response "
+                      "request_serial=%lu request_base_generation=%lu "
+                      "observed_generation=%lu committed_generation=%lu "
+                      "service_ready=1 request_sent_steady=%ld "
+                      "response_received_steady=%ld "
+                      "callback_started_steady=%ld timeout_steady=%ld "
+                      "response_complete=unknown "
+                      "response_generation=unknown commit_result=rejected "
+                      "reject_reason=future_exception detail=%s trigger=%s",
+                      request_serial, request_base_generation,
+                      self->registered_observed_generation_.load(
+                          std::memory_order_acquire),
+                      self->registered_lidar_window_->activeGeneration(),
+                      request_sent_ns,
+                      response_received_ns, callback_started_ns,
+                      deadline_ns,
+                      error.what(), reason.c_str());
           return;
         }
         RegisteredLidarWindowUpdate update;
         bool committed_request_state = false;
+        std::string reject_reason = "none";
         if (response && response->complete &&
             response->header.frame_id == self->mp_.frame_id_ &&
             response->frame_contract_id ==
@@ -1831,22 +1930,24 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
                     std::memory_order_release);
                 self->registered_recovery_in_flight_.store(
                     false, std::memory_order_release);
-                RCLCPP_INFO(
-                    self->node_->get_logger(),
-                    "[grid_map] active-window recovery committed "
-                    "request_serial=%lu response=%lu observed=%lu "
-                    "committed=%lu pending=%d",
-                    request_serial, response->generation,
-                    observed_generation,
-                    self->registered_lidar_window_->activeGeneration(),
-                    self->registered_active_window_healthy_ ? 0 : 1);
                 committed_request_state = true;
               }
             }
             else
               update.reason = "stale_recovery_generation";
           }
+          else
+            update.reason = "invalid_recovery_frame";
         }
+        else if (!response)
+          update.reason = "null_recovery_response";
+        else if (!response->complete)
+          update.reason = response->reason.empty()
+              ? "incomplete_recovery_response" : response->reason;
+        else if (response->header.frame_id != self->mp_.frame_id_)
+          update.reason = "recovery_frame_mismatch";
+        else
+          update.reason = "recovery_contract_mismatch";
         if (!committed_request_state &&
             request_serial == self->registered_recovery_serial_.load(
                                   std::memory_order_acquire))
@@ -1856,12 +1957,42 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
           self->registered_recovery_pending_.store(
               true, std::memory_order_release);
         }
-        if (!update.accepted &&
-            request_serial == self->registered_recovery_serial_.load(
+        if (!update.accepted)
+          reject_reason = update.reason.empty()
+              ? "replace_active_window_failed" : update.reason;
+        if (request_serial == self->registered_recovery_serial_.load(
                                   std::memory_order_acquire))
-          RCLCPP_ERROR(self->node_->get_logger(),
-                       "[grid_map] active-window recovery failed after %s",
-                       reason.c_str());
+        {
+          self->registered_recovery_future_.reset();
+          self->registered_recovery_deadline_ns_.store(
+              0, std::memory_order_release);
+        }
+        const uint64_t response_generation = response
+            ? response->generation : 0U;
+        const int response_complete = response && response->complete ? 1 : 0;
+        RCLCPP_INFO(
+            self->node_->get_logger(),
+            "[grid_map] active-window recovery response "
+            "request_serial=%lu request_base_generation=%lu "
+            "observed_generation=%lu committed_generation=%lu "
+            "service_ready=1 request_sent_steady=%ld "
+            "response_received_steady=%ld callback_started_steady=%ld "
+            "timeout_steady=%ld response_complete=%d "
+            "response_generation=%lu commit_result=%s reject_reason=%s "
+            "pending=%d trigger=%s",
+            request_serial, request_base_generation,
+            self->registered_observed_generation_.load(
+                std::memory_order_acquire),
+            self->registered_lidar_window_->activeGeneration(),
+            request_sent_ns,
+            response_received_ns, callback_started_ns,
+            deadline_ns,
+            response_complete, response_generation,
+            committed_request_state ? "committed" : "rejected",
+            committed_request_state ? "none" : reject_reason.c_str(),
+            self->registered_recovery_pending_.load(
+                std::memory_order_acquire) ? 1 : 0,
+            reason.c_str());
       });
   }
   catch (const std::exception &error)
@@ -1871,6 +2002,8 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
       registered_recovery_in_flight_.store(false,
                                             std::memory_order_release);
     registered_recovery_pending_.store(true, std::memory_order_release);
+    registered_recovery_future_.reset();
+    registered_recovery_deadline_ns_.store(0, std::memory_order_release);
     RCLCPP_WARN(node_->get_logger(),
                 "[grid_map] active-window recovery request failed after %s: %s",
                 reason.c_str(), error.what());
@@ -1889,11 +2022,47 @@ void GridMap::maintainRegisteredWindowRecovery()
         std::memory_order_acquire);
     if (deadline_ns > 0 && now_ns < deadline_ns)
       return;
+    const int64_t response_ready_ns =
+        registered_recovery_response_ready_ns_.load(
+            std::memory_order_acquire);
+    const int64_t control_dispatch_period_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            kRegisteredRecoveryControlPeriod).count();
+    if (response_ready_ns > 0 &&
+        now_ns <= response_ready_ns + control_dispatch_period_ns)
+      return;
+    const uint64_t timed_out_serial = registered_recovery_serial_.load(
+        std::memory_order_acquire);
+    const uint64_t request_base_generation =
+        registered_recovery_request_base_generation_.load(
+            std::memory_order_acquire);
+    if (registered_recovery_future_.has_value())
+      registered_recovery_client_->remove_pending_request(
+          registered_recovery_future_->request_id);
+    registered_recovery_future_.reset();
     registered_recovery_serial_.fetch_add(1U, std::memory_order_acq_rel);
     registered_recovery_in_flight_.store(false, std::memory_order_release);
     registered_recovery_pending_.store(true, std::memory_order_release);
-    RCLCPP_WARN(node_->get_logger(),
-                "[grid_map] active-window recovery timed out; retrying");
+    RCLCPP_WARN(
+        node_->get_logger(),
+        "[grid_map] active-window recovery timeout "
+        "request_serial=%lu request_base_generation=%lu "
+        "observed_generation=%lu committed_generation=%lu "
+        "service_ready=%d request_sent_steady=%ld "
+        "response_received_steady=%ld callback_started_steady=0 "
+        "timeout_steady=%ld response_complete=unknown "
+        "response_generation=unknown commit_result=timed_out "
+        "reject_reason=%s",
+        timed_out_serial, request_base_generation,
+        registered_observed_generation_.load(std::memory_order_acquire),
+        registered_lidar_window_ ?
+            registered_lidar_window_->activeGeneration() : 0U,
+        registered_recovery_client_->service_is_ready() ? 1 : 0,
+        registered_recovery_request_sent_ns_.load(
+            std::memory_order_acquire), response_ready_ns, now_ns,
+        response_ready_ns > 0
+            ? "uncorrelated_or_undispatched_response"
+            : "no_response_before_deadline");
   }
   if (registered_recovery_pending_.load(std::memory_order_acquire))
     requestRegisteredWindowRecovery("startup_or_retry");

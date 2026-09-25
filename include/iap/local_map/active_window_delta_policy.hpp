@@ -4,8 +4,27 @@
 #include <iap/msg/registered_lidar_frame.hpp>
 
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 
 namespace iap::local_map {
+
+struct ActiveWindowRecoveryState {
+  // Serials are deliberately diagnostic-only: a newer pending proposal must
+  // not invalidate the last complete committed generation.
+  std::uint64_t producer_window_serial = 0U;
+  std::uint64_t active_producer_serial = 0U;
+  std::uint64_t active_generation = 0U;
+  std::size_t committed_frame_count = 0U;
+  bool producer_window_complete = false;
+  bool active_window_complete = false;
+};
+
+inline bool committedActiveWindowRecoverable(
+    const ActiveWindowRecoveryState& state) {
+  return state.producer_window_complete && state.active_window_complete &&
+      state.active_generation > 0U && state.committed_frame_count > 0U;
+}
 
 inline bool activeWindowDeltaChangesState(
     const iap::msg::ActiveLidarWindowDelta& delta,

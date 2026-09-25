@@ -824,38 +824,58 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   void serveActiveWindow(
       const std::shared_ptr<iap::srv::GetActiveLidarWindow::Request>& request,
       std::shared_ptr<iap::srv::GetActiveLidarWindow::Response>& response) {
+    const auto started = std::chrono::steady_clock::now();
+    const std::uint64_t request_id =
+        recovery_request_count_.fetch_add(1U, std::memory_order_acq_rel) + 1U;
     response->header.frame_id = planner_frame_id_;
     response->frame_contract_id = frame_contract_id_;
-    if (!request->expected_frame_contract_id.empty() &&
-        request->expected_frame_contract_id != frame_contract_id_) {
-      response->complete = false;
-      response->reason = "frame_contract_mismatch";
-      return;
-    }
+    const bool frame_contract_matches =
+        request->expected_frame_contract_id.empty() ||
+        request->expected_frame_contract_id == frame_contract_id_;
     std::lock_guard<std::mutex> producer_lock(producer_window_mutex_);
     std::lock_guard<std::mutex> lock(active_mutex_);
+    std::size_t pending_window_event_count = 0U;
+    {
+      std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+      pending_window_event_count = pending_window_events_.size();
+    }
     response->generation = active_generation_;
-    response->complete =
-        producer_window_complete_ && active_window_complete_ &&
-        active_producer_serial_ == producer_window_serial_;
-    response->reason = response->complete
-        ? "ok" : "producer_active_window_incomplete";
-    if (!response->complete) {
-      return;
+    response->complete = frame_contract_matches &&
+        iap::local_map::committedActiveWindowRecoverable({
+            producer_window_serial_, active_producer_serial_,
+            active_generation_, active_messages_.size(),
+            producer_window_complete_, active_window_complete_});
+    response->reason = response->complete ? "ok" :
+        (frame_contract_matches ? "producer_active_window_incomplete"
+                                : "frame_contract_mismatch");
+    if (response->complete) {
+      std::vector<std::int64_t> ids;
+      ids.reserve(active_messages_.size());
+      for (const auto& [id, unused] : active_messages_) {
+        (void)unused;
+        ids.push_back(id);
+      }
+      std::sort(ids.begin(), ids.end());
+      for (const auto id : ids) {
+        response->frames.push_back(active_messages_.at(id));
+      }
+      if (!response->frames.empty()) {
+        response->header.stamp = response->frames.back().header.stamp;
+      }
     }
-    std::vector<std::int64_t> ids;
-    ids.reserve(active_messages_.size());
-    for (const auto& [id, unused] : active_messages_) {
-      (void)unused;
-      ids.push_back(id);
-    }
-    std::sort(ids.begin(), ids.end());
-    for (const auto id : ids) {
-      response->frames.push_back(active_messages_.at(id));
-    }
-    if (!response->frames.empty()) {
-      response->header.stamp = response->frames.back().header.stamp;
-    }
+    logger_->info(
+        "[planner_local_map] active-window recovery request_id={} "
+        "producer_window_serial={} active_producer_serial={} "
+        "active_generation={} producer_window_complete={} "
+        "active_window_complete={} pending_window_event_count={} "
+        "response_complete={} response_generation={} response_reason={} "
+        "service_elapsed_ms={:.3f}",
+        request_id, producer_window_serial_, active_producer_serial_,
+        active_generation_, producer_window_complete_ ? 1 : 0,
+        active_window_complete_ ? 1 : 0, pending_window_event_count,
+        response->complete ? 1 : 0, response->generation, response->reason,
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count());
   }
 
   void workerLoop() {
@@ -966,6 +986,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
       active_messages_;
 
   std::atomic<std::uint64_t> invalid_frame_count_{0};
+  std::atomic<std::uint64_t> recovery_request_count_{0};
   std::atomic<std::uint64_t> current_publish_count_{0};
   std::atomic<std::uint64_t> captured_frame_count_{0};
   std::vector<double> callback_latency_ms_;
