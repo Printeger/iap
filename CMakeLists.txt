@@ -693,6 +693,15 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_beam_evidence_binding
         "${iap_msgs_cpp_ts}"
       )
+      ament_add_gtest(test_active_window_delta_policy
+        test/test_active_window_delta_policy.cpp
+      )
+      target_include_directories(test_active_window_delta_policy PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+      )
+      target_link_libraries(test_active_window_delta_policy
+        "${iap_msgs_cpp_ts}"
+      )
       ament_add_gtest(test_future_pl_field_predictor test/test_future_pl_field_predictor.cpp)
       target_link_libraries(test_future_pl_field_predictor iap iap_prediction_integrity)
       ament_add_gtest(test_predictor_module test/test_predictor_module.cpp)

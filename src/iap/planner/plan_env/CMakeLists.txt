@@ -44,6 +44,7 @@ find_path(IAP_MSGS_INCLUDE_DIR
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -62,6 +63,23 @@ if(BUILD_TESTING)
     test/test_registered_lidar_window.cpp
   )
   target_link_libraries(test_registered_lidar_window plan_env)
+
+  add_executable(grid_map_startup_process_probe
+    test/grid_map_startup_process_probe.cpp
+  )
+  target_link_libraries(grid_map_startup_process_probe plan_env)
+  ament_target_dependencies(grid_map_startup_process_probe
+    rclcpp sensor_msgs
+  )
+
+  ament_add_pytest_test(test_grid_map_startup_process
+    test/test_grid_map_startup_process.py
+    TIMEOUT 60
+  )
+  set_tests_properties(test_grid_map_startup_process PROPERTIES
+    ENVIRONMENT
+      "GRID_MAP_STARTUP_PROCESS_PROBE=$<TARGET_FILE:grid_map_startup_process_probe>"
+  )
 endif()
 
 include_directories(

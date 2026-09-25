@@ -659,6 +659,15 @@
   map-relative alignment. Loss of registration health, stale support or a
   source-data gap remains fail-closed and activates the existing certified
   braking path.
+  Active-window generation is a semantic state version, not a heartbeat:
+  an unchanged complete window neither advances generation nor publishes an
+  empty delta. Consumers distinguish the highest observed generation from the
+  fully committed generation. A complete recovery response is eligible to
+  become the committed baseline when its frame contract is valid and its
+  generation is no older than both the request base and the local committed
+  state; being behind an observed-but-uncommitted delta is not a rejection.
+  Such a baseline remains recovery-pending and cannot make a frozen occupancy
+  epoch healthy until later deltas or recovery reach the observed generation.
   `p4.execution.max_tracking_error_m` is a loss-of-control rejection threshold,
   not a future-error bound. Local envelopes use the separate certified
   `p4.assurance.local_tracking_error_bound_m` (default `0.15 m`) and

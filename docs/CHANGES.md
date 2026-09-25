@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(local-map-startup-recovery): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 —
+  make registered active-window generation advance only for semantic frame,
+  pose, source-health, or completeness changes, so unchanged complete windows
+  no longer publish empty heartbeat deltas. GridMap now distinguishes observed
+  from committed generation, commits a valid complete recovery baseline that
+  is current with its request and local committed state, and remains pending
+  until that baseline catches the observed stream. Recovery timeout/serial
+  protection, fail-closed frozen occupancy health, and map safety semantics
+  are unchanged.
 - fix(p4-channel-bundle-authority): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 —
   stop the normal-channel comparison wrapper from requiring 100% diagnostic
   whole-route evidence after P4 has authorized a bounded MISSION actual curve.

@@ -1503,11 +1503,16 @@ void GridMap::registeredCurrentFrameCallback(
   }
   const auto parsed = std::chrono::steady_clock::now();
   std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_);
+  const bool first_healthy_current = !registered_current_frame_healthy_;
   md_.camera_pos_ = frame.T_map_lidar.translation();
   md_.camera_r_m_ = frame.T_map_lidar.linear();
   md_.has_odom_ = true;
   const auto update = registered_lidar_window_->applyCurrentFrame(frame);
   registered_current_frame_healthy_ = update.accepted;
+  if (first_healthy_current && update.accepted)
+    RCLCPP_INFO(node_->get_logger(),
+                "[grid_map] first registered current frame applied id=%ld",
+                frame.frame_id);
   if (update.accepted)
   {
     RegisteredLidarFrameMetadata metadata;
@@ -1599,14 +1604,18 @@ void GridMap::registeredWindowDeltaCallback(
     requestRegisteredWindowRecovery("invalid_delta_envelope");
     return;
   }
-  uint64_t highest = registered_highest_seen_generation_.load(
+  uint64_t observed = registered_observed_generation_.load(
       std::memory_order_acquire);
-  while (highest < message->generation &&
-         !registered_highest_seen_generation_.compare_exchange_weak(
-             highest, message->generation, std::memory_order_acq_rel,
+  while (observed < message->generation &&
+         !registered_observed_generation_.compare_exchange_weak(
+             observed, message->generation, std::memory_order_acq_rel,
              std::memory_order_acquire))
   {
   }
+  if (observed == 0U)
+    RCLCPP_INFO(node_->get_logger(),
+                "[grid_map] first active-window delta base=%lu generation=%lu",
+                message->base_generation, message->generation);
   if (!message->complete)
   {
     {
@@ -1653,7 +1662,7 @@ void GridMap::registeredWindowDeltaCallback(
     {
       registered_active_window_healthy_ =
           update.active_generation >=
-          registered_highest_seen_generation_.load(
+          registered_observed_generation_.load(
               std::memory_order_acquire);
       registered_recovery_pending_.store(
           !registered_active_window_healthy_, std::memory_order_release);
@@ -1717,6 +1726,12 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
   const uint64_t request_serial =
       registered_recovery_serial_.fetch_add(
           1U, std::memory_order_acq_rel) + 1U;
+  RCLCPP_INFO(node_->get_logger(),
+              "[grid_map] active-window recovery service ready "
+              "request_serial=%lu request_base=%lu observed=%lu",
+              request_serial, request_base_generation,
+              registered_observed_generation_.load(
+                  std::memory_order_acquire));
   const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::seconds(1);
   registered_recovery_deadline_ns_.store(
@@ -1766,6 +1781,7 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
         RegisteredLidarWindowUpdate update;
         bool committed_request_state = false;
         if (response && response->complete &&
+            response->header.frame_id == self->mp_.frame_id_ &&
             response->frame_contract_id ==
                 self->registered_frame_contract_id_)
         {
@@ -1793,25 +1809,37 @@ void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
             const uint64_t local_generation =
                 self->registered_lidar_window_->activeGeneration();
             const uint64_t required_generation = std::max(
-                {request_base_generation, local_generation,
-                 self->registered_highest_seen_generation_.load(
-                     std::memory_order_acquire)});
+                request_base_generation, local_generation);
             if (response->generation >= required_generation)
             {
               update = self->registered_lidar_window_->replaceActiveWindow(
                   response->generation, response->frame_contract_id, frames);
               if (update.accepted)
               {
-                self->registered_active_window_healthy_ = true;
+                const uint64_t observed_generation =
+                    self->registered_observed_generation_.load(
+                        std::memory_order_acquire);
+                self->registered_active_window_healthy_ =
+                    response->generation >= observed_generation;
                 self->applyRegisteredLidarUpdate(update);
                 // Commit health, pending and in-flight under the same state
                 // lock used by the delta callback. A fault arriving after
                 // this point will therefore set pending=true after us rather
                 // than being overwritten by a late success completion.
                 self->registered_recovery_pending_.store(
-                    false, std::memory_order_release);
+                    !self->registered_active_window_healthy_,
+                    std::memory_order_release);
                 self->registered_recovery_in_flight_.store(
                     false, std::memory_order_release);
+                RCLCPP_INFO(
+                    self->node_->get_logger(),
+                    "[grid_map] active-window recovery committed "
+                    "request_serial=%lu response=%lu observed=%lu "
+                    "committed=%lu pending=%d",
+                    request_serial, response->generation,
+                    observed_generation,
+                    self->registered_lidar_window_->activeGeneration(),
+                    self->registered_active_window_healthy_ ? 0 : 1);
                 committed_request_state = true;
               }
             }

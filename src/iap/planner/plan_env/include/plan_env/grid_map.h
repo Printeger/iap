@@ -490,7 +490,10 @@ private:
   std::atomic<bool> registered_recovery_in_flight_{false};
   std::atomic<bool> registered_recovery_pending_{false};
   std::atomic<uint64_t> registered_recovery_serial_{0};
-  std::atomic<uint64_t> registered_highest_seen_generation_{0};
+  // Observed may lead the authoritative generation when a delta arrives
+  // before its recovery baseline. RegisteredLidarWindow::activeGeneration()
+  // remains the committed generation used for recovery acceptance.
+  std::atomic<uint64_t> registered_observed_generation_{0};
   std::atomic<int64_t> registered_recovery_deadline_ns_{0};
   bool registered_active_window_healthy_ = false;
   bool registered_current_frame_healthy_ = false;

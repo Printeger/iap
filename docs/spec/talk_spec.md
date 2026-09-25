@@ -357,6 +357,13 @@ For each candidate trajectory τ:
   explicitly identified first estimator frame is the planner-map datum, so it
   has no self-ICP registration term; scan/deskew and all other local margins
   still apply. A
+  registered active-window generation advances only for a semantic frame,
+  pose, source-health, or completeness change; unchanged complete updates are
+  not heartbeat deltas. GridMap keeps observed and committed generations
+  distinct: a valid complete recovery baseline may commit while behind an
+  observed delta, but it stays recovery-pending and cannot authorize a frozen
+  occupancy epoch until the committed state catches up.
+  A
   current scan can supersede old provenance only for the exact same occupied
   surface voxel and never fabricates observed free space. A successor rebound
   to a newer execution snapshot rebuilds local and global P4 assurance and

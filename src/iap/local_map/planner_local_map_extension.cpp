@@ -3,6 +3,7 @@
 // existing CloudDeskewing implementation, but adds an IAP-owned ordered delta
 // protocol; it does not copy or alter GLIM's registration pipeline.
 #include <iap/common/cloud_deskewing.hpp>
+#include <iap/local_map/active_window_delta_policy.hpp>
 #include <iap/local_map/beam_evidence_binding.hpp>
 #include <iap/local_map/registered_hit_wire_filter.hpp>
 #include <iap/msg/active_lidar_window_delta.hpp>
@@ -98,19 +99,6 @@ bool samePose(const Eigen::Isometry3d& lhs, const Eigen::Isometry3d& rhs) {
   const Eigen::Quaterniond rhs_q(rhs.linear());
   const double rotation_delta = lhs_q.angularDistance(rhs_q);
   return translation_delta <= 1.0e-5 && rotation_delta <= 1.0e-6;
-}
-
-bool hasCertifiedSourceHealth(
-    const iap::msg::RegisteredLidarFrame& frame) {
-  return frame.source_health_valid &&
-      std::isfinite(frame.source_health_stamp_s) &&
-      !frame.source_icp_degenerate &&
-      std::isfinite(frame.source_icp_rmse) &&
-      std::isfinite(frame.source_icp_condition) &&
-      std::isfinite(frame.source_icp_gamma_lidar) &&
-      frame.source_icp_rmse >= 0.0 &&
-      frame.source_icp_condition >= 0.0 &&
-      frame.source_icp_gamma_lidar >= 1.0;
 }
 
 }  // namespace
@@ -744,8 +732,6 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     delta.frame_contract_id = frame_contract_id_;
     {
       std::lock_guard<std::mutex> lock(active_mutex_);
-      delta.base_generation = active_generation_;
-      delta.generation = active_generation_ + 1;
       delta.complete = true;
 
       std::unordered_set<std::int64_t> next_ids;
@@ -756,13 +742,15 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
           auto message = makeMessage(frame);
           delta.added.push_back(message);
           active_messages_[frame.id] = std::move(message);
-        } else if (!hasCertifiedSourceHealth(active_messages_[frame.id])) {
+        } else if (!iap::local_map::hasCertifiedSourceHealth(
+                       active_messages_[frame.id])) {
           // The active-window callback can precede the integrity callback for
           // the same estimator frame.  Upgrade that frame atomically once its
           // exact frame-id/stamp report arrives.  Remove+add is an explicit
           // replacement transaction; no adjacent-frame health is borrowed.
           auto refreshed = makeMessage(frame);
-          if (hasCertifiedSourceHealth(refreshed)) {
+          if (iap::local_map::sourceHealthReplacementRequired(
+                  active_messages_[frame.id], refreshed)) {
             delta.removed_frame_ids.push_back(frame.id);
             delta.added.push_back(refreshed);
             active_messages_[frame.id] = std::move(refreshed);
@@ -794,9 +782,15 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
       for (auto& frame : frames) {
         active_snapshots_.emplace(frame.id, std::move(frame));
       }
+      active_producer_serial_ = producer_serial;
+      if (!iap::local_map::activeWindowDeltaChangesState(
+              delta, active_window_complete_)) {
+        return;
+      }
+      delta.base_generation = active_generation_;
+      delta.generation = active_generation_ + 1;
       active_generation_ = delta.generation;
       active_window_complete_ = true;
-      active_producer_serial_ = producer_serial;
     }
     if (delta_publisher_) {
       delta_publisher_->publish(delta);
