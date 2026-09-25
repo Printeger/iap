@@ -2,6 +2,9 @@
 
 #include <plan_env/registered_lidar_window.h>
 
+#include <cstdlib>
+#include <unistd.h>
+
 namespace {
 
 RegisteredLidarFrameData frame(
@@ -99,6 +102,27 @@ TEST(RegisteredLidarWindow, SuccessfulHitRayMarksFreeAndHitWins) {
   ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
   EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
             RegisteredVoxelState::OCCUPIED);
+}
+
+TEST(RegisteredLidarWindow,
+     NearBoundaryDiagonalRayCompletesWithoutOvershootingItsEndpoint) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  ASSERT_EXIT(
+      {
+        alarm(1U);
+        auto window = makeWindow();
+        const auto update = window.applyCurrentFrame(frame(
+            3, Eigen::Vector3d(0.5, 0.5, 0.5),
+            {Eigen::Vector3d(2.5 - 1.0e-13, 2.5, 0.0)}));
+        alarm(0U);
+        const bool correct = update.accepted &&
+            window.stateAt(Eigen::Vector3i(2, 2, 0)) ==
+                RegisteredVoxelState::OBSERVED_FREE &&
+            window.stateAt(Eigen::Vector3i(2, 3, 0)) ==
+                RegisteredVoxelState::OCCUPIED;
+        std::_Exit(correct ? EXIT_SUCCESS : EXIT_FAILURE);
+      },
+      ::testing::ExitedWithCode(EXIT_SUCCESS), "");
 }
 
 TEST(RegisteredLidarWindow,

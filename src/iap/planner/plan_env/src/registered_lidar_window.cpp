@@ -306,9 +306,23 @@ RegisteredLidarWindow::buildContribution(
       if (inBounds(cell)) {
         mark(&free_bits, address(cell));
       }
-      const double crossing = t_max.minCoeff();
+      // The tie tolerance may conservatively advance several axes at one
+      // crossing. Exclude axes that already reached their endpoint so a ray
+      // landing within the tolerance of a voxel boundary cannot overshoot and
+      // then walk forever away from `finish`.
+      const auto before_finish = [&cell, &finish, &step](const int axis) {
+        return step[axis] > 0
+            ? cell[axis] < finish[axis]
+            : step[axis] < 0 && cell[axis] > finish[axis];
+      };
+      double crossing = std::numeric_limits<double>::infinity();
       for (int axis = 0; axis < 3; ++axis) {
-        if (t_max[axis] <= crossing + 1.0e-12) {
+        if (before_finish(axis)) {
+          crossing = std::min(crossing, t_max[axis]);
+        }
+      }
+      for (int axis = 0; axis < 3; ++axis) {
+        if (before_finish(axis) && t_max[axis] <= crossing + 1.0e-12) {
           cell[axis] += step[axis];
           t_max[axis] += t_delta[axis];
         }
