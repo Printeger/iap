@@ -82,7 +82,17 @@ namespace ego_planner
   P4SuccessorProgressRequirement computeP4SuccessorProgressRequirement(
     const P4SuccessorProgressInput & input);
 
-  struct P4RollingSuccessorGuide
+  enum class P4BoundedExecutionFailure
+  {
+    NONE = 0,
+    INVALID_INPUT,
+    LOCAL_SUPPORT,
+    STOPPING,
+    EXPOSURE_BUDGET,
+    FROZEN_GUIDE_MISMATCH,
+  };
+
+  struct P4BoundedExecutionGuide
   {
     bool valid = false;
     std::vector<Eigen::Vector3d> guide;
@@ -90,7 +100,13 @@ namespace ego_planner
       std::numeric_limits<double>::quiet_NaN();
     double projection_distance_m =
       std::numeric_limits<double>::quiet_NaN();
+    double local_frontier_m = std::numeric_limits<double>::quiet_NaN();
+    double rolling_cap_m = std::numeric_limits<double>::quiet_NaN();
+    double usable_progress_m = std::numeric_limits<double>::quiet_NaN();
+    double minimum_progress_m = std::numeric_limits<double>::quiet_NaN();
     double target_station_m = std::numeric_limits<double>::quiet_NaN();
+    P4BoundedExecutionFailure failure =
+      P4BoundedExecutionFailure::INVALID_INPUT;
     std::string reason = "invalid_input";
   };
 
@@ -99,7 +115,7 @@ namespace ego_planner
   // its stopping distance and a non-zero progress reserve.  A parent endpoint
   // that cannot be associated with the frozen guide is rejected rather than
   // silently preparing a child on another corridor.
-  P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
+  P4BoundedExecutionGuide p4BoundRollingSuccessorGuide(
     const std::vector<Eigen::Vector3d> & frozen_guide,
     const Eigen::Vector3d & parent_approved_endpoint,
     double stopping_distance_m, double minimum_progress_m,
@@ -109,7 +125,7 @@ namespace ego_planner
   // then bridge to the remaining selected route.  This prevents a refined
   // B-spline endpoint from becoming unmatchable merely because it is not on
   // the discrete topology centerline.
-  P4RollingSuccessorGuide composeP4RollingSuccessorPath(
+  P4BoundedExecutionGuide composeP4RollingSuccessorPath(
     const std::vector<Eigen::Vector3d> & certified_parent_curve,
     const std::vector<Eigen::Vector3d> & selected_route,
     const Eigen::Vector3d & parent_approved_endpoint);
@@ -511,6 +527,40 @@ namespace ego_planner
     double maximum_global_exceedance_integral_ratio_s = 0.025;
   };
 
+  struct P4BoundedExecutionGuideInput
+  {
+    std::vector<Eigen::Vector3d> frozen_guide;
+    Eigen::Vector3d start_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d start_velocity = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d start_acceleration = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    // A rolling child additionally has to cover the certified parent
+    // endpoint before reserving its own stopping/progress distance.  When
+    // finite, these fields select that continuation policy behind the same
+    // bounded-execution seam used by an initial actual trajectory.
+    Eigen::Vector3d parent_approved_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    double minimum_continuation_progress_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double maximum_endpoint_projection_distance_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double decision_horizon_m = std::numeric_limits<double>::quiet_NaN();
+    double local_support_frontier_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double exposure_affordable_frontier_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_max_parent_execution_s =
+      std::numeric_limits<double>::quiet_NaN();
+    P4ForwardLimits limits;
+  };
+
+  // Bounds every immediate actual trajectory before B-spline generation.
+  // The full guide remains a channel/continuation reference only.
+  P4BoundedExecutionGuide p4BoundExecutionGuide(
+    const P4BoundedExecutionGuideInput & input);
+
   // Opaque, immutable diagnostics may follow a risk sample for manager-side
   // milestone logging. The route worker never interprets the concrete
   // payload; comparison uses only the scalar fields below.
@@ -751,15 +801,15 @@ namespace ego_planner
   // toward the same fixed child endpoint instead of silently expanding back
   // to the ordinary long-horizon local target.
   bool applyP4RollingSuccessorGuide(
-    const P4RollingSuccessorGuide & bounded, bool force_full_search,
+    const P4BoundedExecutionGuide & bounded, bool force_full_search,
     uint64_t incumbent_channel_id, P4ForwardRequest * request);
 
   // Once a parent has a fixed rolling-child extent, failure diagnostics must
   // not make a full topology retry reconstruct a different (usually longer)
   // extent from mutable decision state.
-  P4RollingSuccessorGuide selectP4RollingSuccessorGuide(
-    const P4RollingSuccessorGuide & newly_bounded,
-    const P4RollingSuccessorGuide & fixed_for_parent,
+  P4BoundedExecutionGuide selectP4RollingSuccessorGuide(
+    const P4BoundedExecutionGuide & newly_bounded,
+    const P4BoundedExecutionGuide & fixed_for_parent,
     bool force_full_search);
 
   struct P4ForwardDecision

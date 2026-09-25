@@ -332,8 +332,11 @@
   builds the real terminal-stop B-spline and its <=0.2 s braking-anchor
   library, constructs reaction/braking commitment windows, and directly
   checks every nominal, braking and dual-transition sample at its actual
-  arrival time. Only an entirely SAFE set of window certificates is promoted atomically to
-  `RISK_SELECTED`. The first failure retains curve position, arc length,
+  arrival time. Local motion and braking must be entirely safe. Exact GNSS
+  evidence grants `NORMAL_EXECUTION`; in `MISSION_BEST_EFFORT`, a bounded
+  actual may instead receive degraded authority while it remains inside the
+  hard exposure budget. Only that complete actual bundle is promoted
+  atomically to `RISK_SELECTED`. The first failure retains curve position, arc length,
   arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
   growth. A braking-branch failure is projected to its anchor station on the
   nominal B-spline; that projection is diagnostic and must not sum braking
@@ -351,14 +354,13 @@
   are re-certified against the same latest immutable snapshot. The comparison
   removes any candidate that fails local collision, clearance,
   dynamics, tracking, support freshness or braking proof. Refined channel
-  preferences first favor globally budget-compliant evidence. If none exist,
-  comparable over-budget guides are ordered lexicographically by peak GNSS ratio,
-  worst time-weighted 0.5 s section, continuous exceedance, exceedance
-  integral, predicted recovery, local clearance, task progress and stable
-  path hash. Globally incomplete guides are considered only after all
-  comparable candidates and are ordered by mean unknown LOS-sample coverage,
-  usable satellite count, geometry, predicted support recovery, LiDAR FIM,
-  clearance and progress. The old stable channel is only a tie-break after the
+  preferences determine preparation order only. Bundle authorization group is
+  derived solely from the actual trajectory's `TrajectoryExecutionMode`.
+  Formal bundles precede degraded bundles; degraded bundles are ordered by
+  conservative peak ratio, continuous exceedance, positive exposure integral,
+  actual/braking-tube unknown exposure, actual progress and stable bundle
+  hash. Overlapping GNSS intervals do not cause HOLD once both locally safe
+  bundles are complete. The old stable channel is only a tie-break after the
   complete ordering key is equal. Winner/runner-up, actual endpoints,
   unevaluated suffixes and the full decomposition remain recorded. If the
   bounded preparation deadline expires, the state is `PARTIAL_COMPARISON` and
@@ -551,12 +553,21 @@
   is at most `0.025 ratio*s`, and either recovery is predicted within `2.0 s`
   or a currently certified braking curve remains available. The public task
   contract is `p4.assurance.task_mode`: `STRICT_GLOBAL` retains strict
-  `GNSS PL < AL`, while `MISSION_BEST_EFFORT` treats these bounds as
-  classification and route-ranking budgets. In best-effort mode, exceeding
-  them yields `MISSION_DEGRADED_EXECUTION` only when the exact nominal and
-  braking curves retain local-motion authority; it is never reported as
+  `GNSS PL < AL`, while `MISSION_BEST_EFFORT` permits only degraded motion
+  that remains inside the same hard exposure budget. Whitelisted incomplete
+  GNSS evidence never receives a fabricated finite PL; it charges the entire
+  bounded segment at `maximum_ratio`, with duplicate semantic evidence
+  identities charged once. Budget exhaustion rejects a new bundle and makes
+  runtime execution take its already certified brake. It is never reported as
   integrity satisfaction. An exposure episode survives trajectory ID changes
   and ends only after `0.5 s` continuously below `0.95*AL`.
+- Every immediate actual trajectory is bounded before B-spline resampling.
+  Its frontier is the minimum of guide length, decision horizon and consecutive
+  fresh local support; the committed endpoint additionally reserves stopping
+  distance, the rolling cap and the exposure-affordable frontier. The actual
+  is rebuilt from the true start `p/v/a` with terminal velocity and
+  acceleration zero. The full guide remains only a channel/successor
+  reference and cannot obtain execution authority.
 - A received GNSS epoch certifies reception only at the exact receiver
   reference; no measured-support radius grants future candidate positions
   synthetic map support. Every candidate LOS records its sample count,

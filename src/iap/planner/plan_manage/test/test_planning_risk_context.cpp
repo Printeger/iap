@@ -3887,11 +3887,14 @@ TEST(P4ForwardTerminalLineageTest,
       during_execution_s, commanded_position);
   EXPECT_TRUE(risk_revoke.allowed);
   EXPECT_TRUE(risk_revoke.known_future_risk_unsafe);
-  EXPECT_FALSE(risk_revoke.failsafe_braking_available);
+  EXPECT_TRUE(risk_revoke.failsafe_braking_available);
   EXPECT_FALSE(risk_revoke.failsafe_braking_active);
-  EXPECT_EQ(risk_revoke.reason, "runtime_mission_degraded_execution");
+  EXPECT_EQ(
+      risk_revoke.reason,
+      "failsafe_braking_scheduled:runtime_trajectory_assurance_rejected:"
+      "global_navigation_exposure_budget_exhausted:safe");
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
-            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+            iap::TrajectoryExecutionMode::NORMAL_EXECUTION);
   EXPECT_EQ(risk_revoke.current_risk_generation,
             unsafe_snapshot->generation_id());
   EXPECT_GT(risk_revoke.current_risk_generation,
@@ -3915,7 +3918,7 @@ TEST(P4ForwardTerminalLineageTest,
       risk_revoke.global_maximum_continuous_exceedance_s));
   EXPECT_TRUE(std::isfinite(
       risk_revoke.global_exceedance_integral_ratio_s));
-  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
+  EXPECT_TRUE(manager.pendingP4GuardBrakingCommand().has_value());
   manager.setPlanningRiskContextForTest(
       snapshot, 10.52, nullptr, directRiskCallback(0.5),
       makeP4ExecutionSnapshot(
@@ -4190,10 +4193,13 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
         return row.at("schema_version") == "p4_execution_event_v11" &&
-            row.at("event") == "EXECUTION_ALLOWED" &&
-            row.at("execution_mode") == "MISSION_DEGRADED_EXECUTION" &&
+            row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
+            row.at("execution_mode") == "NORMAL_EXECUTION" &&
             row.at("task_mode") == "mission_best_effort" &&
             row.at("current_risk_generation") == "2" &&
+            row.at("reason").find(
+                "runtime_trajectory_assurance_rejected") !=
+                std::string::npos &&
             std::stod(row.at("violation_hpl_m")) >=
                 std::stod(row.at("alert_limit_h_m")) &&
             std::stod(row.at("runtime_global_peak_ratio")) >
@@ -7080,6 +7086,18 @@ TEST(P4PreparedChannelComparison,
   EXPECT_EQ(comparison.runner_up_channel_id, incumbent.channel_id);
   EXPECT_EQ(comparison.hard_failure_count, 1u);
 
+  // Authorization comes from the actual bundle: a formally assured curve
+  // precedes a numerically lower-risk degraded curve.
+  safer.authorization_group = 1;
+  safer.global_peak_ratio = 0.1;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {incumbent, safer}, snapshot, 2u, incumbent.channel_id);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, incumbent.channel_id);
+  EXPECT_EQ(comparison.runner_up_channel_id, safer.channel_id);
+
+  safer.authorization_group = 0;
   safer.global_peak_ratio = incumbent.global_peak_ratio;
   comparison = ego_planner::compareP4PreparedChannels(
       {incumbent, safer}, snapshot, 3u, incumbent.channel_id);
@@ -7210,7 +7228,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     DefersOverlappingUnknownRiskAndMirrorsObservableWinner)
+     OrdersOverlappingDegradedBundlesByConservativeLexicographicRisk)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -7244,6 +7262,7 @@ TEST(P4PreparedChannelComparison,
       value.global_continuous_exceedance_s = 0.0;
       value.global_exposure_integral_ratio_s = 0.0;
       value.global_recovery_time_s = 0.0;
+      value.authorization_group = 1;
       value.fim_max_ratio = 0.4;
       value.fim_integral = 1.0;
       value.minimum_local_clearance_margin_m = 0.2;
@@ -7259,8 +7278,8 @@ TEST(P4PreparedChannelComparison,
       return value;
     };
 
-  auto negative_y = record(81u, 0.60);
-  auto positive_y = record(82u, 0.70);
+  auto negative_y = record(81u, 1.01);
+  auto positive_y = record(82u, 1.02);
   negative_y.unknown_support_fraction = 0.15;
   negative_y.unknown_kappa_upper_bound = 0.15;
   negative_y.combined_conservative_kappa = 0.15;
@@ -7268,21 +7287,21 @@ TEST(P4PreparedChannelComparison,
   positive_y.unknown_kappa_upper_bound = 0.10;
   positive_y.combined_conservative_kappa = 0.10;
   negative_y.risk_interval_complete = true;
-  negative_y.global_peak_ratio_lower = 0.55;
-  negative_y.global_peak_ratio_upper = 0.72;
-  negative_y.global_rolling_worst_ratio_lower = 0.55;
-  negative_y.global_rolling_worst_ratio_upper = 0.72;
+  negative_y.global_peak_ratio_lower = 1.005;
+  negative_y.global_peak_ratio_upper = 1.03;
+  negative_y.global_rolling_worst_ratio_lower = 1.005;
+  negative_y.global_rolling_worst_ratio_upper = 1.03;
   positive_y.risk_interval_complete = true;
-  positive_y.global_peak_ratio_lower = 0.60;
-  positive_y.global_peak_ratio_upper = 0.75;
-  positive_y.global_rolling_worst_ratio_lower = 0.60;
-  positive_y.global_rolling_worst_ratio_upper = 0.75;
+  positive_y.global_peak_ratio_lower = 1.01;
+  positive_y.global_peak_ratio_upper = 1.04;
+  positive_y.global_rolling_worst_ratio_lower = 1.01;
+  positive_y.global_rolling_worst_ratio_upper = 1.04;
   auto comparison = ego_planner::compareP4PreparedChannels(
       {negative_y, positive_y}, snapshot, 2u);
   EXPECT_EQ(comparison.state,
-            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
-  EXPECT_EQ(comparison.winner_channel_id, 0u);
-  EXPECT_EQ(comparison.runner_up_channel_id, 0u);
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, negative_y.channel_id);
+  EXPECT_EQ(comparison.runner_up_channel_id, positive_y.channel_id);
 
   // With both arms observed, swapping only the measured risk must swap the
   // winner. Channel IDs and world-frame Y signs are deliberately unchanged.
@@ -7310,18 +7329,18 @@ TEST(P4PreparedChannelComparison,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id, negative_y.channel_id);
 
-  negative_y.global_peak_ratio = 0.70;
-  negative_y.global_rolling_worst_ratio = 0.70;
-  negative_y.global_peak_ratio_lower = 0.70;
-  negative_y.global_peak_ratio_upper = 0.70;
-  negative_y.global_rolling_worst_ratio_lower = 0.70;
-  negative_y.global_rolling_worst_ratio_upper = 0.70;
-  positive_y.global_peak_ratio = 0.60;
-  positive_y.global_rolling_worst_ratio = 0.60;
-  positive_y.global_peak_ratio_lower = 0.60;
-  positive_y.global_peak_ratio_upper = 0.60;
-  positive_y.global_rolling_worst_ratio_lower = 0.60;
-  positive_y.global_rolling_worst_ratio_upper = 0.60;
+  negative_y.global_peak_ratio = 1.02;
+  negative_y.global_rolling_worst_ratio = 1.02;
+  negative_y.global_peak_ratio_lower = 1.02;
+  negative_y.global_peak_ratio_upper = 1.02;
+  negative_y.global_rolling_worst_ratio_lower = 1.02;
+  negative_y.global_rolling_worst_ratio_upper = 1.02;
+  positive_y.global_peak_ratio = 1.01;
+  positive_y.global_rolling_worst_ratio = 1.01;
+  positive_y.global_peak_ratio_lower = 1.01;
+  positive_y.global_peak_ratio_upper = 1.01;
+  positive_y.global_rolling_worst_ratio_lower = 1.01;
+  positive_y.global_rolling_worst_ratio_upper = 1.01;
   comparison = ego_planner::compareP4PreparedChannels(
       {negative_y, positive_y}, snapshot, 2u);
   ASSERT_EQ(comparison.state,
@@ -8086,7 +8105,8 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
             ego_planner::P4PreparedCurveFailure::GNSS_RISK);
   EXPECT_NE(manager.lastP4ActualCurveCertification().detail.find(
-                "final_bspline_direct_risk_incomplete"),
+                "trajectory_assurance_rejected:"
+                "global_navigation_evidence_incomplete"),
             std::string::npos);
   EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
             ego_planner::P4ForwardSelectionAuthority::NONE);
@@ -8503,15 +8523,15 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
           10.0, disabled_preview, &reason),
-      ego_planner::P4NormalChannelPreparationDisposition::REJECTED)
+      ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
-  EXPECT_EQ(reason, "normal_channel_comparison_incomparable_hold");
+  EXPECT_EQ(reason, "normal_channel_comparison_complete");
   EXPECT_EQ(manager.lastP4ForwardDecision().candidates.size(), 2u);
   EXPECT_EQ(manager.lastP4ForwardDecision().channel_comparison_state,
-            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+            ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
-            ego_planner::P4ForwardSelectionAuthority::NONE);
-  EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id, 0u);
+            ego_planner::P4ForwardSelectionAuthority::FORMAL);
+  EXPECT_NE(manager.lastP4ForwardDecision().selected_channel_id, 0u);
 }
 
 TEST(P4PreparedChannelPreparation,
@@ -8656,14 +8676,14 @@ TEST(P4PreparedChannelPreparation,
       manager.prepareP4NormalChannelComparison(
           10.0, disabled_preview, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
-          REJECTED)
+          READY_TO_PUBLISH)
       << reason;
-  EXPECT_EQ(reason, "normal_channel_comparison_incomparable_hold");
+  EXPECT_EQ(reason, "normal_channel_comparison_complete");
   EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
-            ego_planner::P4ExecutableIntent::HOLD);
+            ego_planner::P4ExecutableIntent::FINAL_CHANNEL);
   EXPECT_EQ(manager.lastP4ForwardDecision().reason,
-            "normal_channel_comparison_incomparable_hold");
+            "normal_actual_final_channel_bundles_compared");
 }
 
 // State-machine/lineage regression only. The synthetic lateral-sign callback

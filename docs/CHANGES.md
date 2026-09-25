@@ -77,6 +77,16 @@
   B-spline, assurance, brake, and P5 pipeline remains authoritative, and
   physically unavailable observation returns typed HOLD. Pre-beam captures
   are explicitly `non_exact_replay_for_local_evidence`.
+- fix(bounded-actual-mission-selection): make every immediate actual B-spline
+  a pre-generation bounded terminal-stop commitment, keep full guides as
+  channel/successor references only, derive FORMAL versus MISSION_DEGRADED
+  grouping solely from actual `TrajectoryAssurance`, conservatively charge
+  whitelisted incomplete GNSS evidence for the whole bounded duration, make
+  exposure exhaustion reject or brake, and deterministically order complete
+  locally safe bundles by conservative risk instead of holding on overlapping
+  GNSS intervals. No collision, clearance, tracking, braking, freshness,
+  PL/AL or exposure thresholds changed.
+
 - fix(rolling-successor-horizon-and-station-cache): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-410 — every non-braking certified execution now enters
   the successor lane, and long parents use a configurable 2.5-second fixed

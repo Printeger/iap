@@ -986,6 +986,55 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
     const TrajectoryAssuranceRequest& request) const {
   TrajectoryAssuranceResult result;
   result.global = global_.evaluate(request.global_samples);
+  result.global_evidence_identity = request.global_evidence_identity;
+  const auto& policy = global_.policy();
+  const bool repeated_evidence = request.has_prior_global_episode &&
+      !request.global_evidence_identity.empty() &&
+      request.prior_global_episode.last_evidence_identity ==
+          request.global_evidence_identity;
+  if (!result.global.complete &&
+      request.conservative_incomplete_global_navigation &&
+      policy.task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+      std::isfinite(request.committed_duration_s) &&
+      request.committed_duration_s >= 0.0 &&
+      !request.global_evidence_identity.empty()) {
+    const double charged_duration_s = repeated_evidence
+        ? 0.0 : request.committed_duration_s;
+    result.conservative_global_charge_applied = !repeated_evidence;
+    result.conservative_global_charge_ratio = policy.maximum_ratio;
+    result.conservative_global_charge_duration_s = charged_duration_s;
+    result.global.complete = true;
+    result.global.normal = false;
+    result.global.peak_ratio = policy.maximum_ratio;
+    result.global.exceedance_duration_s = charged_duration_s;
+    result.global.maximum_continuous_exceedance_s = charged_duration_s;
+    result.global.exceedance_integral_ratio_s =
+        std::max(0.0, policy.maximum_ratio - 1.0) * charged_duration_s;
+    result.global.rolling_worst_ratio = policy.maximum_ratio;
+    result.global.cvar90_ratio = policy.maximum_ratio;
+    result.global.recovery_predicted = false;
+    result.global.recovery_time_s = std::numeric_limits<double>::infinity();
+    result.global.exit_improvement = 0.0;
+    result.global.peak_budget_utilization = 1.0;
+    result.global.duration_budget_utilization = charged_duration_s /
+        std::max(kEpsilon, policy.maximum_continuous_exceedance_s);
+    result.global.integral_budget_utilization =
+        result.global.exceedance_integral_ratio_s /
+        std::max(kEpsilon, policy.maximum_exceedance_integral_ratio_s);
+    result.global.maximum_budget_utilization = std::max({
+        result.global.peak_budget_utilization,
+        result.global.duration_budget_utilization,
+        result.global.integral_budget_utilization});
+    result.global.within_budget =
+        charged_duration_s <=
+            policy.maximum_continuous_exceedance_s + kEpsilon &&
+        result.global.exceedance_integral_ratio_s <=
+            policy.maximum_exceedance_integral_ratio_s + kEpsilon;
+    annotateGlobalNavigationBudgetFailures(&result.global, policy);
+    result.global.reason = result.global.within_budget
+        ? "conservative_incomplete_global_navigation_within_budget"
+        : "global_navigation_exposure_budget_exhausted";
+  }
   if (request.has_prior_global_episode &&
       request.prior_global_episode.active && result.global.complete) {
     // Predicted future recovery is useful for route ranking, but it is not an
@@ -1009,7 +1058,6 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
     result.global.maximum_continuous_exceedance_s = std::max(
         result.global.maximum_continuous_exceedance_s,
         prior.continuous_exceedance_s);
-    const auto& policy = global_.policy();
     result.global.peak_budget_utilization =
         (result.global.peak_ratio - 1.0) /
         std::max(kEpsilon, policy.maximum_ratio - 1.0);
@@ -1055,22 +1103,25 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
   } else if (result.global.normal) {
     result.mode = TrajectoryExecutionMode::NORMAL_EXECUTION;
     result.reason = "normal_execution";
+  } else if (request.conservative_incomplete_global_navigation &&
+             result.global.complete && result.global.within_budget &&
+             policy.task_mode ==
+                 GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+             request.certified_braking_available) {
+    result.mode = TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
+    result.reason = "mission_degraded_conservative_global_charge";
   } else if (result.global.complete && result.global.within_budget &&
              (result.global.recovery_predicted ||
               request.certified_braking_available)) {
     result.mode = TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
     result.reason = "controlled_degraded_execution";
-  } else if (global_.policy().task_mode ==
-                 GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-             request.certified_braking_available) {
-    result.mode = TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
-    result.reason = result.global.complete
-        ? "mission_degraded_global_budget_exceeded"
-        : "mission_degraded_global_evidence_incomplete";
   } else {
-    result.reason = result.global.complete
-        ? result.global.reason
-        : "global_navigation_evidence_incomplete";
+    result.reason = request.conservative_incomplete_global_navigation &&
+            result.global.complete && !result.global.within_budget
+        ? "global_navigation_exposure_budget_exhausted"
+        : (result.global.complete
+            ? result.global.reason
+            : "global_navigation_evidence_incomplete");
   }
 
   std::ostringstream canonical;
@@ -1080,6 +1131,10 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
             << result.global.peak_ratio << ';'
             << result.global.maximum_continuous_exceedance_s << ';'
             << result.global.exceedance_integral_ratio_s << ';'
+            << result.conservative_global_charge_applied << ';'
+            << result.conservative_global_charge_ratio << ';'
+            << result.conservative_global_charge_duration_s << ';'
+            << result.global_evidence_identity << ';'
             << result.worst_budget_utilization << ';';
   result.certificate_hash = stableHash(canonical.str());
   return result;
@@ -1089,6 +1144,12 @@ bool TrajectoryAssurance::prefer(const TrajectoryAssuranceResult& lhs,
                                  const TrajectoryAssuranceResult& rhs) {
   if (lhs.authorized() != rhs.authorized()) {
     return lhs.authorized();
+  }
+  const auto authorization_group = [](const TrajectoryExecutionMode mode) {
+      return mode == TrajectoryExecutionMode::NORMAL_EXECUTION ? 0 : 1;
+    };
+  if (authorization_group(lhs.mode) != authorization_group(rhs.mode)) {
+    return authorization_group(lhs.mode) < authorization_group(rhs.mode);
   }
   if (std::abs(lhs.worst_budget_utilization -
                rhs.worst_budget_utilization) > kEpsilon) {

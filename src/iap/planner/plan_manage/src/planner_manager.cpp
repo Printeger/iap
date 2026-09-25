@@ -1298,152 +1298,92 @@ namespace ego_planner
       result.winner_channel_id = feasible.front()->channel_id;
       return result;
     }
-    enum class Ordering {LEFT, RIGHT, AMBIGUOUS};
+    enum class Ordering {LEFT, RIGHT, EQUAL};
     const auto compare = [&](const P4PreparedChannelRecord *left,
                              const P4PreparedChannelRecord *right) {
         constexpr double epsilon = 1.0e-9;
         if (left->authorization_group != right->authorization_group)
           return left->authorization_group < right->authorization_group
               ? Ordering::LEFT : Ordering::RIGHT;
-        struct Interval {double lower; double upper;};
-        const auto interval = [](const bool complete, const double lower,
-                                 const double upper, const double fallback) {
-            if (complete &&
-                (std::isfinite(lower) || std::isinf(lower)) &&
-                (std::isfinite(upper) || std::isinf(upper)) &&
-                upper >= lower)
-              return Interval{lower, upper};
-            return Interval{fallback, fallback};
+        const auto conservative = [](const bool interval_complete,
+                                     const double upper,
+                                     const double fallback) {
+            return interval_complete && std::isfinite(upper)
+                ? upper : fallback;
           };
-        const std::array<std::pair<Interval, Interval>, 5> metrics{{
-          {interval(left->risk_interval_complete,
-                    left->global_peak_ratio_lower,
-                    left->global_peak_ratio_upper,
-                    left->global_peak_ratio),
-           interval(right->risk_interval_complete,
-                    right->global_peak_ratio_lower,
-                    right->global_peak_ratio_upper,
-                    right->global_peak_ratio)},
-          {interval(left->risk_interval_complete,
-                    left->global_rolling_worst_ratio_lower,
-                    left->global_rolling_worst_ratio_upper,
-                    left->global_rolling_worst_ratio),
-           interval(right->risk_interval_complete,
-                    right->global_rolling_worst_ratio_lower,
-                    right->global_rolling_worst_ratio_upper,
-                    right->global_rolling_worst_ratio)},
-          {interval(left->risk_interval_complete,
-                    left->global_continuous_exceedance_lower_s,
-                    left->global_continuous_exceedance_upper_s,
-                    left->global_continuous_exceedance_s),
-           interval(right->risk_interval_complete,
-                    right->global_continuous_exceedance_lower_s,
-                    right->global_continuous_exceedance_upper_s,
-                    right->global_continuous_exceedance_s)},
-          {interval(left->risk_interval_complete,
-                    left->global_exposure_integral_lower_ratio_s,
-                    left->global_exposure_integral_upper_ratio_s,
-                    left->global_exposure_integral_ratio_s),
-           interval(right->risk_interval_complete,
-                    right->global_exposure_integral_lower_ratio_s,
-                    right->global_exposure_integral_upper_ratio_s,
-                    right->global_exposure_integral_ratio_s)},
-          {interval(left->risk_interval_complete,
-                    left->global_recovery_time_lower_s,
-                    left->global_recovery_time_upper_s,
-                    left->global_recovery_time_s),
-           interval(right->risk_interval_complete,
-                    right->global_recovery_time_lower_s,
-                    right->global_recovery_time_upper_s,
-                    right->global_recovery_time_s)}}};
-        for (const auto &metric : metrics)
-        {
-          const auto &a = metric.first;
-          const auto &b = metric.second;
-          if (a.upper < b.lower - epsilon)
-            return Ordering::LEFT;
-          if (b.upper < a.lower - epsilon)
-            return Ordering::RIGHT;
-          const bool exact =
-              ((std::isinf(a.lower) && std::isinf(b.lower) &&
-                std::signbit(a.lower) == std::signbit(b.lower)) ||
-               std::abs(a.lower - b.lower) <= epsilon) &&
-              ((std::isinf(a.upper) && std::isinf(b.upper) &&
-                std::signbit(a.upper) == std::signbit(b.upper)) ||
-               std::abs(a.upper - b.upper) <= epsilon);
-          if (!exact)
-            return Ordering::AMBIGUOUS;
-        }
-        const auto lower_exact = [](const double lhs, const double rhs) {
-            if (std::isfinite(lhs) != std::isfinite(rhs))
-              return std::isfinite(lhs) ? -1 : 1;
-            if (!std::isfinite(lhs)) return 0;
-            if (lhs < rhs - 1.0e-9) return -1;
-            if (rhs < lhs - 1.0e-9) return 1;
+        const auto lower = [epsilon](double lhs, double rhs) {
+            if (!std::isfinite(lhs)) lhs =
+                std::numeric_limits<double>::infinity();
+            if (!std::isfinite(rhs)) rhs =
+                std::numeric_limits<double>::infinity();
+            if (lhs < rhs - epsilon) return -1;
+            if (rhs < lhs - epsilon) return 1;
             return 0;
           };
-        for (const auto &values : {
-               std::pair{left->fim_max_ratio, right->fim_max_ratio},
-               std::pair{left->fim_integral, right->fim_integral},
-               std::pair{left->unevaluated_suffix_m,
-                         right->unevaluated_suffix_m},
-               std::pair{left->duration_s, right->duration_s}})
+        const auto unknown_exposure = [](const P4PreparedChannelRecord *record) {
+            double value = std::max(
+                record->unknown_support_fraction,
+                record->combined_conservative_kappa);
+            if (record->route_evidence_evaluated)
+              value = std::max({
+                  value, 1.0 - record->route_support_fraction,
+                  1.0 - record->braking_tube_support_fraction});
+            return value;
+          };
+        const std::array<std::pair<double, double>, 4> lower_metrics{{
+          {conservative(left->risk_interval_complete,
+                        left->global_peak_ratio_upper,
+                        left->global_peak_ratio),
+           conservative(right->risk_interval_complete,
+                        right->global_peak_ratio_upper,
+                        right->global_peak_ratio)},
+          {conservative(left->risk_interval_complete,
+                        left->global_continuous_exceedance_upper_s,
+                        left->global_continuous_exceedance_s),
+           conservative(right->risk_interval_complete,
+                        right->global_continuous_exceedance_upper_s,
+                        right->global_continuous_exceedance_s)},
+          {conservative(left->risk_interval_complete,
+                        left->global_exposure_integral_upper_ratio_s,
+                        left->global_exposure_integral_ratio_s),
+           conservative(right->risk_interval_complete,
+                        right->global_exposure_integral_upper_ratio_s,
+                        right->global_exposure_integral_ratio_s)},
+          {unknown_exposure(left), unknown_exposure(right)}}};
+        for (const auto &metric : lower_metrics)
         {
-          const int ordered = lower_exact(values.first, values.second);
-          if (ordered != 0)
-            return ordered < 0 ? Ordering::LEFT : Ordering::RIGHT;
+          const int order = lower(metric.first, metric.second);
+          if (order != 0)
+            return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         }
-        const int clearance = lower_exact(
-            left->minimum_local_clearance_margin_m,
-            right->minimum_local_clearance_margin_m);
-        if (clearance != 0)
-          return clearance > 0 ? Ordering::LEFT : Ordering::RIGHT;
+        const int progress = lower(
+            right->actual_progress_m, left->actual_progress_m);
+        if (progress != 0)
+          return progress < 0 ? Ordering::LEFT : Ordering::RIGHT;
+        const std::string left_hash = left->curve_identity + '|' +
+            left->refined_path_identity + '|' + left->guide_identity;
+        const std::string right_hash = right->curve_identity + '|' +
+            right->refined_path_identity + '|' + right->guide_identity;
+        if (left_hash != right_hash)
+          return left_hash < right_hash ? Ordering::LEFT : Ordering::RIGHT;
         const bool left_incumbent = left->channel_id == incumbent_channel_id;
         const bool right_incumbent = right->channel_id == incumbent_channel_id;
         if (left_incumbent != right_incumbent)
           return left_incumbent ? Ordering::LEFT : Ordering::RIGHT;
-        return Ordering::AMBIGUOUS;
+        if (left->channel_id != right->channel_id)
+          return left->channel_id < right->channel_id
+              ? Ordering::LEFT : Ordering::RIGHT;
+        return Ordering::EQUAL;
       };
 
-    const P4PreparedChannelRecord *winner = nullptr;
-    for (const auto *candidate : feasible)
-    {
-      bool dominates = true;
-      for (const auto *other : feasible)
-      {
-        if (candidate == other)
-          continue;
-        if (compare(candidate, other) != Ordering::LEFT)
-        {
-          dominates = false;
-          break;
-        }
-      }
-      if (!dominates)
-        continue;
-      if (winner)
-      {
-        result.state = P4ChannelComparisonState::PARTIAL_COMPARISON;
-        return result;
-      }
-      winner = candidate;
-    }
-    if (!winner)
-    {
-      result.state = P4ChannelComparisonState::PARTIAL_COMPARISON;
-      return result;
-    }
+    std::stable_sort(
+        feasible.begin(), feasible.end(),
+        [&compare](const auto *left, const auto *right) {
+          return compare(left, right) == Ordering::LEFT;
+        });
+    const P4PreparedChannelRecord *winner = feasible.front();
     result.winner_channel_id = winner->channel_id;
-    const P4PreparedChannelRecord *runner = nullptr;
-    for (const auto *candidate : feasible)
-    {
-      if (candidate == winner)
-        continue;
-      if (!runner || compare(candidate, runner) == Ordering::LEFT)
-        runner = candidate;
-    }
-    if (runner)
-      result.runner_up_channel_id = runner->channel_id;
+    result.runner_up_channel_id = feasible[1]->channel_id;
     return result;
   }
 
@@ -1857,7 +1797,7 @@ namespace ego_planner
       return request;
     }
 
-    bool p4BestEffortGlobalEvidenceDegradable(
+    bool p4GlobalEvidenceFailureWhitelisted(
         const iap::ForwardRiskBatchResult &result,
         const std::size_t expected_point_count)
     {
@@ -1865,7 +1805,11 @@ namespace ego_planner
         return false;
       if (result.complete)
         return true;
-      if (!iap::forwardRiskFailureIsGlobalNavigationDegradable(
+      // Some producers report the precise typed failure only on each point.
+      // An incomplete batch with no aggregate reason is degradable only when
+      // every non-NONE point reason is independently on the GNSS whitelist.
+      if (result.failure_reason != iap::ForwardRiskFailureReason::NONE &&
+          !iap::forwardRiskFailureIsGlobalNavigationDegradable(
               result.failure_reason))
         return false;
       bool saw_global_degradation = false;
@@ -1896,7 +1840,7 @@ namespace ego_planner
       const bool best_effort_global_only_failure =
           request.task_mode ==
               iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-          p4BestEffortGlobalEvidenceDegradable(result, points.size());
+          p4GlobalEvidenceFailureWhitelisted(result, points.size());
       evidence.complete = result.complete &&
           (execution || snapshot) &&
           points.size() == relative_times.size() &&
@@ -5034,15 +4978,22 @@ namespace ego_planner
       if (reuse_guide.size() < 2u)
         reuse_guide = last_p4_forward_decision_.geometry_common_corridor;
       reuse_guide = p4RemainingPath(reuse_guide, request.position);
-      const double child_stopping_distance_m = p4KinematicStoppingProgress(
-          request.velocity.norm(), request.limits);
-      const auto newly_bounded_successor = p4BoundRollingSuccessorGuide(
-          reuse_guide, p4_execution_certificate_.approved_endpoint,
-          child_stopping_distance_m,
-          std::max(p4_forward_limits_.min_creep_progress_m,
-                   p4_successor_progress_jitter_floor_m_),
+      P4BoundedExecutionGuideInput successor_bound_input;
+      successor_bound_input.frozen_guide = reuse_guide;
+      successor_bound_input.start_position = request.position;
+      successor_bound_input.start_velocity = request.velocity;
+      successor_bound_input.start_acceleration = request.acceleration;
+      successor_bound_input.parent_approved_endpoint =
+          p4_execution_certificate_.approved_endpoint;
+      successor_bound_input.minimum_continuation_progress_m = std::max(
+          p4_forward_limits_.min_creep_progress_m,
+          p4_successor_progress_jitter_floor_m_);
+      successor_bound_input.maximum_endpoint_projection_distance_m =
           p4_local_tracking_error_bound_m_ +
-              p4_planning_clearance_buffer_m_);
+          p4_planning_clearance_buffer_m_;
+      successor_bound_input.limits = request.limits;
+      const auto newly_bounded_successor =
+          p4BoundExecutionGuide(successor_bound_input);
       if (!p4_successor_schedule_.force_full_search &&
           newly_bounded_successor.valid)
         p4_successor_schedule_.fixed_bounded_guide =
@@ -7372,15 +7323,17 @@ namespace ego_planner
         return false;
       }
     }
+    const bool final_global_evidence_degradable =
+        p4GlobalEvidenceFailureWhitelisted(
+            direct_result, direct_points.size());
     const bool final_global_only_degradation =
         p4_global_exposure_policy_.task_mode ==
             iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-        p4BestEffortGlobalEvidenceDegradable(
-            direct_result, direct_points.size());
+        final_global_evidence_degradable;
     const bool direct_snapshot_identity_match =
         direct_result.combined_snapshot_identity ==
             direct_request.combined_snapshot_identity;
-    if ((!direct_result.complete && !final_global_only_degradation) ||
+    if ((!direct_result.complete && !final_global_evidence_degradable) ||
         !direct_snapshot_identity_match ||
         direct_result.points.size() != direct_points.size())
     {
@@ -7438,6 +7391,13 @@ namespace ego_planner
             final_risk_policy.alert_limit_h_m,
             final_risk_policy.alert_limit_v_m,
             p4_direct_risk_evidence_.nominal_sample_rows);
+    assurance_request.conservative_incomplete_global_navigation =
+        final_global_only_degradation && !direct_result.complete;
+    assurance_request.committed_duration_s = executable_times.empty()
+        ? std::numeric_limits<double>::quiet_NaN()
+        : executable_times.back();
+    assurance_request.global_evidence_identity =
+        p4_direct_risk_evidence_.request_identity;
     assurance_request.certified_braking_available =
         !prepared_braking_anchors.empty();
     // A newly generated curve must retain the planning reserve after spline
@@ -7468,15 +7428,23 @@ namespace ego_planner
         p4_direct_risk_evidence_.trajectory_assurance.authorized();
     if (trajectory_assurance_required &&
         !p4_direct_risk_evidence_.trajectory_assurance.authorized())
+    {
+      const auto &assurance =
+          p4_direct_risk_evidence_.trajectory_assurance;
+      const auto failure =
+          assurance.local.status == iap::LocalMotionAssuranceStatus::UNSAFE
+          ? P4PreparedCurveFailure::LOCAL_CLEARANCE
+          : p4_global_exposure_policy_.task_mode ==
+                iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+              assurance.global.complete && !assurance.global.within_budget
+            ? P4PreparedCurveFailure::EXPOSURE_BUDGET
+            : P4PreparedCurveFailure::GNSS_RISK;
       return reject_final_identity(
           P4GeometryCommitVerdict::INVALID_PATH,
           "trajectory_assurance_rejected:" +
-              p4_direct_risk_evidence_.trajectory_assurance.reason + ":" +
-              p4_direct_risk_evidence_.trajectory_assurance.local.reason,
-          p4_direct_risk_evidence_.trajectory_assurance.local.status ==
-                  iap::LocalMotionAssuranceStatus::UNSAFE
-              ? P4PreparedCurveFailure::LOCAL_CLEARANCE
-              : P4PreparedCurveFailure::EXPOSURE_BUDGET);
+              assurance.reason + ":" + assurance.local.reason,
+          failure);
+    }
 
     const auto nominal_arc_at = [&executable_trajectory, &executable_times](
                                     const double relative_time_s) {
@@ -7566,22 +7534,6 @@ namespace ego_planner
       }
     }
 
-    if (controlled_degraded_authorized &&
-        last_p4_forward_decision_.action ==
-            P4ForwardAction::CANDIDATE_READY)
-    {
-      // A long route may establish preference, but controlled degradation is
-      // execution-authorized only over a reaction-and-stopping envelope.
-      // Reject this actual curve unchanged; only a LIMITED_PREFIX guide built
-      // before B-spline generation may enter the certification seam.
-      last_p4_forward_decision_.reason =
-          "route_preference_requires_bounded_execution_envelope";
-      appendP4ForwardDecision(
-          last_p4_forward_decision_,
-          stage + "_controlled_envelope_retry", stamp_s);
-      return false;
-    }
-
     if (last_p4_forward_decision_.action ==
         P4ForwardAction::CANDIDATE_READY)
     {
@@ -7591,9 +7543,13 @@ namespace ego_planner
       last_p4_forward_decision_.action = P4ForwardAction::RISK_SELECTED;
       last_p4_forward_decision_.selection_authority =
           P4ForwardSelectionAuthority::FORMAL;
-      last_p4_forward_decision_.formal_support = true;
+      last_p4_forward_decision_.formal_support =
+          p4_direct_risk_evidence_.trajectory_assurance.mode ==
+          iap::TrajectoryExecutionMode::NORMAL_EXECUTION;
       last_p4_forward_decision_.reason =
-          "actual_terminal_bspline_direct_certified";
+          last_p4_forward_decision_.formal_support
+          ? "actual_terminal_bspline_direct_certified"
+          : "bounded_actual_mission_degraded_certified";
     }
 
     if (execution_snapshot)
@@ -8702,11 +8658,13 @@ namespace ego_planner
     const double risk_duration_ms =
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - risk_started).count();
+    const bool global_evidence_degradable =
+        p4GlobalEvidenceFailureWhitelisted(risk_result, points.size());
     const bool global_only_degradation =
         p4_global_exposure_policy_.task_mode ==
             iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-        p4BestEffortGlobalEvidenceDegradable(risk_result, points.size());
-    if ((!risk_result.complete && !global_only_degradation) ||
+        global_evidence_degradable;
+    if ((!risk_result.complete && !global_evidence_degradable) ||
         risk_result.combined_snapshot_identity !=
             request.combined_snapshot_identity ||
         risk_result.points.size() != points.size())
@@ -8726,6 +8684,11 @@ namespace ego_planner
     assurance.global_samples = iap::globalNavigationSamplesFromForwardRisk(
         risk_result.points, times, execution->risk_policy.alert_limit_h_m,
         execution->risk_policy.alert_limit_v_m);
+    assurance.conservative_incomplete_global_navigation =
+        global_only_degradation && !risk_result.complete;
+    assurance.committed_duration_s = times.empty()
+        ? std::numeric_limits<double>::quiet_NaN() : times.back();
+    assurance.global_evidence_identity = identity;
     assurance.certified_braking_available = true;
     iap::LocalMotionCurve recovery_curve;
     recovery_curve.curve_id = "recovery-brake";
@@ -9468,7 +9431,7 @@ namespace ego_planner
         &bundle.channel_record);
     bundle.channel_record.final_curve_evaluated =
         bundle.trajectory.traj_id_ > 0 && bundle.certificate.valid &&
-        bundle.direct_risk_evidence.complete &&
+        bundle.direct_risk_evidence.admissionComplete() &&
         bundle.channel_record.actual_endpoint.allFinite();
     const bool assurance_passed = bundle.boundary.assurance.complete &&
         bundle.boundary.assurance.safe &&
@@ -9479,7 +9442,7 @@ namespace ego_planner
     bundle.channel_record.clearance_passed = assurance_passed;
     bundle.channel_record.braking_passed = !bundle.braking_anchors.empty();
     bundle.channel_record.gnss_exposure_complete =
-        bundle.direct_risk_evidence.complete;
+        bundle.direct_risk_evidence.admissionComplete();
     bundle.channel_record.p5_preview_passed =
         bundle.p5_preview_complete && bundle.p5_preview_action == 0;
     for (const auto &point : bundle.direct_risk_evidence.points)
@@ -9501,8 +9464,8 @@ namespace ego_planner
     if (selected_candidate)
     {
       bundle.channel_record.authorization_group =
-          selected_candidate->safety_gate_passed ? 0 :
-          selected_candidate->controlled_degraded_candidate ? 1 : 2;
+          bundle.direct_risk_evidence.trajectory_assurance.mode ==
+              iap::TrajectoryExecutionMode::NORMAL_EXECUTION ? 0 : 1;
       bundle.channel_record.global_rolling_worst_ratio =
           selected_candidate->global_rolling_worst_ratio;
       bundle.channel_record.global_continuous_exceedance_s =
@@ -9513,6 +9476,11 @@ namespace ego_planner
       bundle.channel_record.fim_integral = selected_candidate->fim_integral;
       bundle.channel_record.minimum_local_clearance_margin_m =
           selected_candidate->minimum_local_clearance_margin_m;
+      bundle.channel_record.actual_progress_m =
+          bundle.decision.request_position.allFinite()
+          ? (bundle.channel_record.actual_endpoint -
+              bundle.decision.request_position).norm()
+          : 0.0;
       const auto remainder = p4RemainingPath(
           selected_candidate->path, bundle.channel_record.actual_endpoint);
       double suffix_m = 0.0;
@@ -10236,8 +10204,12 @@ namespace ego_planner
             p4_planning_clearance_buffer_m_ +
             p4_local_tracking_error_bound_m_,
         &record);
-    record.authorization_group = selected_candidate->safety_gate_passed ? 0 :
-        selected_candidate->controlled_degraded_candidate ? 1 : 2;
+    record.authorization_group =
+        bundle.direct_risk_evidence.trajectory_assurance.mode ==
+            iap::TrajectoryExecutionMode::NORMAL_EXECUTION ? 0 : 1;
+    record.actual_progress_m = bundle.decision.request_position.allFinite()
+        ? (record.actual_endpoint - bundle.decision.request_position).norm()
+        : 0.0;
     record.global_continuous_exceedance_s =
         bundle.direct_risk_evidence.trajectory_assurance.global.
             exceedance_duration_s;
@@ -10486,7 +10458,9 @@ namespace ego_planner
         P4ForwardTriggerReason::MULTIPLE_CHANNELS;
     selected_bundle.decision.selection_authority =
         P4ForwardSelectionAuthority::FORMAL;
-    selected_bundle.decision.formal_support = true;
+    selected_bundle.decision.formal_support =
+        selected_bundle.direct_risk_evidence.trajectory_assurance.mode ==
+        iap::TrajectoryExecutionMode::NORMAL_EXECUTION;
     selected_bundle.decision.selected_channel_id =
         comparison.winner_channel_id;
     selected_bundle.decision.runner_up_channel_id =
@@ -10915,18 +10889,16 @@ namespace ego_planner
       const auto result = execution->forward_risk_batch(request);
       const double duration_ms = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - started).count();
-      const bool typed_safety_exceedance =
-          !result.complete &&
-          result.failure_reason ==
-              iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED &&
-          std::any_of(result.points.begin(), result.points.end(),
-              [](const auto &point) {
-                return point.safety_state ==
-                           iap::ForwardRiskSafetyState::UNSAFE &&
-                    point.failure_reason == iap::ForwardRiskFailureReason::
-                        SAFETY_LIMIT_EXCEEDED;
-              });
-      if ((!result.complete && !typed_safety_exceedance) ||
+      const bool successor_global_evidence_degradable =
+          p4GlobalEvidenceFailureWhitelisted(result, points.size()) ||
+          (!result.complete &&
+           result.failure_reason ==
+               iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED);
+      const bool successor_global_only_degradation =
+          p4_global_exposure_policy_.task_mode ==
+              iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+          successor_global_evidence_degradable;
+      if ((!result.complete && !successor_global_evidence_degradable) ||
           result.combined_snapshot_identity !=
               request.combined_snapshot_identity ||
           result.points.size() != points.size())
@@ -10943,8 +10915,12 @@ namespace ego_planner
                  iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) ||
             !point.gnss_supported || !point.lidar_supported ||
             !point.fim_supported || !std::isfinite(point.safety_ratio))
+        {
+          if (successor_global_only_degradation)
+            continue;
           return finish(false, "successor_latest_query_incomplete",
                         P4SuccessorFailure::DIRECT_QUERY_TIMEOUT);
+        }
       }
       p4_direct_risk_evidence_ = makeP4DirectRiskEvidence(
           local_data_, risk_snapshot, execution, now_s, points, times,
@@ -10967,6 +10943,12 @@ namespace ego_planner
               result.points, times, execution->risk_policy.alert_limit_h_m,
               execution->risk_policy.alert_limit_v_m,
               p4_direct_risk_evidence_.nominal_sample_rows);
+      assurance_request.conservative_incomplete_global_navigation =
+          successor_global_only_degradation && !result.complete;
+      assurance_request.committed_duration_s = times.empty()
+          ? std::numeric_limits<double>::quiet_NaN()
+          : *std::max_element(times.begin(), times.end());
+      assurance_request.global_evidence_identity = request_identity;
       assurance_request.has_prior_global_episode =
           p4_global_exposure_ledger_.state().active;
       assurance_request.prior_global_episode =
@@ -12709,10 +12691,12 @@ namespace ego_planner
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - direct_start).count();
       record_runtime_window_evidence(result);
-      const bool runtime_global_only_degradation = runtime_best_effort &&
-          p4BestEffortGlobalEvidenceDegradable(
+      const bool runtime_global_evidence_degradable =
+          p4GlobalEvidenceFailureWhitelisted(
               result, direct_points.size());
-      if ((!result.complete && !runtime_global_only_degradation) ||
+      const bool runtime_global_only_degradation = runtime_best_effort &&
+          runtime_global_evidence_degradable;
+      if ((!result.complete && !runtime_global_evidence_degradable) ||
           result.combined_snapshot_identity !=
               request.combined_snapshot_identity ||
           result.points.size() != direct_points.size())
@@ -12743,6 +12727,11 @@ namespace ego_planner
               runtime_policy.alert_limit_h_m,
               runtime_policy.alert_limit_v_m,
               p4_direct_risk_evidence_.nominal_sample_rows);
+      runtime_assurance_request.conservative_incomplete_global_navigation =
+          runtime_global_only_degradation && !result.complete;
+      runtime_assurance_request.committed_duration_s = std::max(
+          0.0, p4_execution_certificate_.duration_s - current_t);
+      runtime_assurance_request.global_evidence_identity = request_identity;
       iap::LocalMotionCurve runtime_nominal;
       runtime_nominal.curve_id = "runtime-nominal";
       if (runtime_windowed)
@@ -12906,6 +12895,14 @@ namespace ego_planner
           current_global_ratio_complete = true;
         }
       }
+      if (!current_global_ratio_complete &&
+          runtime_assurance_request.
+              conservative_incomplete_global_navigation &&
+          p4_direct_risk_evidence_.trajectory_assurance.authorized())
+      {
+        current_global_ratio = p4_global_exposure_policy_.maximum_ratio;
+        current_global_ratio_complete = true;
+      }
       p4_global_exposure_ledger_.noteTrajectoryReplacement(
           static_cast<std::uint64_t>(local_data_.traj_id_));
       const std::string episode_identity =
@@ -12935,25 +12932,10 @@ namespace ego_planner
               episode_before_update.budget_exhausted);
           populate_global_budget_diagnostics(
               episode_result, episode_before_update);
-          if (!runtime_best_effort)
-            return activate_failsafe_braking(
-                "runtime_global_navigation_episode_budget_exhausted",
-                current_t);
-          p4_execution_certificate_.execution_mode =
-              iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
-          // Keep moving only under the already verified local-motion and
-          // braking certificate. The exhausted global budget remains latched
-          // across replans and drives route re-ranking; it is not erased.
-          p4_execution_certificate_.task_mode =
-              iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+          return activate_failsafe_braking(
+              "runtime_global_navigation_episode_budget_exhausted",
+              current_t);
         }
-      }
-      if (!current_global_ratio_complete && runtime_best_effort)
-      {
-        p4_execution_certificate_.execution_mode =
-            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
-        p4_execution_certificate_.task_mode =
-            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
       }
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
       p4_runtime_risk_cache_.valid = true;
@@ -14848,6 +14830,109 @@ namespace ego_planner
           planning_max_vel = std::min(
               planning_max_vel,
               last_p4_forward_decision_.speed_cap_mps);
+        }
+
+        // A channel guide is only a topology reference. Bound the immutable
+        // seed before any B-spline resampling so every immediate actual is a
+        // terminal-stop segment; the full route remains on the candidate for
+        // successor direction and unevaluated-suffix diagnostics.
+        if (!preparingP4SuccessorCurve())
+        {
+          const auto selected_candidate = std::find_if(
+              last_p4_forward_decision_.candidates.begin(),
+              last_p4_forward_decision_.candidates.end(),
+              [this](const P4ForwardCandidate &candidate) {
+                return candidate.candidate_id ==
+                    last_p4_forward_decision_.selected_candidate_id;
+              });
+          double guide_length_m = 0.0;
+          for (std::size_t index = 1u; index < p4_forward_seed.size(); ++index)
+            guide_length_m +=
+                (p4_forward_seed[index] - p4_forward_seed[index - 1u]).norm();
+          double local_support_frontier_m = guide_length_m;
+          double exposure_frontier_m = guide_length_m;
+          if (selected_candidate != last_p4_forward_decision_.candidates.end())
+          {
+            if (!selected_candidate->risk_samples.empty())
+            {
+              local_support_frontier_m = 0.0;
+              for (const auto &sample : selected_candidate->risk_samples)
+              {
+                if (sample.risk.stale || !sample.risk.lidar_supported ||
+                    !sample.risk.fim_supported)
+                  break;
+                local_support_frontier_m = std::max(
+                    local_support_frontier_m, sample.arc_length_m);
+              }
+            }
+            const bool degraded_preference =
+                !selected_candidate->safety_gate_passed &&
+                (selected_candidate->controlled_degraded_candidate ||
+                 selected_candidate->mission_degraded_candidate);
+            if (degraded_preference)
+            {
+              const auto &episode = p4_global_exposure_ledger_.state();
+              const double remaining_continuous_s = std::max(
+                  0.0,
+                  p4_global_exposure_policy_.maximum_continuous_exceedance_s -
+                      (episode.active
+                          ? episode.current_continuous_exceedance_s : 0.0));
+              const double excess_ratio = std::max(
+                  1.0e-9, p4_global_exposure_policy_.maximum_ratio - 1.0);
+              const double remaining_integral_s = std::max(
+                  0.0,
+                  (p4_global_exposure_policy_.
+                      maximum_exceedance_integral_ratio_s -
+                   episode.exceedance_integral_ratio_s) / excess_ratio);
+              const double affordable_s = episode.budget_exhausted
+                  ? 0.0
+                  : std::min(remaining_continuous_s,
+                             remaining_integral_s);
+              exposure_frontier_m = std::min(
+                  guide_length_m,
+                  p4_forward_limits_.max_observe_speed_mps * affordable_s);
+              planning_max_vel = std::min(
+                  planning_max_vel,
+                  p4_forward_limits_.max_observe_speed_mps);
+            }
+          }
+          P4BoundedExecutionGuideInput bounded_input;
+          bounded_input.frozen_guide = p4_forward_seed;
+          bounded_input.start_position = start_pt;
+          bounded_input.start_velocity = start_vel;
+          bounded_input.start_acceleration = start_acc;
+          bounded_input.decision_horizon_m =
+              std::isfinite(last_p4_forward_decision_.decision_horizon_m) &&
+              last_p4_forward_decision_.decision_horizon_m > 0.0
+              ? last_p4_forward_decision_.decision_horizon_m
+              : guide_length_m;
+          bounded_input.local_support_frontier_m =
+              local_support_frontier_m;
+          bounded_input.exposure_affordable_frontier_m =
+              exposure_frontier_m;
+          bounded_input.successor_max_parent_execution_s =
+              p4_successor_deadline_policy_.
+                  maximum_parent_execution_before_switch_s;
+          bounded_input.limits = p4_forward_limits_;
+          const auto bounded = p4BoundExecutionGuide(bounded_input);
+          if (!bounded.valid)
+          {
+            last_p4_forward_decision_.planning_disposition =
+                P4PlanningDisposition::HOLD_REQUIRED;
+            last_p4_forward_decision_.selection_authority =
+                P4ForwardSelectionAuthority::NONE;
+            last_p4_forward_decision_.formal_support = false;
+            last_p4_forward_decision_.reason = bounded.reason;
+            appendP4ForwardDecision(
+                last_p4_forward_decision_,
+                "bounded_actual_guide_rejected", plannerNow().seconds());
+            continous_failures_count_++;
+            return false;
+          }
+          p4_forward_seed = bounded.guide;
+          last_p4_forward_decision_.selected_guide = bounded.guide;
+          local_target_pt = bounded.guide.back();
+          local_target_vel.setZero();
         }
       }
       else
@@ -16828,7 +16913,7 @@ namespace ego_planner
             iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
         const bool successor_global_only_degradation =
             best_effort_successor &&
-            p4BestEffortGlobalEvidenceDegradable(
+            p4GlobalEvidenceFailureWhitelisted(
                 result, request.points.size());
         comparable = (result.complete || successor_global_only_degradation) &&
             result.points.size() == request.points.size();

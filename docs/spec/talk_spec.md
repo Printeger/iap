@@ -293,18 +293,22 @@ For each candidate trajectory τ:
   to schedule expensive refinement by mission risk, then directly evaluates
   the refined candidate set again. Coarse results are hints only and cannot
   authorize motion.
-- Every locally feasible channel is converted into its actual terminal-stop
+- Every locally feasible channel is converted before resampling into a
+  bounded actual terminal-stop
   B-spline and a side-effect-free prepared bundle (dynamics, tracking,
   braking, fixed-window, local-motion, direct GNSS and P5 preview evidence).
   Prepared curves are rebound to one latest immutable snapshot before the
   winner is installed. Hard failures are eliminated first; incomplete work is
   reported as `PARTIAL_COMPARISON` and can authorize only the already
-  certified finite prefix. When every complete locally safe curve exceeds the
-  global budget, best-effort chooses the least-bad actual curve rather than
-  HOLD. Ordering is
-  peak ratio, worst time-weighted 0.5 s section, continuous exceedance,
-  exceedance integral, recovery time, local clearance, task progress and a
-  stable hash, with the old stable channel used only as a true-key tie-break.
+  certified finite prefix. `STRICT_GLOBAL` admits only formal GNSS evidence.
+  `MISSION_BEST_EFFORT` may choose the least-risk degraded actual only while
+  its exposure remains inside the hard budget; exhaustion causes certified
+  braking rather than unbounded degraded continuation. Ordering is formal
+  before degraded, then conservative peak ratio, continuous exceedance,
+  positive exposure integral, actual/braking-tube unknown exposure, actual
+  progress and a stable bundle hash, with the old stable channel used only as
+  a true-key tie-break. Complete locally safe bundles are therefore still
+  orderable when their GNSS intervals overlap.
   Winner, runner-up, actual endpoints, unevaluated suffixes and the full
   geometry/time/risk decomposition are retained. Execution remains a rolling
   reaction-and-stop envelope and is re-evaluated on every new immutable
@@ -384,11 +388,18 @@ For each candidate trajectory τ:
   remaining satellites makes the upper PL unavailable, never a finite
   penalty. PL/AL authorization always uses the upper bound.
 - Final curves store lower/upper peak, rolling, duration, integral, and
-  recovery metrics. After unchanged hard gates and authorization groups, a
-  channel is ordered only when one complete interval is strictly below the
-  other; overlap is `PARTIAL_COMPARISON`. Whole-grid unknown fraction is
+  recovery metrics. After unchanged hard local gates, authorization groups
+  come only from actual-curve assurance. Conservative upper values provide a
+  deterministic ordering when complete bundle intervals overlap; overlap by
+  itself is not `PARTIAL_COMPARISON`. Whole-grid unknown fraction is
   diagnostic only. Final-curve, clearance-tube, every braking tube, and GNSS
-  LOS support are route-scoped formal evidence.
+  LOS support remain route-scoped evidence.
+- Whitelisted incomplete GNSS evidence in `MISSION_BEST_EFFORT` is charged for
+  the whole bounded commitment at the existing maximum degraded ratio without
+  inventing finite PL. Repeated semantic evidence identity is not charged
+  twice. Insufficient remaining duration or integral budget is
+  `EXPOSURE_BUDGET`; runtime exhaustion immediately selects an already
+  certified brake.
 - When two incomplete channels cannot yet be ordered, their executable common
   region is the nominal path contained by every candidate's safe tube, not a
   requirement that candidate centerlines coincide. A feasible result is an

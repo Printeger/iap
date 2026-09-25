@@ -350,6 +350,13 @@ class LocalMotionAssurance {
 
 struct TrajectoryAssuranceRequest {
   std::vector<GlobalNavigationExposureSample> global_samples;
+  // A bounded actual may retain locally safe motion when its GNSS-only
+  // evidence is incomplete.  No finite PL is invented: the whole committed
+  // duration is charged at the policy's maximum admissible degraded ratio.
+  bool conservative_incomplete_global_navigation = false;
+  double committed_duration_s =
+      std::numeric_limits<double>::quiet_NaN();
+  std::string global_evidence_identity;
   // Persistent task-level episode state.  Replanning or changing trajectory
   // identity may not mint a fresh exposure budget.
   bool has_prior_global_episode = false;
@@ -373,6 +380,11 @@ struct TrajectoryAssuranceResult {
   double worst_budget_utilization = std::numeric_limits<double>::infinity();
   double mission_progress_m = 0.0;
   double lidar_observability_improvement = 0.0;
+  bool conservative_global_charge_applied = false;
+  double conservative_global_charge_ratio =
+      std::numeric_limits<double>::quiet_NaN();
+  double conservative_global_charge_duration_s = 0.0;
+  std::string global_evidence_identity;
   std::string certificate_hash;
   std::string reason = "not_evaluated";
 

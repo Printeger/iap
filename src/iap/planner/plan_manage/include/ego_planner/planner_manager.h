@@ -408,6 +408,7 @@ namespace ego_planner
     Eigen::Vector3d actual_endpoint = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     double unevaluated_suffix_m = 0.0;
+    double actual_progress_m = 0.0;
     double duration_s = std::numeric_limits<double>::infinity();
     double global_peak_ratio = std::numeric_limits<double>::infinity();
     double global_peak_ratio_lower =
@@ -438,7 +439,7 @@ namespace ego_planner
     double global_recovery_time_upper_s =
         std::numeric_limits<double>::quiet_NaN();
     bool risk_interval_complete = false;
-    // 0=formal, 1=controlled degraded, 2=mission degraded.
+    // 0=formal, 1=mission degraded. Derived only from actual assurance mode.
     int authorization_group = 0;
     double fim_max_ratio = std::numeric_limits<double>::infinity();
     double fim_integral = std::numeric_limits<double>::infinity();
@@ -539,7 +540,8 @@ namespace ego_planner
       return state == P4SuccessorPreparationState::PREPARED_CERTIFIED &&
           trajectory.traj_id_ > 0 && certificate.valid &&
           boundary.assurance.complete && boundary.assurance.safe &&
-          direct_risk_evidence.complete && !braking_anchors.empty() &&
+          direct_risk_evidence.admissionComplete() &&
+          !braking_anchors.empty() &&
           p5_preview_complete && p5_preview_action == 0;
     }
   };
@@ -1597,7 +1599,7 @@ namespace ego_planner
       // fresher controller traces arrive before updateTrajInfo commits it.
       double frozen_parent_switch_elapsed_s =
           std::numeric_limits<double>::quiet_NaN();
-      P4RollingSuccessorGuide fixed_bounded_guide;
+      P4BoundedExecutionGuide fixed_bounded_guide;
       uint64_t last_attempt_execution_snapshot_id = 0;
       // Route preparation may finish before the one-second execution
       // commitment permits an atomic switch. Keep that immutable result here

@@ -2637,13 +2637,13 @@ P4SuccessorProgressRequirement computeP4SuccessorProgressRequirement(
   return result;
 }
 
-P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
+P4BoundedExecutionGuide p4BoundRollingSuccessorGuide(
   const std::vector<Eigen::Vector3d> & frozen_guide,
   const Eigen::Vector3d & parent_approved_endpoint,
   const double stopping_distance_m, const double minimum_progress_m,
   const double maximum_projection_distance_m)
 {
-  P4RollingSuccessorGuide result;
+  P4BoundedExecutionGuide result;
   if (frozen_guide.size() < 2u || !parent_approved_endpoint.allFinite() ||
     !std::isfinite(stopping_distance_m) || stopping_distance_m < 0.0 ||
     !std::isfinite(minimum_progress_m) || minimum_progress_m <= 0.0 ||
@@ -2687,6 +2687,7 @@ P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
     best_distance_m > maximum_projection_distance_m + kEpsilon)
   {
     result.reason = "approved_endpoint_outside_frozen_guide";
+    result.failure = P4BoundedExecutionFailure::FROZEN_GUIDE_MISMATCH;
     return result;
   }
 
@@ -2694,6 +2695,7 @@ P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
     minimum_progress_m;
   if (result.target_station_m > total_length_m + kEpsilon) {
     result.reason = "frozen_guide_has_insufficient_successor_reserve";
+    result.failure = P4BoundedExecutionFailure::STOPPING;
     return result;
   }
 
@@ -2725,19 +2727,21 @@ P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
   if (result.guide.size() < 2u) {
     result.guide.clear();
     result.reason = "bounded_successor_guide_too_short";
+    result.failure = P4BoundedExecutionFailure::STOPPING;
     return result;
   }
   result.valid = true;
+  result.failure = P4BoundedExecutionFailure::NONE;
   result.reason = "ok";
   return result;
 }
 
-P4RollingSuccessorGuide composeP4RollingSuccessorPath(
+P4BoundedExecutionGuide composeP4RollingSuccessorPath(
   const std::vector<Eigen::Vector3d> & certified_parent_curve,
   const std::vector<Eigen::Vector3d> & selected_route,
   const Eigen::Vector3d & parent_approved_endpoint)
 {
-  P4RollingSuccessorGuide result;
+  P4BoundedExecutionGuide result;
   if (certified_parent_curve.size() < 2u || selected_route.size() < 2u ||
     !parent_approved_endpoint.allFinite() ||
     std::any_of(
@@ -2800,6 +2804,7 @@ P4RollingSuccessorGuide composeP4RollingSuccessorPath(
   }
   result.valid = true;
   result.projection_distance_m = std::sqrt(best_squared_distance);
+  result.failure = P4BoundedExecutionFailure::NONE;
   result.reason = "ok";
   return result;
 }
@@ -3048,7 +3053,7 @@ P4ObservationSegmentResult P4ObservationSegmentPlanner::plan(
 }
 
 bool applyP4RollingSuccessorGuide(
-  const P4RollingSuccessorGuide & bounded, const bool force_full_search,
+  const P4BoundedExecutionGuide & bounded, const bool force_full_search,
   const uint64_t incumbent_channel_id, P4ForwardRequest * request)
 {
   if (!request || !bounded.valid || bounded.guide.size() < 2u ||
@@ -3072,9 +3077,9 @@ bool applyP4RollingSuccessorGuide(
   return true;
 }
 
-P4RollingSuccessorGuide selectP4RollingSuccessorGuide(
-  const P4RollingSuccessorGuide & newly_bounded,
-  const P4RollingSuccessorGuide & fixed_for_parent,
+P4BoundedExecutionGuide selectP4RollingSuccessorGuide(
+  const P4BoundedExecutionGuide & newly_bounded,
+  const P4BoundedExecutionGuide & fixed_for_parent,
   const bool force_full_search)
 {
   if (force_full_search && fixed_for_parent.valid &&
@@ -3741,6 +3746,115 @@ double p4KinematicStoppingProgress(
   const double speed = std::max(0.0, speed_mps);
   return speed * limits.reaction_time_s +
          speed * speed / (2.0 * limits.braking_accel_mps2);
+}
+
+P4BoundedExecutionGuide p4BoundExecutionGuide(
+  const P4BoundedExecutionGuideInput & input)
+{
+  P4BoundedExecutionGuide result;
+  if (input.frozen_guide.size() < 2u ||
+    std::any_of(
+      input.frozen_guide.begin(), input.frozen_guide.end(),
+      [](const Eigen::Vector3d & point) {return !point.allFinite();}) ||
+    !std::isfinite(input.limits.reaction_time_s) ||
+    input.limits.reaction_time_s < 0.0 ||
+    !std::isfinite(input.limits.braking_accel_mps2) ||
+    input.limits.braking_accel_mps2 <= 0.0 ||
+    !std::isfinite(input.limits.vehicle_radius_m) ||
+    input.limits.vehicle_radius_m < 0.0 ||
+    !std::isfinite(input.limits.safety_margin_m) ||
+    input.limits.safety_margin_m < 0.0 ||
+    !std::isfinite(input.limits.min_creep_progress_m) ||
+    input.limits.min_creep_progress_m < 0.0 ||
+    !std::isfinite(input.limits.max_limited_prefix_progress_m) ||
+    input.limits.max_limited_prefix_progress_m <
+      input.limits.min_creep_progress_m ||
+    !std::isfinite(input.limits.max_creep_progress_m) ||
+    !std::isfinite(input.limits.max_observe_speed_mps) ||
+    input.limits.max_observe_speed_mps <= 0.0 ||
+    !input.start_position.allFinite() ||
+    !input.start_velocity.allFinite() ||
+    !input.start_acceleration.allFinite() ||
+    (input.parent_approved_endpoint.allFinite() &&
+     (!std::isfinite(input.minimum_continuation_progress_m) ||
+      input.minimum_continuation_progress_m <= 0.0 ||
+      !std::isfinite(input.maximum_endpoint_projection_distance_m) ||
+      input.maximum_endpoint_projection_distance_m < 0.0)))
+  {
+    return result;
+  }
+
+  const double current_speed_mps = input.start_velocity.norm();
+  if (input.parent_approved_endpoint.allFinite())
+  {
+    return p4BoundRollingSuccessorGuide(
+      input.frozen_guide, input.parent_approved_endpoint,
+      p4KinematicStoppingProgress(current_speed_mps, input.limits),
+      input.minimum_continuation_progress_m,
+      input.maximum_endpoint_projection_distance_m);
+  }
+  if (!std::isfinite(input.decision_horizon_m) ||
+    input.decision_horizon_m <= 0.0 ||
+    !std::isfinite(input.local_support_frontier_m) ||
+    input.local_support_frontier_m < 0.0 ||
+    !std::isfinite(input.exposure_affordable_frontier_m) ||
+    input.exposure_affordable_frontier_m < 0.0 ||
+    !std::isfinite(input.successor_max_parent_execution_s) ||
+    input.successor_max_parent_execution_s <= 0.0)
+  {
+    return result;
+  }
+  const double guide_length_m = pathLength(input.frozen_guide);
+  result.local_frontier_m = std::min({
+    guide_length_m, input.decision_horizon_m,
+    input.local_support_frontier_m});
+  result.rolling_cap_m = std::min(
+    limitedPrefixProgressLimit(input.limits),
+    input.limits.max_observe_speed_mps *
+      input.successor_max_parent_execution_s);
+  result.usable_progress_m = result.local_frontier_m -
+    p4StoppingDistance(current_speed_mps, input.limits);
+  result.minimum_progress_m = std::max(
+    input.limits.min_creep_progress_m,
+    p4KinematicStoppingProgress(current_speed_mps, input.limits));
+  result.target_station_m = std::min({
+    result.usable_progress_m, result.rolling_cap_m,
+    input.exposure_affordable_frontier_m});
+
+  if (result.target_station_m + kEpsilon < result.minimum_progress_m) {
+    if (input.exposure_affordable_frontier_m + kEpsilon <
+      result.minimum_progress_m)
+    {
+      result.failure = P4BoundedExecutionFailure::EXPOSURE_BUDGET;
+      result.reason = "bounded_execution_exposure_budget";
+    } else if (input.local_support_frontier_m <=
+      input.decision_horizon_m + kEpsilon &&
+      input.local_support_frontier_m <= guide_length_m + kEpsilon &&
+      result.local_frontier_m + kEpsilon <
+        p4StoppingDistance(current_speed_mps, input.limits) +
+          result.minimum_progress_m)
+    {
+      result.failure = P4BoundedExecutionFailure::LOCAL_SUPPORT;
+      result.reason = "bounded_execution_local_support";
+    } else {
+      result.failure = P4BoundedExecutionFailure::STOPPING;
+      result.reason = "bounded_execution_stopping_reserve";
+    }
+    return result;
+  }
+
+  result.guide = cropPrefixToDistance(
+    input.frozen_guide, result.target_station_m);
+  if (result.guide.size() < 2u) {
+    result.guide.clear();
+    result.failure = P4BoundedExecutionFailure::STOPPING;
+    result.reason = "bounded_execution_guide_too_short";
+    return result;
+  }
+  result.valid = true;
+  result.failure = P4BoundedExecutionFailure::NONE;
+  result.reason = "ok";
+  return result;
 }
 
 double p4RefinementCorridorRadius(const P4ForwardLimits &limits)
