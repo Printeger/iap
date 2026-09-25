@@ -583,6 +583,17 @@
   incompatible MISSION configuration with the typed detail
   `mission_exposure_policy_incompatible_with_minimum_terminal_stop`.
   `STRICT_GLOBAL` is unchanged.
+- The `icra_dense_forest_four_fork_v2` task profile has a longer, internally
+  consistent MISSION horizon while retaining `maximum_ratio=1.05`. Two
+  `2.5 s` bounded parent executions, the `2.280084270 s` minimum terminal
+  stop, a `0.2 s` switch margin, and a `0.2 s` scheduler guard total
+  `7.680084270 s`; the task rounds this upward to a continuous limit of
+  `8.0 s` and therefore sets the matching worst-case integral limit to
+  `(1.05 - 1.0) * 8.0 = 0.4 ratio*s`. This is a task-specific profile, not a
+  change to the general defaults. Actual exposure, parent-to-switch exposure,
+  and child-after-switch exposure including its terminal stop all consume the
+  same persistent mission ledger; trajectory replacement, guard handoff, ACK,
+  and successor activation do not reset it.
 - A received GNSS epoch certifies reception only at the exact receiver
   reference; no measured-support radius grants future candidate positions
   synthetic map support. Every candidate LOS records its sample count,

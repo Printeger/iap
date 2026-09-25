@@ -188,6 +188,73 @@ TEST(TrajectoryAssuranceTest,
 }
 
 TEST(TrajectoryAssuranceTest,
+     DenseForestMissionBudgetAllowsOneRollingSuccessorAndTerminalStop) {
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 8.0;
+  policy.maximum_exceedance_integral_ratio_s = 0.4;
+
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = {
+      {0.0, 21.0, 42.0, 20.0, 40.0, true},
+      {2.3, 21.0, 42.0, 20.0, 40.0, true}};
+  request.committed_duration_s = 2.3;
+  request.global_evidence_identity = "successor-with-terminal-stop";
+  request.has_prior_global_episode = true;
+  request.prior_global_episode.active = true;
+  request.prior_global_episode.peak_ratio = 1.05;
+  request.prior_global_episode.current_continuous_exceedance_s = 2.5;
+  request.prior_global_episode.continuous_exceedance_s = 2.5;
+  request.prior_global_episode.exceedance_integral_ratio_s = 0.125;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_TRUE(result.authorized()) << result.reason;
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION);
+  EXPECT_NEAR(result.global.maximum_continuous_exceedance_s, 4.8, 1.0e-12);
+  EXPECT_NEAR(result.global.exceedance_integral_ratio_s, 0.24, 1.0e-12);
+  EXPECT_TRUE(result.global.within_budget);
+}
+
+TEST(TrajectoryAssuranceTest,
+     DenseForestMissionBudgetRejectsTrueExhaustionWithoutLedgerReset) {
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.maximum_ratio = 1.05;
+  policy.maximum_continuous_exceedance_s = 8.0;
+  policy.maximum_exceedance_integral_ratio_s = 0.4;
+
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = {
+      {0.0, 21.0, 42.0, 20.0, 40.0, true},
+      {2.3, 21.0, 42.0, 20.0, 40.0, true}};
+  request.committed_duration_s = 2.3;
+  request.global_evidence_identity = "exhausting-successor-with-terminal-stop";
+  request.has_prior_global_episode = true;
+  request.prior_global_episode.active = true;
+  request.prior_global_episode.peak_ratio = 1.05;
+  request.prior_global_episode.current_continuous_exceedance_s = 6.0;
+  request.prior_global_episode.continuous_exceedance_s = 6.0;
+  request.prior_global_episode.exceedance_integral_ratio_s = 0.3;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_EQ(result.reason, "global_navigation_episode_budget_exceeded");
+  EXPECT_NEAR(result.global.maximum_continuous_exceedance_s, 8.3, 1.0e-12);
+  EXPECT_NEAR(result.global.exceedance_integral_ratio_s, 0.415, 1.0e-12);
+  EXPECT_TRUE(result.global.continuous_exceedance_exceeded);
+  EXPECT_TRUE(result.global.exceedance_integral_exceeded);
+}
+
+TEST(TrajectoryAssuranceTest,
      RepeatedIncompleteEvidenceIdentityIsNotChargedTwice) {
   iap::TrajectoryAssuranceRequest request;
   request.global_samples = {

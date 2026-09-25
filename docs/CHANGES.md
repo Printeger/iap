@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(dense-forest-mission-exposure-horizon): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — give only `icra_dense_forest_four_fork_v2` the internally
+  consistent MISSION exposure limits `8.0 s` and `0.4 ratio*s` at the
+  unchanged maximum ratio `1.05`. The horizon covers two bounded `2.5 s`
+  parent executions, the certified `2.280084270 s` minimum terminal stop,
+  and the existing `0.2 s` switch plus `0.2 s` scheduler margins. General
+  defaults remain `2.3 s` and `0.115 ratio*s`; persistent-ledger recovery and
+  deduplication, STRICT_GLOBAL, PL/AL, collision, clearance, dynamics,
+  braking, freshness, controller, and successor state-machine semantics are
+  unchanged.
 - fix(active-window-recovery-timing): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 —
   make `GetActiveLidarWindow` return the last non-empty complete committed
   generation even while a newer complete producer proposal awaits the 2 Hz

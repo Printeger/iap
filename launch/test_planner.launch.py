@@ -1130,6 +1130,15 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
 }
 
 
+DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET = {
+    # Two bounded 2.5 s parent executions, one certified terminal stop, and
+    # the 0.2 s switch plus 0.2 s scheduler margins require 7.680084270 s.
+    "p4.assurance.maximum_continuous_exceedance_s": "8.0",
+    # The incomplete-evidence conservative charge is (1.05 - 1.0) * 8.0.
+    "p4.assurance.maximum_exceedance_integral_ratio_s": "0.4",
+}
+
+
 CORRIDOR_DEGENERATE_MAP_PRESET = {
     "forest_size_x_m": "30.0",
     "forest_size_y_m": "6.0",
@@ -1276,14 +1285,17 @@ P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET = {
 
 COMBO_PRESETS = {
     ("icra_p0_p4_v2_p5_dev", "icra_dense_forest_four_fork_v2"): {
-        key: value
-        for key, value in DENSE_FOUR_FORK_FOREST_ONLINE_PRESET.items()
-        if key.startswith("p0.") or key.startswith("grid_map/") or
-        key == "manager/planning_horizon" or
-        key == "p4.fallback_to_original_when_risk_not_ready" or
-        key.startswith("integrity_") or
-        key.startswith("p5.pred_alert_limit_") or
-        key == "forked_forest.start_canopy_clearance_radius_m"
+        **{
+            key: value
+            for key, value in DENSE_FOUR_FORK_FOREST_ONLINE_PRESET.items()
+            if key.startswith("p0.") or key.startswith("grid_map/") or
+            key == "manager/planning_horizon" or
+            key == "p4.fallback_to_original_when_risk_not_ready" or
+            key.startswith("integrity_") or
+            key.startswith("p5.pred_alert_limit_") or
+            key == "forked_forest.start_canopy_clearance_radius_m"
+        },
+        **DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET,
     },
     ("p0_open_sky", "manual"): P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET,
     ("p5_corridor", "manual"): {
@@ -1435,6 +1447,7 @@ SCENARIO_PRESETS = {
     },
     "icra_dense_forest_four_fork_v2": {
         **DENSE_FOUR_FORK_FOREST_ONLINE_PRESET,
+        **DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET,
         **GNSS_OPEN_SKY_PRESET,
         "use_gnss": "true",
         "use_araim": "true",

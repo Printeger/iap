@@ -522,6 +522,46 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(
             MODULE._planner_local_map_contract(context)[1], contract_id)
 
+    def test_dense_forest_v2_has_task_specific_mission_exposure_horizon(self):
+        continuous_key = "p4.assurance.maximum_continuous_exceedance_s"
+        integral_key = "p4.assurance.maximum_exceedance_integral_ratio_s"
+
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults[continuous_key], "2.3")
+        self.assertEqual(defaults[integral_key], "0.115")
+
+        name = "icra_dense_forest_four_fork_v2"
+        preset = MODULE.SCENARIO_PRESETS[name]
+        self.assertEqual(preset.get(continuous_key), "8.0")
+        self.assertEqual(preset.get(integral_key), "0.4")
+
+        context = self._launch_context_with_defaults(
+            experiment="icra_p0_p4_v2_p5_dev", scenario=name)
+        with mock.patch.object(
+            sys, "argv",
+            ["test", "experiment:=icra_p0_p4_v2_p5_dev", f"scenario:={name}"],
+        ):
+            MODULE._apply_presets(context, REPO)
+        self.assertEqual(context.launch_configurations[continuous_key], "8.0")
+        self.assertEqual(context.launch_configurations[integral_key], "0.4")
+
+        other_context = self._launch_context_with_defaults(
+            experiment="icra_p0_p4_v2_p5_dev",
+            scenario="icra_dense_forest_four_fork_v1",
+        )
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "test",
+                "experiment:=icra_p0_p4_v2_p5_dev",
+                "scenario:=icra_dense_forest_four_fork_v1",
+            ],
+        ):
+            MODULE._apply_presets(other_context, REPO)
+        self.assertEqual(other_context.launch_configurations[continuous_key], "2.3")
+        self.assertEqual(other_context.launch_configurations[integral_key], "0.115")
+
     def test_online_truth_isolation_rejects_simulator_topics(self):
         context = self._launch_context_with_defaults(
             experiment="icra_p0_p4_v2_p5_dev",
