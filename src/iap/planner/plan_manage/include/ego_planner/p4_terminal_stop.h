@@ -54,6 +54,12 @@ P4MissionExposureDurationBudget p4MissionExposureDurationBudget(
     const iap::GlobalNavigationExposurePolicy &policy,
     const iap::GlobalNavigationEpisodeState &episode);
 
+// Reserves already-promised parent execution from the same mission budget
+// before fitting a rolling child's complete terminal-stop curve.
+P4MissionExposureDurationBudget p4MissionExposureDurationBudgetAfterBridge(
+    const P4MissionExposureDurationBudget &budget,
+    double parent_to_switch_duration_s);
+
 enum class P4ExposureDurationFailure
 {
   NONE = 0,

@@ -44,6 +44,7 @@ std::vector<double> derivativeAnchors(const double duration_s) {
 
 void deriveRollingAnchors(
     UniformBspline velocity, const double duration_s,
+    const double control_switch_margin_s,
     P4ActualCurveCertificationResult *result) {
   const std::vector<double> anchors = derivativeAnchors(duration_s);
   std::vector<double> speeds;
@@ -72,7 +73,11 @@ void deriveRollingAnchors(
 
   result->terminal_deceleration_start_s = anchors[suffix_start];
   if (suffix_start > 0u) {
-    result->latest_rolling_switch_elapsed_s = anchors[suffix_start - 1u];
+    result->latest_rolling_switch_elapsed_s = std::max(
+        0.0, std::min(
+            anchors[suffix_start - 1u],
+            result->terminal_deceleration_start_s -
+                control_switch_margin_s));
   }
 }
 
@@ -152,6 +157,8 @@ P4ActualCurveCertificationResult P4ActualCurveCertifier::certify(
   }
   if (!std::isfinite(request.feasibility_tolerance) ||
       request.feasibility_tolerance < 0.0 ||
+      !std::isfinite(request.control_switch_margin_s) ||
+      request.control_switch_margin_s < 0.0 ||
       !request.control_profile.valid()) {
     return failure(P4PreparedCurveFailure::TRACKING_CAPABILITY,
                    "control_capability_profile_invalid");
@@ -218,7 +225,8 @@ P4ActualCurveCertificationResult P4ActualCurveCertifier::certify(
                    detail.str());
   }
 
-  deriveRollingAnchors(velocity, duration_s, &result);
+  deriveRollingAnchors(
+      velocity, duration_s, request.control_switch_margin_s, &result);
   result.complete = true;
   result.failure = P4PreparedCurveFailure::NONE;
   result.detail = "actual_curve_structural_certified";

@@ -565,16 +565,21 @@
   and ends only after `0.5 s` continuously below `0.95*AL`.
 - Every immediate actual trajectory is bounded before B-spline resampling.
   Its frontier is the minimum of guide length, decision horizon and consecutive
-  fresh local support; the committed endpoint additionally reserves stopping
-  distance and the rolling cap. Exposure never becomes a distance proxy.
+  fresh local support; its target is the farthest point before that frontier
+  that still reserves the complete current-state stopping distance. The
+  successor switch cadence (normally at most `2.5 s`) never caps that endpoint,
+  and required successor progress is only an acceptance floor, not a target
+  distance. Exposure never becomes a distance proxy.
   For a degraded MISSION candidate, the generator computes remaining exposure
-  in seconds, generates the actual from the true start `p/v/a`, applies the
-  production terminal-stop time law, and uses a fixed 16-step monotone
-  endpoint search until the real duration fits that same time budget. Every
-  regenerated curve receives new control points, knots and identity before
-  collision, clearance, dynamics, braking and P4 certification. The full guide
-  remains only a channel/successor reference and cannot obtain execution
-  authority.
+  in seconds, subtracts the parent interval from the latest charged observation
+  to the fixed switch, generates the child from the true switch `p/v/a`,
+  applies the production terminal-stop time law, and uses a fixed 16-step
+  monotone endpoint search until the real child duration fits that same time
+  budget. The lower endpoint bound must still extend the certified parent by
+  the required progress and retain the complete stop. Every regenerated curve
+  receives new control points, knots and identity before collision, clearance,
+  dynamics, braking and P4 certification. The full guide remains only a
+  channel/successor reference and cannot obtain execution authority.
 - The MISSION exposure values are an explicit risk-acceptance policy, not PL
   fabrication or permission to treat unknown as free. The zero-speed
   production fixture for `min_creep_progress_m=0.25` requires

@@ -5190,8 +5190,18 @@ namespace ego_planner
           p4_forward_limits_.min_creep_progress_m,
           p4_successor_progress_jitter_floor_m_);
       successor_bound_input.maximum_endpoint_projection_distance_m =
-          p4_local_tracking_error_bound_m_ +
-          p4_planning_clearance_buffer_m_;
+          std::max(
+              p4_local_tracking_error_bound_m_ +
+                  p4_planning_clearance_buffer_m_,
+              p4RefinementCorridorRadius(request.limits));
+      const double successor_guide_length_m = p4PolylineLength(reuse_guide);
+      successor_bound_input.decision_horizon_m = std::min(
+          request.limits.max_lookahead_m, successor_guide_length_m);
+      // This is only the route-worker seed. The worker re-evaluates current
+      // local support, and the selected actual curve is bounded again by its
+      // consecutive fresh risk samples before publication.
+      successor_bound_input.local_support_frontier_m =
+          successor_guide_length_m;
       successor_bound_input.limits = request.limits;
       const auto newly_bounded_successor =
           p4BoundExecutionGuide(successor_bound_input);
@@ -6825,7 +6835,8 @@ namespace ego_planner
     if (certification_stage)
     {
       actual_curve_certification = P4ActualCurveCertifier{}.certify(
-          {local_data_, p4_control_profile_, pp_.feasibility_tolerance_});
+          {local_data_, p4_control_profile_, pp_.feasibility_tolerance_,
+           p4_successor_deadline_policy_.control_switch_margin_s});
       p4_last_actual_curve_certification_ = actual_curve_certification;
       if (!actual_curve_certification.complete)
         return reject_final_identity(
@@ -15172,6 +15183,9 @@ namespace ego_planner
     bool frozen_successor_curve_preparation = false;
     std::optional<P4MissionExposureDurationBudget>
         p4_mission_exposure_duration_budget;
+    double p4_exposure_minimum_progress_m =
+        p4_forward_limits_.min_creep_progress_m;
+    double p4_exposure_parent_to_switch_s = 0.0;
     // This value is part of the immutable parent/child handoff contract.  It
     // must be captured at the same instant as the p/v/a boundary used to
     // construct the child; a later controller trace may legitimately map the
@@ -15410,39 +15424,40 @@ namespace ego_planner
         // seed before any B-spline resampling so every immediate actual is a
         // terminal-stop segment; the full route remains on the candidate for
         // successor direction and unevaluated-suffix diagnostics.
-        if (!preparingP4SuccessorCurve())
+        const bool preparing_successor = preparingP4SuccessorCurve();
+        const auto selected_candidate = std::find_if(
+            last_p4_forward_decision_.candidates.begin(),
+            last_p4_forward_decision_.candidates.end(),
+            [this](const P4ForwardCandidate &candidate) {
+              return candidate.candidate_id ==
+                  last_p4_forward_decision_.selected_candidate_id;
+            });
+        double guide_length_m = 0.0;
+        for (std::size_t index = 1u; index < p4_forward_seed.size(); ++index)
+          guide_length_m +=
+              (p4_forward_seed[index] - p4_forward_seed[index - 1u]).norm();
+        double local_support_frontier_m = guide_length_m;
+        if (selected_candidate != last_p4_forward_decision_.candidates.end())
         {
-          const auto selected_candidate = std::find_if(
-              last_p4_forward_decision_.candidates.begin(),
-              last_p4_forward_decision_.candidates.end(),
-              [this](const P4ForwardCandidate &candidate) {
-                return candidate.candidate_id ==
-                    last_p4_forward_decision_.selected_candidate_id;
-              });
-          double guide_length_m = 0.0;
-          for (std::size_t index = 1u; index < p4_forward_seed.size(); ++index)
-            guide_length_m +=
-                (p4_forward_seed[index] - p4_forward_seed[index - 1u]).norm();
-          double local_support_frontier_m = guide_length_m;
-          if (selected_candidate != last_p4_forward_decision_.candidates.end())
+          if (!selected_candidate->risk_samples.empty())
           {
-            if (!selected_candidate->risk_samples.empty())
+            local_support_frontier_m = 0.0;
+            for (const auto &sample : selected_candidate->risk_samples)
             {
-              local_support_frontier_m = 0.0;
-              for (const auto &sample : selected_candidate->risk_samples)
-              {
-                if (sample.risk.stale || !sample.risk.lidar_supported ||
-                    !sample.risk.fim_supported)
-                  break;
-                local_support_frontier_m = std::max(
-                    local_support_frontier_m, sample.arc_length_m);
-              }
+              if (sample.risk.stale || !sample.risk.lidar_supported ||
+                  !sample.risk.fim_supported)
+                break;
+              local_support_frontier_m = std::max(
+                  local_support_frontier_m, sample.arc_length_m);
             }
-            const bool degraded_preference =
-                !selected_candidate->safety_gate_passed &&
-                (selected_candidate->controlled_degraded_candidate ||
-                 selected_candidate->mission_degraded_candidate);
-            if (degraded_preference)
+          }
+          const bool degraded_preference =
+              !selected_candidate->safety_gate_passed &&
+              (selected_candidate->controlled_degraded_candidate ||
+               selected_candidate->mission_degraded_candidate);
+          if (degraded_preference)
+          {
+            if (!preparing_successor)
             {
               p4_mission_exposure_duration_budget =
                   p4MissionExposureDurationBudget(
@@ -15464,47 +15479,115 @@ namespace ego_planner
                 continous_failures_count_++;
                 return false;
               }
-              planning_max_vel = std::min(
-                  planning_max_vel,
-                  p4_forward_limits_.max_observe_speed_mps);
+            }
+            planning_max_vel = std::min(
+                planning_max_vel,
+                p4_forward_limits_.max_observe_speed_mps);
+          }
+        }
+        Eigen::Vector3d bounded_start_position = start_pt;
+        Eigen::Vector3d bounded_start_velocity = start_vel;
+        Eigen::Vector3d bounded_start_acceleration = start_acc;
+        if (preparing_successor && !p4SuccessorPreparationBoundaryState(
+                &bounded_start_position, &bounded_start_velocity,
+                &bounded_start_acceleration))
+        {
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::IDENTITY,
+              "successor_switch_boundary_unavailable");
+          continous_failures_count_++;
+          return false;
+        }
+        P4BoundedExecutionGuideInput bounded_input;
+        bounded_input.frozen_guide = p4_forward_seed;
+        bounded_input.start_position = bounded_start_position;
+        bounded_input.start_velocity = bounded_start_velocity;
+        bounded_input.start_acceleration = bounded_start_acceleration;
+        bounded_input.decision_horizon_m =
+            std::isfinite(last_p4_forward_decision_.decision_horizon_m) &&
+            last_p4_forward_decision_.decision_horizon_m > 0.0
+            ? last_p4_forward_decision_.decision_horizon_m
+            : guide_length_m;
+        bounded_input.local_support_frontier_m = local_support_frontier_m;
+        if (preparing_successor)
+        {
+          bounded_input.parent_approved_endpoint =
+              p4_execution_certificate_.approved_endpoint;
+          bounded_input.minimum_continuation_progress_m = std::max({
+              p4_forward_limits_.min_creep_progress_m,
+              p4_successor_progress_jitter_floor_m_,
+              std::isfinite(
+                  last_p4_forward_decision_.successor_required_progress_m)
+                  ? last_p4_forward_decision_.successor_required_progress_m
+                  : 0.0});
+          bounded_input.maximum_endpoint_projection_distance_m =
+              std::max(
+                  p4_local_tracking_error_bound_m_ +
+                      p4_planning_clearance_buffer_m_,
+                  p4RefinementCorridorRadius(p4_forward_limits_));
+        }
+        bounded_input.limits = p4_forward_limits_;
+        auto bounded = p4BoundExecutionGuide(bounded_input);
+        if (preparing_successor && !bounded.valid &&
+            bounded.failure ==
+                P4BoundedExecutionFailure::FROZEN_GUIDE_MISMATCH)
+        {
+          std::vector<Eigen::Vector3d> certified_parent_suffix;
+          if (std::isfinite(
+                  p4_successor_schedule_.frozen_parent_switch_elapsed_s) &&
+              sampleTrajectoryIntervalForGeometryCommit(
+                  &local_data_,
+                  p4_successor_schedule_.frozen_parent_switch_elapsed_s,
+                  local_data_.duration_, &certified_parent_suffix))
+          {
+            const auto composed = composeP4RollingSuccessorPath(
+                certified_parent_suffix, p4_forward_seed,
+                p4_execution_certificate_.approved_endpoint);
+            if (composed.valid)
+            {
+              const double composed_length_m =
+                  p4PolylineLength(composed.guide);
+              const double added_bridge_m = std::max(
+                  0.0, composed_length_m - guide_length_m);
+              p4_forward_seed = composed.guide;
+              bounded_input.frozen_guide = p4_forward_seed;
+              bounded_input.decision_horizon_m = std::min(
+                  composed_length_m,
+                  bounded_input.decision_horizon_m + added_bridge_m);
+              bounded_input.local_support_frontier_m = std::min(
+                  composed_length_m,
+                  bounded_input.local_support_frontier_m + added_bridge_m);
+              bounded = p4BoundExecutionGuide(bounded_input);
             }
           }
-          P4BoundedExecutionGuideInput bounded_input;
-          bounded_input.frozen_guide = p4_forward_seed;
-          bounded_input.start_position = start_pt;
-          bounded_input.start_velocity = start_vel;
-          bounded_input.start_acceleration = start_acc;
-          bounded_input.decision_horizon_m =
-              std::isfinite(last_p4_forward_decision_.decision_horizon_m) &&
-              last_p4_forward_decision_.decision_horizon_m > 0.0
-              ? last_p4_forward_decision_.decision_horizon_m
-              : guide_length_m;
-          bounded_input.local_support_frontier_m =
-              local_support_frontier_m;
-          bounded_input.successor_max_parent_execution_s =
-              p4_successor_deadline_policy_.
-                  maximum_parent_execution_before_switch_s;
-          bounded_input.limits = p4_forward_limits_;
-          const auto bounded = p4BoundExecutionGuide(bounded_input);
-          if (!bounded.valid)
-          {
-            last_p4_forward_decision_.planning_disposition =
-                P4PlanningDisposition::HOLD_REQUIRED;
-            last_p4_forward_decision_.selection_authority =
-                P4ForwardSelectionAuthority::NONE;
-            last_p4_forward_decision_.formal_support = false;
-            last_p4_forward_decision_.reason = bounded.reason;
-            appendP4ForwardDecision(
-                last_p4_forward_decision_,
-                "bounded_actual_guide_rejected", plannerNow().seconds());
-            continous_failures_count_++;
-            return false;
-          }
-          p4_forward_seed = bounded.guide;
-          last_p4_forward_decision_.selected_guide = bounded.guide;
-          local_target_pt = bounded.guide.back();
-          local_target_vel.setZero();
         }
+        if (!bounded.valid)
+        {
+          last_p4_forward_decision_.planning_disposition =
+              preparing_successor
+              ? P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY
+              : P4PlanningDisposition::HOLD_REQUIRED;
+          last_p4_forward_decision_.selection_authority =
+              P4ForwardSelectionAuthority::NONE;
+          last_p4_forward_decision_.formal_support = false;
+          last_p4_forward_decision_.reason = bounded.reason;
+          if (preparing_successor)
+            last_p4_forward_decision_.successor_failure =
+                bounded.failure ==
+                        P4BoundedExecutionFailure::FROZEN_GUIDE_MISMATCH
+                ? P4SuccessorFailure::CORRIDOR_INVALID
+                : P4SuccessorFailure::PROGRESS_INSUFFICIENT;
+          appendP4ForwardDecision(
+              last_p4_forward_decision_,
+              "bounded_actual_guide_rejected", plannerNow().seconds());
+          continous_failures_count_++;
+          return false;
+        }
+        p4_forward_seed = bounded.guide;
+        if (preparing_successor)
+          p4_successor_schedule_.fixed_bounded_guide = bounded;
+        local_target_pt = bounded.guide.back();
+        local_target_vel.setZero();
       }
       else
       {
@@ -15546,6 +15629,17 @@ namespace ego_planner
         start_acc = successor_start_acceleration;
         frozen_parent_switch_elapsed_s =
             p4_successor_schedule_.frozen_parent_switch_elapsed_s;
+        const auto &fixed_guide =
+            p4_successor_schedule_.fixed_bounded_guide;
+        if (fixed_guide.valid &&
+            std::isfinite(fixed_guide.approved_endpoint_station_m) &&
+            std::isfinite(fixed_guide.minimum_progress_m))
+        {
+          p4_exposure_minimum_progress_m = std::max(
+              p4_exposure_minimum_progress_m,
+              fixed_guide.approved_endpoint_station_m +
+                  fixed_guide.minimum_progress_m);
+        }
       }
       else if (has_existing_trajectory &&
           last_activated_execution_instance_id_ ==
@@ -15587,6 +15681,77 @@ namespace ego_planner
             P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
         continous_failures_count_++;
         return false;
+      }
+    }
+
+    if (frozen_successor_curve_preparation &&
+        !p4_mission_exposure_duration_budget)
+    {
+      const auto selected_candidate = std::find_if(
+          last_p4_forward_decision_.candidates.begin(),
+          last_p4_forward_decision_.candidates.end(),
+          [this](const P4ForwardCandidate &candidate) {
+            return candidate.candidate_id ==
+                last_p4_forward_decision_.selected_candidate_id;
+          });
+      const bool degraded_preference =
+          selected_candidate != last_p4_forward_decision_.candidates.end() &&
+          !selected_candidate->safety_gate_passed &&
+          (selected_candidate->controlled_degraded_candidate ||
+           selected_candidate->mission_degraded_candidate);
+      if (degraded_preference)
+      {
+        auto budget = p4MissionExposureDurationBudget(
+            p4_global_exposure_policy_,
+            p4_global_exposure_ledger_.state());
+        const auto &parent_sample = active_trajectory_execution_sample_;
+        const bool parent_sample_matches = parent_sample.valid &&
+            parent_sample.received_from_server &&
+            parent_sample.execution_instance_id ==
+                local_data_.execution_instance_id_ &&
+            parent_sample.trajectory_id == local_data_.traj_id_ &&
+            parent_sample.start_time_ns ==
+                local_data_.start_time_.nanoseconds() &&
+            parent_sample.curve_hash == local_data_.curve_hash_ &&
+            executionFeedbackFresh(
+                parent_sample.receive_steady_ns,
+                kExecutionFeedbackFreshnessTimeoutS);
+        if (!budget.valid || !parent_sample_matches)
+        {
+          record_prepared_curve_failure(
+              parent_sample_matches
+                  ? P4PreparedCurveFailure::EXPOSURE_BUDGET
+                  : P4PreparedCurveFailure::FRESHNESS,
+              parent_sample_matches ? budget.reason :
+                  "successor_parent_execution_sample_unavailable");
+          continous_failures_count_++;
+          return false;
+        }
+        const auto bridge = p4RollingSuccessorExposureBridge(
+            parent_sample.receive_ros_stamp_s,
+            parent_sample.trajectory_elapsed_s,
+            frozen_parent_switch_elapsed_s, local_data_.duration_,
+            p4_global_exposure_last_observation_stamp_s_);
+        if (!bridge.valid)
+        {
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::FRESHNESS, bridge.reason);
+          continous_failures_count_++;
+          return false;
+        }
+        budget = p4MissionExposureDurationBudgetAfterBridge(
+            budget, bridge.duration_s);
+        if (!budget.valid)
+        {
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::EXPOSURE_BUDGET, budget.reason);
+          continous_failures_count_++;
+          return false;
+        }
+        p4_exposure_parent_to_switch_s = bridge.duration_s;
+        p4_mission_exposure_duration_budget = budget;
+        planning_max_vel = std::min(
+            planning_max_vel, p4_forward_limits_.max_observe_speed_mps);
       }
     }
 
@@ -17105,14 +17270,13 @@ namespace ego_planner
             "P4 terminal stop retimed final spline from %.3f s to %.3f s",
             terminal.original_duration_s, terminal.final_duration_s);
       }
-      if (p4_mission_exposure_duration_budget &&
-          !preparingP4SuccessorCurve())
+      if (p4_mission_exposure_duration_budget)
       {
         const auto exposure_fit = fitP4TerminalStopToExposureDuration(
             &pos, P4TerminalStartState{start_pt, start_vel, start_acc},
             p4_control_profile_, pp_.feasibility_tolerance_,
             pp_.ctrl_pt_dist, planning_max_vel,
-            p4_forward_limits_.min_creep_progress_m,
+            p4_exposure_minimum_progress_m,
             *p4_mission_exposure_duration_budget);
         if (!exposure_fit.success)
         {
@@ -17132,7 +17296,20 @@ namespace ego_planner
                  << ":integral_limit_ratio_s="
                  << exposure_fit.integral_limit_ratio_s
                  << ":required_minimum_integral_ratio_s="
-                 << exposure_fit.required_minimum_integral_ratio_s;
+                 << exposure_fit.required_minimum_integral_ratio_s
+                 << ":actually_consumed_continuous_s="
+                 << p4_global_exposure_ledger_.state().
+                        current_continuous_exceedance_s
+                 << ":actually_consumed_integral_ratio_s="
+                 << p4_global_exposure_ledger_.state().
+                        exceedance_integral_ratio_s
+                 << ":parent_observation_to_switch_s="
+                 << p4_exposure_parent_to_switch_s
+                 << ":child_after_switch_including_terminal_stop_s="
+                 << exposure_fit.minimum_terminal_stop_duration_s
+                 << ":remaining_budget_s="
+                 << p4_mission_exposure_duration_budget->
+                        affordable_duration_s;
           p4_last_actual_curve_certification_.detail = detail.str();
           last_p4_forward_decision_.planning_disposition =
               P4PlanningDisposition::HOLD_REQUIRED;
@@ -17165,6 +17342,18 @@ namespace ego_planner
               exposure_fit.final_duration_s,
               exposure_fit.affordable_duration_s,
               exposure_fit.generation_count);
+          RCLCPP_INFO(
+              rclcpp::get_logger("ego_planner"),
+              "P4 exposure split consumed_continuous=%.3f "
+              "consumed_integral=%.6f parent_to_switch=%.3f "
+              "child_with_stop=%.3f remaining=%.3f",
+              p4_global_exposure_ledger_.state().
+                  current_continuous_exceedance_s,
+              p4_global_exposure_ledger_.state().
+                  exceedance_integral_ratio_s,
+              p4_exposure_parent_to_switch_s,
+              exposure_fit.final_duration_s,
+              p4_mission_exposure_duration_budget->affordable_duration_s);
         }
       }
       const auto final_limits = pos.checkDerivativeLimits(
@@ -17187,7 +17376,12 @@ namespace ego_planner
                << ":value=" << final_limits.first_violation_value
                << ":limit=" << final_limits.first_violation_limit
                << ":required_time_scale="
-               << final_limits.required_time_scale;
+               << final_limits.required_time_scale
+               << ":start_p=" << start_pt.transpose()
+               << ":start_v=" << start_vel.transpose()
+               << ":start_a=" << start_acc.transpose()
+               << ":target_distance_m="
+               << (local_target_pt - start_pt).norm();
         record_prepared_curve_failure(
             P4PreparedCurveFailure::DYNAMICS, detail.str());
         last_p4_forward_decision_.planning_disposition =

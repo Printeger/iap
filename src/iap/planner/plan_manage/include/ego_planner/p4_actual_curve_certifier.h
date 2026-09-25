@@ -39,6 +39,7 @@ struct P4ActualCurveCertificationRequest {
   const LocalTrajData &trajectory;
   const P4ControlCapabilityProfile &control_profile;
   double feasibility_tolerance = 0.0;
+  double control_switch_margin_s = 0.0;
 };
 
 struct P4ActualCurveCertificationResult {

@@ -100,7 +100,6 @@ namespace ego_planner
     double projection_distance_m =
       std::numeric_limits<double>::quiet_NaN();
     double local_frontier_m = std::numeric_limits<double>::quiet_NaN();
-    double rolling_cap_m = std::numeric_limits<double>::quiet_NaN();
     double usable_progress_m = std::numeric_limits<double>::quiet_NaN();
     double minimum_progress_m = std::numeric_limits<double>::quiet_NaN();
     double target_station_m = std::numeric_limits<double>::quiet_NaN();
@@ -110,10 +109,11 @@ namespace ego_planner
   };
 
   // Produce the immutable, bounded guide used to prepare a rolling child.
-  // The child must cover the parent's approved endpoint and then retain both
-  // its stopping distance and a non-zero progress reserve.  A parent endpoint
-  // that cannot be associated with the frozen guide is rejected rather than
-  // silently preparing a child on another corridor.
+  // The child uses the farthest endpoint that retains its stopping reserve.
+  // It must also extend the parent's approved endpoint by the required
+  // minimum progress. A parent endpoint that cannot be associated with the
+  // frozen guide is rejected rather than silently preparing a child on
+  // another corridor.
   P4BoundedExecutionGuide p4BoundRollingSuccessorGuide(
     const std::vector<Eigen::Vector3d> & frozen_guide,
     const Eigen::Vector3d & parent_approved_endpoint,
@@ -535,10 +535,11 @@ namespace ego_planner
       std::numeric_limits<double>::quiet_NaN());
     Eigen::Vector3d start_acceleration = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
-    // A rolling child additionally has to cover the certified parent
-    // endpoint before reserving its own stopping/progress distance.  When
-    // finite, these fields select that continuation policy behind the same
-    // bounded-execution seam used by an initial actual trajectory.
+    // A rolling child additionally has to extend the certified parent
+    // endpoint by a minimum useful amount. The minimum is an acceptance
+    // floor, never the target endpoint. When finite, these fields select that
+    // continuation policy behind the same bounded-execution seam used by an
+    // initial actual trajectory.
     Eigen::Vector3d parent_approved_endpoint = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
     double minimum_continuation_progress_m =
@@ -547,8 +548,6 @@ namespace ego_planner
       std::numeric_limits<double>::quiet_NaN();
     double decision_horizon_m = std::numeric_limits<double>::quiet_NaN();
     double local_support_frontier_m =
-      std::numeric_limits<double>::quiet_NaN();
-    double successor_max_parent_execution_s =
       std::numeric_limits<double>::quiet_NaN();
     P4ForwardLimits limits;
   };

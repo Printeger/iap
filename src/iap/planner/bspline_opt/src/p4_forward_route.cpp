@@ -2691,10 +2691,13 @@ P4BoundedExecutionGuide p4BoundRollingSuccessorGuide(
     return result;
   }
 
-  result.target_station_m = best_station_m + stopping_distance_m +
-    minimum_progress_m;
-  if (result.target_station_m > total_length_m + kEpsilon) {
-    result.reason = "frozen_guide_has_insufficient_successor_reserve";
+  result.local_frontier_m = total_length_m;
+  result.usable_progress_m = total_length_m - stopping_distance_m;
+  result.minimum_progress_m = minimum_progress_m;
+  result.target_station_m = result.usable_progress_m;
+  if (result.target_station_m + kEpsilon <
+      best_station_m + minimum_progress_m) {
+    result.reason = "frozen_guide_has_insufficient_successor_progress";
     result.failure = P4BoundedExecutionFailure::STOPPING;
     return result;
   }
@@ -3784,39 +3787,35 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
     return result;
   }
 
-  const double current_speed_mps = input.start_velocity.norm();
-  if (input.parent_approved_endpoint.allFinite())
-  {
-    return p4BoundRollingSuccessorGuide(
-      input.frozen_guide, input.parent_approved_endpoint,
-      p4KinematicStoppingProgress(current_speed_mps, input.limits),
-      input.minimum_continuation_progress_m,
-      input.maximum_endpoint_projection_distance_m);
-  }
   if (!std::isfinite(input.decision_horizon_m) ||
     input.decision_horizon_m <= 0.0 ||
     !std::isfinite(input.local_support_frontier_m) ||
-    input.local_support_frontier_m < 0.0 ||
-    !std::isfinite(input.successor_max_parent_execution_s) ||
-    input.successor_max_parent_execution_s <= 0.0)
+    input.local_support_frontier_m < 0.0)
   {
     return result;
   }
+  const double current_speed_mps = input.start_velocity.norm();
   const double guide_length_m = pathLength(input.frozen_guide);
   result.local_frontier_m = std::min({
     guide_length_m, input.decision_horizon_m,
     input.local_support_frontier_m});
-  result.rolling_cap_m = std::min(
-    limitedPrefixProgressLimit(input.limits),
-    input.limits.max_observe_speed_mps *
-      input.successor_max_parent_execution_s);
   result.usable_progress_m = result.local_frontier_m -
     p4StoppingDistance(current_speed_mps, input.limits);
+  if (input.parent_approved_endpoint.allFinite())
+  {
+    auto bounded = p4BoundRollingSuccessorGuide(
+      cropPrefixToDistance(input.frozen_guide, result.local_frontier_m),
+      input.parent_approved_endpoint,
+      p4KinematicStoppingProgress(current_speed_mps, input.limits),
+      input.minimum_continuation_progress_m,
+      input.maximum_endpoint_projection_distance_m);
+    bounded.local_frontier_m = result.local_frontier_m;
+    return bounded;
+  }
   result.minimum_progress_m = std::max(
     input.limits.min_creep_progress_m,
     p4KinematicStoppingProgress(current_speed_mps, input.limits));
-  result.target_station_m = std::min(
-    result.usable_progress_m, result.rolling_cap_m);
+  result.target_station_m = result.usable_progress_m;
 
   if (result.target_station_m + kEpsilon < result.minimum_progress_m) {
     if (input.local_support_frontier_m <=

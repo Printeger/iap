@@ -264,6 +264,32 @@ P4MissionExposureDurationBudget p4MissionExposureDurationBudget(
   return result;
 }
 
+P4MissionExposureDurationBudget p4MissionExposureDurationBudgetAfterBridge(
+    const P4MissionExposureDurationBudget &budget,
+    const double parent_to_switch_duration_s)
+{
+  P4MissionExposureDurationBudget result = budget;
+  if (!budget.valid || !std::isfinite(parent_to_switch_duration_s) ||
+      parent_to_switch_duration_s < 0.0)
+  {
+    result.valid = false;
+    result.reason = "mission_exposure_parent_bridge_invalid";
+    return result;
+  }
+  result.remaining_continuous_s = std::max(
+      0.0, budget.remaining_continuous_s - parent_to_switch_duration_s);
+  result.remaining_integral_duration_s = std::max(
+      0.0,
+      budget.remaining_integral_duration_s - parent_to_switch_duration_s);
+  result.affordable_duration_s = std::min(
+      result.remaining_continuous_s,
+      result.remaining_integral_duration_s);
+  result.valid = std::isfinite(result.affordable_duration_s);
+  result.reason = result.valid ? "ok" :
+      "mission_exposure_parent_bridge_invalid";
+  return result;
+}
+
 P4ExposureBoundedTerminalStopResult
 fitP4TerminalStopToExposureDuration(
     UniformBspline *trajectory, const P4TerminalStartState &start_state,

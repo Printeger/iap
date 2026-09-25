@@ -80,8 +80,9 @@ TEST(P4ActualCurveCertifierTest,
   trajectory.acceleration_traj_ = trajectory.velocity_traj_.getDerivative();
   trajectory.curve_hash_ = "curve-41";
 
+  constexpr double kSwitchMarginS = 0.35;
   const auto result = P4ActualCurveCertifier{}.certify(
-      {trajectory, permissiveProfile(), 0.0});
+      {trajectory, permissiveProfile(), 0.0, kSwitchMarginS});
 
   ASSERT_TRUE(result.complete) << result.detail;
   EXPECT_EQ(result.failure, P4PreparedCurveFailure::NONE);
@@ -91,6 +92,8 @@ TEST(P4ActualCurveCertifierTest,
   EXPECT_GT(result.terminal_deceleration_start_s, 0.0);
   EXPECT_LT(result.latest_rolling_switch_elapsed_s,
             result.terminal_deceleration_start_s);
+  EXPECT_LE(result.latest_rolling_switch_elapsed_s,
+            result.terminal_deceleration_start_s - kSwitchMarginS + 1.0e-12);
   EXPECT_GE(result.latest_rolling_switch_elapsed_s, 0.0);
 }
 

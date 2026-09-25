@@ -3,6 +3,19 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(rolling-endpoint-switch-decoupling): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — select both initial and rolling-child endpoints at the farthest
+  fresh local-support frontier that retains the complete current-state stop.
+  The `2.5 s` parent-execution value now controls only switch scheduling, and
+  dynamic/minimum successor progress is only an acceptance floor. MISSION
+  endpoint fitting deducts the persistent ledger and parent-to-switch bridge
+  before fitting the child's complete terminal stop; true exhaustion still
+  rejects. The switch is explicitly earlier than terminal deceleration by the
+  configured control margin. Typed preparation failures now preserve their
+  first collision, terminal, derivative, exposure, freshness or identity cause
+  and derivative diagnostics include the first axis/node/value/limit. No
+  exposure value, PL/AL, collision, clearance, dynamics, braking or freshness
+  threshold changed.
 - fix(dense-forest-mission-exposure-horizon): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — give only `icra_dense_forest_four_fork_v2` the internally
   consistent MISSION exposure limits `8.0 s` and `0.4 ratio*s` at the
