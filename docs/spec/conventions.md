@@ -243,11 +243,14 @@
   non-authorizing diagnostic: it may choose an earlier feasible stop but may
   neither relax a gate nor turn a safe stoppable prefix into HOLD. Missing,
   zero, or non-positive gain therefore falls back to the farthest safe prefix.
-- A geometry-only prefix, a single route with incomplete risk support, or a
-  prefix containing any invalid/stale/unsupported risk sample has no motion
+- A geometry-only prefix or an actual executable segment containing any
+  invalid/stale/unsupported local-motion or braking sample has no motion
   authority. The current certified monitor sample permits the prefix check to
-  start, but cannot substitute for complete risk support along the executable
-  segment.
+  start, but cannot substitute for complete support along the executable
+  segment. Whole-guide `route_evidence_complete` remains a ranking diagnostic:
+  incomplete evidence on an uncommitted route suffix does not override an
+  actual bundle already authorized by P4 `TrajectoryAssurance` under the
+  bounded MISSION exposure contract.
 - `PENDING` and `RATE_LIMITED` are typed worker results. If the committed
   certificate still passes identity, tracking, collision and runtime Integrity
   checks, the FSM continues it without retrying initialization or changing its

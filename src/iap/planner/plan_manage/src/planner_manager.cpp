@@ -10147,7 +10147,7 @@ namespace ego_planner
   {
     const auto finish = [reason](
         const P4NormalChannelPreparationDisposition disposition,
-        const char *why) {
+        const std::string &why) {
       if (reason) *reason = why;
       return disposition;
     };
@@ -10340,10 +10340,13 @@ namespace ego_planner
     record.failure = P4PreparedCurveFailure::NONE;
     if (!record.feasible())
     {
+      const char *failed_predicate =
+          record.firstFailedFeasibilityPredicate();
       record.failure = P4PreparedCurveFailure::INCOMPLETE;
       return finish(
           P4NormalChannelPreparationDisposition::REJECTED,
-          "normal_channel_final_bundle_incomplete");
+          std::string("normal_channel_final_bundle_incomplete:") +
+              (failed_predicate ? failed_predicate : "unknown"));
     }
 
     for (auto entry = p4_prepared_channel_bundles_.begin();

@@ -7157,7 +7157,7 @@ TEST(P4RouteScopedEvidence,
   EXPECT_DOUBLE_EQ(record.braking_tube_support_fraction, 1.0);
 }
 
-TEST(P4RouteScopedEvidence, RouteUnknownGapFailsClosed) {
+TEST(P4RouteScopedEvidence, RouteUnknownGapRemainsVisibleInDiagnostics) {
   auto fixture = makeRouteEvidenceFixture();
   fixture.evidence.positions[1].y() = 2.5;
   fixture.evidence.positions[2].y() = 2.5;
@@ -7173,7 +7173,7 @@ TEST(P4RouteScopedEvidence, RouteUnknownGapFailsClosed) {
   EXPECT_GT(record.route_max_unknown_duration_s, 0.0);
 }
 
-TEST(P4RouteScopedEvidence, IncompleteBrakeTubeFailsClosed) {
+TEST(P4RouteScopedEvidence, IncompleteBrakeTubeRemainsVisibleInDiagnostics) {
   auto fixture = makeRouteEvidenceFixture();
   fixture.braking_anchors.front().risk_points.back().y() = 2.5;
   ego_planner::P4PreparedChannelRecord record;
@@ -7762,6 +7762,180 @@ TEST(P4PreparedChannelComparison,
   EXPECT_EQ(comparison.feasible_count, 1u);
   EXPECT_EQ(comparison.hard_failure_count, 0u);
   EXPECT_EQ(comparison.winner_channel_id, record.channel_id);
+}
+
+TEST(P4PreparedChannelComparison,
+     StillRejectsMissingAuthorityAndLocalHardSafetyFailures)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  const auto authorized = [&snapshot](const uint64_t channel_id) {
+      ego_planner::P4PreparedChannelRecord record;
+      record.channel_id = channel_id;
+      record.snapshot_identity = snapshot;
+      record.guide_identity = "guide-" + std::to_string(channel_id);
+      record.refined_path_identity =
+          "refined-" + std::to_string(channel_id);
+      record.curve_identity = "curve-" + std::to_string(channel_id);
+      record.actual_endpoint = Eigen::Vector3d(4.0, -1.0, 1.0);
+      record.duration_s = 2.0;
+      record.authorization_group = 1;
+      record.global_peak_ratio = 1.05;
+      record.global_rolling_worst_ratio = 1.05;
+      record.global_continuous_exceedance_s = 2.0;
+      record.global_exposure_integral_ratio_s = 0.1;
+      record.global_recovery_time_s = 2.0;
+      record.minimum_local_clearance_margin_m = 0.2;
+      record.final_curve_evaluated = true;
+      record.local_geometry_passed = true;
+      record.dynamics_passed = true;
+      record.collision_passed = true;
+      record.clearance_passed = true;
+      record.braking_passed = true;
+      record.gnss_exposure_complete = true;
+      record.route_evidence_evaluated = true;
+      record.route_evidence_complete = false;
+      record.route_support_fraction = 0.8;
+      record.braking_tube_support_fraction = 0.9;
+      record.failure = ego_planner::P4PreparedCurveFailure::NONE;
+      return record;
+    };
+
+  auto missing_authority = authorized(74u);
+  missing_authority.gnss_exposure_complete = false;
+  missing_authority.failure = ego_planner::P4PreparedCurveFailure::GNSS_RISK;
+  EXPECT_FALSE(missing_authority.feasible());
+  EXPECT_STREQ(missing_authority.firstFailedFeasibilityPredicate(),
+               "certificate");
+
+  auto collision = authorized(75u);
+  collision.collision_passed = false;
+  collision.failure = ego_planner::P4PreparedCurveFailure::COLLISION;
+  EXPECT_FALSE(collision.feasible());
+  EXPECT_STREQ(collision.firstFailedFeasibilityPredicate(), "collision");
+
+  auto clearance = authorized(76u);
+  clearance.clearance_passed = false;
+  clearance.failure = ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE;
+  EXPECT_FALSE(clearance.feasible());
+  EXPECT_STREQ(clearance.firstFailedFeasibilityPredicate(), "clearance");
+
+  auto braking = authorized(77u);
+  braking.braking_passed = false;
+  braking.failure = ego_planner::P4PreparedCurveFailure::BRAKING;
+  EXPECT_FALSE(braking.feasible());
+  EXPECT_STREQ(braking.firstFailedFeasibilityPredicate(), "braking");
+
+  auto exposure = authorized(78u);
+  exposure.gnss_exposure_complete = false;
+  exposure.failure = ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET;
+  EXPECT_FALSE(exposure.feasible());
+  EXPECT_STREQ(exposure.firstFailedFeasibilityPredicate(), "certificate");
+
+  const auto comparison = ego_planner::compareP4PreparedChannels(
+      {missing_authority, collision, clearance, braking, exposure},
+      snapshot, 5u);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.feasible_count, 0u);
+  EXPECT_EQ(comparison.hard_failure_count, 5u);
+  EXPECT_EQ(comparison.winner_channel_id, 0u);
+}
+
+TEST(P4PreparedChannelComparison,
+     MissionAuthorizedBundleDoesNotRequireCompleteRouteEvidence)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  ego_planner::P4PreparedChannelRecord record;
+  record.channel_id = 72u;
+  record.snapshot_identity = snapshot;
+  record.guide_identity = "guide-72";
+  record.refined_path_identity = "refined-72";
+  record.curve_identity = "terminal-stop-actual-72";
+  record.actual_endpoint = Eigen::Vector3d(4.0, -1.0, 1.0);
+  record.duration_s = 2.0;
+  record.authorization_group = 1;
+  record.global_peak_ratio = 1.05;
+  record.global_rolling_worst_ratio = 1.05;
+  record.global_continuous_exceedance_s = 2.0;
+  record.global_exposure_integral_ratio_s = 0.1;
+  record.global_recovery_time_s = 2.0;
+  record.fim_max_ratio = 0.4;
+  record.fim_integral = 1.0;
+  record.minimum_local_clearance_margin_m = 0.2;
+  record.final_curve_evaluated = true;
+  record.local_geometry_passed = true;
+  record.dynamics_passed = true;
+  record.collision_passed = true;
+  record.clearance_passed = true;
+  record.braking_passed = true;
+  ego_planner::P4DirectTrajectoryRiskEvidence p4_authority;
+  p4_authority.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  p4_authority.complete = false;
+  p4_authority.trajectory_assurance_complete = true;
+  p4_authority.trajectory_assurance.mode =
+      iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
+  ASSERT_TRUE(p4_authority.trajectory_assurance.authorized());
+  ASSERT_TRUE(p4_authority.admissionComplete());
+  record.gnss_exposure_complete = p4_authority.admissionComplete();
+  record.route_evidence_evaluated = true;
+  record.route_evidence_complete = false;
+  record.route_support_fraction = 0.8;
+  record.braking_tube_support_fraction = 0.9;
+  record.failure = ego_planner::P4PreparedCurveFailure::NONE;
+
+  EXPECT_TRUE(record.feasible());
+  const auto comparison = ego_planner::compareP4PreparedChannels(
+      {record}, snapshot, 1u);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.feasible_count, 1u);
+  EXPECT_EQ(comparison.hard_failure_count, 0u);
+  EXPECT_EQ(comparison.winner_channel_id, record.channel_id);
+
+  auto better_supported = record;
+  better_supported.channel_id = 73u;
+  better_supported.guide_identity = "guide-73";
+  better_supported.refined_path_identity = "refined-73";
+  better_supported.curve_identity = "terminal-stop-actual-73";
+  better_supported.route_support_fraction = 0.95;
+  better_supported.braking_tube_support_fraction = 0.95;
+  const auto ranked = ego_planner::compareP4PreparedChannels(
+      {record, better_supported}, snapshot, 2u);
+  EXPECT_EQ(ranked.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(ranked.winner_channel_id, better_supported.channel_id);
+  EXPECT_EQ(ranked.runner_up_channel_id, record.channel_id);
 }
 
 TEST(P4PreparedChannelComparison,

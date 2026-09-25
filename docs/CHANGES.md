@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-channel-bundle-authority): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 —
+  stop the normal-channel comparison wrapper from requiring 100% diagnostic
+  whole-route evidence after P4 has authorized a bounded MISSION actual curve.
+  Route and braking-tube coverage remain recorded and participate in ordering;
+  identity, actual geometry/dynamics, collision, clearance, braking, exposure
+  admission and typed failures remain hard feasibility gates.
 - fix(p4-publication-authority): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 —
   make `P4ExecutionCertificate` the sole pre-execution authorization seam.
   Publication now verifies only executable authority, full trajectory and

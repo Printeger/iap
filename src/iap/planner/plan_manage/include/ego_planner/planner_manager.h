@@ -468,17 +468,30 @@ namespace ego_planner
     bool gnss_exposure_complete = false;
     P4PreparedCurveFailure failure = P4PreparedCurveFailure::INCOMPLETE;
 
+    const char *firstFailedFeasibilityPredicate() const
+    {
+      if (channel_id == 0u) return "channel_identity";
+      if (!snapshot_identity.valid()) return "snapshot_identity";
+      if (guide_identity.empty()) return "guide_identity";
+      if (refined_path_identity.empty()) return "refined_path_identity";
+      if (curve_identity.empty()) return "curve_identity";
+      if (!actual_endpoint.allFinite()) return "actual_endpoint";
+      if (!std::isfinite(duration_s) || duration_s <= 0.0)
+        return "duration";
+      if (!final_curve_evaluated) return "actual_curve";
+      if (!local_geometry_passed) return "geometry";
+      if (!dynamics_passed) return "dynamics";
+      if (!collision_passed) return "collision";
+      if (!clearance_passed) return "clearance";
+      if (!braking_passed) return "braking";
+      if (!gnss_exposure_complete) return "certificate";
+      if (failure != P4PreparedCurveFailure::NONE) return "typed_failure";
+      return nullptr;
+    }
+
     bool feasible() const
     {
-      return channel_id != 0u && snapshot_identity.valid() &&
-          !guide_identity.empty() && !refined_path_identity.empty() &&
-          !curve_identity.empty() && actual_endpoint.allFinite() &&
-          std::isfinite(duration_s) && duration_s > 0.0 &&
-          final_curve_evaluated && local_geometry_passed &&
-          dynamics_passed && collision_passed && clearance_passed &&
-          braking_passed && gnss_exposure_complete &&
-          (!route_evidence_evaluated || route_evidence_complete) &&
-          failure == P4PreparedCurveFailure::NONE;
+      return firstFailedFeasibilityPredicate() == nullptr;
     }
   };
 
