@@ -1683,12 +1683,20 @@ namespace ego_planner
     {
       const bool failed_successor_curve =
           planner_manager_->p4PreparingSuccessorCandidate();
+      const auto &actual_curve_failure =
+          planner_manager_->lastP4ActualCurveCertification();
+      const auto typed_failure =
+          actual_curve_failure.failure == P4PreparedCurveFailure::NONE
+          ? P4PreparedCurveFailure::INCOMPLETE
+          : actual_curve_failure.failure;
+      const std::string typed_detail = actual_curve_failure.detail.empty()
+          ? "rebound_replan_failed_without_typed_detail"
+          : actual_curve_failure.detail;
       if (failed_successor_curve)
       {
         planner_manager_->recordPreparedP4SuccessorCurveFailure(
             plannerNow().seconds(),
-            P4PreparedCurveFailure::DYNAMICS,
-            "terminal_bspline_refinement_collision_or_dynamics");
+            typed_failure, typed_detail);
       }
       else
       {
@@ -1696,8 +1704,7 @@ namespace ego_planner
         const auto disposition =
             planner_manager_->recordP4NormalChannelCurveFailure(
                 plannerNow().seconds(),
-                P4PreparedCurveFailure::DYNAMICS,
-                "terminal_bspline_refinement_collision_or_dynamics",
+                typed_failure, typed_detail,
                 &normal_failure_reason);
         if (disposition ==
             P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING)

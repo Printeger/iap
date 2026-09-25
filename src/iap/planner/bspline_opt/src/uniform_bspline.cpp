@@ -416,6 +416,37 @@ namespace ego_planner
         profile.maximum_acceleration_mps2.array() * (1.0 + tolerance) + 1.0e-9).all();
     result.jerk_ok = (result.maximum_jerk.array() <=
         profile.maximum_jerk_mps3.array() * (1.0 + tolerance) + 1.0e-9).all();
+    const auto record_first_violation = [&result, tolerance](
+        const char *derivative, const Eigen::MatrixXd &points,
+        const Eigen::Vector3d &limits) {
+      if (!result.first_violation_derivative.empty())
+        return;
+      for (Eigen::Index column = 0; column < points.cols(); ++column)
+      {
+        for (Eigen::Index axis = 0;
+             axis < std::min<Eigen::Index>(3, points.rows()); ++axis)
+        {
+          const double limit = limits(axis) * (1.0 + tolerance) + 1.0e-9;
+          const double value = std::abs(points(axis, column));
+          if (value <= limit)
+            continue;
+          result.first_violation_derivative = derivative;
+          result.first_violation_axis = static_cast<int>(axis);
+          result.first_violation_index = static_cast<std::size_t>(column);
+          result.first_violation_value = value;
+          result.first_violation_limit = limit;
+          return;
+        }
+      }
+    };
+    record_first_violation(
+        "velocity", velocity.getControlPoint(),
+        profile.maximum_velocity_mps);
+    record_first_violation(
+        "acceleration", acceleration.getControlPoint(),
+        profile.maximum_acceleration_mps2);
+    record_first_violation(
+        "jerk", jerk.getControlPoint(), profile.maximum_jerk_mps3);
     result.required_time_scale = 1.0;
     for (Eigen::Index axis = 0; axis < 3; ++axis)
     {
@@ -460,7 +491,20 @@ namespace ego_planner
                axis < std::min<Eigen::Index>(3, value.rows()); ++axis)
             if (std::abs(value(axis)) >
                 profile.maximum_jerk_mps3(axis) * (1.0 + tolerance) + 1.0e-9)
+            {
               result.jerk_ok = false;
+              if (result.first_violation_derivative.empty())
+              {
+                result.first_violation_derivative = "jerk_node_side";
+                result.first_violation_axis = static_cast<int>(axis);
+                result.first_violation_index =
+                    result.jerk_node_side_samples - 1u;
+                result.first_violation_value = std::abs(value(axis));
+                result.first_violation_limit =
+                    profile.maximum_jerk_mps3(axis) * (1.0 + tolerance) +
+                    1.0e-9;
+              }
+            }
         }
       }
     }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <vector>
 
 namespace ego_planner {
@@ -196,10 +197,25 @@ P4ActualCurveCertificationResult P4ActualCurveCertifier::certify(
                                   request.feasibility_tolerance);
   if (!derivative_limits.valid || !derivative_limits.velocity_ok ||
       !derivative_limits.acceleration_ok || !derivative_limits.jerk_ok) {
+    std::ostringstream detail;
+    detail << (derivative_limits.first_violation_derivative.empty()
+                   ? "derivative"
+                   : derivative_limits.first_violation_derivative)
+           << "_limit_exceeded:axis=";
+    constexpr const char *kAxes[] = {"x", "y", "z"};
+    if (derivative_limits.first_violation_axis >= 0 &&
+        derivative_limits.first_violation_axis < 3) {
+      detail << kAxes[derivative_limits.first_violation_axis];
+    } else {
+      detail << "unknown";
+    }
+    detail << ":index=" << derivative_limits.first_violation_index
+           << ":value=" << derivative_limits.first_violation_value
+           << ":limit=" << derivative_limits.first_violation_limit
+           << ":required_time_scale="
+           << derivative_limits.required_time_scale;
     return failure(P4PreparedCurveFailure::DYNAMICS,
-                   derivative_limits.reason.empty()
-                       ? "actual_curve_derivative_limit_failed"
-                       : derivative_limits.reason);
+                   detail.str());
   }
 
   deriveRollingAnchors(velocity, duration_s, &result);

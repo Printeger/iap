@@ -36,6 +36,11 @@ namespace ego_planner
     Eigen::Vector3d maximum_acceleration = Eigen::Vector3d::Zero();
     Eigen::Vector3d maximum_jerk = Eigen::Vector3d::Zero();
     std::size_t jerk_node_side_samples = 0;
+    std::string first_violation_derivative;
+    int first_violation_axis = -1;
+    std::size_t first_violation_index = 0;
+    double first_violation_value = std::numeric_limits<double>::quiet_NaN();
+    double first_violation_limit = std::numeric_limits<double>::quiet_NaN();
     double required_time_scale = std::numeric_limits<double>::infinity();
     std::string reason;
   };

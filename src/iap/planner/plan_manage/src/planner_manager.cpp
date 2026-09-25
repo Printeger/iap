@@ -15146,6 +15146,17 @@ namespace ego_planner
   {
     last_p1_rejection_reason_.clear();
     last_p1_rejection_requires_new_generation_ = false;
+    p4_last_actual_curve_certification_ = {};
+    p4_last_actual_curve_certification_.failure =
+        P4PreparedCurveFailure::INCOMPLETE;
+    p4_last_actual_curve_certification_.detail = "rebound_replan_started";
+    const auto record_prepared_curve_failure =
+        [this](const P4PreparedCurveFailure failure,
+               const std::string &detail) {
+          p4_last_actual_curve_certification_.complete = false;
+          p4_last_actual_curve_certification_.failure = failure;
+          p4_last_actual_curve_certification_.detail = detail;
+        };
     const auto p1_config = bspline_optimizer_->getP1IntegrityConfig();
     const bool has_existing_trajectory =
         local_data_.traj_id_ > 0 && local_data_.duration_ > 0.0;
@@ -15920,6 +15931,10 @@ namespace ego_planner
         bspline_optimizer_->initControlPoints(ctrl_pts, true);
     if (collisionScanFailsClosed(collision_scan.status))
     {
+      record_prepared_curve_failure(
+          P4PreparedCurveFailure::COLLISION,
+          std::string("initial_collision_scan_failed:") +
+              collisionScanStatusName(collision_scan.status));
       if (collision_scan.status ==
               CollisionScanStatus::NATIVE_ASTAR_NO_PATH &&
           p4_runtime_config.enable_risk_aware_astar)
@@ -16922,12 +16937,24 @@ namespace ego_planner
     cout << "plan_success=" << flag_step_1_success << endl;
     if (p1_preference_rejected)
     {
+      record_prepared_curve_failure(
+          P4PreparedCurveFailure::DYNAMICS,
+          "p1_preference_candidate_optimization_failed");
       visualization_->displayOptimalList(ctrl_pts, 0);
       continous_failures_count_++;
       return false;
     }
     if (!flag_step_1_success)
     {
+      const auto &failed_scan = bspline_optimizer_->lastCollisionScanResult();
+      const bool collision_observed =
+          failed_scan.status == CollisionScanStatus::CLOSED_SEGMENTS ||
+          collisionScanFailsClosed(failed_scan.status);
+      record_prepared_curve_failure(
+          collision_observed ? P4PreparedCurveFailure::COLLISION
+                             : P4PreparedCurveFailure::DYNAMICS,
+          std::string("rebound_optimizer_failed:collision_scan_status=") +
+              collisionScanStatusName(failed_scan.status));
       visualization_->displayOptimalList(ctrl_pts, 0);
       continous_failures_count_++;
       return false;
@@ -16968,6 +16995,16 @@ namespace ego_planner
 
       if (!flag_step_2_success)
       {
+        const auto &failed_scan =
+            bspline_optimizer_->lastCollisionScanResult();
+        const bool collision_observed =
+            failed_scan.status == CollisionScanStatus::CLOSED_SEGMENTS ||
+            collisionScanFailsClosed(failed_scan.status);
+        record_prepared_curve_failure(
+            collision_observed ? P4PreparedCurveFailure::COLLISION
+                               : P4PreparedCurveFailure::DYNAMICS,
+            std::string("terminal_refinement_failed:collision_scan_status=") +
+                collisionScanStatusName(failed_scan.status));
         if (gate0_writer_ && gate0_writer_->enabled())
         {
           Gate0QualificationEvent refinement_event;
@@ -17048,6 +17085,9 @@ namespace ego_planner
           pp_.feasibility_tolerance_);
       if (!terminal.success)
       {
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::TERMINAL_CONTRACT,
+            std::string("terminal_stop_failed:") + terminal.reason);
         last_p4_forward_decision_.planning_disposition =
             P4PlanningDisposition::HOLD_REQUIRED;
         last_p4_forward_decision_.reason = terminal.reason;
@@ -17132,6 +17172,24 @@ namespace ego_planner
       if (!final_limits.valid || !final_limits.velocity_ok ||
           !final_limits.acceleration_ok || !final_limits.jerk_ok)
       {
+        std::ostringstream detail;
+        constexpr const char *kAxes[] = {"x", "y", "z"};
+        detail << (final_limits.first_violation_derivative.empty()
+                       ? "derivative"
+                       : final_limits.first_violation_derivative)
+               << "_limit_exceeded:axis=";
+        if (final_limits.first_violation_axis >= 0 &&
+            final_limits.first_violation_axis < 3)
+          detail << kAxes[final_limits.first_violation_axis];
+        else
+          detail << "unknown";
+        detail << ":index=" << final_limits.first_violation_index
+               << ":value=" << final_limits.first_violation_value
+               << ":limit=" << final_limits.first_violation_limit
+               << ":required_time_scale="
+               << final_limits.required_time_scale;
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::DYNAMICS, detail.str());
         last_p4_forward_decision_.planning_disposition =
             P4PlanningDisposition::HOLD_REQUIRED;
         last_p4_forward_decision_.reason =
@@ -17148,6 +17206,8 @@ namespace ego_planner
       if (!finalChildBoundaryMatchesFrozenParent(
               pos, frozen_parent_switch_elapsed_s, &boundary_reason))
       {
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::IDENTITY, boundary_reason);
         last_p4_forward_decision_.planning_disposition =
             P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
         last_p4_forward_decision_.reason = boundary_reason;

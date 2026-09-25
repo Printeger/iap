@@ -123,6 +123,29 @@ TEST(P4ActualCurveCertifierTest, RejectsNonStoppedTerminalAsTypedFailure) {
   EXPECT_EQ(trajectory.curve_hash_, hash_before);
 }
 
+TEST(P4ActualCurveCertifierTest,
+     ReportsTheFirstDerivativeLimitViolationWithItsLocation) {
+  LocalTrajData trajectory = identifiedStoppedTrajectory(44);
+  auto profile = permissiveProfile();
+  profile.maximum_velocity_mps = Eigen::Vector3d(0.1, 20.0, 20.0);
+
+  const auto result = P4ActualCurveCertifier{}.certify(
+      {trajectory, profile, 0.0});
+
+  EXPECT_FALSE(result.complete);
+  EXPECT_EQ(result.failure, P4PreparedCurveFailure::DYNAMICS);
+  EXPECT_NE(result.detail.find("velocity"), std::string::npos)
+      << result.detail;
+  EXPECT_NE(result.detail.find("axis=x"), std::string::npos)
+      << result.detail;
+  EXPECT_NE(result.detail.find("index="), std::string::npos)
+      << result.detail;
+  EXPECT_NE(result.detail.find("value="), std::string::npos)
+      << result.detail;
+  EXPECT_NE(result.detail.find("limit="), std::string::npos)
+      << result.detail;
+}
+
 TEST(P4ActualCurveCertifierTest, MapsDirectEvidenceFailuresWithoutStrings) {
   EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
                 iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED),
