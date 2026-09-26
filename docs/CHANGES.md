@@ -3,21 +3,6 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
-- fix(planner-online-local-integrity-authority): IAP-RQ-200 / IAP-RQ-300 /
-  IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 — replace the MISSION GNSS
-  single-sensor veto with online whole-navigation authorization. The estimator
-  now exports a GNSS-independent 15-state local marginal and the exact IMU
-  propagation model through the existing IntegrityReport; GNSS factors and
-  marginalized linear priors are excluded, fixed-map LiDAR ARAIM supplies the
-  current lower bound, and zero/contaminated/stale/degenerate evidence fails
-  closed. P4 propagates that source at every actual nominal/braking offset and
-  requires positive localization-adjusted clearance. STRICT_GLOBAL is
-  unchanged. In MISSION, GNSS peak/duration/integral and persistent episode
-  exhaustion remain truthful ranking/replan diagnostics but no longer veto an
-  otherwise valid `MISSION_DEGRADED_EXECUTION`. Channel comparison orders
-  degraded feasible bundles by GNSS risk, online local margin, raw clearance,
-  then progress; P5 still reacts to new local-integrity, collision, tracking,
-  freshness and braking failures.
 - fix(active-feedback-callback-skew): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — let a fresh controller trace for the exact active execution
   identity supply elapsed time and commanded `p/v/a` while PositionCommand

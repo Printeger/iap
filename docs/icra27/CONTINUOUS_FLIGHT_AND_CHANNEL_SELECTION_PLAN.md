@@ -1,14 +1,5 @@
 # 正确通道选择与连续飞行修复计划
 
-> 2026-09 closure: `MISSION_BEST_EFFORT` execution authority is no longer the
-> GNSS peak/duration/integral budget. P4 `TrajectoryAssurance` now requires a
-> fresh GNSS-independent local FGO/LiDAR/IMU source, propagates its 15-state
-> covariance at the exact nominal and braking sample times, and admits only
-> positive localization-adjusted clearance as
-> `MISSION_DEGRADED_EXECUTION`. GNSS exposure remains a channel-ranking and
-> replan signal. `STRICT_GLOBAL` remains fail-closed on GNSS. The fixed
-> `uncalibrated_default_v1` surface constant is not fallback authority.
-
 日期：2026-09-20
 
 状态：实施中；代码完成、CPU/进程门禁和 live 验收分别记录，本文不是完成报告。

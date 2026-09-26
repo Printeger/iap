@@ -123,29 +123,3 @@ string  failure_reason
 # identity means that no GNSS epoch contributed to this report.
 float64 gnss_epoch_stamp
 uint64  gnss_epoch_identity
-
-# Online GNSS-independent local-navigation evidence.  The 15-state covariance
-# ordering is rotation, position, velocity, accelerometer bias, gyroscope bias.
-bool    local_navigation_valid
-bool    local_navigation_source_contains_gnss
-bool    local_navigation_icp_degenerate
-float64 local_navigation_stamp
-int64   local_navigation_estimation_frame_id
-float64 local_navigation_current_hpl
-float64 local_navigation_current_vpl
-float64[225] local_navigation_state_covariance
-float64[9] local_navigation_world_r_body
-float64[3] local_navigation_specific_force_body
-float64[3] local_navigation_angular_rate_body
-string  local_navigation_source_identity
-string  local_navigation_source_model_identity
-string  local_navigation_model_identity
-string  local_navigation_invalid_reason
-bool    local_navigation_model_valid
-float64[9] local_navigation_accelerometer_noise_covariance
-float64[9] local_navigation_gyroscope_noise_covariance
-float64[9] local_navigation_integration_noise_covariance
-float64[9] local_navigation_accelerometer_bias_rw_covariance
-float64[9] local_navigation_gyroscope_bias_rw_covariance
-float64 local_navigation_maximum_horizon
-float64 local_navigation_coverage_multiplier

@@ -637,28 +637,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluate(
     current_status.reason = P5GateReason::OK;
   }
   P5GateStatus merged = merge(current_status, future_status);
-  const bool mission_degraded_execution = context.direct_risk &&
-      context.direct_risk->task_mode ==
-          iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-      context.direct_risk->trajectory_assurance_complete &&
-      context.direct_risk->trajectory_assurance.authorized() &&
-      context.direct_risk->trajectory_assurance.local.status ==
-          iap::LocalMotionAssuranceStatus::SAFE &&
-      context.direct_risk->trajectory_assurance.mode ==
-          iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
-  if (mission_degraded_execution &&
-      merged.action != P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE) {
-    // P4's local certificate keeps the currently activated motion authority.
-    // P5 still reports the post-activation GNSS degradation through the
-    // existing replan path so a healthier successor can be sought without
-    // arming or activating a braking guard.
-    merged.action = P5GateAction::REQUEST_REPLAN;
-    merged.reason = context.direct_risk->trajectory_assurance.global.complete
-        ? P5GateReason::FUTURE_BAD
-        : P5GateReason::FUTURE_UNKNOWN;
-    merged.future_reason = reasonName(merged.reason);
-    appendActiveReason(&merged.active_reasons, merged.future_reason);
-  }
   if (context.direct_risk &&
       context.direct_risk->trajectory_assurance_complete) {
     merged.execution_mode =

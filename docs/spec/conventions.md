@@ -258,7 +258,7 @@
   segment. Whole-guide `route_evidence_complete` remains a ranking diagnostic:
   incomplete evidence on an uncommitted route suffix does not override an
   actual bundle already authorized by P4 `TrajectoryAssurance` under the
-  MISSION local-integrity contract.
+  bounded MISSION exposure contract.
 - `PENDING` and `RATE_LIMITED` are typed worker results. If the committed
   certificate still passes identity, tracking, collision and runtime Integrity
   checks, the FSM continues it without retrying initialization or changing its
@@ -344,11 +344,8 @@
   checks every nominal, braking and dual-transition sample at its actual
   arrival time. Local motion and braking must be entirely safe. Exact GNSS
   evidence grants `NORMAL_EXECUTION`; in `MISSION_BEST_EFFORT`, a bounded
-  actual may instead receive `MISSION_DEGRADED_EXECUTION` when fresh online
-  GNSS-independent local-navigation integrity leaves positive adjusted
-  clearance on every nominal and braking sample. GNSS exposure remains
-  truthful ranking/replan evidence but is not by itself a motion veto. Only
-  that complete actual bundle is promoted
+  actual may instead receive degraded authority while it remains inside the
+  hard exposure budget. Only that complete actual bundle is promoted
   atomically to `RISK_SELECTED`. The first failure retains curve position, arc length,
   arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
   growth. A braking-branch failure is projected to its anchor station on the
@@ -371,9 +368,8 @@
   derived solely from the actual trajectory's `TrajectoryExecutionMode`.
   Formal bundles precede degraded bundles; degraded bundles are ordered by
   conservative peak ratio, continuous exceedance, positive exposure integral,
-  actual/braking-tube unknown exposure, minimum local-navigation-adjusted
-  margin, raw clearance margin, actual progress and stable bundle hash.
-  Overlapping GNSS intervals do not cause HOLD once both locally safe
+  actual/braking-tube unknown exposure, actual progress and stable bundle
+  hash. Overlapping GNSS intervals do not cause HOLD once both locally safe
   bundles are complete. The old stable channel is only a tie-break after the
   complete ordering key is equal. Winner/runner-up, actual endpoints,
   unevaluated suffixes and the full decomposition remain recorded. If the
@@ -567,15 +563,13 @@
   is at most `0.115 ratio*s`, and either recovery is predicted within `2.0 s`
   or a currently certified braking curve remains available. The public task
   contract is `p4.assurance.task_mode`: `STRICT_GLOBAL` retains strict
-  `GNSS PL < AL`, while `MISSION_BEST_EFFORT` permits degraded motion only
-  under the fresh GNSS-independent local-navigation contract below.
-  Whitelisted incomplete GNSS evidence never receives a fabricated finite PL;
-  it charges the entire
+  `GNSS PL < AL`, while `MISSION_BEST_EFFORT` permits only degraded motion
+  that remains inside the same hard exposure budget. Whitelisted incomplete
+  GNSS evidence never receives a fabricated finite PL; it charges the entire
   bounded segment at `maximum_ratio`, with duplicate semantic evidence
-  identities charged once. Budget exhaustion remains truthful GNSS ranking,
-  replan and diagnostic evidence in MISSION, but does not veto a bundle whose
-  online local-navigation margins remain positive; it is never reported as
-  global integrity satisfaction. An exposure episode survives trajectory ID changes
+  identities charged once. Budget exhaustion rejects a new bundle and makes
+  runtime execution take its already certified brake. It is never reported as
+  integrity satisfaction. An exposure episode survives trajectory ID changes
   and ends only after `0.5 s` continuously below `0.95*AL`.
 - Every immediate actual trajectory is bounded before B-spline resampling.
   Route generation, channel comparison and topology freezing consume the full
@@ -647,19 +641,14 @@
   once. In `STRICT_GLOBAL`, incomplete evidence on an unselected alternative
   does not block another complete safe route; the selected route itself
   remains fail-closed.
-- A runtime global-navigation exposure event must report the
+- A runtime stop attributed to global-navigation exposure must report the
   decision-time decomposition, not only the first point above AL. The
   execution event records the evaluated peak ratio, maximum continuous
   exceedance, positive exceedance integral, their exact policy limits, the
   carried episode state, and independent flags for hard-global, peak,
   duration, integral, and already-exhausted-episode causes. The first unsafe
   point remains spatial evidence, but it is not by itself the explanation for
-  the aggregate risk observation. Repeated watchdog reads do not consume
-  budget. In `STRICT_GLOBAL` any limit violation remains a hard rejection. In
-  `MISSION_BEST_EFFORT`, peak, duration, integral and exhausted-episode flags
-  are diagnostics/ranking/replan inputs while a fresh positive local-integrity
-  certificate remains valid; they cannot independently command HOLD or
-  braking.
+  an aggregate-budget stop. Repeated watchdog reads do not consume budget.
 - `LocalMotionAssurance` independently checks the exact nominal curve and all
   reachable braking curves at no more than `0.2 s` spacing. Its directional
   margin subtracts vehicle radius, measured tracking bound, a deployment-
@@ -696,47 +685,6 @@
   map-relative alignment. Loss of registration health, stale support or a
   source-data gap remains fail-closed and activates the existing certified
   braking path.
-  Mission fallback additionally requires the monitor's online
-  `LocalNavigationSourceEvidence`. Its 15-state covariance ordering is
-  `[rotation, position, velocity, accelerometer bias, gyroscope bias]`. The
-  result carries the source stamp, exact estimator frame, current H/V bounds,
-  health flags, and source/model identities alongside every predicted bound.
-  The
-  producer rebuilds a local factor graph from an explicit whitelist of LiDAR,
-  IMU and trunk factor types. Known pseudorange, Doppler, clock,
-  `LinearContainerFactor`, generic pose/velocity/bias prior, generic pose
-  between and damping factors are excluded because their C++ types cannot
-  prove a local sensor origin. Any other unrecognized factor touching an
-  X/V/B state invalidates the source, so current or marginalized GNSS
-  information cannot contaminate it. A pose datum removes only the
-  coordinate gauge; no zero odometry covariance, truth value or fixed
-  localization bound is admitted. The source-specific LiDAR ARAIM run uses only fixed-map target
-  blocks and lower-bounds every propagated result.
-  `evaluateLocalNavigationIntegrity(source, model, offsets)` propagates that
-  covariance over each actual nominal/braking time offset with the exact
-  accelerometer, gyroscope, integration and bias-random-walk covariances bound
-  into the estimator model identity. Its maximum propagation domain is the
-  active odometry estimator's configured fixed-lag window, also bound into the
-  model identity; it assumes no future LiDAR improvement.
-  Horizontal and vertical bounds are the configured coverage multiplier times
-  the propagated position covariance (never below current LiDAR HPL/VPL).
-  For obstacle direction `d`, authorization uses
-  `m_adjusted = m_clearance - H*||d_xy|| - V*|d_z|`; a certified-empty capped
-  query conservatively subtracts `max(H,V)`. The same H/V bounds are charged
-  against all six faces of the bound task-frame lattice, and the task frame
-  and finite bounds are certificate inputs. Propagation time is source age at
-  evaluation plus the sample offset from the active curve origin; a runtime
-  suffix never resets covariance age to zero. Every nominal and reachable
-  braking sample must have both adjusted margins greater than zero. Stale
-  evidence, mismatched model
-  identity, a non-positive/non-finite covariance, ICP degeneracy, horizon
-  overflow or non-positive adjusted margin fails closed. The evidence and
-  model identities are certificate inputs and persist across rolling-child
-  replacement; ACK or trajectory-ID changes do not mint a new source.
-  After activation, P5 records a locally authorized GNSS degradation through
-  the existing debounced `REQUEST_REPLAN` action while the P4 certificate
-  keeps the current trajectory executable; that GNSS condition alone never
-  arms a braking guard.
   Active-window generation is a semantic state version, not a heartbeat:
   an unchanged complete window neither advances generation nor publishes an
   empty delta. Consumers distinguish the highest observed generation from the
@@ -764,12 +712,17 @@
   boundary continues to use its independent `p4.forward.safety_margin_m`.
   ICP RMSE, condition, gamma and degeneracy are registration-health evidence,
   not a position covariance or a surface-error bound; they therefore cannot
-  be added to every obstacle envelope. A deployment may provide a bound whose
-  identity is tied to the actual LiDAR measurement/extrinsic/time-sync model.
-  Simulation truth is evaluation-only and never enters that model. The
-  repository's `0.02 m` / `uncalibrated_default_v1` values remain diagnostic
-  compatibility fields and are excluded from the authorization envelope; they
-  cannot grant MISSION fallback. Legacy `local_scan_error_min_m` and
+  be added to every obstacle envelope. Online authorization uses the fixed
+  `p4.assurance.local_surface_error_bound_m` and binds its non-empty
+  `local_surface_error_calibration_id` into the certificate. The bound is
+  produced offline from three calibration runs plus one independent held-out
+  run as `max(0.02 m, q99.9(relative-pose error),
+  q99.9(one-sided repeated-surface offset)) + 0.01 m`; a held-out exceedance
+  invalidates the calibration. Simulation truth is evaluation-only and never
+  enters the planner. The repository's `0.02 m` / `uncalibrated_default_v1`
+  defaults are development/test wiring only and are not deployment authority;
+  a deployment profile must install a retained passing value and calibration
+  ID. Legacy `local_scan_error_min_m` and
   `local_lidar_error_multiplier` are accepted only for configuration
   compatibility and have no authorization effect.
   Route refinement and final assurance share the same immutable

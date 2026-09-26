@@ -1385,9 +1385,9 @@ TEST(P5RuntimeIntegrityGateTest,
       "braking_window_pointwise", direct.window_layout_hash,
       direct.window_point_satellite_sets_hash);
 
-  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN)
+  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK)
       << status.future_reason;
-  EXPECT_EQ(status.raw_reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
+  EXPECT_EQ(status.raw_reason, ego_planner::P5GateReason::OK);
   EXPECT_EQ(status.unknown_count, 0u);
 }
 
@@ -1441,49 +1441,6 @@ TEST(P5RuntimeIntegrityGateTest,
 
   EXPECT_NE(status.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(status.future_reason, "future_unknown");
-}
-
-TEST(P5RuntimeIntegrityGateTest,
-     ObservedGnssPeakDoesNotGuardLocallyAuthorizedMissionTrajectory) {
-  auto config = baseConfig();
-  config.test_only_allow_grid_risk_authority = false;
-  config.current_stale_to_replan_s = 100.0;
-  config.current_stale_to_emergency_s = 100.0;
-  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
-  constexpr double kObservedRatio = 1.062960;
-  gate.setCurrentIntegrityForTest(integrityMsg(
-      0.0, 10.0 * kObservedRatio, 10.0 * kObservedRatio, 10.0, 10.0));
-  auto trajectory = makeTrajectory();
-  const auto grid = makeSnapshot(1.0, 1.0);
-  auto direct = directRiskEvidence(
-      trajectory, grid, 10.0 * kObservedRatio, 10.0 * kObservedRatio);
-  bindFreshExecutionSnapshot(
-      &direct, grid, iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
-  for (auto& point : direct.points) {
-    point.prediction.gnss.valid = true;
-    point.prediction.gnss.hpl = 10.0 * kObservedRatio;
-    point.prediction.gnss.vpl = 10.0 * kObservedRatio;
-    point.failure_reason =
-        iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
-    point.safety_state = iap::ForwardRiskSafetyState::UNSAFE;
-  }
-  direct.trajectory_assurance_complete = true;
-  direct.trajectory_assurance.mode =
-      iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
-  direct.trajectory_assurance.certificate_hash = "observed-peak-cert";
-  direct.trajectory_assurance.local.status =
-      iap::LocalMotionAssuranceStatus::SAFE;
-  direct.trajectory_assurance.local.certificate_hash = "local-cert";
-  direct.trajectory_assurance.global.complete = true;
-  direct.trajectory_assurance.global.within_budget = false;
-
-  const auto status = gate.evaluateRuntime(
-      trajectory, nullptr, 0.0, 0.5, &direct);
-
-  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN)
-      << status.current_reason << ':' << status.future_reason;
-  EXPECT_EQ(status.raw_reason, ego_planner::P5GateReason::FUTURE_BAD);
-  EXPECT_EQ(status.bad_count, 0u);
 }
 
 TEST(P5RuntimeIntegrityGateTest,

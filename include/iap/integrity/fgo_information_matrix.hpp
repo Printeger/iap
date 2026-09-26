@@ -8,7 +8,6 @@
 // WLS-only S0 = (G^T W G)^{-1} used by ARAIM's own geometry matrix.
 
 #include <Eigen/Core>
-#include <iap/integrity/local_navigation_integrity.hpp>
 #include <memory>
 #include <mutex>
 #include <spdlog/spdlog.h>
@@ -65,12 +64,6 @@ struct FGOPositionInfo {
   std::vector<char> gnss_constellations;
   std::vector<int> trunk_landmark_ids;
   std::vector<std::string> factor_type_tags;
-
-  // Marginal from a graph rebuilt only from local LiDAR/IMU/trunk factors.
-  // GNSS factors and fixed-lag LinearContainerFactor priors are excluded so
-  // marginalized GNSS information cannot leak into this authority source.
-  LocalNavigationSourceEvidence local_navigation_source;
-  LocalNavigationPropagationModel local_navigation_model;
 };
 
 // ---------------------------------------------------------------------------
@@ -93,10 +86,6 @@ class FGOInformationManager {
 
     /// Minimum eigenvalue threshold for valid extraction.
     double min_eigenvalue = 1e-12;
-
-    /// Finite interval over which the configured IMU error-state model may
-    /// be extrapolated without another estimator update.
-    double local_navigation_maximum_horizon_s = 0.0;
   };
 
   FGOInformationManager();

@@ -115,50 +115,6 @@ inline void fill_integrity_report_msg(const IntegrityReport& report,
   msg.negative_variance_rejected = report.numerical_failure.negative_variance_rejected;
   msg.degenerate_geometry        = report.numerical_failure.degenerate_geometry;
   msg.failure_reason             = report.numerical_failure.failure_reason;
-
-  const auto& local = report.local_navigation_source;
-  const auto& model = report.local_navigation_model;
-  msg.local_navigation_valid = local.valid;
-  msg.local_navigation_source_contains_gnss = local.source_contains_gnss;
-  msg.local_navigation_icp_degenerate = local.icp_degenerate;
-  msg.local_navigation_stamp = local.stamp_s;
-  msg.local_navigation_estimation_frame_id = local.estimation_frame_id;
-  msg.local_navigation_current_hpl = local.current_lidar_hpl_m;
-  msg.local_navigation_current_vpl = local.current_lidar_vpl_m;
-  msg.local_navigation_source_identity = local.source_identity;
-  msg.local_navigation_source_model_identity = local.model_identity;
-  msg.local_navigation_model_identity = model.identity;
-  msg.local_navigation_invalid_reason = local.invalid_reason;
-  msg.local_navigation_model_valid = model.valid;
-  msg.local_navigation_maximum_horizon = model.maximum_horizon_s;
-  msg.local_navigation_coverage_multiplier = model.coverage_multiplier;
-  for (Eigen::Index row = 0; row < 15; ++row) {
-    for (Eigen::Index col = 0; col < 15; ++col) {
-      msg.local_navigation_state_covariance[
-          static_cast<std::size_t>(row * 15 + col)] =
-          local.state_covariance(row, col);
-    }
-  }
-  for (Eigen::Index row = 0; row < 3; ++row) {
-    msg.local_navigation_specific_force_body[static_cast<std::size_t>(row)] =
-        local.corrected_specific_force_body(row);
-    msg.local_navigation_angular_rate_body[static_cast<std::size_t>(row)] =
-        local.corrected_angular_rate_body(row);
-    for (Eigen::Index col = 0; col < 3; ++col) {
-      const auto index = static_cast<std::size_t>(row * 3 + col);
-      msg.local_navigation_world_r_body[index] = local.world_R_body(row, col);
-      msg.local_navigation_accelerometer_noise_covariance[index] =
-          model.accelerometer_noise_covariance(row, col);
-      msg.local_navigation_gyroscope_noise_covariance[index] =
-          model.gyroscope_noise_covariance(row, col);
-      msg.local_navigation_integration_noise_covariance[index] =
-          model.integration_noise_covariance(row, col);
-      msg.local_navigation_accelerometer_bias_rw_covariance[index] =
-          model.accelerometer_bias_random_walk_covariance(row, col);
-      msg.local_navigation_gyroscope_bias_rw_covariance[index] =
-          model.gyroscope_bias_random_walk_covariance(row, col);
-    }
-  }
 }
 
 }  // namespace iap
