@@ -2978,6 +2978,19 @@ TEST(P4ActualCurveClearanceCertification,
   EXPECT_NE(manager.lastP4ActualCurveCertification().detail.find(
                 "trajectory_assurance_rejected:local_precheck"),
             std::string::npos);
+  const auto &local_failure =
+      manager.latestP4DirectRiskEvidence().trajectory_assurance.local;
+  EXPECT_EQ(local_failure.status,
+            iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(local_failure.reason, "local_clearance_margin_not_positive");
+  EXPECT_EQ(local_failure.first_failure.curve_id, "nominal");
+  EXPECT_TRUE(local_failure.first_failure.position_map.allFinite());
+  EXPECT_TRUE(std::isfinite(
+      local_failure.first_failure.obstacle_clearance_m));
+  EXPECT_TRUE(std::isfinite(
+      local_failure.first_failure.required_envelope_m));
+  EXPECT_TRUE(local_failure.first_failure.nearest_obstacle_position_map.
+      allFinite());
   EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
             ego_planner::P4ForwardSelectionAuthority::NONE);
   EXPECT_FALSE(manager.p4ExecutionCertificate().valid);

@@ -7358,6 +7358,19 @@ namespace ego_planner
         generation_local_assurance.status !=
             iap::LocalMotionAssuranceStatus::SAFE)
     {
+      // The local precheck deliberately runs before the direct GNSS batch.
+      // Bind its compact first-failure evidence to the existing lineage row
+      // before rejecting so a standard (non-raw) live identifies the actual
+      // curve/sample, clearance and nearest obstacle that failed.
+      p4_direct_risk_evidence_ = P4DirectTrajectoryRiskEvidence{};
+      p4_direct_risk_evidence_.trajectory_id = local_data_.traj_id_;
+      p4_direct_risk_evidence_.trajectory_start_ns =
+          local_data_.start_time_.nanoseconds();
+      p4_direct_risk_evidence_.trajectory_assurance.local =
+          generation_local_assurance;
+      p4_direct_risk_evidence_.trajectory_assurance_complete =
+          generation_local_assurance.status !=
+              iap::LocalMotionAssuranceStatus::UNKNOWN;
       const bool braking_failure =
           generation_local_assurance.first_failure.curve_id.find(
               "brake-") == 0u;
