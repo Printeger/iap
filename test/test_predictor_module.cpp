@@ -2140,6 +2140,40 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     TransitionEvidenceReusesUpperAndLowerReceiverAdvisories) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "transition-receiver-cache";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE;
+  const iap::ForwardRiskQueryPoint transition{
+      Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp, 0.0, 1, 42, 10};
+  request.points = {transition, transition};
+  request.points.back().satellite_window_id = 20;
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete)
+      << iap::forwardRiskFailureReasonName(result.failure_reason);
+  EXPECT_EQ(result.timing.evidence_reuse_count, 1u);
+  EXPECT_EQ(result.timing.candidate_cache_hit_count, 1u);
+  // One hit is the upper-bound receiver advisory and one is the matching
+  // lower-bound advisory. Neither GNSS solve should repeat for the overlap.
+  EXPECT_EQ(result.timing.receiver_cache_hit_count, 2u);
+}
+
+TEST(PredictorModuleTest,
      FrozenSixteenSecondBdsWindowPolicyStaysNumericallyEquivalentAndInBudget) {
   auto params = make_params();
   params.lidar.fim_params.fim_radius_m = 30.0;

@@ -1293,6 +1293,18 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
       receiver_cache;
   receiver_cache.reserve(request.points.size());
+  std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
+      lower_receiver_cache;
+  lower_receiver_cache.reserve(request.points.size());
+  const auto satellite_mask_hash = [](
+      const std::vector<bool>& satellite_mask) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const bool selected : satellite_mask) {
+      hash ^= selected ? 1ULL : 0ULL;
+      hash *= 1099511628211ULL;
+    }
+    return hash == 0u ? 1u : hash;
+  };
   struct CandidateAdvisoryCacheEntry {
     std::uint64_t evidence_point_id = 0;
     std::vector<bool> satellite_mask;
@@ -1329,9 +1341,25 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
             ReceiverAdvisoryCacheEntry{local_mask, std::move(receiver)});
       }
     }
-    lower_receiver_advisories[index] =
-        gnss_.query_receiver_measured_with_satellite_mask(
-            request.snapshot, lower_mask);
+    const std::uint64_t lower_mask_hash = satellite_mask_hash(lower_mask);
+    auto cached_lower_receiver = lower_receiver_cache.find(lower_mask_hash);
+    if (cached_lower_receiver != lower_receiver_cache.end() &&
+        cached_lower_receiver->second.satellite_mask == lower_mask) {
+      lower_receiver_advisories[index] =
+          cached_lower_receiver->second.advisory;
+      ++out.timing.receiver_cache_hit_count;
+    } else {
+      auto lower_receiver =
+          gnss_.query_receiver_measured_with_satellite_mask(
+              request.snapshot, lower_mask);
+      lower_receiver_advisories[index] = lower_receiver;
+      if (cached_lower_receiver == lower_receiver_cache.end()) {
+        lower_receiver_cache.emplace(
+            lower_mask_hash,
+            ReceiverAdvisoryCacheEntry{
+                lower_mask, std::move(lower_receiver)});
+      }
+    }
 
     const auto& query = request.points[index];
     advisory_source_rows[index] = index;
