@@ -11894,6 +11894,24 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
+     RouteFrontierAndBoundedCurveUseTheSameDerivedProgressRequirement)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision decision;
+  decision.successor_required_progress_m = 0.86893986870464512;
+  manager.setP4ForwardDecisionForTest(decision);
+
+  EXPECT_DOUBLE_EQ(
+      manager.requiredP4SuccessorContinuationProgress(),
+      decision.successor_required_progress_m);
+
+  decision.successor_required_progress_m =
+      std::numeric_limits<double>::quiet_NaN();
+  manager.setP4ForwardDecisionForTest(decision);
+  EXPECT_DOUBLE_EQ(manager.requiredP4SuccessorContinuationProgress(), 0.10);
+}
+
+TEST(P4PreparedSuccessorPolicy,
      PendingFrozenChannelAndDiagnosticFullSearchStayBoundToSuccessor)
 {
   ensureRclcpp();

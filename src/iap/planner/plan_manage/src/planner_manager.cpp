@@ -5429,7 +5429,7 @@ namespace ego_planner
           p4RequiredRollingSuccessorFrontier(
               reuse_guide, p4_execution_certificate_.approved_endpoint,
               successor_stopping_distance_m,
-              p4_successor_progress_jitter_floor_m_,
+              requiredP4SuccessorContinuationProgress(),
               maximum_endpoint_projection_distance_m);
       const double reuse_frontier_m = std::min({
           p4PolylineLength(reuse_guide), request.limits.max_lookahead_m,
@@ -16506,12 +16506,8 @@ namespace ego_planner
         {
           bounded_input.parent_approved_endpoint =
               p4_execution_certificate_.approved_endpoint;
-          bounded_input.minimum_continuation_progress_m = std::max({
-              p4_successor_progress_jitter_floor_m_,
-              std::isfinite(
-                  last_p4_forward_decision_.successor_required_progress_m)
-                  ? last_p4_forward_decision_.successor_required_progress_m
-                  : 0.0});
+          bounded_input.minimum_continuation_progress_m =
+              requiredP4SuccessorContinuationProgress();
           bounded_input.maximum_endpoint_projection_distance_m =
               std::max(
                   p4_local_tracking_error_bound_m_ +

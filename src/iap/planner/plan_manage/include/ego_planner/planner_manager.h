@@ -962,6 +962,15 @@ namespace ego_planner
     {
       return p4_successor_deadline_policy_.successor_prepare_wcet_s;
     }
+    double requiredP4SuccessorContinuationProgress() const
+    {
+      return std::max(
+          p4_successor_progress_jitter_floor_m_,
+          std::isfinite(
+              last_p4_forward_decision_.successor_required_progress_m)
+              ? last_p4_forward_decision_.successor_required_progress_m
+              : 0.0);
+    }
     bool trajectoryQueueDeadlineAvailable(
         double now_s, double start_time_s,
         bool update_pipeline_measurement = true);
