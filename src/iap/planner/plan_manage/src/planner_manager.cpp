@@ -10923,6 +10923,49 @@ namespace ego_planner
         });
     if (next_unprepared == last_p4_forward_decision_.candidates.end())
     {
+      const auto pending_certification = std::find_if(
+          last_p4_forward_decision_.candidates.begin(),
+          last_p4_forward_decision_.candidates.end(),
+          [this](const P4ForwardCandidate &candidate) {
+            const auto entry = p4_prepared_channel_bundles_.find(
+                candidate.channel_id);
+            return entry != p4_prepared_channel_bundles_.end() &&
+                entry->second.state ==
+                    P4SuccessorPreparationState::CURVE_PREPARING;
+          });
+      if (pending_certification !=
+          last_p4_forward_decision_.candidates.end())
+      {
+        const auto cached = p4_prepared_channel_bundles_.find(
+            pending_certification->channel_id);
+        P4ForwardDecision pending = cached->second.decision;
+        pending.planning_attempt_id =
+            planning_risk_context_.planning_attempt_id;
+        pending.result_status = P4ForwardResultStatus::PENDING;
+        pending.action = P4ForwardAction::CANDIDATE_READY;
+        pending.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+        pending.selection_authority = P4ForwardSelectionAuthority::NONE;
+        pending.formal_support = false;
+        pending.selected_candidate_id =
+            pending_certification->candidate_id;
+        pending.selected_channel_id = pending_certification->channel_id;
+        pending.selected_guide = pending_certification->path;
+        pending.channel_comparison_state =
+            P4ChannelComparisonState::PARTIAL_COMPARISON;
+        pending.planning_disposition =
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+        pending.reason = "normal_channel_risk_snapshot_pending";
+        appendP4ForwardDecision(
+            last_p4_forward_decision_,
+            "normal_channel_typed_failure_pending_recertification", now_s);
+        last_p4_forward_decision_ = pending;
+        p4_pending_channel_work_item_ = std::move(pending);
+        p4_pending_channel_context_.reset();
+        return finish(
+            P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
+            "normal_channel_risk_snapshot_pending");
+      }
+
       appendP4ForwardDecision(
           last_p4_forward_decision_,
           "normal_channel_typed_failure_complete", now_s);

@@ -9934,6 +9934,12 @@ TEST(P4PreparedChannelPreparation,
   second_channel.path[1].y() *= -1.0;
   second_channel.path_hash = "first-healthy-generation-runner-up";
   decision.candidates.push_back(second_channel);
+  auto third_channel = decision.candidates.front();
+  third_channel.candidate_id += 2u;
+  third_channel.channel_id += 2u;
+  third_channel.path[1].y() += 0.5;
+  third_channel.path_hash = "first-healthy-generation-hard-failure";
+  decision.candidates.push_back(third_channel);
   manager.setP4ForwardDecisionForTest(decision);
 
   const auto install_curve = [&manager](
@@ -9975,6 +9981,21 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_EQ(
       manager.deferP4NormalChannelCertificationForRiskSnapshot(
           10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+      third_channel.channel_id);
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+  ASSERT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.0, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "last_channel_local_clearance_failed", &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -10026,6 +10047,25 @@ TEST(P4PreparedChannelPreparation,
           NEXT_CHANNEL_PENDING)
       << reason;
 
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 1u);
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+      third_channel.channel_id);
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+  ASSERT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.0, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "retried_last_channel_local_clearance_failed", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+      second_channel.channel_id);
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
       10.0, &waiting));
   EXPECT_FALSE(waiting);
