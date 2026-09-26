@@ -5367,6 +5367,77 @@ namespace ego_planner
         return std::move(*pending_channel);
 
       const int parent_id = p4_successor_schedule_.parent_trajectory_id;
+      const auto compute_successor_route = [](
+          P4ForwardRequest route_request,
+          const bool allow_full_search_fallback) {
+        P4SuccessorPreparationResult result;
+        const auto decision_ready = [](const P4ForwardDecision &decision) {
+          return decision.result_status == P4ForwardResultStatus::READY &&
+              (decision.action == P4ForwardAction::CANDIDATE_READY ||
+               decision.action == P4ForwardAction::RISK_SELECTED ||
+               decision.action == P4ForwardAction::CONTINUE_NOMINAL ||
+               (decision.action ==
+                    P4ForwardAction::DEFER_RISK_SELECTION &&
+                decision.executable_intent ==
+                    P4ExecutableIntent::LIMITED_PREFIX));
+        };
+        result.decision = P4ForwardRoutePlanner().decide(route_request);
+        result.decision.successor_fast_path =
+            route_request.successor_fast_path;
+        bool ready = decision_ready(result.decision);
+        const bool geometry_fallback_allowed =
+            p4SuccessorGeometryFallbackAllowed(result.decision);
+        if (!ready && route_request.successor_fast_path &&
+            allow_full_search_fallback && geometry_fallback_allowed &&
+            !(route_request.cancel_requested &&
+              route_request.cancel_requested()))
+        {
+          // A blocked/too-short frozen suffix invalidates only the fast
+          // path. Retry once with ordinary channel enumeration, still under
+          // the same absolute deadline.
+          route_request.successor_fast_path = false;
+          route_request.incumbent_channel_id = 0u;
+          route_request.successor_reuse_guide.clear();
+          route_request.nominal_local_reference = {
+              route_request.position, route_request.local_target};
+          result.decision =
+              P4ForwardRoutePlanner().decide(route_request);
+          result.decision.successor_fast_path = false;
+          ready = decision_ready(result.decision);
+        }
+        result.ready = ready;
+        if (ready)
+        {
+          result.failure = P4SuccessorFailure::NONE;
+          result.reason = "ready";
+        }
+        else if (result.decision.trigger_reason ==
+                     P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED ||
+                 result.decision.reason.find("compute_budget") !=
+                     std::string::npos)
+        {
+          result.failure = P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
+          result.reason = result.decision.reason;
+        }
+        else if (result.decision.safety_state ==
+                 P4ForwardSafetyState::UNSAFE)
+        {
+          result.failure = P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+          result.reason = result.decision.reason;
+        }
+        else if (result.decision.risk_support ==
+                 P4ForwardRiskSupport::INCOMPLETE)
+        {
+          result.failure = P4SuccessorFailure::SUPPORT_INCOMPLETE;
+          result.reason = result.decision.reason;
+        }
+        else
+        {
+          result.failure = P4SuccessorFailure::CORRIDOR_INVALID;
+          result.reason = result.decision.reason;
+        }
+        return result;
+      };
       std::optional<P4SuccessorPreparationResult> completed_result;
       if (p4_successor_schedule_.prepared_route)
       {
@@ -5376,6 +5447,65 @@ namespace ego_planner
       else
       {
         completed_result = p4_successor_worker_.poll(parent_id);
+      }
+      // The producer-native occupancy-key fast path is deliberately bounded
+      // and performs no channel enumeration. Finish it in this planning
+      // callback so a ready child route cannot sit behind executor timer
+      // polling until its immutable parent anchor expires. Only the ordinary
+      // full-search fallback remains asynchronous.
+      if (!completed_result && request.successor_fast_path &&
+          p4_successor_schedule_.next_request_sequence == 1u &&
+          !p4_successor_worker_.busyFor(parent_id))
+      {
+        const double ready_deadline_s =
+            p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+        const auto cancel_token =
+            std::make_shared<std::atomic<bool>>(false);
+        const auto steady_deadline = std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(
+                    std::max(0.0, ready_deadline_s - successor_now_s)));
+        request.cancel_requested = [cancel_token, steady_deadline]() {
+          return cancel_token->load(std::memory_order_relaxed) ||
+              std::chrono::steady_clock::now() > steady_deadline;
+        };
+        const auto started = std::chrono::steady_clock::now();
+        auto fast_result = compute_successor_route(request, false);
+        const auto finished = std::chrono::steady_clock::now();
+        if (finished > steady_deadline)
+        {
+          cancel_token->store(true, std::memory_order_relaxed);
+          fast_result.ready = false;
+          fast_result.canceled = true;
+          fast_result.failure = P4SuccessorFailure::DEADLINE_MISSED;
+          fast_result.reason = "successor_deadline_expired_inflight";
+        }
+        fast_result.parent_trajectory_id = parent_id;
+        fast_result.request_sequence =
+            p4_successor_schedule_.next_request_sequence;
+        fast_result.queue_delay_ms = 0.0;
+        fast_result.compute_duration_ms =
+            std::chrono::duration<double, std::milli>(
+                finished - started).count();
+        const bool fast_path_needs_full_search =
+            !fast_result.ready &&
+            p4SuccessorGeometryFallbackAllowed(fast_result.decision) &&
+            !(request.cancel_requested && request.cancel_requested());
+        if (fast_path_needs_full_search)
+        {
+          request.successor_fast_path = false;
+          request.incumbent_channel_id = 0u;
+          request.successor_reuse_guide.clear();
+          request.nominal_local_reference = {
+              request.position, request.local_target};
+        }
+        else
+        {
+          ++p4_successor_schedule_.next_request_sequence;
+          p4_successor_schedule_.last_attempt_execution_snapshot_id =
+              execution ? execution->execution_snapshot_id : 0u;
+          completed_result = std::move(fast_result);
+        }
       }
       if (completed_result)
       {
@@ -5512,73 +5642,9 @@ namespace ego_planner
         successor_request.cancel_token = cancel_token;
         p4_successor_schedule_.last_attempt_execution_snapshot_id =
             execution ? execution->execution_snapshot_id : 0u;
-        successor_request.compute = [request]() mutable {
-          P4SuccessorPreparationResult result;
-          const auto decision_ready = [](const P4ForwardDecision &decision) {
-            return decision.result_status ==
-                  P4ForwardResultStatus::READY &&
-              (decision.action == P4ForwardAction::CANDIDATE_READY ||
-               decision.action == P4ForwardAction::RISK_SELECTED ||
-               decision.action == P4ForwardAction::CONTINUE_NOMINAL ||
-               (decision.action ==
-                    P4ForwardAction::DEFER_RISK_SELECTION &&
-                decision.executable_intent ==
-                    P4ExecutableIntent::LIMITED_PREFIX));
-          };
-          result.decision = P4ForwardRoutePlanner().decide(request);
-          result.decision.successor_fast_path = request.successor_fast_path;
-          bool ready = decision_ready(result.decision);
-          const bool geometry_fallback_allowed =
-              p4SuccessorGeometryFallbackAllowed(result.decision);
-          if (!ready && request.successor_fast_path &&
-              geometry_fallback_allowed &&
-              !(request.cancel_requested && request.cancel_requested()))
-          {
-            // A blocked/too-short frozen suffix invalidates only the fast
-            // path. Retry once with ordinary channel enumeration, still in
-            // the dedicated successor worker and under its absolute deadline.
-            P4ForwardRequest fallback = request;
-            fallback.successor_fast_path = false;
-            fallback.incumbent_channel_id = 0u;
-            fallback.successor_reuse_guide.clear();
-            fallback.nominal_local_reference = {
-                fallback.position, fallback.local_target};
-            result.decision = P4ForwardRoutePlanner().decide(fallback);
-            result.decision.successor_fast_path = false;
-            ready = decision_ready(result.decision);
-          }
-          result.ready = ready;
-          if (ready)
-          {
-            result.failure = P4SuccessorFailure::NONE;
-            result.reason = "ready";
-          }
-          else if (result.decision.trigger_reason ==
-                   P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED ||
-                   result.decision.reason.find("compute_budget") !=
-                       std::string::npos)
-          {
-            result.failure = P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
-            result.reason = result.decision.reason;
-          }
-          else if (result.decision.safety_state ==
-                   P4ForwardSafetyState::UNSAFE)
-          {
-            result.failure = P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
-            result.reason = result.decision.reason;
-          }
-          else if (result.decision.risk_support ==
-                   P4ForwardRiskSupport::INCOMPLETE)
-          {
-            result.failure = P4SuccessorFailure::SUPPORT_INCOMPLETE;
-            result.reason = result.decision.reason;
-          }
-          else
-          {
-            result.failure = P4SuccessorFailure::CORRIDOR_INVALID;
-            result.reason = result.decision.reason;
-          }
-          return result;
+        successor_request.compute =
+            [request, compute_successor_route]() mutable {
+          return compute_successor_route(request, true);
         };
         if (!p4_successor_worker_.submit(std::move(successor_request)))
         {

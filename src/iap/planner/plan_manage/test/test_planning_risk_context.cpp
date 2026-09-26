@@ -11576,3 +11576,94 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(worker_result.planning_disposition,
             ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
 }
+
+TEST(P4PreparedSuccessorPolicy,
+     ReusedSafeSuccessorRouteIsReturnedInTheSubmittingCallback)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen, nullptr);
+  const auto snapshot = makeP4SelectionSnapshot(
+      10.0, frozen->geometry_id, true);
+  const auto risk = directRiskCallback(0.5);
+  auto execution = makeP4ExecutionSnapshot(snapshot, risk, 10.0, 92u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen;
+  occupancy->geometry.origin_w = frozen->lattice_origin;
+  occupancy->geometry.extent_m = frozen->extent_m;
+  occupancy->geometry.resolution_m = frozen->resolution_m;
+  occupancy->geometry.geometry_id = frozen->geometry_id;
+  auto bound_execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
+  bound_execution->occupancy = occupancy;
+
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("successor_inline_fast_path.csv").string(), 1);
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, risk, bound_execution);
+  manager.setTimeProvider([] {
+    return rclcpp::Time(10, 100000000, RCL_ROS_TIME);
+  });
+
+  Eigen::MatrixXd control_points(3, 8);
+  for (int index = 0; index < control_points.cols(); ++index)
+    control_points.col(index) = Eigen::Vector3d(
+        0.25 * static_cast<double>(index), 0.0, 1.0);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(control_points, 3, 0.5);
+  manager.local_data_.velocity_traj_ =
+      manager.local_data_.position_traj_.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+  manager.local_data_.traj_id_ = 18;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  manager.local_data_.curve_hash_ = "inline-fast-parent";
+
+  ego_planner::P4ExecutionCertificate parent;
+  parent.valid = true;
+  parent.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  parent.trajectory_id = manager.local_data_.traj_id_;
+  parent.start_time_ns = manager.local_data_.start_time_.nanoseconds();
+  parent.duration_s = 30.0;
+  parent.latest_rolling_switch_elapsed_s = 20.0;
+  parent.execution_deadline_s = 40.0;
+  parent.control_points_hash = manager.local_data_.curve_hash_;
+  parent.approved_endpoint = Eigen::Vector3d(1.75, 0.0, 1.0);
+  parent.successor_channel_id = 7u;
+  parent.successor_topology_path = {
+      parent.approved_endpoint, Eigen::Vector3d(10.0, 0.0, 1.0)};
+  manager.setP4ExecutionCertificateForTest(parent);
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash, 10.1, 0.1,
+      manager.local_data_.position_traj_.evaluateDeBoorT(0.1),
+      manager.local_data_.velocity_traj_.evaluateDeBoorT(0.1),
+      manager.local_data_.acceleration_traj_.evaluateDeBoorT(0.1)));
+
+  const auto decision = manager.evaluateP4ForwardRouteForTest(
+      Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+      parent.approved_endpoint);
+
+  EXPECT_EQ(decision.result_status,
+            ego_planner::P4ForwardResultStatus::READY);
+  EXPECT_EQ(decision.reason, "successor_fast_path_ready");
+  EXPECT_TRUE(decision.successor_fast_path);
+  EXPECT_EQ(decision.successor_failure,
+            ego_planner::P4SuccessorFailure::NONE);
+}
