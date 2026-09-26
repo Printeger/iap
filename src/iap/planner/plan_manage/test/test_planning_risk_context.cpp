@@ -11341,6 +11341,10 @@ TEST(P4PreparedSuccessorPolicy,
       map, snapshot,
       p4LineageTestPath("successor_feedback_priority.csv").string(), 1);
   ego_planner::EGOPlannerManager manager;
+  int64_t steady_now_ns = 1'000'000'000LL;
+  manager.setSteadyTimeProvider([&steady_now_ns]() {
+    return steady_now_ns;
+  });
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy, execution->forward_risk_batch, execution);
@@ -11449,6 +11453,27 @@ TEST(P4PreparedSuccessorPolicy,
       manager.local_data_.position_traj_.evaluateDeBoorT(0.1),
       manager.local_data_.velocity_traj_.evaluateDeBoorT(0.1),
       manager.local_data_.acceleration_traj_.evaluateDeBoorT(0.1)));
+  // Production planning and PositionCommand share a mutually-exclusive
+  // callback group. A long planning callback can therefore make the latest
+  // PositionCommand receive sample stale even though the reentrant,
+  // identity-bound controller trace continues to advance. That trace is the
+  // same real parent execution progress already used by the watchdog and
+  // must be sufficient to consume the immutable ready route.
+  steady_now_ns += 300'000'000LL;
+  const double trace_elapsed_s = 0.2;
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash,
+      1'725'000'000.0, trace_elapsed_s,
+      manager.local_data_.position_traj_.evaluateDeBoorT(trace_elapsed_s),
+      manager.local_data_.velocity_traj_.evaluateDeBoorT(trace_elapsed_s),
+      manager.local_data_.acceleration_traj_.evaluateDeBoorT(
+          trace_elapsed_s),
+      manager.local_data_.position_traj_.evaluateDeBoorT(trace_elapsed_s),
+      manager.local_data_.velocity_traj_.evaluateDeBoorT(trace_elapsed_s),
+      manager.local_data_.acceleration_traj_.evaluateDeBoorT(
+          trace_elapsed_s),
+      false));
   const auto worker_result = manager.evaluateP4ForwardRouteForTest(
       Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
       Eigen::Vector3d(1.75, 0.0, 1.0));

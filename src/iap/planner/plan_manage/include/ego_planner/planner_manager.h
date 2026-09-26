@@ -916,6 +916,11 @@ namespace ego_planner
         Eigen::Vector3d *feedback_velocity,
         Eigen::Vector3d *feedback_acceleration,
         bool *saturated = nullptr) const;
+    bool trajectoryExecutionProgress(
+        uint64_t execution_instance_id, int trajectory_id,
+        int64_t start_time_ns, const std::string &curve_hash,
+        double maximum_age_s, double *receive_ros_stamp_s,
+        double *trajectory_elapsed_s) const;
     bool activeTrajectoryExecutionState(
         double now_s, double maximum_age_s, double *trajectory_elapsed_s,
         Eigen::Vector3d *position, Eigen::Vector3d *velocity,
@@ -1492,6 +1497,8 @@ namespace ego_planner
       int64_t start_time_ns = 0;
       std::string curve_hash;
       double sample_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      double receive_ros_stamp_s =
+          std::numeric_limits<double>::quiet_NaN();
       int64_t receive_steady_ns = 0;
       double trajectory_elapsed_s =
           std::numeric_limits<double>::quiet_NaN();

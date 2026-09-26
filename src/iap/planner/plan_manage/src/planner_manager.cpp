@@ -2974,6 +2974,7 @@ namespace ego_planner
       const Eigen::Vector3d &feedback_velocity,
       const Eigen::Vector3d &feedback_acceleration, const bool saturated)
   {
+    const double receive_ros_stamp_s = plannerNow().seconds();
     std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
     const bool identity_matches =
         execution_instance_id == last_activated_execution_instance_id_ &&
@@ -3007,6 +3008,8 @@ namespace ego_planner
     trajectory_controller_trace_sample_.start_time_ns = start_time_ns;
     trajectory_controller_trace_sample_.curve_hash = curve_hash;
     trajectory_controller_trace_sample_.sample_ros_stamp_s = sample_stamp_s;
+    trajectory_controller_trace_sample_.receive_ros_stamp_s =
+        receive_ros_stamp_s;
     trajectory_controller_trace_sample_.receive_steady_ns = steadyNowNs();
     trajectory_controller_trace_sample_.trajectory_elapsed_s =
         trajectory_elapsed_s;
@@ -3023,6 +3026,67 @@ namespace ego_planner
     trajectory_controller_trace_sample_.feedback_acceleration =
         feedback_acceleration;
     trajectory_controller_trace_sample_.saturated = saturated;
+    return true;
+  }
+
+  bool EGOPlannerManager::trajectoryExecutionProgress(
+      const uint64_t execution_instance_id, const int trajectory_id,
+      const int64_t start_time_ns, const std::string &curve_hash,
+      const double maximum_age_s, double *receive_ros_stamp_s,
+      double *trajectory_elapsed_s) const
+  {
+    if (!receive_ros_stamp_s || !trajectory_elapsed_s ||
+        execution_instance_id == 0u || trajectory_id <= 0 ||
+        start_time_ns <= 0 || curve_hash.empty() ||
+        !std::isfinite(maximum_age_s) || maximum_age_s < 0.0)
+      return false;
+
+    bool found = false;
+    double selected_receive_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double selected_elapsed_s =
+        std::numeric_limits<double>::quiet_NaN();
+    const auto &sample = active_trajectory_execution_sample_;
+    if (sample.valid && sample.received_from_server &&
+        sample.execution_instance_id == execution_instance_id &&
+        sample.trajectory_id == trajectory_id &&
+        sample.start_time_ns == start_time_ns &&
+        sample.curve_hash == curve_hash &&
+        std::isfinite(sample.receive_ros_stamp_s) &&
+        std::isfinite(sample.trajectory_elapsed_s) &&
+        executionFeedbackFresh(sample.receive_steady_ns, maximum_age_s))
+    {
+      found = true;
+      selected_receive_s = sample.receive_ros_stamp_s;
+      selected_elapsed_s = sample.trajectory_elapsed_s;
+    }
+
+    // PositionCommand shares the planning callback group and can be delayed
+    // by a long certification pass. The controller trace is already the
+    // watchdog's identity-bound, reentrant control evidence; reuse its latest
+    // commanded progress without changing any freshness or identity limit.
+    {
+      std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+      const auto &trace = trajectory_controller_trace_sample_;
+      if (trace.valid &&
+          trace.execution_instance_id == execution_instance_id &&
+          trace.trajectory_id == trajectory_id &&
+          trace.start_time_ns == start_time_ns &&
+          trace.curve_hash == curve_hash &&
+          std::isfinite(trace.receive_ros_stamp_s) &&
+          std::isfinite(trace.trajectory_elapsed_s) &&
+          executionFeedbackFresh(trace.receive_steady_ns, maximum_age_s) &&
+          (!found || trace.trajectory_elapsed_s >= selected_elapsed_s))
+      {
+        found = true;
+        selected_receive_s = trace.receive_ros_stamp_s;
+        selected_elapsed_s = trace.trajectory_elapsed_s;
+      }
+    }
+    if (!found)
+      return false;
+    *receive_ros_stamp_s = selected_receive_s;
+    *trajectory_elapsed_s = selected_elapsed_s;
     return true;
   }
 
@@ -5296,19 +5360,18 @@ namespace ego_planner
             completed.compute_duration_ms;
         successor.successor_failure = completed.failure;
         completed.decision = successor;
-        const auto &parent_sample = active_trajectory_execution_sample_;
+        double parent_receive_ros_stamp_s =
+            std::numeric_limits<double>::quiet_NaN();
+        double parent_execution_elapsed_s =
+            std::numeric_limits<double>::quiet_NaN();
         const bool parent_execution_sample_ready =
-            parent_sample.valid && parent_sample.received_from_server &&
-            parent_sample.execution_instance_id ==
-                local_data_.execution_instance_id_ &&
-            parent_sample.trajectory_id == local_data_.traj_id_ &&
-            parent_sample.start_time_ns ==
-                local_data_.start_time_.nanoseconds() &&
-            parent_sample.curve_hash == local_data_.curve_hash_ &&
-            std::isfinite(parent_sample.trajectory_elapsed_s) &&
-            executionFeedbackFresh(
-                parent_sample.receive_steady_ns,
-                kExecutionFeedbackFreshnessTimeoutS);
+            trajectoryExecutionProgress(
+                local_data_.execution_instance_id_, local_data_.traj_id_,
+                local_data_.start_time_.nanoseconds(),
+                local_data_.curve_hash_,
+                kExecutionFeedbackFreshnessTimeoutS,
+                &parent_receive_ros_stamp_s,
+                &parent_execution_elapsed_s);
         if (completed.ready &&
             completed.failure == P4SuccessorFailure::NONE &&
             !parent_execution_sample_ready)
@@ -6973,17 +7036,15 @@ namespace ego_planner
     {
       auto &parent = p4_execution_commitment_backup_.local_data;
       const double switch_elapsed_s = local_data_.parent_switch_elapsed_s_;
-      const auto &sample = active_trajectory_execution_sample_;
-      const bool sample_matches = sample.valid &&
-          sample.received_from_server &&
-          sample.execution_instance_id == parent.execution_instance_id_ &&
-          sample.trajectory_id == parent.traj_id_ &&
-          sample.start_time_ns == parent.start_time_.nanoseconds() &&
-          sample.curve_hash == parent.curve_hash_ &&
-          std::isfinite(sample.trajectory_elapsed_s) &&
-          executionFeedbackFresh(
-              sample.receive_steady_ns,
-              kExecutionFeedbackFreshnessTimeoutS);
+      double parent_receive_ros_stamp_s =
+          std::numeric_limits<double>::quiet_NaN();
+      double parent_execution_elapsed_s =
+          std::numeric_limits<double>::quiet_NaN();
+      const bool sample_matches = trajectoryExecutionProgress(
+          parent.execution_instance_id_, parent.traj_id_,
+          parent.start_time_.nanoseconds(), parent.curve_hash_,
+          kExecutionFeedbackFreshnessTimeoutS,
+          &parent_receive_ros_stamp_s, &parent_execution_elapsed_s);
       if (!std::isfinite(switch_elapsed_s) || switch_elapsed_s < 0.0 ||
           switch_elapsed_s > parent.duration_ + 1.0e-9)
         return reject_final_identity(
@@ -6998,7 +7059,7 @@ namespace ego_planner
       if (sample_matches)
       {
         const auto bridge = p4RollingSuccessorExposureBridge(
-            sample.receive_ros_stamp_s, sample.trajectory_elapsed_s,
+            parent_receive_ros_stamp_s, parent_execution_elapsed_s,
             switch_elapsed_s, parent.duration_,
             p4_global_exposure_last_observation_stamp_s_);
         if (!bridge.valid)
@@ -11366,26 +11427,23 @@ namespace ego_planner
           parent_switch_elapsed_s > incumbent.duration_ + 1.0e-9)
         return finish(false, "successor_parent_switch_anchor_invalid",
                       P4SuccessorFailure::PARENT_IDENTITY_CHANGED);
-      const auto &parent_sample = active_trajectory_execution_sample_;
-      const bool parent_sample_matches = parent_sample.valid &&
-          parent_sample.received_from_server &&
-          parent_sample.execution_instance_id ==
-              incumbent.execution_instance_id_ &&
-          parent_sample.trajectory_id == incumbent.traj_id_ &&
-          parent_sample.start_time_ns ==
-              incumbent.start_time_.nanoseconds() &&
-          parent_sample.curve_hash == incumbent.curve_hash_ &&
-          executionFeedbackFresh(
-              parent_sample.receive_steady_ns,
-              kExecutionFeedbackFreshnessTimeoutS);
+      double parent_receive_ros_stamp_s =
+          std::numeric_limits<double>::quiet_NaN();
+      double parent_execution_elapsed_s =
+          std::numeric_limits<double>::quiet_NaN();
+      const bool parent_sample_matches = trajectoryExecutionProgress(
+          incumbent.execution_instance_id_, incumbent.traj_id_,
+          incumbent.start_time_.nanoseconds(), incumbent.curve_hash_,
+          kExecutionFeedbackFreshnessTimeoutS,
+          &parent_receive_ros_stamp_s, &parent_execution_elapsed_s);
       if (!parent_sample_matches && parent_switch_elapsed_s > 1.0e-9)
         return finish(false, "successor_parent_execution_sample_unavailable",
                       P4SuccessorFailure::INTEGRITY_STALE);
       if (parent_sample_matches)
       {
         const auto bridge = p4RollingSuccessorExposureBridge(
-            parent_sample.receive_ros_stamp_s,
-            parent_sample.trajectory_elapsed_s,
+            parent_receive_ros_stamp_s,
+            parent_execution_elapsed_s,
             parent_switch_elapsed_s, incumbent.duration_,
             p4_global_exposure_last_observation_stamp_s_);
         if (!bridge.valid)
