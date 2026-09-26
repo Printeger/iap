@@ -1583,7 +1583,8 @@ namespace ego_planner
         planner_manager_->p4SuccessorPreparationDue(now_s);
     if (p4SafetyObserverShouldDriveSuccessorPlanning(
             exec_state_ == EXEC_TRAJ, p4_execution_check.applicable,
-            p4_execution_check.allowed, rolling_successor, successor_due))
+            p4_execution_check.allowed, rolling_successor, successor_due,
+            planner_manager_->trajectoryCommandAwaitingActivation()))
     {
       changeFSMExecState(REPLAN_TRAJ, "P4_SUCCESSOR_SAFETY_HANDOFF");
       execFSMCallback();
