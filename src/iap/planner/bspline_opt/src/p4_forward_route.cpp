@@ -4370,6 +4370,42 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       request, decision.candidates, graph);
   }
 
+  // A clear committed successor guide is already the frozen topology seed
+  // selected by the parent's completed comparison.  Re-running ForwardRisk
+  // here cannot authorize motion: the exact child B-spline, braking curves,
+  // local assurance and P5 checks below the manager remain the sole
+  // authority.  It can, however, contend with the runtime watchdog for the
+  // same immutable risk provider and strand the successor worker past its
+  // fixed deadline.  Return the geometry-only seed immediately.  A blocked
+  // guide has already fallen through to ordinary bounded channel search, so
+  // this does not turn an invalid incumbent into a candidate.
+  if (request.successor_fast_path && nominal_path_clear &&
+      decision.channel_search_termination ==
+        "successor_reuse_guide_clear" &&
+      decision.candidates.size() == 1u)
+  {
+    auto &candidate = decision.candidates.front();
+    candidate.risk_supported = false;
+    candidate.safety_gate_passed = false;
+    candidate.safety_state = P4ForwardSafetyState::UNKNOWN;
+    candidate.reason = "successor_fast_path_geometry_seed";
+    decision.action = P4ForwardAction::CANDIDATE_READY;
+    decision.trigger_reason = P4ForwardTriggerReason::SINGLE_CHANNEL;
+    decision.geometry_state = P4ForwardGeometryState::CLEAR;
+    decision.risk_support = P4ForwardRiskSupport::INCOMPLETE;
+    decision.safety_state = P4ForwardSafetyState::UNKNOWN;
+    decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+    decision.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+    decision.formal_support = false;
+    decision.selected_candidate_id = candidate.candidate_id;
+    decision.selected_channel_id = candidate.channel_id;
+    decision.selected_guide = candidate.path;
+    decision.planning_disposition =
+      P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+    decision.reason = "successor_fast_path_geometry_seed_ready";
+    return finalize(std::move(decision));
+  }
+
   // A best-effort route with a native refiner has no authority until the
   // refined geometry is available.  Nevertheless, evaluate every coarse
   // channel in one batch before choosing which expensive refinement to run.

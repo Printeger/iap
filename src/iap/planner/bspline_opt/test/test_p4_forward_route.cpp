@@ -1519,6 +1519,49 @@ TEST(P4ForwardRoute,
 }
 
 TEST(P4ForwardRoute,
+     ClearSuccessorFastPathDefersRiskToActualCurveCertification)
+{
+  auto request = straightRequest();
+  request.successor_fast_path = true;
+  request.incumbent_channel_id = 42u;
+  request.successor_reuse_guide = request.nominal_local_reference;
+  request.raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>(
+      std::vector<Eigen::Vector3d>{Eigen::Vector3d(3.0, 2.0, 1.0)});
+  int risk_queries = 0;
+  request.risk = [&risk_queries](const Eigen::Vector3d &, double) {
+      ++risk_queries;
+      return P4ForwardRiskSample{};
+    };
+  request.risk_batch = [&risk_queries](
+      const std::vector<P4ForwardRiskQuery> &, double,
+      std::vector<P4ForwardRiskSample> *) {
+      ++risk_queries;
+      return false;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(risk_queries, 0)
+    << "a frozen clear guide is only a seed; the actual child owns risk";
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::FINAL_CHANNEL);
+  EXPECT_EQ(decision.planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+  EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(decision.formal_support);
+  EXPECT_EQ(decision.risk_support,
+            ego_planner::P4ForwardRiskSupport::INCOMPLETE);
+  EXPECT_EQ(decision.selected_channel_id, 42u);
+  ASSERT_GE(decision.selected_guide.size(), 2u);
+  EXPECT_TRUE(decision.selected_guide.front().isApprox(
+      request.successor_reuse_guide.front(), 1.0e-12));
+  EXPECT_GT((decision.selected_guide.back() -
+             decision.selected_guide.front()).norm(), 1.0);
+}
+
+TEST(P4ForwardRoute,
      SuccessorFastPathFallsBackToTopologyOnlyWhenCommittedGuideIsBlocked)
 {
   auto request = straightRequest();
