@@ -144,6 +144,7 @@ class TestStageContracts(unittest.TestCase):
         identities = [(7, trajectory, 1_000_000_000 * trajectory,
                        f"curve-{trajectory}")
                       for trajectory in (10, 11, 12)]
+        previous = None
         for execution, trajectory, start_ns, curve_hash in identities:
             common = {
                 "execution_instance_id": execution,
@@ -151,6 +152,13 @@ class TestStageContracts(unittest.TestCase):
                 "start_time_ns": start_ns,
                 "curve_hash": curve_hash,
             }
+            if previous is not None:
+                common.update({
+                    "parent_execution_instance_id": previous[0],
+                    "parent_trajectory_id": previous[1],
+                    "parent_start_time_ns": previous[2],
+                    "parent_curve_hash": previous[3],
+                })
             records.extend([
                 {"kind": "normal_bspline", "payload": common},
                 {"kind": "trajectory_status", "payload": {
@@ -162,6 +170,7 @@ class TestStageContracts(unittest.TestCase):
                     "feedback_position_xyz": [0.05, 0.0, 1.5],
                     "saturated": False}},
             ])
+            previous = (execution, trajectory, start_ns, curve_hash)
         records.extend([
             {"kind": "iap_odom", "payload": {
                 "stamp_s": 1.0, "position_m": [-18.0, 0.0, 1.5],
@@ -182,6 +191,7 @@ class TestStageContracts(unittest.TestCase):
 
     def test_continuous_flight_does_not_count_guard_activation_as_successor(self):
         records = []
+        first_identity = None
         for index, kind in enumerate((
                 "normal_bspline", "pending_guard_bspline",
                 "normal_bspline"), start=1):
@@ -191,6 +201,16 @@ class TestStageContracts(unittest.TestCase):
                 "start_time_ns": index * 1_000_000_000,
                 "curve_hash": f"curve-{index}",
             }
+            if index == 1:
+                first_identity = (7, index, index * 1_000_000_000,
+                                  f"curve-{index}")
+            elif index == 3:
+                common.update({
+                    "parent_execution_instance_id": first_identity[0],
+                    "parent_trajectory_id": first_identity[1],
+                    "parent_start_time_ns": first_identity[2],
+                    "parent_curve_hash": first_identity[3],
+                })
             records.extend([
                 {"kind": kind, "payload": common},
                 {"kind": "trajectory_status", "payload": {
@@ -204,6 +224,28 @@ class TestStageContracts(unittest.TestCase):
         self.assertIn("non_nominal_trajectory_activation",
                       summary["failures"])
         self.assertIn("fewer_than_two_successor_switches",
+                      summary["failures"])
+
+    def test_continuous_flight_requires_successor_parent_identity(self):
+        records = []
+        for index in range(1, 4):
+            common = {
+                "execution_instance_id": 7,
+                "trajectory_id": index,
+                "start_time_ns": index * 1_000_000_000,
+                "curve_hash": f"curve-{index}",
+            }
+            records.extend([
+                {"kind": "normal_bspline", "payload": common},
+                {"kind": "trajectory_status", "payload": {
+                    **common, "state": "ACTIVATED"}},
+            ])
+
+        summary = MODULE.analyze_continuous_flight(records)
+
+        self.assertEqual(summary["successor_switch_count"], 0)
+        self.assertEqual(summary["successor_parent_mismatch_count"], 2)
+        self.assertIn("successor_parent_identity_mismatch",
                       summary["failures"])
 
     def test_continuous_flight_allows_unbound_hover_before_first_activation(self):
@@ -231,6 +273,15 @@ class TestStageContracts(unittest.TestCase):
                 "start_time_ns": 1_000_000_000 * trajectory,
                 "curve_hash": f"curve-{trajectory}",
             }
+            if index > 0:
+                previous_trajectory = trajectory - 1
+                common.update({
+                    "parent_execution_instance_id": 7,
+                    "parent_trajectory_id": previous_trajectory,
+                    "parent_start_time_ns":
+                        1_000_000_000 * previous_trajectory,
+                    "parent_curve_hash": f"curve-{previous_trajectory}",
+                })
             stamp = 1.0 + index
             records.extend([
                 {"kind": "normal_bspline", "receive_steady_s": stamp - .1,

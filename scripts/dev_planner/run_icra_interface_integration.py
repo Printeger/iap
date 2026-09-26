@@ -995,6 +995,12 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
                 int(value.get("start_time_ns", 0) or 0),
                 str(value.get("curve_hash", "")))
 
+    def parent_identity(value: dict) -> tuple[int, int, int, str]:
+        return (int(value.get("parent_execution_instance_id", 0) or 0),
+                int(value.get("parent_trajectory_id", 0) or 0),
+                int(value.get("parent_start_time_ns", 0) or 0),
+                str(value.get("parent_curve_hash", "")))
+
     published_normal = {identity(payload(row)) for row in normal_splines}
     published_guards = {identity(payload(row)) for row in guard_splines}
     published = published_normal | published_guards
@@ -1022,7 +1028,20 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
             continue
         if not distinct_activations or distinct_activations[-1] != item:
             distinct_activations.append(item)
-    successor_switches = max(0, len(distinct_activations) - 1)
+    normal_by_identity = {
+        identity(payload(row)): payload(row) for row in normal_splines
+    }
+    successor_switches = 0
+    successor_parent_mismatches = 0
+    for parent, child in zip(
+            distinct_activations, distinct_activations[1:]):
+        child_curve = normal_by_identity.get(child, {})
+        if parent_identity(child_curve) == parent:
+            successor_switches += 1
+        else:
+            successor_parent_mismatches += 1
+    if successor_parent_mismatches:
+        failures.append("successor_parent_identity_mismatch")
     if successor_switches < 2:
         failures.append("fewer_than_two_successor_switches")
 
@@ -1127,6 +1146,7 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         activation_count=len(activated),
         non_nominal_activation_count=len(non_nominal_activations),
         successor_switch_count=successor_switches,
+        successor_parent_mismatch_count=successor_parent_mismatches,
         maximum_tracking_error_m=maximum_tracking_error_m,
         saturated_count=saturated_count,
         longest_nonterminal_pause_s=longest_nonterminal_pause_s,
