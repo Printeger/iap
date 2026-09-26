@@ -11242,10 +11242,12 @@ TEST(P4PreparedSuccessorPolicy,
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
       9.9, &cache_reason))
       << cache_reason;
-  // A cached child is released early enough to complete latest-snapshot
-  // reauthorization, DDS delivery and traj_server queueing before its fixed
-  // switch instant.  It must not wait until the instant it should activate.
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.149));
+  // A complete cached child is queued immediately.  Waiting until only the
+  // measured minimum lead remains can miss the immutable switch window when
+  // the loaded executor delays the next FSM callback; traj_server still
+  // activates it only at the fixed start after full-identity ACK matching.
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(9.9));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.149));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.15));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.80));
   EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.85));

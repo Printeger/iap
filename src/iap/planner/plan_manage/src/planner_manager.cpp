@@ -10386,15 +10386,19 @@ namespace ego_planner
     const auto &boundary = p4_cached_successor_bundle_->boundary;
     const double minimum_commitment_end_s =
         static_cast<double>(boundary.parent_start_time_ns) * 1.0e-9 + 1.0;
-    const double queue_release_s = boundary.planned_switch_time_s -
-        requiredTrajectoryLeadTimeSeconds();
     constexpr double kMinimumQueueMarginS = 0.2;
     const double latest_queue_time_s =
         boundary.planned_switch_time_s - kMinimumQueueMarginS;
+    // Queue a complete, certified child as soon as it exists.  The immutable
+    // start time still controls activation, while latest-snapshot
+    // reauthorization, the publication certificate, the queue-deadline gate
+    // and full-identity ACK matching remain mandatory.  Delaying publication
+    // until only the measured minimum lead remains is not a safety property
+    // and can lose the whole fixed window if a loaded executor starves the
+    // next FSM timer callback.
     return std::isfinite(boundary.planned_switch_time_s) &&
         boundary.planned_switch_time_s + 1.0e-9 >=
             minimum_commitment_end_s &&
-        now_s + 1.0e-9 >= queue_release_s &&
         now_s <= latest_queue_time_s + 1.0e-9;
   }
 
