@@ -1627,6 +1627,31 @@ TEST(P4ForwardRoute,
 }
 
 TEST(P4ForwardRoute,
+     SuccessorFastPathUsesFrozenGeometryWithoutReindexingRawSnapshot)
+{
+  auto request = straightRequest();
+  request.successor_fast_path = true;
+  request.incumbent_channel_id = 42u;
+  request.successor_reuse_guide = request.nominal_local_reference;
+  request.raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>(
+      10000u, Eigen::Vector3d(3.0, 2.0, 1.0));
+  int geometry_queries = 0;
+  request.geometry = [&geometry_queries](const Eigen::Vector3d &) {
+      ++geometry_queries;
+      return P4ForwardGeometryState::CLEAR;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_GT(geometry_queries, 0)
+    << "the frozen guide should not wait for a full raw-index rebuild";
+  EXPECT_EQ(decision.channel_search_termination,
+            "successor_reuse_guide_clear");
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
+}
+
+TEST(P4ForwardRoute,
      SuccessorFastPathFallsBackToTopologyOnlyWhenCommittedGuideIsBlocked)
 {
   auto request = straightRequest();
@@ -1636,6 +1661,15 @@ TEST(P4ForwardRoute,
   request.raw_occupied_voxel_centers =
     std::make_shared<const std::vector<Eigen::Vector3d>>(
       std::vector<Eigen::Vector3d>{Eigen::Vector3d(2.0, 0.0, 1.0)});
+  request.geometry = [](const Eigen::Vector3d &point) {
+      if (point.x() >= 1.95 && point.x() <= 2.05 &&
+        std::abs(point.y()) <= 0.05 &&
+        point.z() >= 0.95 && point.z() <= 1.05)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return P4ForwardGeometryState::CLEAR;
+    };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 

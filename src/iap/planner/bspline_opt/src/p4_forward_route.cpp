@@ -202,7 +202,15 @@ public:
     resolution_(request.limits.topology_resolution_m)
   {
     dimensions_ = (request.map_extent / resolution_).array().floor().cast<int>();
-    if (request.raw_occupied_voxel_centers) {
+    // The rolling fast path only validates one already-committed guide. Its
+    // frozen geometry callback addresses the same immutable occupancy and is
+    // cached below with the vehicle envelope, so rebuilding the complete raw
+    // hit index can only delay that bounded check. If the guide is blocked,
+    // the same callback remains fail-closed for the ordinary fallback search.
+    // Normal multi-channel planning keeps the raw sparse index.
+    if (request.raw_occupied_voxel_centers &&
+      !request.successor_fast_path)
+    {
       raw_occupied_cells_.reserve(
         request.raw_occupied_voxel_centers->size() * 2 + 1);
       const double occupancy_resolution =
