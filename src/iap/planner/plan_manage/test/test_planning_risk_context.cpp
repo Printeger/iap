@@ -9865,6 +9865,16 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(manager.lastP4ForwardDecision().reason,
             "successor_curve_waiting_for_new_snapshot");
   EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.95, 182u));
+  manager.clearPlanningRiskContext();
+  ASSERT_EQ(manager.planningRiskContext().planning_attempt_id, 0u);
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.96, 183u));
+  EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
+      failed_attempt_id)
+      << "a safety callback without a planning transaction must not bind "
+         "the retry to invalid attempt zero";
   manager.setPlanningRiskContextForTest(risk_snapshot, 10.96);
   const uint64_t retry_attempt_id =
       manager.planningRiskContext().planning_attempt_id;

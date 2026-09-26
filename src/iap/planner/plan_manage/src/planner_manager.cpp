@@ -3776,6 +3776,14 @@ namespace ego_planner
         return false;
       if (p4_pending_channel_work_item_)
       {
+        // The safety observer can see the new execution snapshot before a
+        // planning callback has installed its PlanningRiskContext.  Attempt
+        // id zero is not a transaction identity: consuming the retry here
+        // would bind the frozen work item to zero and make the next real
+        // attempt fail the mandatory final-commit identity gate.  Keep the
+        // retry pending until the ordinary planning entry owns a valid id.
+        if (planning_risk_context_.planning_attempt_id == 0u)
+          return false;
         // The frozen guide remains search lineage from the failed snapshot,
         // but its replacement actual curve belongs to this new planning
         // attempt.  Normal cached-curve recertification performs the same
