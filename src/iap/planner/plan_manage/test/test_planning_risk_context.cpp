@@ -2958,6 +2958,78 @@ TEST(TrajectoryExecutionFeedbackTest,
             ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING);
 }
 
+TEST(TrajectoryExecutionFeedbackTest,
+     PendingChildTraceBridgesOnlyBoundedActivationAckSkew)
+{
+  auto fixture = makeActivatedRuntimeFeedbackFixture(
+      "runtime_pending_child_activation_ack", 942);
+  auto &manager = *fixture.manager;
+  const auto instance = manager.executionInstanceId();
+
+  ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
+  const int child_id = 943;
+  const int64_t child_start_ns = 11'000'000'000LL;
+  const std::string child_hash = "pending-child-943";
+  manager.local_data_.traj_id_ = child_id;
+  manager.local_data_.start_time_ =
+      rclcpp::Time(child_start_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = child_hash;
+  auto child_certificate = manager.p4ExecutionCertificate();
+  child_certificate.trajectory_id = child_id;
+  child_certificate.start_time_ns = child_start_ns;
+  child_certificate.control_points_hash = child_hash;
+  manager.setP4ExecutionCertificateForTest(child_certificate);
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      instance, child_id, child_start_ns, child_hash));
+  manager.stageP4ExecutionCandidateForActivation();
+  ASSERT_TRUE(manager.trajectoryCommandAwaitingActivation());
+
+  // The controller callback is reentrant, while the matching status callback
+  // can be queued behind this safety turn.  The exact pending child trace is
+  // control evidence, not an activation authority, and may bridge only the
+  // existing 200 ms feedback handshake.
+  *fixture.steady_now_ns += 201'000'000LL;
+  auto child_trajectory = manager.local_data_.position_traj_;
+  auto child_velocity = child_trajectory.getDerivative();
+  auto child_acceleration = child_velocity.getDerivative();
+  constexpr double early_elapsed_s = 0.05;
+  const Eigen::Vector3d early_position =
+      child_trajectory.evaluateDeBoorT(early_elapsed_s);
+  const Eigen::Vector3d early_velocity =
+      child_velocity.evaluateDeBoorT(early_elapsed_s);
+  const Eigen::Vector3d early_acceleration =
+      child_acceleration.evaluateDeBoorT(early_elapsed_s);
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      instance, child_id, child_start_ns, child_hash,
+      1'725'000'001.0, early_elapsed_s, early_position, early_velocity,
+      early_acceleration, early_position, early_velocity,
+      early_acceleration, false));
+  const auto waiting = manager.validateCommittedP4TrajectoryExecution(
+      fixture.evaluation_ros_s, early_position);
+  EXPECT_TRUE(waiting.allowed) << waiting.reason;
+  EXPECT_EQ(waiting.reason,
+            "runtime_waiting_for_pending_activation_ack");
+  EXPECT_FALSE(waiting.guard_braking_preschedule_requested);
+  EXPECT_TRUE(manager.trajectoryCommandAwaitingActivation());
+
+  constexpr double late_elapsed_s = 0.201;
+  const Eigen::Vector3d late_position =
+      child_trajectory.evaluateDeBoorT(late_elapsed_s);
+  const Eigen::Vector3d late_velocity =
+      child_velocity.evaluateDeBoorT(late_elapsed_s);
+  const Eigen::Vector3d late_acceleration =
+      child_acceleration.evaluateDeBoorT(late_elapsed_s);
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      instance, child_id, child_start_ns, child_hash,
+      1'725'000'001.2, late_elapsed_s, late_position, late_velocity,
+      late_acceleration, late_position, late_velocity,
+      late_acceleration, false));
+  const auto expired = manager.validateCommittedP4TrajectoryExecution(
+      fixture.evaluation_ros_s, late_position);
+  EXPECT_NE(expired.reason.find("controller_execution_trace_stale"),
+            std::string::npos) << expired.reason;
+}
+
 TEST(P4ActualCurveClearanceCertification,
      LocalFailureIsTypedAndSkipsGnssRiskComputation) {
   ensureRclcpp();

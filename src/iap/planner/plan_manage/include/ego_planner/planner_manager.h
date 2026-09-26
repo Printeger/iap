@@ -1531,6 +1531,13 @@ namespace ego_planner
       bool saturated = false;
     } trajectory_controller_trace_sample_;
     mutable std::mutex trajectory_controller_trace_mutex_;
+    // Protected by trajectory_controller_trace_mutex_. This is only the
+    // identity of the already-published activation transaction; it does not
+    // grant execution authority before the matching server ACK.
+    uint64_t pending_activation_trace_execution_instance_id_ = 0;
+    int pending_activation_trace_trajectory_id_ = 0;
+    int64_t pending_activation_trace_start_time_ns_ = 0;
+    std::string pending_activation_trace_curve_hash_;
     bool controller_trace_required_ = false;
     std::chrono::steady_clock::time_point last_trajectory_publish_steady_;
     std::chrono::steady_clock::time_point

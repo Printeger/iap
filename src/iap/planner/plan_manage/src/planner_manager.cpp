@@ -2982,7 +2982,14 @@ namespace ego_planner
         trajectory_id == last_activated_trajectory_id_ &&
         start_time_ns == last_activated_start_time_ns_ &&
         curve_hash == last_activated_curve_hash_;
-    if (!identity_matches || execution_instance_id == 0 ||
+    const bool pending_activation_identity_matches =
+        execution_instance_id ==
+            pending_activation_trace_execution_instance_id_ &&
+        trajectory_id == pending_activation_trace_trajectory_id_ &&
+        start_time_ns == pending_activation_trace_start_time_ns_ &&
+        curve_hash == pending_activation_trace_curve_hash_;
+    if ((!identity_matches && !pending_activation_identity_matches) ||
+        execution_instance_id == 0 ||
         trajectory_id <= 0 ||
         start_time_ns <= 0 || curve_hash.empty() ||
         !std::isfinite(sample_stamp_s) ||
@@ -3226,16 +3233,31 @@ namespace ego_planner
     }
     {
       // Controller traces arrive on a reentrant callback group. Publish the
-      // new active identity and clear the prior trace under the same narrow
-      // mutex so the first matching trace cannot be erased by activation.
+      // new active identity under the same narrow mutex. A controller trace
+      // for this exact published child can legitimately precede the ACK
+      // callback; preserve it instead of erasing the first real sample.
       std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+      const bool buffered_trace_matches_activation =
+          trajectory_controller_trace_sample_.valid &&
+          trajectory_controller_trace_sample_.execution_instance_id ==
+              execution_instance_id &&
+          trajectory_controller_trace_sample_.trajectory_id ==
+              trajectory_id &&
+          trajectory_controller_trace_sample_.start_time_ns ==
+              start_time_ns &&
+          trajectory_controller_trace_sample_.curve_hash == curve_hash;
       last_activated_execution_instance_id_ = execution_instance_id;
       last_activated_trajectory_id_ = trajectory_id;
       last_activated_start_time_ns_ = start_time_ns;
       last_activated_curve_hash_ = curve_hash;
       last_activated_receive_steady_ns_ = steadyNowNs();
-      trajectory_controller_trace_sample_ =
-          TrajectoryControllerTraceSample{};
+      if (!buffered_trace_matches_activation)
+        trajectory_controller_trace_sample_ =
+            TrajectoryControllerTraceSample{};
+      pending_activation_trace_execution_instance_id_ = 0;
+      pending_activation_trace_trajectory_id_ = 0;
+      pending_activation_trace_start_time_ns_ = 0;
+      pending_activation_trace_curve_hash_.clear();
     }
     // The planned start stamp may be seconds behind the actual activation
     // when a child waits for parent progress. Until the first controller
@@ -9894,6 +9916,13 @@ namespace ego_planner
     p4_pending_activation_is_prepared_successor_ =
         queued_prepared_successor;
     p4_candidate_awaiting_activation_ = true;
+    {
+      std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+      pending_activation_trace_execution_instance_id_ = queued_instance;
+      pending_activation_trace_trajectory_id_ = queued_id;
+      pending_activation_trace_start_time_ns_ = queued_start_ns;
+      pending_activation_trace_curve_hash_ = queued_hash;
+    }
   }
 
   void EGOPlannerManager::restoreP4ExecutionCommitmentAfterCandidateRejection()
@@ -9904,6 +9933,13 @@ namespace ego_planner
     p4_pending_activation_state_.reset();
     p4_candidate_awaiting_activation_ = false;
     p4_pending_activation_is_prepared_successor_ = false;
+    {
+      std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+      pending_activation_trace_execution_instance_id_ = 0;
+      pending_activation_trace_trajectory_id_ = 0;
+      pending_activation_trace_start_time_ns_ = 0;
+      pending_activation_trace_curve_hash_.clear();
+    }
     if (!had_incumbent)
     {
       p4_planning_disposition_ = P4PlanningDisposition::HOLD_REQUIRED;
@@ -9923,6 +9959,13 @@ namespace ego_planner
     p4_pending_activation_state_.reset();
     p4_candidate_awaiting_activation_ = false;
     p4_pending_activation_is_prepared_successor_ = false;
+    {
+      std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
+      pending_activation_trace_execution_instance_id_ = 0;
+      pending_activation_trace_trajectory_id_ = 0;
+      pending_activation_trace_start_time_ns_ = 0;
+      pending_activation_trace_curve_hash_.clear();
+    }
     p4_prepared_successor_.reset();
     p4_cached_successor_bundle_.reset();
     p4_cached_successor_activation_in_progress_ = false;
@@ -12927,8 +12970,28 @@ namespace ego_planner
         &trace_commanded_acceleration, &control_actual_position,
         &control_actual_velocity, &control_actual_acceleration,
         &controller_saturated);
+    bool pending_activation_controller_trace_matches = false;
+    if (!controller_trace_matches && trajectoryCommandAwaitingActivation())
+    {
+      std::lock_guard<std::mutex> lock(
+          trajectory_controller_trace_mutex_);
+      const auto &trace = trajectory_controller_trace_sample_;
+      pending_activation_controller_trace_matches = trace.valid &&
+          trace.execution_instance_id ==
+              pending_activation_trace_execution_instance_id_ &&
+          trace.trajectory_id == pending_activation_trace_trajectory_id_ &&
+          trace.start_time_ns == pending_activation_trace_start_time_ns_ &&
+          trace.curve_hash == pending_activation_trace_curve_hash_ &&
+          trace.trajectory_elapsed_s <=
+              kExecutionFeedbackFreshnessTimeoutS + 1.0e-9 &&
+          !trace.saturated &&
+          executionFeedbackFresh(
+              trace.receive_steady_ns,
+              kExecutionFeedbackFreshnessTimeoutS);
+    }
     if (execution_clock_stale && !controller_trace_matches &&
-        !activated_guard_controller_trace_matches)
+        !activated_guard_controller_trace_matches &&
+        !pending_activation_controller_trace_matches)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
     bool waiting_for_first_matching_controller_trace = false;
@@ -12951,9 +13014,25 @@ namespace ego_planner
     }
     if (controller_trace_required_ && !controller_trace_matches &&
         !activated_guard_controller_trace_matches &&
+        !pending_activation_controller_trace_matches &&
         !waiting_for_first_matching_controller_trace)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
+    if (controller_trace_required_ &&
+        pending_activation_controller_trace_matches)
+    {
+      // The exact certified child is already reaching the controller, while
+      // its server status callback is queued behind this safety turn. This
+      // trace cannot activate the child: it only bridges the existing 200 ms
+      // feedback handshake, after which the unchanged stale-feedback guard
+      // applies if the full-identity ACK still has not been processed.
+      out.allowed = true;
+      out.reason = "runtime_waiting_for_pending_activation_ack";
+      p4_execution_revoked_ = false;
+      published_p4_forward_decision_.planning_disposition =
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+      return finish(out, "EXECUTION_ALLOWED");
+    }
     if (controller_trace_required_ &&
         waiting_for_first_matching_controller_trace)
     {
