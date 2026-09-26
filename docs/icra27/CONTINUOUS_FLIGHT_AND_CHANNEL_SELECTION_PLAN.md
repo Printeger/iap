@@ -1,5 +1,7 @@
 # 正确通道选择与连续飞行修复计划
 
+> 2026-09-26 开发入口：[MISSION 连续飞行修复开发计划](MISSION_CONTINUOUS_FLIGHT_IMPLEMENTATION_PLAN.md)。本文件保留历史调查和实现背景；下面的 exposure 硬预算、重复 P5 检查及“continuous-flight 尚未实现”等描述不再作为本轮开发要求。新计划区分当前代码与待修改行为，并以完整 live 闭环为完成条件。
+
 日期：2026-09-20
 
 状态：实施中；代码完成、CPU/进程门禁和 live 验收分别记录，本文不是完成报告。
