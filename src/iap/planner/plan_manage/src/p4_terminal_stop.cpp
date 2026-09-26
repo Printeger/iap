@@ -136,20 +136,32 @@ P4BrakingControllabilityResult evaluateP4BrakingControllability(
       latency * velocity_error +
       0.5 * latency * latency * acceleration_error;
   result.latency_reachable_excursion_m = reachable.norm();
-  result.controllable_margin_m = available_clearance_margin_m -
-      result.latency_reachable_excursion_m;
   result.within_certified_domain =
       (position_error.array() <=
            profile.position_tracking_bound_m.array() + 1.0e-12).all() &&
       (velocity_error.array() <=
            profile.velocity_tracking_bound_mps.array() + 1.0e-12).all() &&
-      (actual.acceleration.cwiseAbs().array() <=
-           profile.maximum_acceleration_mps2.array() + 1.0e-12).all();
-  result.controllable = result.controllable_margin_m >= -1.0e-12 &&
       (actual.velocity.cwiseAbs().array() <=
            profile.maximum_velocity_mps.array() + 1.0e-12).all() &&
       (actual.acceleration.cwiseAbs().array() <=
            profile.maximum_acceleration_mps2.array() + 1.0e-12).all();
+  // The certified nominal and braking curves have already been expanded by
+  // their tracking envelope.  While feedback remains inside that domain,
+  // charging the same measured deviation against the residual obstacle
+  // margin again double-counts it and can contradict the certificate.  Once
+  // feedback leaves the certified domain, the independent recovery check
+  // remains conservative and must fit the full latency-reachable excursion
+  // inside the residual margin.
+  result.controllable_margin_m = result.within_certified_domain
+      ? available_clearance_margin_m
+      : available_clearance_margin_m -
+            result.latency_reachable_excursion_m;
+  result.controllable = result.within_certified_domain ||
+      (result.controllable_margin_m >= -1.0e-12 &&
+      (actual.velocity.cwiseAbs().array() <=
+           profile.maximum_velocity_mps.array() + 1.0e-12).all() &&
+      (actual.acceleration.cwiseAbs().array() <=
+           profile.maximum_acceleration_mps2.array() + 1.0e-12).all());
   result.valid = true;
   result.reason = result.within_certified_domain
       ? "within_certified_braking_domain"

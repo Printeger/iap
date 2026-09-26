@@ -386,6 +386,13 @@ For each candidate trajectory τ:
   parameters are parse-only diagnostics and never enter the clearance
   envelope; a surface residual is neither pose error nor GNSS measurement
   sigma.
+  Runtime control feedback that remains inside the certified position,
+  velocity, acceleration and absolute dynamic domain is already covered by
+  that tracking envelope; its measured deviation is not subtracted a second
+  time from the certificate's residual obstacle margin. Once feedback leaves
+  the certified domain, the recovery-brake check remains independent and
+  conservative: the full latency-reachable excursion must fit the residual
+  margin or execution is revoked.
   Exceeding the certified tracking bound activates a certified brake; the
   larger controller threshold is reserved for immediate loss-of-control
   revocation.

@@ -498,6 +498,30 @@ TEST(P4TerminalStopProductionTest,
   EXPECT_TRUE(inside.within_certified_domain);
   EXPECT_TRUE(inside.controllable);
 
+  // LocalMotionAssurance has already reserved the certified tracking
+  // envelope around every nominal and braking sample.  A measured state that
+  // remains inside that envelope must not consume the certificate's residual
+  // obstacle margin a second time.
+  const auto inside_with_small_residual_margin =
+      ego_planner::evaluateP4BrakingControllability(
+          certified, actual, profile, 0.01);
+  ASSERT_TRUE(inside_with_small_residual_margin.valid);
+  EXPECT_TRUE(inside_with_small_residual_margin.within_certified_domain);
+  EXPECT_TRUE(inside_with_small_residual_margin.controllable);
+  EXPECT_EQ(inside_with_small_residual_margin.reason,
+            "within_certified_braking_domain");
+
+  auto near_limit_certified = certified;
+  near_limit_certified.velocity.x() = 1.95;
+  auto absolute_velocity_exceeded = near_limit_certified;
+  absolute_velocity_exceeded.velocity.x() = 2.1;
+  const auto over_speed = ego_planner::evaluateP4BrakingControllability(
+      near_limit_certified, absolute_velocity_exceeded, profile, 0.5);
+  ASSERT_TRUE(over_speed.valid);
+  EXPECT_FALSE(over_speed.within_certified_domain);
+  EXPECT_FALSE(over_speed.controllable);
+  EXPECT_EQ(over_speed.reason, "outside_controllable_braking_domain");
+
   actual.position.x() = 0.14;
   const auto recovery = ego_planner::evaluateP4BrakingControllability(
       certified, actual, profile, 0.5);

@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(certified-braking-domain-accounting): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — do not charge an observed position/velocity/acceleration
+  deviation twice when it remains inside the calibrated control-capability
+  domain already reserved by every certified nominal and braking envelope.
+  Absolute velocity and acceleration limits remain part of that domain. Once
+  feedback leaves it, the existing recovery path still requires the full
+  latency-reachable excursion to fit the residual local-clearance margin and
+  otherwise revokes execution. This removes false
+  `outside_controllable_braking_domain` revocations without changing local
+  clearance, tracking, dynamics or braking thresholds.
 - fix(execution-watchdog-clock-progress): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — evaluate the runtime execution watchdog, its geometry check and
   its P5 handoff on the existing odometry-stamp-plus-steady-elapsed scheduling

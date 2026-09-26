@@ -146,6 +146,14 @@
   rollback are rejected without refreshing either source. If neither source
   is fresh after the existing activation grace window, or if trace saturation,
   tracking or controllability fails, runtime retains its fail-closed brake.
+  Local-motion certification has already expanded every nominal and braking
+  sample by the certified tracking envelope. Feedback whose position,
+  velocity, acceleration and absolute dynamics remain inside the calibrated
+  control-capability domain therefore remains covered without charging the
+  same deviation against the certificate's residual obstacle margin again.
+  Feedback outside that domain must still fit its full latency-reachable
+  excursion inside the residual margin before a new recovery brake can be
+  certified; otherwise execution is revoked.
   The execution watchdog evaluates that feedback and current P0 evidence on
   the existing scheduling clock derived from the last odometry stamp plus
   steady elapsed time. This clock advances only the runtime observation while
