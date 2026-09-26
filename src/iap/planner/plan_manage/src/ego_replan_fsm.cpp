@@ -1674,6 +1674,7 @@ namespace ego_planner
               local_target_pt_,
               local_target_vel_, (have_new_target_ || flag_use_poly_init),
               flag_randomPolyTraj, odom_pos_));
+    bool selected_normal_bundle_after_typed_failure = false;
     have_new_target_ = false;
 
     cout << "refine_success=" << plan_and_refine_success << endl;
@@ -1712,6 +1713,16 @@ namespace ego_planner
           planner_manager_->local_data_ = previous_local_data;
           planner_manager_->restoreP4ExecutionCommitmentAfterCandidateRejection();
           return false;
+        }
+        if (disposition ==
+            P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+        {
+          // The failed callback can be the final frozen channel. In that
+          // case the comparison has already restored an earlier complete
+          // bundle; continue the same publication transaction instead of
+          // treating the failed channel as the transaction result.
+          plan_and_refine_success = true;
+          selected_normal_bundle_after_typed_failure = true;
         }
       }
     }
@@ -1798,14 +1809,35 @@ namespace ego_planner
                   plannerNow().seconds(), failure,
                   "normal_final_curve_lineage_rejected", nullptr);
         }
-        reject_candidate();
+        if (normal_failure_disposition ==
+            P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+        {
+          // The rejected curve was only one immutable channel record. The
+          // comparison restored a different, already complete winner, so
+          // keep that state and carry it through latest-snapshot/P5 gates.
+          selected_normal_bundle_after_typed_failure = true;
+        }
+        else
+        {
+          reject_candidate();
+        }
         if (preparing_successor_curve)
           planner_manager_->recordPreparedP4SuccessorCurveFailure(
               plannerNow().seconds(),
               planner_manager_->lastP4ActualCurveCertification().failure,
               "successor_curve_certification_failed");
-        (void)normal_failure_disposition;
-        return false;
+        if (normal_failure_disposition ==
+            P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+        {
+          RCLCPP_INFO(
+              node_->get_logger(),
+              "P4 typed channel failure completed comparison; publishing "
+              "the restored complete winner");
+        }
+        else
+        {
+          return false;
+        }
       }
 
       if (using_cached_successor)
@@ -1849,45 +1881,48 @@ namespace ego_planner
 
       if (!using_cached_successor)
       {
-        std::string comparison_reason;
-        const auto comparison_disposition =
-            planner_manager_->prepareP4NormalChannelComparison(
-                plannerNow().seconds(), &comparison_reason);
-        if (comparison_disposition ==
-                P4NormalChannelPreparationDisposition::
-                    NEXT_CHANNEL_PENDING ||
-            comparison_disposition ==
-                P4NormalChannelPreparationDisposition::
-                    COMMON_PREFIX_PENDING)
+        if (!selected_normal_bundle_after_typed_failure)
         {
-          RCLCPP_INFO(
-              node_->get_logger(),
-              "P4 normal channel prepare-only handoff: %s",
-              comparison_reason.c_str());
-          reject_candidate();
-          // The next frozen guide is consumed by a later FSM callback. Never
-          // recurse through the planner from an actual-curve result.
-          return false;
-        }
-        if (comparison_disposition ==
-            P4NormalChannelPreparationDisposition::REJECTED)
-        {
-          RCLCPP_WARN(
-              node_->get_logger(),
-              "P4 normal channel comparison rejected: %s",
-              comparison_reason.c_str());
-          reject_candidate();
-          return false;
-        }
-        if (comparison_disposition ==
-            P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
-        {
-          info = &planner_manager_->local_data_;
-          RCLCPP_INFO(
-              node_->get_logger(),
-              "P4 normal channel comparison selected a complete actual "
-              "curve bundle: %s",
-              comparison_reason.c_str());
+          std::string comparison_reason;
+          const auto comparison_disposition =
+              planner_manager_->prepareP4NormalChannelComparison(
+                  plannerNow().seconds(), &comparison_reason);
+          if (comparison_disposition ==
+                  P4NormalChannelPreparationDisposition::
+                      NEXT_CHANNEL_PENDING ||
+              comparison_disposition ==
+                  P4NormalChannelPreparationDisposition::
+                      COMMON_PREFIX_PENDING)
+          {
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "P4 normal channel prepare-only handoff: %s",
+                comparison_reason.c_str());
+            reject_candidate();
+            // The next frozen guide is consumed by a later FSM callback.
+            // Never recurse through the planner from an actual-curve result.
+            return false;
+          }
+          if (comparison_disposition ==
+              P4NormalChannelPreparationDisposition::REJECTED)
+          {
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "P4 normal channel comparison rejected: %s",
+                comparison_reason.c_str());
+            reject_candidate();
+            return false;
+          }
+          if (comparison_disposition ==
+              P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+          {
+            info = &planner_manager_->local_data_;
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "P4 normal channel comparison selected a complete actual "
+                "curve bundle: %s",
+                comparison_reason.c_str());
+          }
         }
         if (preparing_normal_multi_channel_curve &&
             !planner_manager_->certifyP4ActualCurve(

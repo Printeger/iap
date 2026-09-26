@@ -195,7 +195,12 @@ For each candidate trajectory τ:
   evidence once against the latest execution snapshot. That reauthorization
   is mandatory even when the snapshot ID is unchanged because local freshness
   and GNSS diagnostics can advance. Publication then validates the rebound P4
-  certificate once.
+  certificate once. In bounded normal-channel comparison, a typed failure of
+  the last frozen guide does not discard an earlier complete bundle: the
+  comparison restores that winner, rebinds it to the current planning attempt,
+  and sends it through the same latest-snapshot, P5, identity, local-safety and
+  braking gates before publication. The failed immutable guide is not retried
+  or altered.
   Shared-corridor risk must not worsen and the extension is independently
   certified. The successor is published
   only if parent identity, switch window, position/velocity/acceleration

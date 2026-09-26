@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-last-channel-winner-publication): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — when the last frozen normal channel ends in a typed actual-curve
+  failure, preserve and publish an earlier complete locally safe bundle already
+  selected by the bounded comparison instead of rejecting the whole planning
+  transaction. The restored winner is rebound to the current planning attempt
+  and still passes the mandatory latest-snapshot reauthorization, P5, identity,
+  freshness, local-clearance and braking gates before publication; the failed
+  immutable channel remains rejected and is never modified or retried.
 - fix(execution-snapshot-causal-tolerance): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — apply the existing one-microsecond causal stamp tolerance to
   the execution snapshot's aggregate evaluation time as well as its frozen

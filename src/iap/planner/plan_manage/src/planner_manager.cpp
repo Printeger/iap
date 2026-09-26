@@ -10818,6 +10818,13 @@ namespace ego_planner
           P4NormalChannelPreparationDisposition::REJECTED,
           "normal_channel_comparison_winner_missing");
     P4PreparedSuccessorBundle selected_bundle = winner->second;
+    // The bundle was constructed in an earlier prepare-only callback, but
+    // the winner is published by the current callback. Bind its decision to
+    // the active planning transaction before the mandatory latest-snapshot
+    // reauthorization; the frozen snapshot/channel identities remain
+    // unchanged and continue to own the comparison evidence.
+    selected_bundle.decision.planning_attempt_id =
+        planning_risk_context_.planning_attempt_id;
     selected_bundle.decision.channel_comparison_state = comparison.state;
     selected_bundle.decision.action = P4ForwardAction::RISK_SELECTED;
     selected_bundle.decision.executable_intent =

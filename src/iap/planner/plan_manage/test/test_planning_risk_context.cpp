@@ -3995,6 +3995,203 @@ TEST(P4PreparedChannelPreparation,
       << "the unevaluated guide suffix must not enter the formal query set";
 }
 
+TEST(P4PreparedChannelPublication,
+     LastTypedFailurePublishesEarlierCompleteWinner) {
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  const auto safe_risk = directRiskCallback(0.4);
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, safe_risk, 10.0, 921u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  occupancy->geometry.resolution_m = 0.1;
+
+  auto first_curve = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto first_terminal = ego_planner::imposeP4TerminalStop(
+      &first_curve, terminalStartState(first_curve), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(first_terminal.success) << first_terminal.reason;
+  Eigen::MatrixXd failed_points = p4StoppedControlPoints();
+  failed_points.row(1) *= -1.0;
+  auto failed_curve = ego_planner::UniformBspline(failed_points, 3, 0.5);
+  const auto failed_terminal = ego_planner::imposeP4TerminalStop(
+      &failed_curve, terminalStartState(failed_curve),
+      20.0, 100.0, 0.0);
+  ASSERT_TRUE(failed_terminal.success) << failed_terminal.reason;
+  const Eigen::Vector3d failed_midpoint = failed_curve.evaluateDeBoorT(
+      0.5 * failed_curve.getTimeSum());
+  const auto local_obstacles =
+      std::make_shared<const std::vector<Eigen::Vector3d>>(
+          std::vector<Eigen::Vector3d>{failed_midpoint});
+  occupancy->raw_occupied_voxel_centers = local_obstacles;
+  occupancy->current_frame_occupied_voxel_centers = local_obstacles;
+  execution->occupancy = occupancy;
+
+  const auto debug_path =
+      p4LineageTestPath("last_typed_failure_publishes_winner.csv");
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, debug_path.string(), 1);
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->pp_.max_vel_ = 20.0;
+  manager->pp_.max_acc_ = 100.0;
+  manager->setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, safe_risk, execution);
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider([] {
+    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  });
+
+  auto decision = makeForwardDecision(
+      snapshot, manager->planningRiskContext().planning_attempt_id);
+  const auto &bound_execution =
+      *manager->planningRiskContext().execution_snapshot;
+  ASSERT_TRUE(bound_execution.forward_risk_batch);
+  decision.snapshot_identity.execution_snapshot_id =
+      bound_execution.execution_snapshot_id;
+  decision.snapshot_identity.risk_source_identity_hash =
+      iap::canonicalRiskGridSourceIdentityHash(
+          bound_execution.source_identity);
+  decision.snapshot_identity.local_map_support_identity =
+      bound_execution.source_identity.local_map_support_identity;
+  decision.snapshot_identity.alert_limit_policy_id =
+      bound_execution.source_identity.alert_limit_policy_id;
+  decision.snapshot_identity.gnss_epoch_identity =
+      bound_execution.source_identity.gnss_epoch_identity;
+  decision.snapshot_identity.gnss_epoch_stamp_s =
+      bound_execution.source_identity.gnss_stamp_s;
+  decision.snapshot_identity.risk_stamp_s =
+      bound_execution.evaluation_time_s;
+  decision.snapshot_identity.geometry_id = bound_execution.geometry_id;
+  decision.snapshot_identity.frame_contract_id =
+      bound_execution.frame_contract_id;
+  decision.snapshot_identity.occupancy_generation =
+      bound_execution.occupancy->generation;
+  decision.snapshot_identity.occupancy_stamp_s =
+      bound_execution.occupancy->cloud_stamp_s;
+  decision.snapshot_identity.frame_id = bound_execution.occupancy->frame_id;
+  decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.executable_intent =
+      ego_planner::P4ExecutableIntent::FINAL_CHANNEL;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_candidate_id = 101u;
+  decision.selected_channel_id = 201u;
+  const auto sample_curve = [](ego_planner::UniformBspline curve) {
+    std::vector<Eigen::Vector3d> samples;
+    const double duration_s = curve.getTimeSum();
+    for (double time_s = 0.0; time_s < duration_s; time_s += 0.1)
+      samples.push_back(curve.evaluateDeBoorT(time_s));
+    samples.push_back(curve.evaluateDeBoorT(duration_s));
+    return samples;
+  };
+  auto first = decision.candidates.front();
+  first.candidate_id = decision.selected_candidate_id;
+  first.channel_id = decision.selected_channel_id;
+  first.path = sample_curve(first_curve);
+  first.topology_path = first.path;
+  first.path_hash = "complete-first-channel";
+  first.occupancy_supported = true;
+  auto failed = first;
+  failed.candidate_id = 102u;
+  failed.channel_id = 202u;
+  failed.path = sample_curve(failed_curve);
+  failed.topology_path = failed.path;
+  failed.path_hash = "last-channel-local-clearance-failure";
+  decision.candidates = {first, failed};
+  decision.selected_guide = first.path;
+
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.test_only_allow_grid_risk_authority = true;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+  iap::msg::IntegrityReport integrity;
+  integrity.header.stamp.sec = 10;
+  integrity.hpl = 1.0;
+  integrity.vpl = 1.0;
+  integrity.hal = 20.0;
+  integrity.val = 40.0;
+  integrity.im = 19.0;
+  manager->p5_integrity_gate_->setCurrentIntegrityForTest(integrity);
+
+  auto node = std::make_shared<rclcpp::Node>(
+      "last_typed_failure_publishes_winner_test");
+  manager->setPlanningVisualizationForTest(
+      std::make_shared<ego_planner::PlanningVisualization>(node));
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "/test/last_typed_failure_publishes_winner",
+      ego_planner::trajectoryCommandQos());
+  auto *manager_ptr = manager.get();
+  std::size_t planning_callbacks = 0u;
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME),
+      [manager_ptr, snapshot, occupancy, safe_risk, execution,
+       decision, first_curve, failed_curve, &planning_callbacks]() mutable {
+        manager_ptr->setPlanningRiskContextForTest(
+            snapshot, 10.0, occupancy, safe_risk, execution);
+        ego_planner::P4ForwardDecision active_decision;
+        if (planning_callbacks++ == 0u) {
+          active_decision = decision;
+          manager_ptr->local_data_.position_traj_ = first_curve;
+          manager_ptr->local_data_.traj_id_ = 501;
+        } else {
+          EXPECT_TRUE(manager_ptr->pendingP4ChannelWorkItemForTest().has_value());
+          active_decision = *manager_ptr->pendingP4ChannelWorkItemForTest();
+          manager_ptr->clearP4PendingChannelWorkItemForTest();
+          manager_ptr->local_data_.position_traj_ = failed_curve;
+          manager_ptr->local_data_.traj_id_ = 502;
+        }
+        active_decision.planning_attempt_id =
+            manager_ptr->planningRiskContext().planning_attempt_id;
+        manager_ptr->setP4ForwardDecisionForTest(
+            std::move(active_decision));
+        manager_ptr->local_data_.velocity_traj_ =
+            manager_ptr->local_data_.position_traj_.getDerivative();
+        manager_ptr->local_data_.acceleration_traj_ =
+            manager_ptr->local_data_.velocity_traj_.getDerivative();
+        manager_ptr->local_data_.execution_instance_id_ =
+            manager_ptr->executionInstanceId();
+        manager_ptr->local_data_.start_time_ =
+            rclcpp::Time(12, 0, RCL_ROS_TIME);
+        manager_ptr->local_data_.duration_ =
+            manager_ptr->local_data_.position_traj_.getTimeSum();
+        manager_ptr->local_data_.curve_hash_ =
+            ego_planner::p4ControlPointHash(
+                manager_ptr->local_data_.position_traj_.getControlPoint());
+        return true;
+      });
+
+  EXPECT_FALSE(fsm.callReboundReplanForTest());
+  ASSERT_TRUE(manager_ptr->pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_TRUE(fsm.callReboundReplanForTest())
+      << "the complete first-channel bundle must survive the last channel's "
+         "typed local-clearance failure";
+  EXPECT_TRUE(manager_ptr->trajectoryCommandAwaitingActivation());
+  EXPECT_EQ(manager_ptr->lastP4ForwardDecision().action,
+            ego_planner::P4ForwardAction::RISK_SELECTED);
+  EXPECT_EQ(manager_ptr->lastP4ForwardDecision().selected_channel_id,
+            first.channel_id);
+}
+
 TEST(P4LimitedPrefixPublication,
      IncompleteChannelGeometryPublishesTubeIntersectionPrefix) {
   ensureRclcpp();

@@ -360,7 +360,12 @@
   the committed parent trajectory, and starts a fresh actual-curve transaction
   for the next already-frozen guide. The optimizer keeps that curve inside the
   frozen guide tube; the unchanged final structural corridor check remains the
-  authority. An independently generated common corridor may become an
+  authority. If the last frozen guide fails after an earlier complete bundle
+  was cached, the bounded comparison may restore that earlier bundle. It is
+  rebound to the current planning attempt and must still pass latest-snapshot
+  reauthorization, P5, identity, freshness, local-clearance and braking gates;
+  the last channel's failure does not veto the restored winner. An independently
+  generated common corridor may become an
   ordinary `LIMITED_PREFIX` only after the complete certification chain.
 - Best-effort route discovery first schedules refined, clearance-aware channel
   guides, then converts every locally feasible stable channel into an actual
