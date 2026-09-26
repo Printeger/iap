@@ -10143,8 +10143,17 @@ namespace ego_planner
         last_p4_forward_decision_.snapshot_identity.execution_snapshot_id != 0u
         ? last_p4_forward_decision_.snapshot_identity.execution_snapshot_id
         : p4_direct_risk_evidence_.execution_snapshot_id;
+    const bool has_complete_current_event_sibling = std::any_of(
+        p4_prepared_channel_bundles_.begin(),
+        p4_prepared_channel_bundles_.end(),
+        [this](const auto &entry) {
+          return entry.second.decision.decision_event_id ==
+                  last_p4_forward_decision_.decision_event_id &&
+              entry.second.complete() &&
+              entry.second.channel_record.feasible();
+        });
     if (failure == P4SuccessorFailure::LOCAL_MAP_STALE &&
-        failed_snapshot_id != 0u)
+        failed_snapshot_id != 0u && !has_complete_current_event_sibling)
     {
       P4ForwardDecision failed_decision = last_p4_forward_decision_;
       failed_decision.successor_failure = failure;
