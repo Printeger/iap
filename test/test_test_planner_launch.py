@@ -480,7 +480,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p4.forward.route_compute_budget_ms": "1200.0",
             "p4.forward.compute_budget_ms": "150.0",
             "p4.execution.successor_prepare_wcet_s": "1.2",
-            "p4.execution.successor_max_parent_execution_s": "2.5",
+            "p4.execution.successor_max_parent_execution_s": "4.0",
             "p4.forward.max_channel_searches": "32",
             "p4.forward.channel_enumeration_budget_ms": "250.0",
             "p4.forward.advisory_min_relative_improvement": "0.10",

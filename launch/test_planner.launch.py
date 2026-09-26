@@ -1103,7 +1103,12 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.execution.successor_prepare_wcet_s": "1.2",
     "p4.execution.successor_control_switch_margin_s": "0.2",
     "p4.execution.successor_scheduler_guard_s": "0.2",
-    "p4.execution.successor_max_parent_execution_s": "2.5",
+    # Full route plus actual-curve preparation took 2.2--2.3 s in the
+    # production forest callback before the immutable 200 ms queue margin.
+    # Allow the scheduler to use the already-certified rolling switch at
+    # 4.0 s; computeP4SuccessorDeadline still clamps every command to that
+    # trajectory's own pre-deceleration/latest-switch certificate.
+    "p4.execution.successor_max_parent_execution_s": "4.0",
     "p4.execution.successor_progress_jitter_floor_m": "0.10",
     "p4.execution.successor_progress_stability_margin_m": "0.05",
     "p4.forward.min_creep_progress_m": "0.25",
