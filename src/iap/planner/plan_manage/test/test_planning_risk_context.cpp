@@ -8103,6 +8103,48 @@ TEST(P4SuccessorDeadlineScheduling,
   EXPECT_TRUE(due);
 }
 
+TEST(P4SuccessorDeadlineScheduling,
+     FirstFreshAuthorityReanchorsAnUnsubmittedExpiredWindow)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ExecutionCertificate certificate;
+  certificate.valid = true;
+  certificate.trajectory_id = 20;
+  certificate.start_time_ns = 10000000000LL;
+  certificate.duration_s = 30.0;
+  certificate.execution_deadline_s = 40.0;
+  certificate.latest_rolling_switch_elapsed_s = 23.0;
+  certificate.control_points_hash = "authority-wait-parent";
+  certificate.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  manager.local_data_.execution_instance_id_ = 1u;
+  manager.local_data_.traj_id_ = certificate.trajectory_id;
+  manager.local_data_.start_time_ =
+      rclcpp::Time(certificate.start_time_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = certificate.control_points_hash;
+  manager.local_data_.duration_ = certificate.duration_s;
+  manager.setP4ExecutionCertificateForTest(certificate);
+  manager.setTimeProvider([]() {
+    return rclcpp::Time(10000000000LL, RCL_ROS_TIME);
+  });
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
+  ASSERT_LT(
+      manager.p4SuccessorDeadlineForTest().candidate_ready_deadline_s,
+      20.0);
+
+  ASSERT_TRUE(manager.p4SuccessorPreparationDue(20.0, 77u));
+
+  const auto &reanchored = manager.p4SuccessorDeadlineForTest();
+  EXPECT_NEAR(reanchored.latest_prepare_start_s, 21.2, 1.0e-12);
+  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 22.35, 1.0e-12);
+  EXPECT_NEAR(reanchored.planned_switch_time_s, 22.5, 1.0e-12);
+}
+
 struct RouteEvidenceFixture {
   std::shared_ptr<const FrozenOccupancyEpoch> epoch;
   ego_planner::P4DirectTrajectoryRiskEvidence evidence;

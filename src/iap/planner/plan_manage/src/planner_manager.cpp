@@ -3625,7 +3625,6 @@ namespace ego_planner
               last_p4_forward_decision_,
               p4_execution_certificate_.authority);
     }
-    const auto &deadline = p4_successor_schedule_.deadline;
     if (p4_cached_successor_bundle_ &&
         p4_cached_successor_bundle_->complete())
       return preparedP4SuccessorBundleDue(now_s);
@@ -3637,6 +3636,33 @@ namespace ego_planner
     // publication gates after polling.
     if (p4_successor_worker_.resultReadyFor(parent_id))
       return true;
+    auto &deadline = p4_successor_schedule_.deadline;
+    // The first fixed window can expire while the FSM is correctly waiting
+    // for its first locally-fresh execution authority.  No child route or
+    // candidate exists in that case, so there is nothing late to accept or
+    // retime.  When authority first becomes available, establish one new
+    // fixed window from that planning opportunity, still capped by the
+    // parent's immutable execution and pre-deceleration deadlines.  Once a
+    // worker request has been submitted, its deadline remains immutable.
+    const bool first_request_never_submitted =
+        p4_successor_schedule_.next_request_sequence == 1u &&
+        p4_successor_schedule_.last_attempt_execution_snapshot_id == 0u &&
+        !p4_successor_schedule_.prepared_route &&
+        !p4_successor_schedule_.result_delivered &&
+        !p4_successor_worker_.busyFor(parent_id);
+    if (deadline.valid && first_request_never_submitted &&
+        effective_execution_snapshot_id > 0u &&
+        now_s > deadline.candidate_ready_deadline_s + 1.0e-9)
+    {
+      const auto reanchored = computeP4SuccessorDeadline(
+          p4_successor_deadline_policy_, now_s,
+          p4_execution_certificate_.execution_deadline_s,
+          static_cast<double>(parent_start_ns) * 1.0e-9 +
+              p4_execution_certificate_.latest_rolling_switch_elapsed_s);
+      if (reanchored.valid &&
+          reanchored.candidate_ready_deadline_s > now_s + 1.0e-9)
+        deadline = reanchored;
+    }
     if (p4_successor_schedule_.awaiting_new_snapshot)
     {
       if (!p4SuccessorSnapshotRetryDue(
