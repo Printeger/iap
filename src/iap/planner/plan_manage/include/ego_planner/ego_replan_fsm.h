@@ -98,6 +98,13 @@ namespace ego_planner
         !trajectory_command_awaiting_activation;
   }
 
+  inline bool p4P5ReplanUsesAuthorizedSuccessorHandoff(
+      const P5GateAction action, const bool successor_handoff_ready)
+  {
+    return action == P5GateAction::REQUEST_REPLAN &&
+        successor_handoff_ready;
+  }
+
   inline bool p4ExecutionUsesRollingSuccessor(
       const P4ExecutionCertificate &certificate,
       const bool execution_revoked)

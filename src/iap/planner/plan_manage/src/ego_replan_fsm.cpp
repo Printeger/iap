@@ -1046,8 +1046,23 @@ namespace ego_planner
       return false;
     }
     const double now_s = plannerNow().seconds();
-    const auto execution = planner_manager_->p0_risk_grid_runtime_->
+    auto execution = planner_manager_->p0_risk_grid_runtime_->
         acquireExecutionRiskSnapshotForEvaluation(now_s);
+    // The safety callback has just certified the executing curve against one
+    // immutable snapshot.  Under callback load, a second history lookup at
+    // the same physical boundary can temporarily find no causal entry.  Reuse
+    // the exact retained snapshot only while it still passes the unchanged
+    // local-freshness gate; never turn stale evidence into planning authority.
+    if (!planner_manager_->p0_risk_grid_runtime_->
+             executionSnapshotLocalFreshAt(execution, now_s))
+    {
+      const auto &direct =
+          planner_manager_->latestP4DirectRiskEvidence();
+      if (planner_manager_->p0_risk_grid_runtime_->
+              executionSnapshotLocalFreshAt(
+                  direct.execution_snapshot, now_s))
+        execution = direct.execution_snapshot;
+    }
     if (!planner_manager_->p0_risk_grid_runtime_->
              executionSnapshotLocalFreshAt(
             execution, now_s))
@@ -1562,6 +1577,24 @@ namespace ego_planner
         RCLCPP_WARN(node_->get_logger(),
                     "P5 requested replan: reason=%s",
                     P5RuntimeIntegrityGate::reasonName(p5_status.reason));
+        const bool p5_rolling_successor = p4ExecutionUsesRollingSuccessor(
+            planner_manager_->p4ExecutionCertificate(),
+            planner_manager_->p4ExecutionRevoked());
+        const bool p5_successor_due = p5_rolling_successor &&
+            planner_manager_->p4SuccessorPreparationDue(now_s);
+        const bool p5_successor_handoff_ready =
+            p4SafetyObserverShouldDriveSuccessorPlanning(
+                exec_state_ == EXEC_TRAJ, p4_execution_check.applicable,
+                p4_execution_check.allowed, p5_rolling_successor,
+                p5_successor_due,
+                planner_manager_->trajectoryCommandAwaitingActivation());
+        if (p4P5ReplanUsesAuthorizedSuccessorHandoff(
+                p5_status.action, p5_successor_handoff_ready))
+        {
+          changeFSMExecState(REPLAN_TRAJ, "P4_SUCCESSOR_P5_HANDOFF");
+          execFSMCallback();
+          return;
+        }
         if (!planner_manager_->p4GuardTransitionPending())
           changeFSMExecState(REPLAN_TRAJ, "P5_REPLAN");
         return;

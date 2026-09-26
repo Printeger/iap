@@ -7870,6 +7870,19 @@ TEST(P4PlanningCyclePolicy,
       true, true, true, true, true, true));
 }
 
+TEST(P4PlanningCyclePolicy,
+     P5ReplanUsesTheAlreadyAuthorizedRollingSuccessorHandoff)
+{
+  EXPECT_TRUE(ego_planner::p4P5ReplanUsesAuthorizedSuccessorHandoff(
+      ego_planner::P5GateAction::REQUEST_REPLAN, true));
+  EXPECT_FALSE(ego_planner::p4P5ReplanUsesAuthorizedSuccessorHandoff(
+      ego_planner::P5GateAction::REQUEST_REPLAN, false));
+  EXPECT_FALSE(ego_planner::p4P5ReplanUsesAuthorizedSuccessorHandoff(
+      ego_planner::P5GateAction::OK, true));
+  EXPECT_FALSE(ego_planner::p4P5ReplanUsesAuthorizedSuccessorHandoff(
+      ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE, true));
+}
+
 TEST(P4ExecutionParameterContract, TrackingErrorLimitMustBeFiniteAndBounded)
 {
   EXPECT_TRUE(ego_planner::validP4TrackingErrorLimit(0.75));

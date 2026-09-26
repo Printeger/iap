@@ -4352,16 +4352,26 @@ namespace ego_planner
     }
     if (p0_risk_grid_runtime_)
     {
-      const auto execution =
+      auto execution =
           p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
               now_s);
-      if (execution &&
-          (p4_global_exposure_policy_.task_mode ==
+      const auto execution_fresh = [this, now_s](
+          const std::shared_ptr<const P0ExecutionRiskSnapshot> &candidate) {
+        return p4_global_exposure_policy_.task_mode ==
                    iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT
-               ? p0_risk_grid_runtime_->executionSnapshotLocalFreshAt(
-                     execution, now_s)
-               : p0_risk_grid_runtime_->executionSnapshotFreshAt(
-                     execution, now_s)))
+            ? p0_risk_grid_runtime_->executionSnapshotLocalFreshAt(
+                  candidate, now_s)
+            : p0_risk_grid_runtime_->executionSnapshotFreshAt(
+                  candidate, now_s);
+      };
+      if (!execution_fresh(execution))
+      {
+        const auto &direct = latestP4DirectRiskEvidence();
+        if (execution_fresh(direct.execution_snapshot))
+          execution = direct.execution_snapshot;
+      }
+      if (execution &&
+          execution_fresh(execution))
       {
         planning_risk_context_.p4_authority.execution_snapshot = execution;
         planning_risk_context_.p4_authority.occupancy_snapshot =
