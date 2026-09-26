@@ -10040,10 +10040,158 @@ namespace ego_planner
     const std::string failure_reason = preserve_first_typed_failure
         ? last_p4_forward_decision_.reason
         : "successor_curve_preparation_failed:" + detail;
-    // A failed immutable child is terminal for this rolling attempt.  Keep
-    // executing the already-certified parent to its stop; do not reinterpret
-    // the failure as permission to search another channel or regenerate the
-    // curve.
+
+    // A typed failure rejects only this immutable channel curve.  When an
+    // earlier channel from the same frozen comparison already owns a complete
+    // successor bundle, retain it and count this channel as an evaluated hard
+    // failure.  This is the successor equivalent of the normal-channel
+    // comparison path: the rejected curve never gains authority, while one
+    // later failure cannot erase an already-certified winner.
+    for (auto entry = p4_prepared_channel_bundles_.begin();
+         entry != p4_prepared_channel_bundles_.end();)
+    {
+      if (entry->second.decision.decision_event_id !=
+          last_p4_forward_decision_.decision_event_id)
+        entry = p4_prepared_channel_bundles_.erase(entry);
+      else
+        ++entry;
+    }
+    std::set<uint64_t> expected_channel_ids;
+    for (const auto &candidate : last_p4_forward_decision_.candidates)
+      if (candidate.channel_id > 0u && candidate.occupancy_supported)
+        expected_channel_ids.insert(candidate.channel_id);
+    const auto complete_sibling = std::find_if(
+        p4_prepared_channel_bundles_.begin(),
+        p4_prepared_channel_bundles_.end(), [](const auto &entry) {
+          return entry.second.complete() &&
+              entry.second.channel_record.feasible();
+        });
+    const auto failed_candidate = std::find_if(
+        last_p4_forward_decision_.candidates.begin(),
+        last_p4_forward_decision_.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          return candidate.channel_id > 0u && candidate.occupancy_supported &&
+              ((last_p4_forward_decision_.selected_candidate_id > 0u &&
+                candidate.candidate_id ==
+                    last_p4_forward_decision_.selected_candidate_id) ||
+               (last_p4_forward_decision_.selected_candidate_id == 0u &&
+                candidate.channel_id ==
+                    last_p4_forward_decision_.selected_channel_id));
+        });
+    if (expected_channel_ids.size() >= 2u &&
+        complete_sibling != p4_prepared_channel_bundles_.end() &&
+        failed_candidate != last_p4_forward_decision_.candidates.end())
+    {
+      P4PreparedSuccessorBundle failed_bundle;
+      failed_bundle.state = P4SuccessorPreparationState::FAILED;
+      failed_bundle.decision = last_p4_forward_decision_;
+      auto &failed_record = failed_bundle.channel_record;
+      failed_record.channel_id = failed_candidate->channel_id;
+      failed_record.snapshot_identity =
+          complete_sibling->second.channel_record.snapshot_identity;
+      failed_record.guide_identity = failed_candidate->path_hash;
+      failed_record.refined_path_identity = p4PreparedGuideIdentity(
+          last_p4_forward_decision_.selected_guide);
+      failed_record.failure =
+          p4PreparedFailureForSuccessorFailure(failure);
+      p4_prepared_channel_bundles_[failed_record.channel_id] =
+          std::move(failed_bundle);
+
+      P4ForwardDecision failed_decision = last_p4_forward_decision_;
+      failed_decision.successor_failure = failure;
+      failed_decision.reason = failure_reason;
+      appendP4ForwardDecision(
+          failed_decision, "successor_channel_typed_failure", now_s);
+
+      const auto next_unprepared = std::find_if(
+          last_p4_forward_decision_.candidates.begin(),
+          last_p4_forward_decision_.candidates.end(),
+          [this](const P4ForwardCandidate &candidate) {
+            return candidate.channel_id > 0u &&
+                candidate.occupancy_supported &&
+                p4_prepared_channel_bundles_.count(candidate.channel_id) ==
+                    0u;
+          });
+      if (next_unprepared != last_p4_forward_decision_.candidates.end())
+      {
+        P4ForwardDecision next = last_p4_forward_decision_;
+        next.selected_candidate_id = next_unprepared->candidate_id;
+        next.selected_channel_id = next_unprepared->channel_id;
+        next.selected_guide = next_unprepared->path;
+        next.selected_actual_endpoint = Eigen::Vector3d::Constant(
+            std::numeric_limits<double>::quiet_NaN());
+        next.selected_unevaluated_suffix_m =
+            std::numeric_limits<double>::quiet_NaN();
+        next.channel_comparison_state =
+            P4ChannelComparisonState::PARTIAL_COMPARISON;
+        next.successor_failure = P4SuccessorFailure::NONE;
+        next.reason = "successor_next_channel_after_typed_failure:" + detail;
+        last_p4_forward_decision_ = next;
+        p4_pending_channel_work_item_ = std::move(next);
+        p4_pending_channel_context_ = planning_risk_context_;
+        return;
+      }
+
+      std::vector<P4PreparedChannelRecord> prepared_records;
+      for (const auto &entry : p4_prepared_channel_bundles_)
+        prepared_records.push_back(entry.second.channel_record);
+      const auto comparison = compareP4PreparedChannels(
+          prepared_records,
+          complete_sibling->second.channel_record.snapshot_identity,
+          expected_channel_ids.size(),
+          p4_execution_certificate_.successor_channel_id);
+      const auto winner = p4_prepared_channel_bundles_.find(
+          comparison.winner_channel_id);
+      if (comparison.state == P4ChannelComparisonState::COMPLETE &&
+          winner != p4_prepared_channel_bundles_.end() &&
+          winner->second.complete())
+      {
+        P4PreparedSuccessorBundle selected_bundle = winner->second;
+        selected_bundle.decision.channel_comparison_state = comparison.state;
+        selected_bundle.decision.selected_channel_id =
+            comparison.winner_channel_id;
+        selected_bundle.decision.runner_up_channel_id =
+            comparison.runner_up_channel_id;
+        selected_bundle.decision.selected_actual_endpoint =
+            selected_bundle.channel_record.actual_endpoint;
+        selected_bundle.decision.selected_unevaluated_suffix_m =
+            selected_bundle.channel_record.unevaluated_suffix_m;
+        selected_bundle.decision.successor_failure =
+            P4SuccessorFailure::NONE;
+        selected_bundle.decision.reason =
+            "successor_channel_typed_failure_winner_retained";
+        p4_cached_successor_bundle_ = std::move(selected_bundle);
+        p4_cached_successor_activation_in_progress_ = false;
+        p4_successor_preparation_state_ =
+            P4SuccessorPreparationState::PREPARED_CERTIFIED;
+        p4_successor_schedule_.result_delivered = true;
+        p4_successor_schedule_.last_failure = P4SuccessorFailure::NONE;
+        last_p4_forward_decision_ =
+            p4_cached_successor_bundle_->decision;
+        p4_pending_channel_work_item_.reset();
+        p4_pending_channel_context_.reset();
+        appendP4ForwardDecision(
+            last_p4_forward_decision_,
+            "successor_channel_typed_failure_complete", now_s);
+        P4ExecutionCheckDiagnostics retained;
+        retained.applicable = true;
+        retained.allowed = true;
+        retained.identity_match = true;
+        retained.execution_snapshot_id =
+            p4_cached_successor_bundle_->certificate.execution_snapshot_id;
+        retained.reason =
+            "successor_channel_typed_failure_winner_retained";
+        appendP4ExecutionEvent(
+            "SUCCESSOR_CHANNEL_TYPED_FAILURE_WINNER_RETAINED",
+            now_s, retained);
+        return;
+      }
+    }
+
+    // With no complete sibling, a failed immutable child is terminal for
+    // this rolling attempt. Keep executing the already-certified parent to
+    // its stop; do not reinterpret the failure as permission to regenerate
+    // the rejected curve.
     p4_successor_preparation_state_ = P4SuccessorPreparationState::FAILED;
     p4_successor_schedule_.result_delivered = true;
     p4_prepared_successor_.reset();

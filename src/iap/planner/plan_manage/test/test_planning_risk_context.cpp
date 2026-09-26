@@ -11328,6 +11328,32 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
             second_channel.channel_id);
 
+  // A typed rejection of the last frozen channel must complete the
+  // comparison with the already-certified first channel.  The failed
+  // channel remains an evaluated hard-failure record; it is never accepted
+  // and it must not erase the complete successor bundle.
+  const auto first_channel_id =
+      single_channel_decision.candidates.front().channel_id;
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+  manager.recordPreparedP4SuccessorCurveFailure(
+      9.91, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "successor_exposure_ledger_anchor_invalid");
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()
+                ->decision.channel_comparison_state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()
+                ->decision.selected_channel_id,
+            first_channel_id);
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()
+                ->decision.successor_failure,
+            ego_planner::P4SuccessorFailure::NONE);
+
   // Restore the single-channel fixture used by the publish-reauthorization
   // assertions below.
   manager.clearP4PendingChannelWorkItemForTest();
