@@ -479,7 +479,8 @@ namespace ego_planner
     void setP4ActualCurveClearanceConstraints(
         const Eigen::MatrixXd &seed_control_points, double interval_s,
         const std::vector<P4ActualCurveClearanceConstraintSample> &samples,
-        double planning_clearance_buffer_m);
+        double planning_clearance_buffer_m,
+        double occupancy_resolution_m);
     void setP4ActualCurveGuideCorridor(
         const Eigen::MatrixXd &seed_control_points, double interval_s,
         const std::vector<Eigen::Vector3d> &guide,

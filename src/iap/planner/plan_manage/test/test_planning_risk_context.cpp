@@ -2082,7 +2082,7 @@ TEST(P4ActualCurveClearanceOptimization,
       before, *clearance, &query_count, &minimum_queried_base_margin);
   const int frozen_query_count = query_count;
   optimizer->setP4ActualCurveClearanceConstraints(
-      points, 0.2, fixed_clearance, 0.05);
+      points, 0.2, fixed_clearance, 0.05, 0.1);
   const auto measured = clearance->query(
       Eigen::Vector3d(-12.77299865, 1.916976736, 1.29004215),
       0.15, 0.05);
@@ -2131,15 +2131,14 @@ TEST(P4ActualCurveClearanceOptimization,
   safe_sample.signed_margin_m = 0.060;
   safe_sample.escape_direction = Eigen::Vector3d::UnitY();
   optimizer->setP4ActualCurveClearanceConstraints(
-      points, 0.2, {safe_sample}, 0.05);
+      points, 0.2, {safe_sample}, 0.05, 0.1);
 
   const auto displacements = optimizer->
       p4ActualCurveClearanceRequiredDisplacementsForTest();
   ASSERT_EQ(displacements.size(), 1u);
-  // A sample with 10 mm seed surplus still needs 13 mm of outward generation
-  // displacement once the 18 mm bounded frame allowance and existing 5 mm
-  // solver allowance are combined.
-  EXPECT_NEAR(displacements.front(), 0.013, 1.0e-12);
+  // A 100 mm occupancy voxel has an 86.603 mm half diagonal. Preserve that
+  // frozen-frame representation bound plus the 5 mm solver allowance.
+  EXPECT_NEAR(displacements.front(), 0.0316025403784, 1.0e-12);
 }
 
 TEST(P4ActualCurveClearanceOptimization,
@@ -2154,16 +2153,16 @@ TEST(P4ActualCurveClearanceOptimization,
   const Eigen::MatrixXd points = denseForkTangentControlPoints();
   ego_planner::P4ActualCurveClearanceConstraintSample live_sample;
   live_sample.time_s = 0.4;
-  // The publication check reported +15.8269707211 mm after subtracting the
-  // 50 mm planning buffer, so its hard margin was 65.8269707211 mm.  The
-  // first later current-frame check reported -2.13526405 mm hard margin.
-  constexpr double kPublicationHardMarginM = 0.0658269707211;
+  // The publication check reported +30.4112216661 mm after subtracting the
+  // 50 mm planning buffer, so its hard margin was 80.4112216661 mm.  The
+  // first later current-frame check reported -0.0220075644 mm hard margin.
+  constexpr double kPublicationHardMarginM = 0.0804112216661;
   constexpr double kMeasuredClearanceChangeM =
-      kPublicationHardMarginM + 0.00213526405;
+      kPublicationHardMarginM + 0.0000220075644;
   live_sample.signed_margin_m = kPublicationHardMarginM;
   live_sample.escape_direction = Eigen::Vector3d::UnitY();
   optimizer->setP4ActualCurveClearanceConstraints(
-      points, 0.2, {live_sample}, 0.05);
+      points, 0.2, {live_sample}, 0.05, 0.1);
 
   const auto displacements = optimizer->
       p4ActualCurveClearanceRequiredDisplacementsForTest();
@@ -2217,7 +2216,7 @@ TEST(P4ActualCurveClearanceOptimization,
     const ego_planner::UniformBspline seed(points, 3, 0.2);
     optimizer->setP4ActualCurveClearanceConstraints(
         points, 0.2,
-        freezeActualCurveClearanceForTest(seed, *clearance), 0.05);
+        freezeActualCurveClearanceForTest(seed, *clearance), 0.05, 0.1);
     optimizer->setLocalTargetPt(points.col(points.cols() - 2));
     double final_cost = std::numeric_limits<double>::quiet_NaN();
     int iterations = 0;
@@ -2277,7 +2276,7 @@ TEST(P4ActualCurveClearanceOptimization,
   const ego_planner::UniformBspline seed(points, 3, 0.2);
   optimizer->setP4ActualCurveClearanceConstraints(
       points, 0.2,
-      freezeActualCurveClearanceForTest(seed, *clearance), 0.05);
+      freezeActualCurveClearanceForTest(seed, *clearance), 0.05, 0.1);
   optimizer->setLocalTargetPt(points.col(points.cols() - 2));
   double final_cost = std::numeric_limits<double>::quiet_NaN();
   int iterations = 0;
@@ -2327,7 +2326,7 @@ TEST(P4ActualCurveClearanceOptimization,
   const ego_planner::UniformBspline seed(points, 3, 0.2);
   optimizer->setP4ActualCurveClearanceConstraints(
       points, 0.2,
-      freezeActualCurveClearanceForTest(seed, *clearance), 0.05);
+      freezeActualCurveClearanceForTest(seed, *clearance), 0.05, 0.1);
   optimizer->setLocalTargetPt(points.col(points.cols() - 2));
   double final_cost = std::numeric_limits<double>::quiet_NaN();
   int iterations = 0;
@@ -2377,7 +2376,8 @@ TEST(P4ActualCurveClearanceOptimization,
   ASSERT_EQ(nearest_obstacle_ids.size(), 2u);
   safe_optimizer->setP4ActualCurveClearanceConstraints(
       safe_points, 0.2,
-      freezeActualCurveClearanceForTest(safe_seed, *safe_clearance), 0.05);
+      freezeActualCurveClearanceForTest(safe_seed, *safe_clearance), 0.05,
+      0.1);
   safe_optimizer->setLocalTargetPt(
       safe_points.col(safe_points.cols() - 2));
   ASSERT_TRUE(safe_optimizer->optimizeReboundCostForTest(

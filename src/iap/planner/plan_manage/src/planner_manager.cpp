@@ -16300,7 +16300,9 @@ namespace ego_planner
           p4_local_tracking_error_bound_m_);
       bspline_optimizer_->setP4ActualCurveClearanceConstraints(
           ctrl_pts, ts, fixed_clearance,
-          p4_planning_clearance_buffer_m_);
+          p4_planning_clearance_buffer_m_,
+          planning_risk_context_.execution_snapshot->occupancy
+              ->geometry.resolution_m);
       const bool constrained_prefix =
           last_p4_forward_decision_.executable_intent ==
               P4ExecutableIntent::LIMITED_PREFIX;

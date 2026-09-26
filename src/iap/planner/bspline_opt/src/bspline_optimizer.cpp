@@ -18,13 +18,17 @@ namespace ego_planner
 {
   namespace
   {
-    // Compact live evidence measured a 67.962 mm loss of hard clearance
-    // between the publication frame and the first limiting current frame.
-    // The unchanged 50 mm planning buffer covers the first 50 mm; preserve a
-    // further 18 mm bounded frame allowance plus the existing 5 mm solver
-    // allowance.  Final assurance still evaluates the unchanged 50 mm
-    // planning policy and hard local envelope.
-    constexpr double kP4ActualCurveClearanceGenerationReserveM = 0.023;
+    // Fixed half-space constraints are sampled from one frozen occupancy
+    // frame, while execution assurance consumes later current frames. Keep a
+    // small solver allowance beyond the spatial representation bound supplied
+    // by the frozen occupancy geometry. Final assurance still evaluates the
+    // unchanged planning policy and hard local envelope.
+    constexpr double kP4ActualCurveClearanceSolverAllowanceM = 0.005;
+    // Smooth the positive hinge over one percent of the planning-clearance
+    // normalization (0.5 mm for the production 50 mm buffer). This remains
+    // inside the solver allowance above and avoids presenting L-BFGS with an
+    // effectively sharp 50 nm transition at the constraint boundary.
+    constexpr double kP4ActualCurveClearanceNormalizedSmoothing = 0.01;
 
     constexpr int kP1AcceptedProfileSampleCount = 200;
     constexpr const char *kP1AcceptedProfileCsvName =
@@ -601,7 +605,8 @@ namespace ego_planner
   void BsplineOptimizer::setP4ActualCurveClearanceConstraints(
       const Eigen::MatrixXd &seed_control_points, const double interval_s,
       const std::vector<P4ActualCurveClearanceConstraintSample> &samples,
-      const double planning_clearance_buffer_m)
+      const double planning_clearance_buffer_m,
+      const double occupancy_resolution_m)
   {
     clearP4ActualCurveClearanceConstraints();
     if (seed_control_points.rows() != 3 ||
@@ -609,7 +614,9 @@ namespace ego_planner
         !seed_control_points.allFinite() || !std::isfinite(interval_s) ||
         interval_s <= 0.0 ||
         !std::isfinite(planning_clearance_buffer_m) ||
-        planning_clearance_buffer_m <= 0.0)
+        planning_clearance_buffer_m <= 0.0 ||
+        !std::isfinite(occupancy_resolution_m) ||
+        occupancy_resolution_m <= 0.0)
       return;
 
     setBsplineInterval(interval_s);
@@ -618,13 +625,16 @@ namespace ego_planner
     // Freeze the sampled half-spaces before L-BFGS starts.  In particular,
     // neither the nearest obstacle nor its escape direction is reselected
     // from a trial point during a line search.
+    const double occupancy_half_diagonal_m =
+        0.5 * std::sqrt(3.0) * occupancy_resolution_m;
+    const double generation_target_hard_margin_m =
+        std::max(planning_clearance_buffer_m, occupancy_half_diagonal_m) +
+        kP4ActualCurveClearanceSolverAllowanceM;
     p4_actual_curve_clearance_constraints_.reserve(samples.size());
     for (const auto &sample : samples)
     {
       const double required_displacement_m =
-          planning_clearance_buffer_m +
-          kP4ActualCurveClearanceGenerationReserveM -
-          sample.signed_margin_m;
+          generation_target_hard_margin_m - sample.signed_margin_m;
       if (!std::isfinite(sample.time_s) ||
           !std::isfinite(required_displacement_m) ||
           !sample.escape_direction.allFinite() ||
@@ -2954,7 +2964,8 @@ namespace ego_planner
       if (!(violation_m > 0.0))
         continue;
       const double normalized_violation = violation_m / normalization_m;
-      constexpr double smoothing = 1.0e-6;
+      constexpr double smoothing =
+          kP4ActualCurveClearanceNormalizedSmoothing;
       const double smooth_norm = std::sqrt(
           normalized_violation * normalized_violation +
           smoothing * smoothing);
