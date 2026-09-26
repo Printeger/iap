@@ -9992,6 +9992,64 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
+     HardFailuresFromAnOlderDecisionEventDoNotSuppressFreshChannels)
+{
+  const auto snapshot = makeP4SelectionSnapshot();
+  ego_planner::EGOPlannerManager manager;
+
+  auto decision = makeForwardDecision(snapshot, 41u);
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path[1].y() *= -1.0;
+  second_channel.path_hash = "fresh-event-runner-up";
+  decision.candidates.push_back(second_channel);
+
+  manager.setP4ForwardDecisionForTest(decision);
+  std::string reason;
+  ASSERT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.0, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "old-event-first-channel-failed", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+  ASSERT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.0, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "old-event-second-channel-failed", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::REJECTED)
+      << reason;
+
+  ++decision.decision_event_id;
+  ++decision.planning_attempt_id;
+  manager.setP4ForwardDecisionForTest(decision);
+  EXPECT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.1, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "fresh-event-first-channel-failed", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->decision_event_id,
+      decision.decision_event_id);
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+      second_channel.channel_id);
+}
+
+TEST(P4PreparedChannelPreparation,
      NormalMultiChannelPreparationSurvivesCallbacksAckAndScheduleRebuild)
 {
   ensureRclcpp();

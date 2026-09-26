@@ -256,9 +256,11 @@ For each candidate trajectory τ:
   switched to another channel or reinterpreted. Multi-channel preparation may
   continue only with the next already-frozen guide while the committed parent
   trajectory remains retained; the failed channel's HOLD disposition is not
-  inherited by that new preparation transaction. The optimizer preserves the
-  frozen guide tube and the unchanged final structural corridor check remains
-  authoritative. A stoppable prefix of the
+  inherited by that new preparation transaction. Prepared curves and typed
+  failures belong to that route `decision_event_id`; a later route event that
+  reuses stable channel IDs or the same snapshot must prepare fresh actual
+  curves. The optimizer preserves the frozen guide tube and the unchanged final
+  structural corridor check remains authoritative. A stoppable prefix of the
   corridor shared by at least two topology channels is generated independently
   and passes the same complete actual-curve certification chain. Every point
   of that nominal executable prefix must be inside every channel tube; tube

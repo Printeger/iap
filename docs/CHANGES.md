@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-normal-channel-event-isolation): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — scope prepared normal-channel curves and typed failures to one
+  immutable route `decision_event_id`. A later event may reuse stable topology
+  channel IDs and the same risk snapshot, but it must generate and certify its
+  own actual curves instead of treating an older event's failures as completed
+  work. Frozen siblings within the same event still share one comparison
+  identity; all local-clearance, freshness, dynamics, braking and publication
+  gates remain unchanged.
 - fix(certified-braking-domain-accounting): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — do not charge an observed position/velocity/acceleration
   deviation twice when it remains inside the calibrated control-capability

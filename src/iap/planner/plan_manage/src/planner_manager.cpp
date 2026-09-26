@@ -10102,6 +10102,20 @@ namespace ego_planner
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_channel_risk_snapshot_is_not_pending");
 
+    // Prepared normal-channel artifacts are a transaction scoped to one
+    // route decision event. Stable channel ids and an unchanged risk
+    // snapshot do not make a hard failure from an older event evidence about
+    // a freshly optimized curve.
+    for (auto entry = p4_prepared_channel_bundles_.begin();
+         entry != p4_prepared_channel_bundles_.end();)
+    {
+      if (entry->second.decision.decision_event_id !=
+          last_p4_forward_decision_.decision_event_id)
+        entry = p4_prepared_channel_bundles_.erase(entry);
+      else
+        ++entry;
+    }
+
     std::set<uint64_t> expected_channel_ids;
     for (const auto &candidate : last_p4_forward_decision_.candidates)
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
@@ -10293,6 +10307,20 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_channel_failure_not_typed");
+
+    // A channel id names a topology slot, not a permanent curve. Do not let
+    // a completed hard failure from an older planning event satisfy the
+    // all-channel comparison for this event, even when both events reuse the
+    // same snapshot and stable channel ids.
+    for (auto entry = p4_prepared_channel_bundles_.begin();
+         entry != p4_prepared_channel_bundles_.end();)
+    {
+      if (entry->second.decision.decision_event_id !=
+          last_p4_forward_decision_.decision_event_id)
+        entry = p4_prepared_channel_bundles_.erase(entry);
+      else
+        ++entry;
+    }
 
     std::set<uint64_t> expected_channel_ids;
     for (const auto &candidate : last_p4_forward_decision_.candidates)
@@ -10493,6 +10521,16 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_multi_channel_comparison_not_required");
+
+    for (auto entry = p4_prepared_channel_bundles_.begin();
+         entry != p4_prepared_channel_bundles_.end();)
+    {
+      if (entry->second.decision.decision_event_id !=
+          last_p4_forward_decision_.decision_event_id)
+        entry = p4_prepared_channel_bundles_.erase(entry);
+      else
+        ++entry;
+    }
     if (!p4_execution_certificate_.valid ||
         p4_execution_certificate_.trajectory_id != local_data_.traj_id_ ||
         p4_execution_certificate_.start_time_ns !=

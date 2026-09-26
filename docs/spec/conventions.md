@@ -372,9 +372,13 @@
   shift, retime, switch channels or change execution intent. Multi-channel
   preparation records the typed failure on that immutable channel, retains
   the committed parent trajectory, and starts a fresh actual-curve transaction
-  for the next already-frozen guide. The optimizer keeps that curve inside the
-  frozen guide tube; the unchanged final structural corridor check remains the
-  authority. If the last frozen guide fails after an earlier complete bundle
+  for the next already-frozen guide. That prepared-bundle transaction is
+  scoped to one `decision_event_id`: stable topology channel IDs and an
+  unchanged snapshot may be reused by a later route event, but its actual
+  curves and typed failures are not reused as completed work. The optimizer
+  keeps that curve inside the frozen guide tube; the unchanged final structural
+  corridor check remains the authority. If the last frozen guide fails after
+  an earlier complete bundle
   was cached, the bounded comparison may restore that earlier bundle. It is
   rebound to the current planning attempt and must still pass latest-snapshot
   reauthorization, P5, identity, freshness, local-clearance and braking gates;
