@@ -118,7 +118,12 @@ For each candidate trajectory τ:
   still-reachable nominal rows and braking curves whose anchors have not
   passed, preserving their original window memberships. New maps and GNSS
   epochs update the physical evidence at those same points; they do not redraw
-  the experiment.
+  the experiment. The runtime watchdog uses the already-defined scheduling
+  clock (last odometry stamp plus same-machine steady elapsed) so a long safety
+  callback cannot freeze its evidence time and evict every causal snapshot.
+  Fresh exact-identity controller feedback supplies executed `p/v/a`; planning
+  and generated state remain on exact sensor time, and every freshness and
+  local-safety gate remains unchanged.
   Before any runtime continue/reject/brake transition, P4 persists the full
   window evidence and makes the execution event reference it. A diagnostic
   background four-cell replay then separates map/support change, GNSS

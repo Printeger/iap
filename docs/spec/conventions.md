@@ -146,6 +146,12 @@
   rollback are rejected without refreshing either source. If neither source
   is fresh after the existing activation grace window, or if trace saturation,
   tracking or controllability fails, runtime retains its fail-closed brake.
+  The execution watchdog evaluates that feedback and current P0 evidence on
+  the existing scheduling clock derived from the last odometry stamp plus
+  steady elapsed time. This clock advances only the runtime observation while
+  the mutually exclusive FSM callback group delays odometry delivery; route
+  planning and generated state remain bound to exact sensor stamps. Snapshot,
+  support, trace, collision, tracking and braking freshness still fail closed.
 - Planner-side GNSS geometry uses all four constellations
   `GPS+BDS+GAL+GLO` in formal and forest launch defaults. This changes neither
   the PL equation nor AL. The full information matrix is factored once;

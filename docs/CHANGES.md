@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(execution-watchdog-clock-progress): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — evaluate the runtime execution watchdog, its geometry check and
+  its P5 handoff on the existing odometry-stamp-plus-steady-elapsed scheduling
+  clock when the mutually exclusive FSM callback group temporarily delays the
+  next odometry callback. Planning and state generation still use the exact
+  sensor stamp; fresh same-identity controller feedback supplies executed
+  state, and stale feedback, snapshots, local support, tracking, collision and
+  braking remain fail-closed. This prevents a frozen odometry stamp from
+  eventually evicting every causal P0 snapshot while the vehicle is moving.
 - fix(p4-last-channel-winner-publication): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — when the last frozen normal channel ends in a typed actual-curve
   failure, preserve and publish an earlier complete locally safe bundle already

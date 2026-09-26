@@ -295,6 +295,7 @@ namespace ego_planner
     void getLocalTarget();
     rclcpp::Time plannerNow() const;
     rclcpp::Time plannerSchedulingNow() const;
+    rclcpp::Time executionWatchdogNow() const;
 
     /* ROS functions */
     void execFSMCallback();
@@ -339,6 +340,10 @@ namespace ego_planner
     bool callReboundReplanForTest()
     {
       return callReboundReplan(false, false);
+    }
+    rclcpp::Time executionWatchdogNowForTest() const
+    {
+      return executionWatchdogNow();
     }
     void setP5PreEvaluationHookForTest(std::function<void()> hook)
     {

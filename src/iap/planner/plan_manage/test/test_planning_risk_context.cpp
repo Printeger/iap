@@ -2502,6 +2502,26 @@ ActivatedRuntimeFeedbackFixture makeActivatedRuntimeFeedbackFixture(
 
 }  // namespace
 
+TEST(P4ExecutionWatchdogClockTest,
+     AdvancesWhenTheOdomCallbackIsTemporarilyStarved)
+{
+  ensureRclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "execution_watchdog_clock_test");
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::make_unique<ego_planner::EGOPlannerManager>(), node, {}, nullptr,
+      rclcpp::Time(10, 0, RCL_ROS_TIME), [] { return false; });
+
+  const auto before = fsm.executionWatchdogNowForTest();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  const auto after = fsm.executionWatchdogNowForTest();
+
+  EXPECT_GE(before.nanoseconds(), 10'000'000'000LL);
+  EXPECT_GT((after - before).seconds(), 0.01)
+      << "the execution watchdog must not freeze at the last odom stamp";
+}
+
 TEST(TrajectoryExecutionFeedbackTest,
      RuntimeUsesSteadyFreshnessAndPreservesHardControllerBrakes)
 {

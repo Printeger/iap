@@ -517,6 +517,18 @@ namespace ego_planner
     return plannerNow();
   }
 
+  rclcpp::Time EGOReplanFSM::executionWatchdogNow() const
+  {
+    // The safety timer shares the mutually-exclusive FSM callback group with
+    // odometry. A bounded direct-risk check can therefore delay delivery of
+    // the next odom message even while controller feedback and P0 continue.
+    // Advance from the last stamped odom with the existing steady scheduling
+    // clock so execution evidence is evaluated at the physical watchdog
+    // instant. Planning still uses plannerNow() and therefore never invents a
+    // new state from extrapolated odometry.
+    return plannerSchedulingNow();
+  }
+
   void EGOReplanFSM::BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg)
   {
     size_t id = msg->drone_id;
@@ -1192,8 +1204,9 @@ namespace ego_planner
     constexpr double time_step = 0.01;
     // double t_cur = (ros::Time::now() - info->start_time_).toSec();
     const rclcpp::Time planning_now = plannerNow();
+    const rclcpp::Time execution_now = executionWatchdogNow();
     const rclcpp::Time scheduling_now = plannerSchedulingNow();
-    const double now_s = planning_now.seconds();
+    const double now_s = execution_now.seconds();
     // Guard anchors are chosen against stamped sensor time, while the queue
     // deadline advances on the same-machine steady clock between odometry
     // callbacks. Feed that observed phase difference into the guard-only
@@ -1343,7 +1356,7 @@ namespace ego_planner
     std::optional<P4GeometryCommitResult> p4_collision_commit;
     if (const auto geometry_commit =
             planner_manager_->validateCommittedP4TrajectoryGeometry(
-                plannerNow().seconds());
+                now_s);
         geometry_commit && !geometry_commit->accepted())
     {
       RCLCPP_WARN(
@@ -1371,7 +1384,7 @@ namespace ego_planner
     }
     const double CLEARANCE = 1.0 * planner_manager_->getSwarmClearance();
     // double t_cur_global = ros::Time::now().toSec();
-    double t_cur_global = plannerNow().seconds();
+    double t_cur_global = now_s;
 
     double t_2_3 = info->duration_ * 2 / 3;
     for (double t = t_cur; t < info->duration_; t += time_step)
@@ -1471,7 +1484,6 @@ namespace ego_planner
         planner_manager_->p4ExecutionCertificate().authority !=
             P4ExecutionAuthority::LIMITED_PREFIX_BRAKING)
     {
-      const double now_s = plannerNow().seconds();
       const auto &direct_evidence =
           planner_manager_->latestP4DirectRiskEvidence();
       // validateCommittedP4TrajectoryExecution() has just refreshed this
