@@ -363,6 +363,47 @@ TEST(P4RollingSuccessorGuide,
       Eigen::Vector3d(bounded.target_station_m, 0.0, 1.0), 1.0e-12));
 }
 
+TEST(P4RollingSuccessorGuide,
+     TotalChildProgressAndContinuationBeyondParentUseDistinctFloors)
+{
+  ego_planner::P4BoundedExecutionGuideInput input;
+  input.frozen_guide = {
+    {0.0, 0.0, 1.0}, {1.0, 0.0, 1.0},
+    {2.0, 0.0, 1.0}, {3.0, 0.0, 1.0}};
+  input.start_position = input.frozen_guide.front();
+  input.start_velocity.setZero();
+  input.start_acceleration.setZero();
+  input.parent_approved_endpoint = Eigen::Vector3d(1.1, 0.0, 1.0);
+  input.minimum_continuation_progress_m = 0.10;
+  input.maximum_endpoint_projection_distance_m = 0.20;
+  input.decision_horizon_m = 2.10;
+  input.local_support_frontier_m = 3.0;
+  input.limits.min_creep_progress_m = 0.25;
+
+  const auto bounded = ego_planner::p4BoundExecutionGuide(input);
+
+  ASSERT_TRUE(bounded.valid) << bounded.reason;
+  EXPECT_GE(bounded.target_station_m, input.limits.min_creep_progress_m);
+  EXPECT_GE(
+      bounded.target_station_m - bounded.approved_endpoint_station_m,
+      input.minimum_continuation_progress_m);
+  EXPECT_LT(
+      bounded.target_station_m - bounded.approved_endpoint_station_m,
+      input.limits.min_creep_progress_m);
+
+  // The successor-specific continuation floor must not accidentally remove
+  // the ordinary minimum total motion requirement.
+  input.parent_approved_endpoint = Eigen::Vector3d(0.05, 0.0, 1.0);
+  input.minimum_continuation_progress_m = 0.05;
+  input.decision_horizon_m = 1.00;
+  input.local_support_frontier_m = 3.00;
+  const auto too_short = ego_planner::p4BoundExecutionGuide(input);
+  EXPECT_FALSE(too_short.valid);
+  EXPECT_EQ(
+      too_short.failure, ego_planner::P4BoundedExecutionFailure::STOPPING);
+  EXPECT_EQ(too_short.reason, "bounded_execution_stopping_reserve");
+}
+
 TEST(P4BoundedExecutionGuide,
      CurrentAccelerationIncreasesTheUnifiedStoppingReserve)
 {

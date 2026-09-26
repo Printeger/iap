@@ -3786,22 +3786,14 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
   result.usable_progress_m = result.local_frontier_m -
     p4StoppingDistance(
       input.start_velocity, input.start_acceleration, input.limits);
-  if (input.parent_approved_endpoint.allFinite())
-  {
-    auto bounded = p4BoundRollingSuccessorGuide(
-      cropPrefixToDistance(input.frozen_guide, result.local_frontier_m),
-      input.parent_approved_endpoint,
-      p4StoppingDistance(
-        input.start_velocity, input.start_acceleration, input.limits),
-      input.minimum_continuation_progress_m,
-      input.maximum_endpoint_projection_distance_m);
-    bounded.local_frontier_m = result.local_frontier_m;
-    return bounded;
-  }
-  result.minimum_progress_m = std::max(
-    input.limits.min_creep_progress_m,
-    p4KinematicStoppingProgress(
-      input.start_velocity, input.start_acceleration, input.limits));
+  result.minimum_progress_m = input.limits.min_creep_progress_m;
+  const bool rolling_successor =
+    input.parent_approved_endpoint.allFinite();
+  if (!rolling_successor)
+    result.minimum_progress_m = std::max(
+      result.minimum_progress_m,
+      p4KinematicStoppingProgress(
+        input.start_velocity, input.start_acceleration, input.limits));
   result.target_station_m = result.usable_progress_m;
 
   if (result.target_station_m + kEpsilon < result.minimum_progress_m) {
@@ -3820,6 +3812,19 @@ P4BoundedExecutionGuide p4BoundExecutionGuide(
       result.reason = "bounded_execution_stopping_reserve";
     }
     return result;
+  }
+
+  if (rolling_successor)
+  {
+    auto bounded = p4BoundRollingSuccessorGuide(
+      cropPrefixToDistance(input.frozen_guide, result.local_frontier_m),
+      input.parent_approved_endpoint,
+      p4StoppingDistance(
+        input.start_velocity, input.start_acceleration, input.limits),
+      input.minimum_continuation_progress_m,
+      input.maximum_endpoint_projection_distance_m);
+    bounded.local_frontier_m = result.local_frontier_m;
+    return bounded;
   }
 
   result.guide = cropPrefixToDistance(

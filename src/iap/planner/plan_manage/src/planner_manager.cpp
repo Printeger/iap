@@ -15602,7 +15602,6 @@ namespace ego_planner
           bounded_input.parent_approved_endpoint =
               p4_execution_certificate_.approved_endpoint;
           bounded_input.minimum_continuation_progress_m = std::max({
-              p4_forward_limits_.min_creep_progress_m,
               p4_successor_progress_jitter_floor_m_,
               std::isfinite(
                   last_p4_forward_decision_.successor_required_progress_m)
