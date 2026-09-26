@@ -66,6 +66,7 @@ class PredictorModule {
     LidarAdvisoryResult lidar;
     double gnss_evaluation_time_s =
         std::numeric_limits<double>::quiet_NaN();
+    bool evaluated = false;
   };
 
   PredictorParams params_;
@@ -82,7 +83,8 @@ class PredictorModule {
       const GnssAdvisoryResult* selected_receiver_advisory = nullptr,
       GlobalNavigationTaskMode task_mode =
           GlobalNavigationTaskMode::STRICT_GLOBAL,
-      bool gnss_unknown_as_open_bound = false) const;
+      bool gnss_unknown_as_open_bound = false,
+      bool reuse_cached_gnss = true) const;
 };
 
 }  // namespace iap

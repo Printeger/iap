@@ -2162,7 +2162,8 @@ TEST(PredictorModuleTest,
   request.points = {transition, transition};
   request.points.back().satellite_window_id = 20;
 
-  const auto result = module.queryForwardRiskBatch(request);
+  iap::PredictorBatchDiagnostics diagnostics;
+  const auto result = module.queryForwardRiskBatch(request, &diagnostics);
 
   ASSERT_TRUE(result.complete)
       << iap::forwardRiskFailureReasonName(result.failure_reason);
@@ -2171,6 +2172,7 @@ TEST(PredictorModuleTest,
   // One hit is the upper-bound receiver advisory and one is the matching
   // lower-bound advisory. Neither GNSS solve should repeat for the overlap.
   EXPECT_EQ(result.timing.receiver_cache_hit_count, 2u);
+  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 1u);
 }
 
 TEST(PredictorModuleTest,

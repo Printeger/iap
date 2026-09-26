@@ -505,7 +505,8 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     const std::vector<bool>* gnss_satellite_mask,
     const GnssAdvisoryResult* selected_receiver_advisory,
     const GlobalNavigationTaskMode task_mode,
-    const bool gnss_unknown_as_open_bound) const {
+    const bool gnss_unknown_as_open_bound,
+    const bool reuse_cached_gnss) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
   out.query_time_s = input.query_time_s;
@@ -589,7 +590,8 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
   const bool gnss_allowed =
       source_allows_gnss(params_.source_mode) &&
       !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
-  const bool reuse_gnss = cached_spatial_advisory != nullptr &&
+  const bool reuse_gnss = reuse_cached_gnss &&
+      cached_spatial_advisory != nullptr &&
       (!support_evaluation_time_sensitive_ || !gnss_allowed ||
        (cached_spatial_advisory->gnss_evaluation_time_s ==
             freshness_time_s(working_input)));
@@ -675,6 +677,7 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     evaluated_spatial_advisory->lidar = out.lidar;
     evaluated_spatial_advisory->gnss_evaluation_time_s =
         freshness_time_s(working_input);
+    evaluated_spatial_advisory->evaluated = true;
   }
   if (out.gnss.valid) {
     apply_certified_gnss_anchor(gnss_, params_.gnss,
@@ -1397,6 +1400,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       request.points.size());
   std::atomic<std::size_t> next_advisory_row{0u};
   std::atomic<bool> advisory_aborted{false};
+  std::atomic<std::size_t> lower_spatial_reuse_count{0u};
   const auto advisory_worker = [&]() {
     while (!advisory_aborted.load(std::memory_order_relaxed)) {
       const std::size_t work_index = next_advisory_row.fetch_add(
@@ -1411,15 +1415,24 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       const PredictorQueryInput input(
           query.position_map, request.snapshot, query.query_time_s,
           query.horizon_s, "map", request.evaluation_time_s);
+      SpatialAdvisory upper_spatial_advisory;
       prefetched_predictions[index] = queryWithSpatialAdvisory(
-          input, nullptr, nullptr, diagnostics,
+          input, nullptr, &upper_spatial_advisory, diagnostics,
           &local_satellite_masks[index], &receiver_advisories[index],
           request.task_mode);
+      const SpatialAdvisory* lower_spatial_advisory =
+          upper_spatial_advisory.evaluated
+          ? &upper_spatial_advisory : nullptr;
+      // The bound pair shares one physical point, so LiDAR/FIM is identical.
+      // Keep GNSS separate because the upper and lower masks intentionally
+      // differ.
       prefetched_lower_predictions[index] = queryWithSpatialAdvisory(
-          input, nullptr, nullptr, nullptr,
+          input, lower_spatial_advisory, nullptr, nullptr,
           &lower_bound_satellite_masks[index],
           &lower_receiver_advisories[index],
-          GlobalNavigationTaskMode::MISSION_BEST_EFFORT, true);
+          GlobalNavigationTaskMode::MISSION_BEST_EFFORT, true, false);
+      if (lower_spatial_advisory != nullptr)
+        lower_spatial_reuse_count.fetch_add(1u, std::memory_order_relaxed);
     }
   };
   const std::size_t advisory_worker_count = std::min<std::size_t>(
@@ -1434,6 +1447,9 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   }
   advisory_worker();
   for (auto& worker : advisory_workers) worker.join();
+  if (diagnostics != nullptr)
+    diagnostics->spatial_advisory_reuse_count +=
+        lower_spatial_reuse_count.load(std::memory_order_relaxed);
   if (advisory_aborted.load(std::memory_order_relaxed) || budget_expired()) {
     fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
     return out;
