@@ -9922,14 +9922,58 @@ TEST(P4PreparedSuccessorPolicy,
       12.5, ego_planner::P4PreparedCurveFailure::GNSS_RISK,
       "successor_gnss_limit_exceeded");
   EXPECT_FALSE(fast_path_manager.preparingP4SuccessorCurve());
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       fast_path_manager.p4SuccessorFullSearchFallbackPendingForTest());
+  EXPECT_EQ(fast_path_manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::ROUTE_PENDING);
   EXPECT_EQ(fast_path_manager.lastP4ForwardDecision().successor_failure,
             ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED);
 
+  ego_planner::EGOPlannerManager multi_channel_manager;
+  multi_channel_manager.setP4SuccessorPreparationBoundaryForTest(
+      20, 13000000000LL, 14.0,
+      "successor_full_search_fallback_ready");
+  ego_planner::P4ForwardDecision multi_channel;
+  multi_channel.decision_event_id = 55u;
+  multi_channel.snapshot_identity.execution_snapshot_id = 183u;
+  for (const auto &[candidate_id, channel_id, lateral_m] :
+       {std::tuple<uint64_t, uint64_t, double>{1u, 17u, 1.0},
+        std::tuple<uint64_t, uint64_t, double>{2u, 29u, -1.0}})
+  {
+    ego_planner::P4ForwardCandidate candidate;
+    candidate.candidate_id = candidate_id;
+    candidate.channel_id = channel_id;
+    candidate.occupancy_supported = true;
+    candidate.path = {
+        Eigen::Vector3d::Zero(), Eigen::Vector3d(1.0, lateral_m, 0.0)};
+    candidate.path_hash = "full-search-channel-" +
+        std::to_string(channel_id);
+    multi_channel.candidates.push_back(std::move(candidate));
+  }
+  multi_channel.selected_candidate_id = 1u;
+  multi_channel.selected_channel_id = 17u;
+  multi_channel.selected_guide = multi_channel.candidates.front().path;
+  multi_channel_manager.setP4ForwardDecisionForTest(multi_channel);
+  multi_channel_manager.recordPreparedP4SuccessorCurveFailure(
+      13.5, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+      "first_channel_local_clearance_failed");
+  EXPECT_TRUE(multi_channel_manager.preparingP4SuccessorCurve());
+  ASSERT_TRUE(
+      multi_channel_manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(
+      multi_channel_manager.pendingP4ChannelWorkItemForTest()
+          ->selected_candidate_id,
+      2u);
+  EXPECT_EQ(
+      multi_channel_manager.pendingP4ChannelWorkItemForTest()
+          ->selected_channel_id,
+      29u);
+  EXPECT_EQ(multi_channel_manager.lastP4ForwardDecision().successor_failure,
+            ego_planner::P4SuccessorFailure::NONE);
+
   ego_planner::EGOPlannerManager first_failure_manager;
   first_failure_manager.setP4SuccessorPreparationBoundaryForTest(
-      20, 13000000000LL, 14.0);
+      21, 14000000000LL, 15.0);
   ego_planner::P4ForwardDecision gnss_failure;
   gnss_failure.successor_failure =
       ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
