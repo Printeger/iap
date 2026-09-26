@@ -1146,6 +1146,18 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
     elif any(not all((item[0] > 0, item[1] > 0, item[2] > 0, item[3]))
              for item in command_identities):
         failures.append("position_command_identity_incomplete")
+    command_receive_times = sorted(
+        float(row.get("receive_steady_s", math.inf))
+        for row in bound_commands
+    )
+    maximum_command_gap_s = max((
+        later - earlier for earlier, later in zip(
+            command_receive_times, command_receive_times[1:])
+    ), default=0.0)
+    if (not command_receive_times or
+            not all(math.isfinite(value) for value in command_receive_times) or
+            maximum_command_gap_s > 0.25):
+        failures.append("position_command_data_gap")
 
     maximum_tracking_error_m = 0.0
     saturated_count = 0
@@ -1187,6 +1199,18 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         failures.append("tracking_envelope_exceeded")
     if saturated_count:
         failures.append("controller_saturation_observed")
+    bound_trace_times = sorted(
+        float(row.get("receive_steady_s", math.inf))
+        for row in traces if any(identity(payload(row)))
+    )
+    maximum_trace_gap_s = max((
+        later - earlier for earlier, later in zip(
+            bound_trace_times, bound_trace_times[1:])
+    ), default=0.0)
+    if (not bound_trace_times or
+            not all(math.isfinite(value) for value in bound_trace_times) or
+            maximum_trace_gap_s > 0.25):
+        failures.append("controller_trace_data_gap")
 
     samples = []
     for row in odometry:
@@ -1201,11 +1225,23 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
             samples.append((stamp, position, math.sqrt(sum(
                 value * value for value in velocity))))
     samples.sort(key=lambda item: item[0])
+    maximum_odometry_gap_s = max((
+        later[0] - earlier[0] for earlier, later in zip(
+            samples, samples[1:])
+    ), default=0.0)
+    if len(samples) < 2 or maximum_odometry_gap_s > 0.5:
+        failures.append("odometry_data_gap")
     longest_nonterminal_pause_s = 0.0
     pause_start = None
+    departed = False
+    initial_position = samples[0][1] if samples else None
+    terminal_goal = [18.0, 0.0, 1.5]
     for stamp, position, speed in samples:
-        in_flight = position[0] > -17.5 and position[0] < 17.5
-        if in_flight and speed < 0.05:
+        if (not departed and initial_position is not None and
+                (speed >= 0.05 or math.dist(position, initial_position) > 0.1)):
+            departed = True
+        nonterminal = math.dist(position, terminal_goal) > 0.5
+        if departed and nonterminal and speed < 0.05:
             pause_start = stamp if pause_start is None else pause_start
             longest_nonterminal_pause_s = max(
                 longest_nonterminal_pause_s, stamp - pause_start)
@@ -1215,12 +1251,43 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         failures.append("nonterminal_flight_pause_exceeded")
     if not samples:
         failures.append("odometry_missing")
+        terminal_hover_duration_s = 0.0
     else:
         _, final_position, final_speed = samples[-1]
-        if math.dist(final_position, [18.0, 0.0, 1.5]) > 0.5:
+        if math.dist(final_position, terminal_goal) > 0.5:
             failures.append("terminal_goal_not_reached")
         if final_speed >= 0.05:
             failures.append("terminal_hover_not_established")
+        hover_suffix = []
+        for sample in reversed(samples):
+            stamp, position, speed = sample
+            if math.dist(position, terminal_goal) > 0.5 or speed >= 0.05:
+                break
+            if hover_suffix and hover_suffix[-1][0] - stamp > 0.5:
+                break
+            hover_suffix.append(sample)
+        terminal_hover_duration_s = (
+            hover_suffix[0][0] - hover_suffix[-1][0]
+            if len(hover_suffix) >= 2 else 0.0)
+        if terminal_hover_duration_s < 2.0:
+            failures.append("terminal_hover_duration_insufficient")
+
+    forks = forest_scene_contract()["forks"]
+    actual_forks_passed = set()
+    for _stamp, position, _speed in samples:
+        x_m, y_m = position[0], position[1]
+        for fork in forks:
+            x_min = float(fork["x_min_m"])
+            t = (x_m - x_min) / float(fork["length_m"])
+            if not 0.15 <= t <= 0.85:
+                continue
+            low_y, high_y = _forest_arm_centers(fork, x_m)
+            arm_distance = min(abs(y_m - low_y), abs(y_m - high_y))
+            if arm_distance <= 1.0:
+                actual_forks_passed.add(int(fork["fork_index"]))
+            break
+    if actual_forks_passed != {0, 1, 2, 3}:
+        failures.append("forest_forks_not_traversed")
     return _result(
         failures,
         position_command_count=len(commands),
@@ -1236,6 +1303,12 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         maximum_tracking_error_m=maximum_tracking_error_m,
         saturated_count=saturated_count,
         longest_nonterminal_pause_s=longest_nonterminal_pause_s,
+        terminal_hover_duration_s=terminal_hover_duration_s,
+        actual_forks_passed=sorted(actual_forks_passed),
+        actual_fork_count=len(actual_forks_passed),
+        maximum_command_gap_s=maximum_command_gap_s,
+        maximum_controller_trace_gap_s=maximum_trace_gap_s,
+        maximum_odometry_gap_s=maximum_odometry_gap_s,
         rejected_command_count=len(rejected),
         startup_hover_command_count=len(startup_hover_commands),
         startup_hover_trace_count=startup_hover_trace_count,

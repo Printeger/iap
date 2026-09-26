@@ -139,7 +139,7 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(
             MODULE.stage_duration_s("continuous-flight"), 180.0)
 
-    def test_continuous_flight_uses_command_controller_and_odom_evidence(self):
+    def test_continuous_flight_rejects_sparse_closed_loop_evidence(self):
         records = []
         identities = [(7, trajectory, 1_000_000_000 * trajectory,
                        f"curve-{trajectory}")
@@ -193,9 +193,15 @@ class TestStageContracts(unittest.TestCase):
 
         summary = MODULE.analyze_continuous_flight(records)
 
-        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["result"], "FAIL")
         self.assertEqual(summary["successor_switch_count"], 2)
         self.assertAlmostEqual(summary["maximum_tracking_error_m"], 0.05)
+        self.assertIn("position_command_data_gap", summary["failures"])
+        self.assertIn("controller_trace_data_gap", summary["failures"])
+        self.assertIn("odometry_data_gap", summary["failures"])
+        self.assertIn("terminal_hover_duration_insufficient",
+                      summary["failures"])
+        self.assertIn("forest_forks_not_traversed", summary["failures"])
 
     def test_continuous_flight_does_not_count_guard_activation_as_successor(self):
         records = []
@@ -301,6 +307,28 @@ class TestStageContracts(unittest.TestCase):
         self.assertIn("successor_switch_not_at_nonzero_speed",
                       summary["failures"])
 
+    def test_continuous_flight_detects_pause_immediately_after_departure(self):
+        records = [
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 0.0, "position_m": [-18.0, 0.0, 1.5],
+                "velocity_mps": [0.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 0.1, "position_m": [-17.9, 0.0, 1.5],
+                "velocity_mps": [1.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 0.2, "position_m": [-17.8, 0.0, 1.5],
+                "velocity_mps": [0.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 0.8, "position_m": [-17.8, 0.0, 1.5],
+                "velocity_mps": [0.0, 0.0, 0.0]}},
+        ]
+
+        summary = MODULE.analyze_continuous_flight(records)
+
+        self.assertGreater(summary["longest_nonterminal_pause_s"], 0.5)
+        self.assertIn("nonterminal_flight_pause_exceeded",
+                      summary["failures"])
+
     def test_continuous_flight_allows_unbound_hover_before_first_activation(self):
         records = [{
             "kind": "poscmd", "receive_steady_s": 0.5,
@@ -368,17 +396,56 @@ class TestStageContracts(unittest.TestCase):
                             "saturated": False,
                         },
                     })
-        records.extend([
-            {"kind": "iap_odom", "payload": {
-                "stamp_s": 1.0, "position_m": [-18.0, 0.0, 1.5],
-                "velocity_mps": [1.0, 0.0, 0.0]}},
-            {"kind": "iap_odom", "payload": {
-                "stamp_s": 2.0, "position_m": [0.0, 0.0, 1.5],
-                "velocity_mps": [1.0, 0.0, 0.0]}},
-            {"kind": "iap_odom", "payload": {
-                "stamp_s": 3.0, "position_m": [18.0, 0.0, 1.5],
-                "velocity_mps": [0.0, 0.0, 0.0]}},
-        ])
+        identities = []
+        for trajectory in (10, 11, 12):
+            common = {
+                "execution_instance_id": 7,
+                "trajectory_id": trajectory,
+                "start_time_ns": 1_000_000_000 * trajectory,
+                "curve_hash": f"curve-{trajectory}",
+            }
+            identities.append(common)
+        for step in range(11, 133):
+            receive_s = step / 10.0
+            identity_index = 0 if receive_s < 2.0 else (
+                1 if receive_s < 3.0 else 2)
+            common = identities[identity_index]
+            position = [identity_index * .01, 0.0, 1.5]
+            records.extend([
+                {"kind": "poscmd", "receive_steady_s": receive_s,
+                 "payload": {**common, "position_xyz": position}},
+                {"kind": "controller_trace",
+                 "receive_steady_s": receive_s + .001,
+                 "payload": {
+                     **common,
+                     "position_xyz": position,
+                     "velocity_xyz": [1.0, 0.0, 0.0],
+                     "acceleration_xyz": [0.0, 0.0, 0.0],
+                     "feedback_position_xyz": position,
+                     "feedback_velocity_xyz": [1.0, 0.0, 0.0],
+                     "saturated": False,
+                 }},
+            ])
+        forks = MODULE.forest_scene_contract()["forks"]
+        for step in range(0, 123):
+            stamp_s = 1.0 + step / 10.0
+            if stamp_s <= 11.0:
+                x_m = -18.0 + 3.6 * (stamp_s - 1.0)
+                y_m = 0.0
+                for fork in forks:
+                    x_min = float(fork["x_min_m"])
+                    if x_min <= x_m <= x_min + float(fork["length_m"]):
+                        y_m = MODULE._forest_arm_centers(fork, x_m)[0]
+                        break
+                velocity = [3.6, 0.0, 0.0]
+            else:
+                x_m, y_m = 18.0, 0.0
+                velocity = [0.0, 0.0, 0.0]
+            records.append({"kind": "iap_odom", "payload": {
+                "stamp_s": stamp_s,
+                "position_m": [x_m, y_m, 1.5],
+                "velocity_mps": velocity,
+            }})
 
         summary = MODULE.analyze_continuous_flight(records)
 
