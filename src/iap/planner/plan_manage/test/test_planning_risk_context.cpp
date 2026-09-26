@@ -2437,6 +2437,28 @@ TEST(P4ActualCurveClearanceOptimization,
       << assurance.reason;
 }
 
+TEST(P4ReboundFailureEvidence,
+     BoundaryConditionDoesNotLeakInitializationPlaceholder) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("rebound_boundary_failure.csv").string());
+
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  const Eigen::Vector3d position(-16.5, 0.5, 1.5);
+
+  EXPECT_FALSE(manager.reboundReplan(
+      position, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), position,
+      Eigen::Vector3d::Zero(), true, false, position));
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::LOCAL_GEOMETRY);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "planning_target_within_minimum_progress:distance_m=0");
+}
+
 TEST(P4ActualCurveClearanceOptimization,
      MirroredDenseForkUsesTheEvaluatorEscapeDirection) {
   auto map = std::make_shared<GridMap>();

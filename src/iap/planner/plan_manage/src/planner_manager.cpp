@@ -15213,6 +15213,11 @@ namespace ego_planner
 
     if ((start_pt - local_target_pt).norm() < 0.2)
     {
+      std::ostringstream detail;
+      detail << "planning_target_within_minimum_progress:distance_m="
+             << (start_pt - local_target_pt).norm();
+      record_prepared_curve_failure(
+          P4PreparedCurveFailure::LOCAL_GEOMETRY, detail.str());
       cout << "Close to goal" << endl;
       continous_failures_count_++;
       return false;
