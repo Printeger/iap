@@ -232,3 +232,12 @@ python3 scripts/dev_planner/run_icra_interface_integration.py \
 ## 9. 给开发 Codex 的开工指令
 
 > 阅读 AGENTS.md、本计划、相关 spec 和当前源码，按步骤 1→5 实施。用户已确认 MISSION exposure 取消独立停车权、失败保留首因、P5 收敛为运行时监督；在这个范围内自主完成实现、测试、提交和 live 修复循环，不反复请求已授权事项。先核对现状并复用已有认证、局部安全、候选比较、后继和 continuous-flight runner。禁止新增定位系统、重复授权框架或放宽安全标准。每次 live 使用可追溯的干净源码版本；最终必须交付同一版本三次完整森林通过、选路对照和故障保护证据。发现未解决问题继续修复，不把阶段性测试或回滚描述成完成。
+
+## 10. 本轮执行进度
+
+- 当前提交链：`83fddbc`、`9f27a05`、`f6761b8`、`784d3d3`、`a4a35e9`、`30426ac`、`ffc118b`（均基于计划提交 `e675443`）。
+- 已完成：步骤 1 的 manager/FSM 下游失败首因补全；optimizer 失败记录 solver result、终止原因、迭代数和耗时；continuous-flight analyzer 排除 guard、校验父子身份、非零速度与 p/v/a 命令连续性，并拒绝 required process 提前退出、数据断流、短程停车、终点悬停不足及未由 odom 穿越四叉。
+- 基线两次停车首因：轨迹 5 是 `SUCCESSOR_CURVE_PREPARATION_FAILED`，旧 detail 泄漏 `rebound_replan_started`；轨迹 9 是 P5 将本段预测积分与 prior episode 重复累计到 `0.403255 > 0.4` 后触发 exposure braking。原始证据：`results/icra27/dev_runs/interface_integration/run-20260926T050049Z-450628/full-r01-risk/exports/planner_p4_risk_astar_debug.csv.execution_events.csv` 及同目录 `stdout.log`。
+- CPU 证据：`test/test_icra_interface_integration.py` 94/94 通过；`test_planning_risk_context` 168/169 通过。唯一失败 `P4PreparedChannelPreparation.GuideSweptCollisionStillReachesActualCurvePreparation` 已定位为候选 A 失败后候选 B 继承 `HOLD_REQUIRED`，在 B 的 actual curve 生成前返回；这是步骤 4 范围内的真实恢复阻塞，不是本次诊断记录造成的授权变化。
+- 工作区：仅用户历史文件 `docs/whatsnext.md` 保持未跟踪、未修改；尚未进行本轮 live，不能计入最终验收。
+- 下一步：按步骤 2 核对局部安全依据与实际参数，再以一个贯通提交执行步骤 3 的 MISSION exposure 去授权化；随后在步骤 4 用上述生产红测修复候选 B 接棒，进入短 live。
