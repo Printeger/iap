@@ -1955,7 +1955,8 @@ namespace ego_planner
           !iap::forwardRiskFailureIsGlobalNavigationDegradable(
               result.failure_reason))
         return false;
-      bool saw_global_degradation = false;
+      bool saw_global_degradation =
+          result.failure_reason != iap::ForwardRiskFailureReason::NONE;
       for (const auto &point : result.points)
       {
         if (point.failure_reason == iap::ForwardRiskFailureReason::NONE)

@@ -5014,6 +5014,41 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_NE(continuing.runtime_window_evidence_sequence_id, 0u);
   EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
+
+  // The producer may report a typed GNSS-only failure at batch level without
+  // redundantly copying it into every otherwise usable point.  MISSION must
+  // preserve local motion authority for that representation just as it does
+  // when the same typed reason is attached to individual points.
+  const auto aggregate_gnss_incomplete = [](
+      const iap::ForwardRiskBatchRequest &request) {
+    auto result = directRiskCallback(0.5)(request);
+    result.complete = false;
+    result.failure_reason =
+        iap::ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE;
+    for (auto &point : result.points)
+      point.failure_reason = iap::ForwardRiskFailureReason::NONE;
+    return result;
+  };
+  const auto aggregate_gnss_snapshot = makeP4ExecutionSnapshot(
+      snapshot, aggregate_gnss_incomplete, 10.505, 74u);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.505, nullptr, aggregate_gnss_incomplete,
+      aggregate_gnss_snapshot);
+  const double aggregate_gnss_check_s = 10.51;
+  const auto aggregate_gnss_degraded =
+      manager.validateCommittedP4TrajectoryExecution(
+          aggregate_gnss_check_s,
+          manager.local_data_.position_traj_.evaluateDeBoorT(
+              aggregate_gnss_check_s -
+              manager.local_data_.start_time_.seconds()));
+  EXPECT_TRUE(aggregate_gnss_degraded.allowed)
+      << aggregate_gnss_degraded.reason;
+  EXPECT_EQ(aggregate_gnss_degraded.reason,
+            "runtime_execution_contract_valid");
+  EXPECT_FALSE(
+      aggregate_gnss_degraded.guard_braking_preschedule_requested);
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
+
   auto marginal_nominal = manager.local_data_.position_traj_;
   const double marginal_start_s = manager.local_data_.start_time_.seconds();
   const double marginal_threshold_t = 1.5;
