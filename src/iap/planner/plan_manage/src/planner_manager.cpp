@@ -12302,12 +12302,15 @@ namespace ego_planner
     Eigen::Vector3d server_acceleration;
     bool current_t_from_server = false;
     bool execution_clock_stale = false;
+    bool execution_clock_is_activation_placeholder = false;
     if (activeTrajectoryExecutionState(
             evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS,
             &server_execution_t,
             &server_position, &server_velocity, &server_acceleration))
     {
       current_t_from_server = true;
+      execution_clock_is_activation_placeholder =
+          !active_trajectory_execution_sample_.received_from_server;
       current_t = std::clamp(
           server_execution_t, 0.0,
           p4_execution_certificate_.duration_s);
@@ -12420,7 +12423,8 @@ namespace ego_planner
       // bounded callback skew, the exact active controller trace is the same
       // command identity and may carry the newer elapsed time; use it instead
       // of treating the old PositionCommand sample as a controller outage.
-      if (!current_t_from_server || execution_clock_stale)
+      if (!current_t_from_server || execution_clock_stale ||
+          execution_clock_is_activation_placeholder)
       {
         current_t = std::clamp(
             trace_execution_elapsed_s, 0.0,

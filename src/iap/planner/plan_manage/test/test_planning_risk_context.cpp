@@ -2625,6 +2625,45 @@ TEST(TrajectoryExecutionFeedbackTest,
   EXPECT_TRUE(waiting_result.allowed) << waiting_result.reason;
   EXPECT_EQ(waiting_result.reason, "runtime_execution_contract_valid");
 
+  auto trace_before_position_command = makeActivatedRuntimeFeedbackFixture(
+      "runtime_trace_before_position_command", 941);
+  auto trace_first_trajectory =
+      trace_before_position_command.manager->local_data_.position_traj_;
+  auto trace_first_velocity = trace_first_trajectory.getDerivative();
+  auto trace_first_acceleration = trace_first_velocity.getDerivative();
+  constexpr double trace_first_elapsed_s = 0.7;
+  const Eigen::Vector3d trace_first_position =
+      trace_first_trajectory.evaluateDeBoorT(trace_first_elapsed_s);
+  const Eigen::Vector3d trace_first_velocity_at_sample =
+      trace_first_velocity.evaluateDeBoorT(trace_first_elapsed_s);
+  const Eigen::Vector3d trace_first_acceleration_at_sample =
+      trace_first_acceleration.evaluateDeBoorT(trace_first_elapsed_s);
+  ASSERT_TRUE(
+      trace_before_position_command.manager->recordTrajectoryControllerTrace(
+          trace_before_position_command.manager->local_data_.
+              execution_instance_id_,
+          trace_before_position_command.manager->local_data_.traj_id_,
+          trace_before_position_command.manager->local_data_.start_time_.
+              nanoseconds(),
+          trace_before_position_command.manager->local_data_.curve_hash_,
+          1'725'000'000.3, trace_first_elapsed_s, trace_first_position,
+          trace_first_velocity_at_sample,
+          trace_first_acceleration_at_sample, trace_first_position,
+          trace_first_velocity_at_sample,
+          trace_first_acceleration_at_sample, false));
+  const auto trace_first_result = trace_before_position_command.manager->
+      validateCommittedP4TrajectoryExecution(
+          trace_before_position_command.evaluation_ros_s,
+          trace_first_position);
+  EXPECT_TRUE(trace_first_result.allowed) << trace_first_result.reason;
+  EXPECT_EQ(trace_first_result.reason, "runtime_execution_contract_valid");
+  EXPECT_NEAR(
+      trace_first_result.remaining_time_s,
+      trace_before_position_command.manager->local_data_.duration_ -
+          trace_first_elapsed_s,
+      1.0e-9);
+  EXPECT_FALSE(trace_first_result.guard_braking_preschedule_requested);
+
   auto waiting_expired = makeActivatedRuntimeFeedbackFixture(
       "runtime_feedback_waiting_expired", 936);
   *waiting_expired.steady_now_ns += 200'000'010LL;
