@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(execution-snapshot-causal-tolerance): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — apply the existing one-microsecond causal stamp tolerance to
+  the execution snapshot's aggregate evaluation time as well as its frozen
+  local source stamps. This prevents sub-microsecond ROS nanosecond/double
+  conversion skew from creating a false missing-snapshot brake; data more than
+  one microsecond in the future and all existing freshness, registration,
+  local-clearance and braking checks remain rejected unchanged.
 - fix(p4-frozen-channel-recovery): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — keep a typed failure attached to its immutable failed channel
   while preparing the next already-frozen guide with the committed parent

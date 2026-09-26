@@ -152,8 +152,10 @@ struct P0ExecutionRiskSnapshot {
       const iap::ForwardRiskBatchRequest&)> diagnostic_forward_risk_batch;
 
   bool localFreshAt(double now_s) const {
+    constexpr double kCausalStampToleranceS = 1.0e-6;
     if (execution_snapshot_id == 0u || !std::isfinite(now_s) ||
-        !std::isfinite(evaluation_time_s) || now_s < evaluation_time_s ||
+        !std::isfinite(evaluation_time_s) ||
+        now_s - evaluation_time_s < -kCausalStampToleranceS ||
         !occupancy || !forward_risk_batch || risk_policy.frame_id != "map" ||
         geometry_id.empty()) {
       return false;
@@ -161,7 +163,7 @@ struct P0ExecutionRiskSnapshot {
     const double timeout = risk_policy.stale_timeout_s;
     const auto fresh_stamp = [now_s, timeout](const double stamp) {
       const double age = now_s - stamp;
-      return std::isfinite(stamp) && age >= -1.0e-6 &&
+      return std::isfinite(stamp) && age >= -kCausalStampToleranceS &&
           (timeout < 0.0 || age <= timeout);
     };
     if (!fresh_stamp(occupancy->cloud_stamp_s)) {

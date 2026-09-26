@@ -54,6 +54,11 @@ TEST(P0ExecutionRiskSnapshotTest,
   snapshot.integrity_anchor.current.icp_gamma_lidar = 1.2;
   snapshot.integrity_anchor.has_epoch = false;
 
+  // ROS nanosecond stamps and double seconds can differ by a fraction of the
+  // existing one-microsecond causal tolerance. The snapshot and all of its
+  // local sources still describe the same physical instant in that case.
+  EXPECT_TRUE(snapshot.localFreshAt(100.0 - 0.5e-6));
+  EXPECT_FALSE(snapshot.localFreshAt(100.0 - 2.0e-6));
   EXPECT_TRUE(snapshot.localFreshAt(100.5));
   EXPECT_FALSE(snapshot.globalFreshAt(100.5, 1.0));
   EXPECT_FALSE(snapshot.freshAt(100.5, 1.0));
