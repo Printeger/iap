@@ -8078,6 +8078,56 @@ TEST(P4SuccessorDeadlineScheduling,
 }
 
 TEST(P4SuccessorDeadlineScheduling,
+     ServerActivationEpochKeepsChildStartAndParentClockAligned)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ExecutionCertificate certificate;
+  certificate.valid = true;
+  certificate.trajectory_id = 181;
+  certificate.start_time_ns = 10000000000LL;
+  certificate.duration_s = 32.0;
+  certificate.execution_deadline_s = 42.0;
+  certificate.latest_rolling_switch_elapsed_s = 10.0;
+  certificate.control_points_hash = "server-epoch-parent";
+  certificate.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  manager.local_data_.execution_instance_id_ = 1u;
+  manager.local_data_.traj_id_ = certificate.trajectory_id;
+  manager.local_data_.start_time_ =
+      rclcpp::Time(certificate.start_time_ns, RCL_ROS_TIME);
+  manager.local_data_.position_traj_ = makeMovingCurvedP4Trajectory(0.2);
+  manager.local_data_.velocity_traj_ =
+      manager.local_data_.position_traj_.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.curve_hash_ = certificate.control_points_hash;
+  manager.local_data_.duration_ = certificate.duration_s;
+  manager.setP4ExecutionCertificateForTest(certificate);
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
+  manager.setTimeProvider([]() {
+    return rclcpp::Time(12000000000LL, RCL_ROS_TIME);
+  });
+
+  constexpr int64_t activation_event_ns = 11700000000LL;
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash, activation_event_ns));
+  const auto deadline = manager.p4SuccessorDeadlineForTest();
+  ASSERT_NEAR(deadline.planned_switch_time_s, 14.2, 1.0e-12);
+
+  Eigen::Vector3d position;
+  Eigen::Vector3d velocity;
+  Eigen::Vector3d acceleration;
+  double parent_elapsed_s = -1.0;
+  ASSERT_TRUE(manager.activatedTrajectoryStateAtAbsoluteTime(
+      14200000000LL, &position, &velocity, &acceleration,
+      &parent_elapsed_s));
+  EXPECT_NEAR(parent_elapsed_s, 2.5, 1.0e-12);
+}
+
+TEST(P4SuccessorDeadlineScheduling,
      CompletedWorkerResultPreemptsStaleScheduleSuppression)
 {
   ego_planner::EGOPlannerManager manager;

@@ -3180,7 +3180,8 @@ namespace ego_planner
 
   bool EGOPlannerManager::recordTrajectoryActivated(
       const uint64_t execution_instance_id, const int trajectory_id,
-      const int64_t start_time_ns, const std::string &curve_hash)
+      const int64_t start_time_ns, const std::string &curve_hash,
+      const int64_t event_time_ns)
   {
     const bool published_identity_matches =
         execution_instance_id == last_published_execution_instance_id_ &&
@@ -3238,6 +3239,17 @@ namespace ego_planner
     // trace for the new identity arrives, bind watchdog progress to the
     // actual activation boundary instead of falling back to ROS-start age.
     active_trajectory_execution_sample_ = ActiveTrajectoryExecutionSample{};
+    const double activation_now_s = plannerNow().seconds();
+    const double reported_activation_s =
+        static_cast<double>(event_time_ns) * 1.0e-9;
+    const bool reported_activation_is_causal = event_time_ns > 0 &&
+        std::isfinite(reported_activation_s) &&
+        reported_activation_s <= activation_now_s + 1.0e-6;
+    const double activation_epoch_s = reported_activation_is_causal
+        ? reported_activation_s
+        : activation_now_s;
+    const double activation_elapsed_s = std::max(
+        0.0, activation_now_s - activation_epoch_s);
     const Eigen::MatrixXd activated_control_points =
         local_data_.position_traj_.getControlPoint();
     if (local_data_.execution_instance_id_ == execution_instance_id &&
@@ -3267,21 +3279,24 @@ namespace ego_planner
         active_trajectory_execution_sample_.start_time_ns = start_time_ns;
         active_trajectory_execution_sample_.curve_hash = curve_hash;
         active_trajectory_execution_sample_.sample_ros_stamp_s =
-            plannerNow().seconds();
+            activation_now_s;
         active_trajectory_execution_sample_.receive_ros_stamp_s =
             active_trajectory_execution_sample_.sample_ros_stamp_s;
         active_trajectory_execution_sample_.receive_steady_ns =
             steadyNowNs();
-        active_trajectory_execution_sample_.trajectory_elapsed_s = 0.0;
+        active_trajectory_execution_sample_.trajectory_elapsed_s =
+            std::clamp(activation_elapsed_s, 0.0, activated_duration);
         active_trajectory_execution_sample_.position =
-            local_data_.position_traj_.evaluateDeBoorT(0.0);
+            local_data_.position_traj_.evaluateDeBoorT(
+                active_trajectory_execution_sample_.trajectory_elapsed_s);
         active_trajectory_execution_sample_.velocity =
-            activated_velocity.evaluateDeBoorT(0.0);
+            activated_velocity.evaluateDeBoorT(
+                active_trajectory_execution_sample_.trajectory_elapsed_s);
         active_trajectory_execution_sample_.acceleration =
-            activated_acceleration.evaluateDeBoorT(0.0);
+            activated_acceleration.evaluateDeBoorT(
+                active_trajectory_execution_sample_.trajectory_elapsed_s);
       }
     }
-    const double activation_now_s = plannerNow().seconds();
     P4ExecutionCheckDiagnostics activated;
     activated.applicable = true;
     activated.allowed = true;
@@ -3341,7 +3356,7 @@ namespace ego_planner
       p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
           p4_successor_deadline_policy_,
           std::max(static_cast<double>(start_time_ns) * 1.0e-9,
-                   activation_now_s),
+                   activation_epoch_s),
           p4_execution_certificate_.execution_deadline_s,
           static_cast<double>(start_time_ns) * 1.0e-9 +
               p4_execution_certificate_.latest_rolling_switch_elapsed_s);

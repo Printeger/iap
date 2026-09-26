@@ -246,7 +246,8 @@ namespace ego_planner
             const bool recorded = planner_manager_->recordTrajectoryActivated(
                 message->execution_instance_id,
                 message->trajectory_id, start_time_ns,
-                message->curve_hash);
+                message->curve_hash,
+                rclcpp::Time(message->actual_event_time).nanoseconds());
             if (!recorded && !pending_guard_matches)
             {
               RCLCPP_ERROR(

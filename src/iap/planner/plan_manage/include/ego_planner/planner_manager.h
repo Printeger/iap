@@ -970,7 +970,8 @@ namespace ego_planner
         int64_t start_time_ns, const std::string &curve_hash);
     bool recordTrajectoryActivated(
         uint64_t execution_instance_id, int trajectory_id,
-        int64_t start_time_ns, const std::string &curve_hash);
+        int64_t start_time_ns, const std::string &curve_hash,
+        int64_t event_time_ns = 0);
     bool recordTrajectoryTerminalStatus(
         uint64_t execution_instance_id, int trajectory_id,
         int64_t start_time_ns, const std::string &curve_hash,
