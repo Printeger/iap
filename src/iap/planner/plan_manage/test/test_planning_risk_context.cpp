@@ -11663,7 +11663,7 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
-     PendingFrozenChannelPreemptsSuccessorWorkerResubmission)
+     PendingFrozenChannelAndDiagnosticFullSearchStayBoundToSuccessor)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -11769,15 +11769,33 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
 
   ego_planner::P4SuccessorPreparationResult completed_route;
-  completed_route.ready = true;
+  // Reproduce the live failure: a full successor search found multiple
+  // occupancy-clear channels, but guide-level GNSS diagnostics deferred the
+  // route.  Those diagnostics must hand the still-parent-bound route to the
+  // exact actual-curve preparation transaction instead of being retried as a
+  // failed worker result until the rolling deadline expires.
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path[1].y() += 0.25;
+  second_channel.path_hash = "successor-full-search-second-channel";
+  completed_route.ready = false;
   completed_route.parent_trajectory_id = parent.trajectory_id;
-  completed_route.failure = ego_planner::P4SuccessorFailure::NONE;
+  completed_route.failure =
+      ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
   completed_route.decision = decision;
+  completed_route.decision.action =
+      ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  completed_route.decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  completed_route.decision.unevaluated_channel_count = 0u;
+  completed_route.decision.candidates.push_back(second_channel);
+  completed_route.decision.successor_fast_path = false;
   // Reproduce the production worker result: route decisions default to HOLD
   // until the manager binds them to the still-authoritative parent.
   completed_route.decision.planning_disposition =
       ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
-  completed_route.reason = "ok";
+  completed_route.reason = "route_level_gnss_diagnostic";
   manager.setP4PreparedSuccessorRouteForTest(std::move(completed_route));
 
   const auto awaiting_execution_sample =

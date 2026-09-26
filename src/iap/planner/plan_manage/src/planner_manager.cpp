@@ -5549,6 +5549,24 @@ namespace ego_planner
             completed.compute_duration_ms;
         successor.successor_failure = completed.failure;
         completed.decision = successor;
+        const bool route_risk_is_diagnostic =
+            completed.failure == P4SuccessorFailure::GNSS_LIMIT_EXCEEDED ||
+            completed.failure == P4SuccessorFailure::SUPPORT_INCOMPLETE;
+        if (!completed.ready && route_risk_is_diagnostic &&
+            !successor.successor_fast_path &&
+            prepareNormalChannelsForActualCertification(&successor))
+        {
+          // A full successor search returns topology, not motion authority.
+          // Keep it bound to this parent and let the existing actual-curve
+          // transaction certify every frozen channel.  Returning the route
+          // failure here would lose the successor state and retry the same
+          // guide-level diagnostic until the rolling deadline expired.
+          completed.ready = true;
+          completed.failure = P4SuccessorFailure::NONE;
+          completed.reason = "ready";
+          successor.successor_failure = P4SuccessorFailure::NONE;
+          completed.decision = successor;
+        }
         double parent_receive_ros_stamp_s =
             std::numeric_limits<double>::quiet_NaN();
         double parent_execution_elapsed_s =
