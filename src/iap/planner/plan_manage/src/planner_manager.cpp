@@ -3774,6 +3774,17 @@ namespace ego_planner
               p4_successor_schedule_.last_attempt_execution_snapshot_id,
               effective_execution_snapshot_id))
         return false;
+      if (p4_pending_channel_work_item_)
+      {
+        // The frozen guide remains search lineage from the failed snapshot,
+        // but its replacement actual curve belongs to this new planning
+        // attempt.  Normal cached-curve recertification performs the same
+        // explicit rebind before running the ordinary latest-snapshot,
+        // geometry, local-assurance and P5 gates.  Without it every freshness
+        // retry is rejected solely because the attempt sequence advanced.
+        p4_pending_channel_work_item_->planning_attempt_id =
+            planning_risk_context_.planning_attempt_id;
+      }
       p4_successor_schedule_.awaiting_new_snapshot = false;
       p4_successor_schedule_.result_delivered = false;
     }

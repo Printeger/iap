@@ -9797,6 +9797,10 @@ TEST(P4PreparedSuccessorPolicy,
      FreshnessRejectionRetriesOnlyAfterExecutionSnapshotAdvances)
 {
   ego_planner::EGOPlannerManager manager;
+  const auto risk_snapshot = makeP4SelectionSnapshot();
+  manager.setPlanningRiskContextForTest(risk_snapshot, 10.0);
+  const uint64_t failed_attempt_id =
+      manager.planningRiskContext().planning_attempt_id;
   ego_planner::P4ExecutionCertificate certificate;
   certificate.valid = true;
   certificate.trajectory_id = 17;
@@ -9833,6 +9837,7 @@ TEST(P4PreparedSuccessorPolicy,
   decision.selected_channel_id = 2u;
   decision.selected_guide = {
       Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitX()};
+  decision.planning_attempt_id = failed_attempt_id;
   decision.snapshot_identity.execution_snapshot_id = 182u;
   manager.setP4ForwardDecisionForTest(std::move(decision));
   ASSERT_TRUE(manager.preparingP4SuccessorCurve());
@@ -9852,8 +9857,22 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(manager.lastP4ForwardDecision().reason,
             "successor_curve_waiting_for_new_snapshot");
   EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.95, 182u));
+  manager.setPlanningRiskContextForTest(risk_snapshot, 10.96);
+  const uint64_t retry_attempt_id =
+      manager.planningRiskContext().planning_attempt_id;
+  ASSERT_NE(retry_attempt_id, failed_attempt_id);
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u));
   EXPECT_FALSE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
+      retry_attempt_id);
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->snapshot_identity.
+          execution_snapshot_id,
+      182u)
+      << "the frozen guide keeps its source lineage until the replacement "
+         "actual curve passes latest-snapshot certification";
 }
 
 TEST(P4PreparedSuccessorPolicy,
