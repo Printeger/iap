@@ -1627,6 +1627,40 @@ TEST(P4ForwardRoute,
 }
 
 TEST(P4ForwardRoute,
+     ClearSuccessorFastPathPreservesTheCertifiedGuideArcLength)
+{
+  auto request = straightRequest();
+  request.successor_fast_path = true;
+  request.incumbent_channel_id = 42u;
+  request.successor_reuse_guide = {
+    {0.0, 0.0, 1.0}, {2.0, 1.0, 1.0}, {4.0, 0.0, 1.0},
+    {6.0, 1.0, 1.0}, {7.0, 0.5, 1.0}};
+  request.map_extent = Eigen::Vector3d(30.0, 30.0, 10.0);
+  request.local_target = request.successor_reuse_guide.back();
+  request.nominal_local_reference = request.successor_reuse_guide;
+  request.raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>();
+
+  const auto length = [](const std::vector<Eigen::Vector3d> &path) {
+      double total_m = 0.0;
+      for (std::size_t index = 1u; index < path.size(); ++index)
+        total_m += (path[index] - path[index - 1u]).norm();
+      return total_m;
+    };
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  EXPECT_EQ(decision.channel_search_termination,
+            "successor_reuse_guide_clear");
+  EXPECT_NEAR(length(decision.selected_guide),
+              length(request.successor_reuse_guide), 1.0e-12);
+  ASSERT_FALSE(decision.selected_guide.empty());
+  EXPECT_TRUE(decision.selected_guide.back().isApprox(
+      request.successor_reuse_guide.back(), 1.0e-12));
+}
+
+TEST(P4ForwardRoute,
      SuccessorFastPathUsesFrozenGeometryWithoutReindexingRawSnapshot)
 {
   auto request = straightRequest();

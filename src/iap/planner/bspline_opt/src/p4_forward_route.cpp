@@ -4462,6 +4462,17 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       decision.candidates.size() == 1u)
   {
     auto &candidate = decision.candidates.front();
+    // The lattice candidate above proves connectivity, but its cell-centre
+    // representative can shortcut a curved committed guide by a fraction of
+    // a voxel.  The manager admitted this fast path using arc-length stopping
+    // and continuation progress on the exact frozen guide, so return that
+    // same already swept-free prefix to the actual-curve gate.  Otherwise a
+    // guide that passed the precheck can lose its final progress reserve only
+    // because of this second representation.
+    candidate.path = cropPrefixToDistance(
+      request.successor_reuse_guide, decision.decision_horizon_m);
+    candidate.length_m = pathLength(candidate.path);
+    candidate.path_hash = hashPath(candidate.path);
     candidate.risk_supported = false;
     candidate.safety_gate_passed = false;
     candidate.safety_state = P4ForwardSafetyState::UNKNOWN;
