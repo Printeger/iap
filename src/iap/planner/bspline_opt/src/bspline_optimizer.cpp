@@ -624,9 +624,84 @@ namespace ego_planner
     }
   }
 
+  void BsplineOptimizer::setP4ActualCurveGuideCorridor(
+      const Eigen::MatrixXd &seed_control_points, const double interval_s,
+      const std::vector<Eigen::Vector3d> &guide,
+      const double maximum_deviation_m)
+  {
+    p4_actual_curve_guide_corridor_constraints_.clear();
+    if (seed_control_points.rows() != 3 ||
+        seed_control_points.cols() < order_ + 1 ||
+        !seed_control_points.allFinite() || !std::isfinite(interval_s) ||
+        interval_s <= 0.0 || guide.size() < 2u ||
+        !std::isfinite(maximum_deviation_m) ||
+        maximum_deviation_m <= 0.0)
+      return;
+    if (std::any_of(guide.begin(), guide.end(),
+                    [](const Eigen::Vector3d &point) {
+                      return !point.allFinite();
+                    }))
+      return;
+
+    setBsplineInterval(interval_s);
+    const int span_count = seed_control_points.cols() - order_;
+    constexpr int kSamplesPerSpan = 4;
+    const int sample_count = std::max(1, span_count * kSamplesPerSpan);
+    const double duration_s = interval_s * span_count;
+    p4_actual_curve_guide_corridor_constraints_.reserve(
+        static_cast<std::size_t>(sample_count + 1));
+    for (int sample_index = 0; sample_index <= sample_count; ++sample_index)
+    {
+      const double time_s = duration_s *
+          static_cast<double>(sample_index) /
+          static_cast<double>(sample_count);
+      P4ActualCurveGuideCorridorConstraint constraint;
+      double weights[4] = {};
+      if (!cubicBasisForTime(
+              time_s, static_cast<int>(seed_control_points.cols()),
+              constraint.first_control_point, weights))
+        continue;
+      std::copy(std::begin(weights), std::end(weights),
+                constraint.weights.begin());
+      Eigen::Vector3d seed_position = Eigen::Vector3d::Zero();
+      for (int basis = 0; basis < 4; ++basis)
+        seed_position +=
+            constraint.weights[static_cast<std::size_t>(basis)] *
+            seed_control_points.col(
+                constraint.first_control_point + basis);
+
+      double nearest_squared = std::numeric_limits<double>::infinity();
+      for (std::size_t segment = 0; segment + 1u < guide.size(); ++segment)
+      {
+        const Eigen::Vector3d delta = guide[segment + 1u] - guide[segment];
+        const double squared_length = delta.squaredNorm();
+        const double alpha = squared_length > 1.0e-12
+            ? std::clamp(
+                  (seed_position - guide[segment]).dot(delta) /
+                      squared_length,
+                  0.0, 1.0)
+            : 0.0;
+        const Eigen::Vector3d projection = guide[segment] + alpha * delta;
+        const double squared_distance =
+            (seed_position - projection).squaredNorm();
+        if (squared_distance < nearest_squared)
+        {
+          nearest_squared = squared_distance;
+          constraint.guide_projection = projection;
+        }
+      }
+      if (!std::isfinite(nearest_squared))
+        continue;
+      constraint.maximum_deviation_m = maximum_deviation_m;
+      p4_actual_curve_guide_corridor_constraints_.push_back(
+          std::move(constraint));
+    }
+  }
+
   void BsplineOptimizer::clearP4ActualCurveClearanceConstraints()
   {
     p4_actual_curve_clearance_constraints_.clear();
+    p4_actual_curve_guide_corridor_constraints_.clear();
     p4_actual_curve_planning_clearance_buffer_m_ = 0.0;
   }
 
@@ -2810,7 +2885,9 @@ namespace ego_planner
   {
     cost = 0.0;
     gradient.setZero();
-    if (p4_actual_curve_clearance_constraints_.empty() || order_ != 3 ||
+    if ((p4_actual_curve_clearance_constraints_.empty() &&
+         p4_actual_curve_guide_corridor_constraints_.empty()) ||
+        order_ != 3 ||
         q.cols() < order_ + 1 ||
         !std::isfinite(p4_actual_curve_planning_clearance_buffer_m_) ||
         p4_actual_curve_planning_clearance_buffer_m_ <= 0.0)
@@ -2845,6 +2922,44 @@ namespace ego_planner
           -sample_weight * normalized_violation /
           (normalization_m * smooth_norm) *
           constraint.escape_direction;
+      for (int basis = 0; basis < 4; ++basis)
+        gradient.col(constraint.first_control_point + basis) +=
+            constraint.weights[static_cast<std::size_t>(basis)] *
+            point_gradient;
+    }
+
+    // Keep the immutable actual candidate in the same frozen topology tube
+    // that the final structural certification checks.  Each projection is
+    // fixed from the seed before L-BFGS, so line-search trials cannot switch
+    // guide branches at a crossing and silently change the work item.
+    for (const auto &constraint :
+         p4_actual_curve_guide_corridor_constraints_)
+    {
+      if (constraint.first_control_point < 0 ||
+          constraint.first_control_point + 3 >= q.cols() ||
+          !(constraint.maximum_deviation_m > 0.0))
+        continue;
+      Eigen::Vector3d point = Eigen::Vector3d::Zero();
+      for (int basis = 0; basis < 4; ++basis)
+        point += constraint.weights[static_cast<std::size_t>(basis)] *
+            q.col(constraint.first_control_point + basis);
+      const Eigen::Vector3d delta = point - constraint.guide_projection;
+      const double distance_m = delta.norm();
+      const double violation_m =
+          distance_m - constraint.maximum_deviation_m;
+      if (!(violation_m > 0.0) || distance_m <= 1.0e-12)
+        continue;
+      const double normalized_violation =
+          violation_m / constraint.maximum_deviation_m;
+      constexpr double smoothing = 1.0e-6;
+      const double smooth_norm = std::sqrt(
+          normalized_violation * normalized_violation +
+          smoothing * smoothing);
+      cost += smooth_norm - smoothing;
+      const Eigen::Vector3d point_gradient =
+          normalized_violation /
+          (constraint.maximum_deviation_m * smooth_norm) *
+          delta / distance_m;
       for (int basis = 0; basis < 4; ++basis)
         gradient.col(constraint.first_control_point + basis) +=
             constraint.weights[static_cast<std::size_t>(basis)] *

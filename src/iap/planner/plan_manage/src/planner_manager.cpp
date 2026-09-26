@@ -35,6 +35,10 @@ namespace ego_planner
     // trajectory publication lead time additionally contains optimizer WCET
     // and is not a control-feedback latency bound.
     constexpr double kExecutionFeedbackFreshnessTimeoutS = 0.2;
+    // The final geometry commit samples at this maximum chord length. Keep
+    // optimizer guide constraints one chord inside the hard corridor so a
+    // between-sample spline extremum cannot cross the committed boundary.
+    constexpr double kP4GeometryCommitMaximumChordLengthM = 0.05;
   }
 
   bool p4RequiresFullSuccessorChannelSearch(
@@ -1743,7 +1747,6 @@ namespace ego_planner
           start_time < 0.0 || end_time <= start_time ||
           end_time > duration + 1.0e-9)
         return false;
-      constexpr double kMaximumChordLengthM = 0.05;
       constexpr double kCurveApproximationErrorM = 0.002;
       constexpr int kMaximumSamples = 4096;
       const double max_speed = maxControlPointNorm(
@@ -1752,7 +1755,9 @@ namespace ego_planner
           trajectory->acceleration_traj_.getControlPoint());
       double step_s = 0.05;
       if (max_speed > 1.0e-9)
-        step_s = std::min(step_s, kMaximumChordLengthM / max_speed);
+        step_s = std::min(
+            step_s,
+            kP4GeometryCommitMaximumChordLengthM / max_speed);
       if (max_acceleration > 1.0e-9)
         step_s = std::min(step_s, std::sqrt(
             8.0 * kCurveApproximationErrorM / max_acceleration));
@@ -10449,6 +10454,12 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN();
     next.channel_comparison_state =
         P4ChannelComparisonState::PARTIAL_COMPARISON;
+    // The typed failure belongs to the immutable channel we just recorded.
+    // The next frozen guide still needs an actual curve before the complete
+    // bundles can be compared, so do not carry the failed channel's HOLD
+    // disposition into that preparation transaction.
+    next.planning_disposition =
+        P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
     next.reason = "normal_next_channel_after_typed_failure:" + detail;
     appendP4ForwardDecision(
         last_p4_forward_decision_, "normal_channel_typed_failure", now_s);
@@ -16040,6 +16051,17 @@ namespace ego_planner
       bspline_optimizer_->setP4ActualCurveClearanceConstraints(
           ctrl_pts, ts, fixed_clearance,
           p4_planning_clearance_buffer_m_);
+      const bool constrained_prefix =
+          last_p4_forward_decision_.executable_intent ==
+              P4ExecutableIntent::LIMITED_PREFIX;
+      const double maximum_guide_deviation_m =
+          (constrained_prefix ? 0.5 : 1.0) *
+          p4_forward_limits_.topology_resolution_m;
+      const double optimizer_guide_deviation_m = std::max(
+          1.0e-3, maximum_guide_deviation_m -
+              kP4GeometryCommitMaximumChordLengthM);
+      bspline_optimizer_->setP4ActualCurveGuideCorridor(
+          ctrl_pts, ts, p4_forward_seed, optimizer_guide_deviation_m);
     }
     segments = collision_scan.closed_segments;
     if (safety_viz_)

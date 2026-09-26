@@ -480,6 +480,10 @@ namespace ego_planner
         const Eigen::MatrixXd &seed_control_points, double interval_s,
         const std::vector<P4ActualCurveClearanceConstraintSample> &samples,
         double planning_clearance_buffer_m);
+    void setP4ActualCurveGuideCorridor(
+        const Eigen::MatrixXd &seed_control_points, double interval_s,
+        const std::vector<Eigen::Vector3d> &guide,
+        double maximum_deviation_m);
     void clearP4ActualCurveClearanceConstraints();
     void releaseP4RiskSnapshot();
     void clearP4RiskSnapshot();
@@ -723,6 +727,15 @@ namespace ego_planner
     std::vector<P4ActualCurveClearanceConstraint>
         p4_actual_curve_clearance_constraints_;
     double p4_actual_curve_planning_clearance_buffer_m_{0.0};
+    struct P4ActualCurveGuideCorridorConstraint
+    {
+      int first_control_point = 0;
+      std::array<double, 4> weights{};
+      Eigen::Vector3d guide_projection = Eigen::Vector3d::Zero();
+      double maximum_deviation_m = 0.0;
+    };
+    std::vector<P4ActualCurveGuideCorridorConstraint>
+        p4_actual_curve_guide_corridor_constraints_;
     void invalidateP4AttemptLineage();
     void syncP4AdmittedLineage();
     static P4AttemptLineageRecord makeP4AttemptLineageRecord(

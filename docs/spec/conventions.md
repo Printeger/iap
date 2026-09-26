@@ -356,8 +356,11 @@
   rows or duplicated handover memberships as route progress. Certification
   never feeds a failed actual curve back into generation: it does not crop,
   shift, retime, switch channels or change execution intent. Multi-channel
-  preparation continues with the next already-frozen guide and records the
-  typed failure; an independently generated common corridor may become an
+  preparation records the typed failure on that immutable channel, retains
+  the committed parent trajectory, and starts a fresh actual-curve transaction
+  for the next already-frozen guide. The optimizer keeps that curve inside the
+  frozen guide tube; the unchanged final structural corridor check remains the
+  authority. An independently generated common corridor may become an
   ordinary `LIMITED_PREFIX` only after the complete certification chain.
 - Best-effort route discovery first schedules refined, clearance-aware channel
   guides, then converts every locally feasible stable channel into an actual

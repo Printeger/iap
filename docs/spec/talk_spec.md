@@ -244,7 +244,11 @@ For each candidate trajectory τ:
   failure is recorded as a typed terminal result and never fed back into curve
   generation. The immutable failed B-spline is not cropped, shifted, retimed,
   switched to another channel or reinterpreted. Multi-channel preparation may
-  continue only with the next already-frozen guide. A stoppable prefix of the
+  continue only with the next already-frozen guide while the committed parent
+  trajectory remains retained; the failed channel's HOLD disposition is not
+  inherited by that new preparation transaction. The optimizer preserves the
+  frozen guide tube and the unchanged final structural corridor check remains
+  authoritative. A stoppable prefix of the
   corridor shared by at least two topology channels is generated independently
   and passes the same complete actual-curve certification chain. Every point
   of that nominal executable prefix must be inside every channel tube; tube

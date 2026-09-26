@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-frozen-channel-recovery): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — keep a typed failure attached to its immutable failed channel
+  while preparing the next already-frozen guide with the committed parent
+  trajectory retained. The actual-curve optimizer now uses fixed projections
+  from its seed to stay inside that guide's topology tube, with one geometry
+  commit chord of internal reserve; the final hard corridor check remains
+  authoritative and unchanged. Failed curves are not mutated or retried, all
+  locally feasible channels still produce complete actual bundles before
+  comparison, and local clearance, dynamics, braking, identity and freshness
+  gates are unchanged.
 - fix(mission-exposure-authority): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — make local motion and certified braking the MISSION execution
   gates while retaining GNSS peak, duration, integral, unknown and episode
