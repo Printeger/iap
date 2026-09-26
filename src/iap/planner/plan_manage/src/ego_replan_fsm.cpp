@@ -1589,7 +1589,8 @@ namespace ego_planner
                 p5_successor_due,
                 planner_manager_->trajectoryCommandAwaitingActivation());
         if (p4P5ReplanUsesAuthorizedSuccessorHandoff(
-                p5_status.action, p5_successor_handoff_ready))
+                p5_status.action == P5GateAction::REQUEST_REPLAN,
+                p5_successor_handoff_ready))
         {
           changeFSMExecState(REPLAN_TRAJ, "P4_SUCCESSOR_P5_HANDOFF");
           execFSMCallback();

@@ -99,10 +99,10 @@ namespace ego_planner
   }
 
   inline bool p4P5ReplanUsesAuthorizedSuccessorHandoff(
-      const P5GateAction action, const bool successor_handoff_ready)
+      const bool p5_replan_requested,
+      const bool successor_handoff_ready)
   {
-    return action == P5GateAction::REQUEST_REPLAN &&
-        successor_handoff_ready;
+    return p5_replan_requested && successor_handoff_ready;
   }
 
   inline bool p4ExecutionUsesRollingSuccessor(
