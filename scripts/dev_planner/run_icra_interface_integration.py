@@ -4990,6 +4990,15 @@ def _successful_session_result(stages, diagnostic_only: bool = False) -> str:
     return "PASS" if {"full", "shutdown"}.issubset(requested) else "STAGE_PASS"
 
 
+def classify_run_for_acceptance(summary: dict, diagnostic_only: bool) -> dict:
+    """Bind each child result to the same acceptance class as its session."""
+    summary["diagnostic_only"] = diagnostic_only
+    summary["acceptance_eligible"] = not diagnostic_only
+    if diagnostic_only and summary.get("result") == "PASS":
+        summary["result"] = "DIAGNOSTIC_PASS"
+    return summary
+
+
 def summarize_forest_pair(
         baseline: dict, risk: dict, repetition: int) -> dict:
     """Reduce one completed A/B pair to directly comparable evidence."""
@@ -5065,6 +5074,12 @@ def _run_main(args: argparse.Namespace) -> int:
     if retain_raw_risk_detail and args.repetitions != 1:
         raise SystemExit(
             "raw risk detail is limited to one diagnostic repetition")
+    planned_run_count = args.repetitions * sum(
+        2 if stage == "shutdown" or (forest_ab and stage == "full") else 1
+        for stage in stages)
+    if retain_raw_risk_detail and planned_run_count != 1:
+        raise SystemExit(
+            "raw risk detail is limited to exactly one diagnostic run")
     if retain_raw_risk_detail and not raw_detail_reason:
         raise SystemExit(
             "raw risk detail requires --raw-detail-reason")
@@ -5172,6 +5187,10 @@ def _run_main(args: argparse.Namespace) -> int:
                         retain_raw_risk_detail=retain_raw_risk_detail,
                         raw_satellite_detail_max_rows=(
                             raw_satellite_detail_max_rows))
+                    classify_run_for_acceptance(
+                        summary, diagnostic_only=retain_raw_risk_detail)
+                    if run_root.is_dir():
+                        _json_write(run_root / "summary.json", summary)
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
@@ -5182,6 +5201,8 @@ def _run_main(args: argparse.Namespace) -> int:
                         "task_mode": task_mode,
                         "path": str(run_root),
                         "result": summary["result"],
+                        "diagnostic_only": summary["diagnostic_only"],
+                        "acceptance_eligible": summary["acceptance_eligible"],
                         "failures": summary["failures"],
                     })
                     if forest_ab and stage == "full":
@@ -5196,7 +5217,10 @@ def _run_main(args: argparse.Namespace) -> int:
                     if summary["result"] == "INTERRUPTED":
                         return _persist_interrupted_session(
                             session, session_summary, stage)
-                    if summary["result"] != "PASS":
+                    expected_run_result = (
+                        "DIAGNOSTIC_PASS"
+                        if retain_raw_risk_detail else "PASS")
+                    if summary["result"] != expected_run_result:
                         # A paired run remains diagnostically useful only when
                         # both variants complete. Defer a baseline failure
                         # until its matching risk run has written the delta.

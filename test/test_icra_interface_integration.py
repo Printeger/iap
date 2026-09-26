@@ -909,6 +909,22 @@ class TestRunnerLifecycle(unittest.TestCase):
             preflight.assert_not_called()
 
             args.raw_detail_reason = "confirmed runtime-window cause"
+            args.repetitions = 1
+            args.through = "full"
+            with mock.patch.object(MODULE, "_gpu_preflight") as preflight:
+                with self.assertRaisesRegex(
+                        SystemExit, "exactly one diagnostic run"):
+                    MODULE._run_main(args)
+            preflight.assert_not_called()
+
+            args.through = None
+            args.forest_ab = True
+            with mock.patch.object(MODULE, "_gpu_preflight") as preflight:
+                with self.assertRaisesRegex(
+                        SystemExit, "exactly one diagnostic run"):
+                    MODULE._run_main(args)
+            preflight.assert_not_called()
+
             args.repetitions = 2
             with mock.patch.object(MODULE, "_gpu_preflight") as preflight:
                 with self.assertRaisesRegex(
@@ -1085,11 +1101,18 @@ class TestRunnerLifecycle(unittest.TestCase):
             args = self.runner_args(root)
             args.retain_raw_risk_detail = True
             args.raw_detail_reason = "confirmed runtime-window cause"
+
+            def completed_run(_stage, run_root, *_args, **_kwargs):
+                run_root.mkdir(parents=True)
+                summary = MODULE._result([])
+                MODULE._json_write(run_root / "summary.json", summary)
+                return summary
+
             with mock.patch.object(
                     MODULE, "_gpu_preflight",
                     return_value={"gpu_ready": True}), mock.patch.object(
                         MODULE, "_run_one",
-                        return_value=MODULE._result([])) as run_one:
+                        side_effect=completed_run) as run_one:
                 self.assertEqual(MODULE._run_main(args), 0)
 
             self.assertTrue(
@@ -1101,6 +1124,14 @@ class TestRunnerLifecycle(unittest.TestCase):
             self.assertTrue(session["diagnostic_only"])
             self.assertFalse(session["acceptance_eligible"])
             self.assertEqual(session["result"], "DIAGNOSTIC_PASS")
+            self.assertEqual(session["runs"][0]["result"], "DIAGNOSTIC_PASS")
+            self.assertTrue(session["runs"][0]["diagnostic_only"])
+            self.assertFalse(session["runs"][0]["acceptance_eligible"])
+            run_summary = json.loads(Path(
+                session["runs"][0]["path"], "summary.json").read_text())
+            self.assertEqual(run_summary["result"], "DIAGNOSTIC_PASS")
+            self.assertTrue(run_summary["diagnostic_only"])
+            self.assertFalse(run_summary["acceptance_eligible"])
 
     def test_process_wait_reports_progress_periodically(self):
         now = [0.0]
@@ -1133,6 +1164,11 @@ class TestRunnerLifecycle(unittest.TestCase):
         launch = Process(202)
         with tempfile.TemporaryDirectory() as temporary_directory:
             run_root = Path(temporary_directory) / "full-r01"
+            def interrupt_after_compact_evidence(*_args, **_kwargs):
+                (run_root / "compact_first_cause.txt").write_text(
+                    "first cause\n")
+                raise KeyboardInterrupt
+
             with mock.patch.object(
                     MODULE, "_node_names", return_value=set()), mock.patch.object(
                         MODULE.subprocess, "Popen",
@@ -1140,7 +1176,7 @@ class TestRunnerLifecycle(unittest.TestCase):
                             MODULE, "_wait_capture_ready",
                             return_value=True), mock.patch.object(
                                 MODULE, "_wait_for_exit",
-                                side_effect=KeyboardInterrupt), mock.patch.object(
+                                side_effect=interrupt_after_compact_evidence), mock.patch.object(
                                     MODULE, "_stop_group",
                                     return_value=(-2, True, False)) as stop_group:
                 summary = MODULE._run_one(
@@ -1156,6 +1192,9 @@ class TestRunnerLifecycle(unittest.TestCase):
             )
             persisted = json.loads((run_root / "summary.json").read_text())
             self.assertEqual(persisted["result"], "INTERRUPTED")
+            self.assertEqual(
+                (run_root / "compact_first_cause.txt").read_text(),
+                "first cause\n")
 
     def test_cli_returns_130_and_persists_interrupted_session(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

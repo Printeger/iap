@@ -1891,7 +1891,8 @@ ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     const std::string& debug_path,
     const uint64_t planning_attempt_id = 73,
-    const bool raw_detail_enable = false) {
+    const bool raw_detail_enable = false,
+    const std::int64_t raw_satellite_detail_max_rows = 5000) {
   ensureRclcpp();
   rclcpp::NodeOptions options;
   options.parameter_overrides({
@@ -1924,6 +1925,8 @@ ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
   config.debug_csv_enable = true;
   config.debug_csv_path = debug_path;
   config.raw_detail_enable = raw_detail_enable;
+  config.runtime_window_satellite_detail_max_rows =
+      raw_satellite_detail_max_rows;
   optimizer->setP4RiskAStarConfigForTest(config);
   optimizer->setP4RiskSnapshot(
       snapshot, 10.0, planning_attempt_id);
@@ -4660,11 +4663,13 @@ TEST(P4ForwardTerminalLineageTest,
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".gnss_risk_detail.csv"));
   std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".runtime_window_satellite.csv"));
+  std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".execution_events.csv"));
   // This test explicitly validates the diagnostic satellite-detail schema;
   // production and acceptance runs leave this opt-in disabled.
   auto optimizer = makeP4Optimizer(
-      map, snapshot, debug_path.string(), 1, true);
+      map, snapshot, debug_path.string(), 1, true, 1);
 
   ego_planner::EGOPlannerManager manager;
   manager.pp_.max_vel_ = 20.0;
@@ -5301,6 +5306,21 @@ TEST(P4ForwardTerminalLineageTest,
             row.at("global_budget_failure_causes") ==
                 "PEAK_RATIO|CONTINUOUS_DURATION|EXCESS_INTEGRAL";
       }));
+  std::ifstream satellite_detail(
+      debug_path.string() + ".runtime_window_satellite.csv");
+  ASSERT_TRUE(satellite_detail.good());
+  std::size_t detail_rows_written = 0u;
+  std::size_t truncated_markers = 0u;
+  std::string detail_line;
+  while (std::getline(satellite_detail, detail_line))
+  {
+    if (detail_line.rfind("p4_runtime_window_satellite_v2,", 0) == 0)
+      ++detail_rows_written;
+    if (detail_line.rfind("TRUNCATED,", 0) == 0)
+      ++truncated_markers;
+  }
+  EXPECT_EQ(detail_rows_written, 1u);
+  EXPECT_EQ(truncated_markers, 1u);
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -5314,6 +5334,14 @@ TEST(P4ForwardTerminalLineageTest,
   const auto debug_path = p4LineageTestPath("forward_windowed_formal.csv");
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
+  for (const char *suffix : {
+           ".forward_risk_samples.csv", ".gnss_risk_detail.csv",
+           ".runtime_window.csv", ".runtime_window_satellite.csv",
+           ".runtime_window_batch.csv"})
+  {
+    std::filesystem::remove(std::filesystem::path(
+        debug_path.string() + suffix));
+  }
   auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
   const auto safe_direct = directRiskCallback(0.5);
   const auto execution_snapshot = makeP4ExecutionSnapshot(
@@ -5507,6 +5535,15 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(endpoint_hold.reason, "approved_endpoint_reached");
   EXPECT_EQ(manager.p4ExecutionCertificate().authority,
             ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING);
+  EXPECT_TRUE(std::filesystem::is_regular_file(std::filesystem::path(
+      debug_path.string() + ".runtime_window_batch.csv")));
+  for (const char *suffix : {
+           ".forward_risk_samples.csv", ".gnss_risk_detail.csv",
+           ".runtime_window.csv", ".runtime_window_satellite.csv"})
+  {
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(
+        debug_path.string() + suffix)));
+  }
 }
 
 TEST(P4ForwardTerminalLineageTest,

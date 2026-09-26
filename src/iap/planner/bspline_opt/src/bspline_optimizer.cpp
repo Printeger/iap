@@ -483,7 +483,8 @@ namespace ego_planner
     node->get_parameter(
       "p4.runtime_window_satellite_detail_max_rows",
       p4_config_.runtime_window_satellite_detail_max_rows);
-    if (p4_config_.runtime_window_satellite_detail_max_rows < 1)
+    if (p4_config_.raw_detail_enable &&
+        p4_config_.runtime_window_satellite_detail_max_rows < 1)
     {
       RCLCPP_WARN(
         rclcpp::get_logger("BsplineOptimizer"),
