@@ -1066,6 +1066,7 @@ namespace ego_planner
     void recordGate0NormalBsplinePublish(double stamp_s);
     bool certifyP4ActualCurve(const std::string &stage,
                                       double stamp_s);
+    std::vector<Eigen::Vector3d> p4ActualCurveCommitReferencePath() const;
     bool validateP4PublicationCertificate(
         const LocalTrajData &trajectory, double now_s,
         P4PreparedCurveFailure *failure = nullptr,
@@ -1331,6 +1332,10 @@ namespace ego_planner
     void setP4ExecutionCertificateForTest(P4ExecutionCertificate certificate)
     {
       p4_execution_certificate_ = std::move(certificate);
+    }
+    void setP4FixedBoundedGuideForTest(P4BoundedExecutionGuide guide)
+    {
+      p4_successor_schedule_.fixed_bounded_guide = std::move(guide);
     }
     void setP4PreparedComparisonIncumbentForTest(const uint64_t channel_id)
     {

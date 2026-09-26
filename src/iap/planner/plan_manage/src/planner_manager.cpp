@@ -6616,6 +6616,22 @@ namespace ego_planner
         last_p4_forward_decision_, "native_rebound_no_path", stamp_s);
   }
 
+  std::vector<Eigen::Vector3d>
+  EGOPlannerManager::p4ActualCurveCommitReferencePath() const
+  {
+    // The worker's selected route is lookahead geometry. Successor curve
+    // construction first shortens it to the farthest endpoint that preserves
+    // the child's stopping reserve, and that immutable bounded guide is what
+    // the optimizer actually consumes. Bind geometry commit to the same guide
+    // instead of incorrectly requiring the child to reach the discarded
+    // lookahead suffix.
+    if (preparingP4SuccessorCurve() &&
+        p4_successor_schedule_.fixed_bounded_guide.valid &&
+        p4_successor_schedule_.fixed_bounded_guide.guide.size() >= 2u)
+      return p4_successor_schedule_.fixed_bounded_guide.guide;
+    return p4GuideReferencePath(last_p4_forward_decision_);
+  }
+
   bool EGOPlannerManager::certifyP4ActualCurve(
       const std::string &stage, const double stamp_s)
   {
@@ -8095,7 +8111,7 @@ namespace ego_planner
             return false;
           };
       const std::vector<Eigen::Vector3d> reference_path =
-          p4GuideReferencePath(last_p4_forward_decision_);
+          p4ActualCurveCommitReferencePath();
       if (!reference_path.empty())
       {
         const bool constrained_prefix =

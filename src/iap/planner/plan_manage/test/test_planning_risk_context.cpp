@@ -7845,6 +7845,32 @@ TEST(P4SuccessorRiskComparison,
       true, true, false));
 }
 
+TEST(P4PreparedSuccessorPolicy,
+     GeometryCommitUsesTheImmutableBoundedExecutionGuide)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selected_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(10.0, 0.0, 1.0)};
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      7, 10'000'000'000LL, 12.5);
+  ego_planner::P4BoundedExecutionGuide bounded;
+  bounded.valid = true;
+  bounded.guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(6.0, 0.0, 1.0)};
+  manager.setP4FixedBoundedGuideForTest(std::move(bounded));
+
+  const auto reference = manager.p4ActualCurveCommitReferencePath();
+
+  ASSERT_EQ(reference.size(), 2u);
+  EXPECT_TRUE(reference.back().isApprox(
+      Eigen::Vector3d(6.0, 0.0, 1.0)));
+}
+
 TEST(P4SuccessorDeadlineScheduling,
      StartsPreparationAfterActivationWhileKeepingAbsoluteDeadline)
 {
