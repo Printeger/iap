@@ -2136,11 +2136,42 @@ TEST(P4ActualCurveClearanceOptimization,
   const auto displacements = optimizer->
       p4ActualCurveClearanceRequiredDisplacementsForTest();
   ASSERT_EQ(displacements.size(), 1u);
-  // The live current-frame map moved the limiting obstacle by 9.68 mm
-  // relative to the publication frame.  A sample with 10 mm seed surplus
-  // therefore still needs 5 mm of outward generation displacement once the
-  // existing 5 mm solver allowance and 10 mm frame reserve are combined.
-  EXPECT_NEAR(displacements.front(), 0.005, 1.0e-12);
+  // A sample with 10 mm seed surplus still needs 13 mm of outward generation
+  // displacement once the 18 mm bounded frame allowance and existing 5 mm
+  // solver allowance are combined.
+  EXPECT_NEAR(displacements.front(), 0.013, 1.0e-12);
+}
+
+TEST(P4ActualCurveClearanceOptimization,
+     PreservesTheMeasuredCurrentFrameClearanceChange) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_clearance_current_frame.csv").string());
+
+  const Eigen::MatrixXd points = denseForkTangentControlPoints();
+  ego_planner::P4ActualCurveClearanceConstraintSample live_sample;
+  live_sample.time_s = 0.4;
+  // The publication check reported +15.8269707211 mm after subtracting the
+  // 50 mm planning buffer, so its hard margin was 65.8269707211 mm.  The
+  // first later current-frame check reported -2.13526405 mm hard margin.
+  constexpr double kPublicationHardMarginM = 0.0658269707211;
+  constexpr double kMeasuredClearanceChangeM =
+      kPublicationHardMarginM + 0.00213526405;
+  live_sample.signed_margin_m = kPublicationHardMarginM;
+  live_sample.escape_direction = Eigen::Vector3d::UnitY();
+  optimizer->setP4ActualCurveClearanceConstraints(
+      points, 0.2, {live_sample}, 0.05);
+
+  const auto displacements = optimizer->
+      p4ActualCurveClearanceRequiredDisplacementsForTest();
+  ASSERT_EQ(displacements.size(), 1u);
+  const double protected_runtime_margin_m =
+      kPublicationHardMarginM + displacements.front() -
+      kMeasuredClearanceChangeM;
+  EXPECT_GE(protected_runtime_margin_m, 0.005);
 }
 
 TEST(P4ReboundFailureEvidence,

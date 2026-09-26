@@ -18,14 +18,13 @@ namespace ego_planner
 {
   namespace
   {
-    // The final local-assurance lattice found up to 2.9 mm of negative
-    // margin after the soft optimizer had targeted the exact 5 cm planning
-    // reserve, and the first live current frame moved the limiting measured
-    // clearance by 9.68 mm relative to the publication frame.  Preserve the
-    // existing 5 mm solver allowance plus a bounded 10 mm frame-to-frame
-    // generation reserve.  Final assurance still evaluates the unchanged
-    // 5 cm planning policy and hard local envelope.
-    constexpr double kP4ActualCurveClearanceGenerationReserveM = 0.015;
+    // Compact live evidence measured a 67.962 mm loss of hard clearance
+    // between the publication frame and the first limiting current frame.
+    // The unchanged 50 mm planning buffer covers the first 50 mm; preserve a
+    // further 18 mm bounded frame allowance plus the existing 5 mm solver
+    // allowance.  Final assurance still evaluates the unchanged 50 mm
+    // planning policy and hard local envelope.
+    constexpr double kP4ActualCurveClearanceGenerationReserveM = 0.023;
 
     constexpr int kP1AcceptedProfileSampleCount = 200;
     constexpr const char *kP1AcceptedProfileCsvName =
