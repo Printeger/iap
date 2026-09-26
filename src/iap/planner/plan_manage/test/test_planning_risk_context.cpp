@@ -8145,6 +8145,29 @@ TEST(P4SuccessorDeadlineScheduling,
   EXPECT_NEAR(reanchored.planned_switch_time_s, 22.5, 1.0e-12);
 }
 
+TEST(P4PreparedSuccessorPolicy,
+     ComparisonUsesTheSameFrozenParentExecutionAnchorAsTheChild)
+{
+  ego_planner::EGOPlannerManager manager;
+  manager.local_data_.start_time_ =
+      rclcpp::Time(10000000000LL, RCL_ROS_TIME);
+  manager.local_data_.duration_ = 30.0;
+  manager.setP4FrozenParentSwitchElapsedForTest(11.75);
+
+  EXPECT_DOUBLE_EQ(
+      manager.p4SuccessorComparisonParentElapsedForTest(22.5, true),
+      11.75);
+  EXPECT_DOUBLE_EQ(
+      manager.p4SuccessorComparisonParentElapsedForTest(22.5, false),
+      12.5);
+
+  manager.setP4FrozenParentSwitchElapsedForTest(
+      std::numeric_limits<double>::quiet_NaN());
+  EXPECT_DOUBLE_EQ(
+      manager.p4SuccessorComparisonParentElapsedForTest(22.5, true),
+      12.5);
+}
+
 struct RouteEvidenceFixture {
   std::shared_ptr<const FrozenOccupancyEpoch> epoch;
   ego_planner::P4DirectTrajectoryRiskEvidence evidence;

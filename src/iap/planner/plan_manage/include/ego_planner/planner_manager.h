@@ -1199,6 +1199,17 @@ namespace ego_planner
     {
       return p4_successor_schedule_.frozen_parent_switch_elapsed_s;
     }
+    void setP4FrozenParentSwitchElapsedForTest(double elapsed_s)
+    {
+      p4_successor_schedule_.frozen_parent_switch_elapsed_s = elapsed_s;
+    }
+    double p4SuccessorComparisonParentElapsedForTest(
+        double planned_switch_time_s,
+        bool successor_curve_preparation) const
+    {
+      return p4SuccessorComparisonParentElapsed(
+          planned_switch_time_s, successor_curve_preparation);
+    }
     void updateTrajInfoWithFrozenParentAnchorForTest(
         const UniformBspline &position_traj,
         const rclcpp::Time &start_time,
@@ -1450,6 +1461,9 @@ namespace ego_planner
         const UniformBspline &position_traj,
         double frozen_parent_switch_elapsed_s,
         std::string *reason = nullptr);
+    double p4SuccessorComparisonParentElapsed(
+        double planned_switch_time_s,
+        bool successor_curve_preparation) const;
     /* main planning algorithms & modules */
     PlanningVisualization::Ptr visualization_;
 

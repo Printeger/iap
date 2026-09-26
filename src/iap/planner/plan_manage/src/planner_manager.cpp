@@ -9846,6 +9846,26 @@ namespace ego_planner
         p4_successor_schedule_.deadline.planned_switch_time_s * 1.0e9));
   }
 
+  double EGOPlannerManager::p4SuccessorComparisonParentElapsed(
+      const double planned_switch_time_s,
+      const bool successor_curve_preparation) const
+  {
+    // A rolling child is constructed at this controller/execution-clock
+    // anchor. Compare it against that same immutable parent state; deriving
+    // another elapsed time from the planned start can reject a continuous
+    // child when publication or activation latency shifts the two clocks.
+    if (successor_curve_preparation && std::isfinite(
+            p4_successor_schedule_.frozen_parent_switch_elapsed_s))
+    {
+      return std::clamp(
+          p4_successor_schedule_.frozen_parent_switch_elapsed_s,
+          0.0, local_data_.duration_);
+    }
+    return std::clamp(
+        planned_switch_time_s - local_data_.start_time_.seconds(),
+        0.0, local_data_.duration_);
+  }
+
   bool EGOPlannerManager::p4SuccessorPreparationBoundaryState(
       Eigen::Vector3d *position, Eigen::Vector3d *velocity,
       Eigen::Vector3d *acceleration)
@@ -17955,9 +17975,8 @@ namespace ego_planner
       std::vector<double> incumbent_times;
       const double planned_switch_time_s =
           p4_successor_schedule_.deadline.planned_switch_time_s;
-      const double incumbent_t = std::clamp(
-          planned_switch_time_s - local_data_.start_time_.seconds(), 0.0,
-          local_data_.duration_);
+      const double incumbent_t = p4SuccessorComparisonParentElapsed(
+          planned_switch_time_s, successor_curve_preparation);
       const bool sampled = sample_spline(
           pos, &candidate_points, &candidate_times) &&
           sampleTrajectoryForGeometryCommit(
