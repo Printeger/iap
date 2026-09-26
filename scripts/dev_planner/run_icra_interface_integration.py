@@ -980,8 +980,10 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
     traces = [row for row in records if row.get("kind") == "controller_trace"]
     odometry = [row for row in records if row.get("kind") == "iap_odom"]
     statuses = [row for row in records if row.get("kind") == "trajectory_status"]
-    splines = [row for row in records if row.get("kind") in (
-        "normal_bspline", "pending_guard_bspline")]
+    normal_splines = [row for row in records
+                      if row.get("kind") == "normal_bspline"]
+    guard_splines = [row for row in records
+                     if row.get("kind") == "pending_guard_bspline"]
 
     def payload(row: dict) -> dict:
         value = row.get("payload", row)
@@ -993,7 +995,9 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
                 int(value.get("start_time_ns", 0) or 0),
                 str(value.get("curve_hash", "")))
 
-    published = {identity(payload(row)) for row in splines}
+    published_normal = {identity(payload(row)) for row in normal_splines}
+    published_guards = {identity(payload(row)) for row in guard_splines}
+    published = published_normal | published_guards
     activated = [payload(row) for row in statuses
                  if payload(row).get("state") == "ACTIVATED"]
     rejected = [payload(row) for row in statuses
@@ -1006,8 +1010,16 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         failures.append("activation_identity_incomplete")
     if any(item not in published for item in activation_identities):
         failures.append("activation_without_matching_curve")
+    non_nominal_activations = [
+        item for item in activation_identities
+        if item in published_guards and item not in published_normal
+    ]
+    if non_nominal_activations:
+        failures.append("non_nominal_trajectory_activation")
     distinct_activations = []
     for item in activation_identities:
+        if item not in published_normal:
+            continue
         if not distinct_activations or distinct_activations[-1] != item:
             distinct_activations.append(item)
     successor_switches = max(0, len(distinct_activations) - 1)
@@ -1113,6 +1125,7 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         controller_trace_count=len(traces),
         odometry_count=len(samples),
         activation_count=len(activated),
+        non_nominal_activation_count=len(non_nominal_activations),
         successor_switch_count=successor_switches,
         maximum_tracking_error_m=maximum_tracking_error_m,
         saturated_count=saturated_count,

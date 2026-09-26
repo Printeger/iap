@@ -180,6 +180,32 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(summary["successor_switch_count"], 2)
         self.assertAlmostEqual(summary["maximum_tracking_error_m"], 0.05)
 
+    def test_continuous_flight_does_not_count_guard_activation_as_successor(self):
+        records = []
+        for index, kind in enumerate((
+                "normal_bspline", "pending_guard_bspline",
+                "normal_bspline"), start=1):
+            common = {
+                "execution_instance_id": 7,
+                "trajectory_id": index,
+                "start_time_ns": index * 1_000_000_000,
+                "curve_hash": f"curve-{index}",
+            }
+            records.extend([
+                {"kind": kind, "payload": common},
+                {"kind": "trajectory_status", "payload": {
+                    **common, "state": "ACTIVATED"}},
+            ])
+
+        summary = MODULE.analyze_continuous_flight(records)
+
+        self.assertEqual(summary["successor_switch_count"], 1)
+        self.assertEqual(summary["non_nominal_activation_count"], 1)
+        self.assertIn("non_nominal_trajectory_activation",
+                      summary["failures"])
+        self.assertIn("fewer_than_two_successor_switches",
+                      summary["failures"])
+
     def test_continuous_flight_allows_unbound_hover_before_first_activation(self):
         records = [{
             "kind": "poscmd", "receive_steady_s": 0.5,
