@@ -174,6 +174,48 @@ namespace ego_planner
       return P4PreparedCurveFailure::DYNAMICS;
     }
 
+    P4PreparedCurveFailure p4PreparedFailureForSuccessorFailure(
+        const P4SuccessorFailure failure)
+    {
+      switch (failure)
+      {
+        case P4SuccessorFailure::NONE:
+          return P4PreparedCurveFailure::NONE;
+        case P4SuccessorFailure::GNSS_LIMIT_EXCEEDED:
+          return P4PreparedCurveFailure::GNSS_RISK;
+        case P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED:
+          return P4PreparedCurveFailure::EXPOSURE_BUDGET;
+        case P4SuccessorFailure::SUPPORT_INCOMPLETE:
+        case P4SuccessorFailure::INTEGRITY_UNSAFE:
+          return P4PreparedCurveFailure::SUPPORT;
+        case P4SuccessorFailure::LOCAL_MAP_STALE:
+        case P4SuccessorFailure::INTEGRITY_STALE:
+        case P4SuccessorFailure::GNSS_EPOCH_STALE:
+          return P4PreparedCurveFailure::FRESHNESS;
+        case P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT:
+          return P4PreparedCurveFailure::LOCAL_CLEARANCE;
+        case P4SuccessorFailure::BRAKING_CURVE_UNSAFE:
+          return P4PreparedCurveFailure::BRAKING;
+        case P4SuccessorFailure::DIRECT_QUERY_TIMEOUT:
+        case P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED:
+        case P4SuccessorFailure::DEADLINE_MISSED:
+          return P4PreparedCurveFailure::COMPUTE_BUDGET;
+        case P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE:
+          return P4PreparedCurveFailure::SNAPSHOT_MISMATCH;
+        case P4SuccessorFailure::COLLISION_CHANGED:
+          return P4PreparedCurveFailure::COLLISION;
+        case P4SuccessorFailure::DYNAMICS_INVALID:
+          return P4PreparedCurveFailure::DYNAMICS;
+        case P4SuccessorFailure::PROGRESS_INSUFFICIENT:
+        case P4SuccessorFailure::CORRIDOR_INVALID:
+          return P4PreparedCurveFailure::LOCAL_GEOMETRY;
+        case P4SuccessorFailure::PARENT_IDENTITY_CHANGED:
+        case P4SuccessorFailure::CANCELED_SUPERSEDED:
+          return P4PreparedCurveFailure::IDENTITY;
+      }
+      return P4PreparedCurveFailure::INCOMPLETE;
+    }
+
     bool p4SlamRegistrationHealthValid(
         const iap::CurrentIntegrityState &integrity)
     {
@@ -15381,6 +15423,15 @@ namespace ego_planner
       if (last_p4_forward_decision_.planning_disposition ==
           P4PlanningDisposition::HOLD_REQUIRED)
       {
+        const auto successor_failure =
+            last_p4_forward_decision_.successor_failure;
+        record_prepared_curve_failure(
+            successor_failure == P4SuccessorFailure::NONE
+                ? P4PreparedCurveFailure::SUPPORT
+                : p4PreparedFailureForSuccessorFailure(successor_failure),
+            std::string("forward_decision_hold_required:") +
+                last_p4_forward_decision_.reason + ":successor_failure=" +
+                p4SuccessorFailureName(successor_failure));
         continous_failures_count_++;
         return false;
       }
@@ -15393,6 +15444,15 @@ namespace ego_planner
             last_p4_forward_decision_.executable_intent ==
                 P4ExecutableIntent::HOLD)
         {
+          record_prepared_curve_failure(
+              last_p4_forward_decision_.executable_intent ==
+                      P4ExecutableIntent::HOLD
+                  ? P4PreparedCurveFailure::SUPPORT
+                  : P4PreparedCurveFailure::DYNAMICS,
+              last_p4_forward_decision_.executable_intent ==
+                      P4ExecutableIntent::HOLD
+                  ? "deferred_risk_selection_requires_hold"
+                  : "deferred_risk_selection_invalid_speed_cap");
           continous_failures_count_++;
           return false;
         }
@@ -15403,6 +15463,9 @@ namespace ego_planner
               last_p4_forward_decision_.deferred_trajectory;
           if (p4_forward_seed.size() < 2)
           {
+            record_prepared_curve_failure(
+                P4PreparedCurveFailure::LOCAL_GEOMETRY,
+                "deferred_limited_prefix_seed_too_short");
             continous_failures_count_++;
             return false;
           }
@@ -15494,6 +15557,10 @@ namespace ego_planner
                     last_p4_forward_decision_,
                     "bounded_actual_duration_budget_invalid",
                     plannerNow().seconds());
+                record_prepared_curve_failure(
+                    P4PreparedCurveFailure::EXPOSURE_BUDGET,
+                    std::string("bounded_actual_duration_budget_invalid:") +
+                        p4_mission_exposure_duration_budget->reason);
                 continous_failures_count_++;
                 return false;
               }
@@ -15598,6 +15665,16 @@ namespace ego_planner
           appendP4ForwardDecision(
               last_p4_forward_decision_,
               "bounded_actual_guide_rejected", plannerNow().seconds());
+          P4PreparedCurveFailure bounded_failure =
+              P4PreparedCurveFailure::LOCAL_GEOMETRY;
+          if (bounded.failure == P4BoundedExecutionFailure::LOCAL_SUPPORT)
+            bounded_failure = P4PreparedCurveFailure::LOCAL_CLEARANCE;
+          else if (bounded.failure == P4BoundedExecutionFailure::STOPPING)
+            bounded_failure = P4PreparedCurveFailure::BRAKING;
+          record_prepared_curve_failure(
+              bounded_failure,
+              std::string("bounded_actual_guide_rejected:") +
+                  bounded.reason);
           continous_failures_count_++;
           return false;
         }
@@ -15609,6 +15686,10 @@ namespace ego_planner
       }
       else
       {
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::SUPPORT,
+            std::string("forward_action_not_executable:") +
+                p4ForwardActionName(last_p4_forward_decision_.action));
         continous_failures_count_++;
         return false;
       }
@@ -15639,6 +15720,9 @@ namespace ego_planner
               "successor_switch_boundary_unavailable";
           p4_planning_disposition_ =
               P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::IDENTITY,
+              "successor_switch_boundary_unavailable");
           continous_failures_count_++;
           return false;
         }
@@ -15681,6 +15765,9 @@ namespace ego_planner
               "future_start_boundary_unavailable";
           p4_planning_disposition_ =
               P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::IDENTITY,
+              "future_start_boundary_unavailable");
           continous_failures_count_++;
           return false;
         }
@@ -15697,6 +15784,9 @@ namespace ego_planner
             "parent_switch_anchor_unavailable";
         p4_planning_disposition_ =
             P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::IDENTITY,
+            "parent_switch_anchor_unavailable");
         continous_failures_count_++;
         return false;
       }
@@ -15864,6 +15954,13 @@ namespace ego_planner
         if (!std::isfinite(forward_seed_interval_s) ||
             forward_seed_interval_s <= 0.0)
         {
+          std::ostringstream detail;
+          detail << "forward_seed_interval_invalid:interval_s="
+                 << forward_seed_interval_s
+                 << ":guide_length_m=" << p4PolylineLength(p4_forward_seed)
+                 << ":planning_max_vel_mps=" << planning_max_vel;
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::DYNAMICS, detail.str());
           continous_failures_count_++;
           return false;
         }
@@ -15875,6 +15972,13 @@ namespace ego_planner
           RCLCPP_WARN(
               rclcpp::get_logger("ego_planner"),
               "P4 forward guide could not produce seven B-spline seed points");
+          std::ostringstream detail;
+          detail << "forward_guide_resample_too_short:point_count="
+                 << point_set.size()
+                 << ":guide_point_count=" << p4_forward_seed.size()
+                 << ":control_point_spacing_m=" << pp_.ctrl_pt_dist;
+          record_prepared_curve_failure(
+              P4PreparedCurveFailure::LOCAL_GEOMETRY, detail.str());
           continous_failures_count_++;
           return false;
         }
@@ -15994,6 +16098,9 @@ namespace ego_planner
             else
             {
               RCLCPP_ERROR(rclcpp::get_logger("ego_planner"), "pseudo_arc_length is empty, return!");
+              record_prepared_curve_failure(
+                  P4PreparedCurveFailure::LOCAL_GEOMETRY,
+                  "previous_trajectory_pseudo_arc_empty");
               continous_failures_count_++;
               return false;
             }
@@ -16103,7 +16210,7 @@ namespace ego_planner
     if (collisionScanFailsClosed(collision_scan.status))
     {
       record_prepared_curve_failure(
-          P4PreparedCurveFailure::COLLISION,
+          p4PreparedFailureForCollisionScan(collision_scan.status),
           std::string("initial_collision_scan_failed:") +
               collisionScanStatusName(collision_scan.status));
       if (collision_scan.status ==
@@ -17119,12 +17226,20 @@ namespace ego_planner
     {
       const auto &failed_scan = bspline_optimizer_->lastCollisionScanResult();
       const bool collision_observed = p4CollisionObserved(failed_scan.status);
+      const auto &optimizer_trace =
+          bspline_optimizer_->getLastP1OptimizationTrace();
+      std::ostringstream detail;
+      detail << "rebound_optimizer_failed:solver_result="
+             << optimizer_trace.solver_result
+             << ":solver_reason=" << optimizer_trace.termination_reason
+             << ":iterations=" << optimizer_trace.iteration_count
+             << ":elapsed_ms=" << t_opt.seconds() * 1000.0
+             << ":collision_scan_status="
+             << collisionScanStatusName(failed_scan.status)
+             << ":collision_observed=" << (collision_observed ? 1 : 0);
       record_prepared_curve_failure(
           p4PreparedFailureForCollisionScan(failed_scan.status),
-          std::string("rebound_optimizer_failed:collision_scan_status=") +
-              collisionScanStatusName(failed_scan.status) +
-              ":collision_observed=" +
-              (collision_observed ? "1" : "0"));
+          detail.str());
       visualization_->displayOptimalList(ctrl_pts, 0);
       continous_failures_count_++;
       return false;
@@ -17169,12 +17284,15 @@ namespace ego_planner
             bspline_optimizer_->lastCollisionScanResult();
         const bool collision_observed =
             p4CollisionObserved(failed_scan.status);
+        std::ostringstream detail;
+        detail << "terminal_refinement_failed:elapsed_ms="
+               << (rclcpp::Clock().now() - t_start).seconds() * 1000.0
+               << ":collision_scan_status="
+               << collisionScanStatusName(failed_scan.status)
+               << ":collision_observed=" << (collision_observed ? 1 : 0);
         record_prepared_curve_failure(
             p4PreparedFailureForCollisionScan(failed_scan.status),
-            std::string("terminal_refinement_failed:collision_scan_status=") +
-                collisionScanStatusName(failed_scan.status) +
-                ":collision_observed=" +
-                (collision_observed ? "1" : "0"));
+            detail.str());
         if (gate0_writer_ && gate0_writer_->enabled())
         {
           Gate0QualificationEvent refinement_event;
@@ -17464,6 +17582,9 @@ namespace ego_planner
         for (const auto &trace : p1_candidate_traces)
           bspline_optimizer_->writeP1OptimizationTrace(trace);
         bspline_optimizer_->clearRiskSnapshot();
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::INCOMPLETE,
+            "p1_refinement_selected_trace_missing");
         continous_failures_count_++;
         return false;
       }
@@ -17579,6 +17700,10 @@ namespace ego_planner
         for (const auto &trace : p1_candidate_traces)
           bspline_optimizer_->writeP1OptimizationTrace(trace);
         bspline_optimizer_->clearRiskSnapshot();
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::SUPPORT,
+            std::string("p1_refinement_rejected:") +
+                refinement_decision.reason);
         continous_failures_count_++;
         return false;
       }
@@ -17618,6 +17743,10 @@ namespace ego_planner
           "rejected", freshness_reason, "existing_poly_random_failure_budget");
       bspline_optimizer_->clearRiskSnapshot();
       clearPlanningRiskContext();
+      record_prepared_curve_failure(
+          P4PreparedCurveFailure::FRESHNESS,
+          std::string("planning_risk_context_rejected:") +
+              freshness_reason);
       continous_failures_count_++;
       return false;
     }
@@ -17644,6 +17773,13 @@ namespace ego_planner
                 ? "base_initial_fallback_next_generation"
                 : "existing_trajectory");
         bspline_optimizer_->clearRiskSnapshot();
+        record_prepared_curve_failure(
+            (!accepted_context.fresh ||
+             accepted_context.stale_miss_count > 0)
+                ? P4PreparedCurveFailure::FRESHNESS
+                : P4PreparedCurveFailure::SUPPORT,
+            std::string("accepted_p1_context_rejected:") +
+                last_p1_rejection_reason_);
         continous_failures_count_++;
         return false;
       }
@@ -17692,6 +17828,9 @@ namespace ego_planner
             accepted_time.seconds());
         bspline_optimizer_->clearRiskSnapshot();
         clearPlanningRiskContext();
+        record_prepared_curve_failure(
+            P4PreparedCurveFailure::BRAKING,
+            "failsafe_braking_commitment_active");
         return false;
       }
       std::vector<Eigen::Vector3d> candidate_points;
@@ -18110,6 +18249,25 @@ namespace ego_planner
         appendP4ForwardDecision(
             last_p4_forward_decision_, "limited_prefix_retained",
             accepted_time.seconds());
+        const auto typed_successor_failure =
+            last_p4_forward_decision_.successor_failure;
+        std::ostringstream detail;
+        detail << "successor_actual_curve_rejected:"
+               << replacement_reason
+               << ":successor_failure="
+               << p4SuccessorFailureName(typed_successor_failure)
+               << ":batch_failure="
+               << iap::forwardRiskFailureReasonName(successor_batch_failure)
+               << ":point_failure="
+               << iap::forwardRiskFailureReasonName(successor_point_failure)
+               << ":first_index=" << successor_first_failure_index
+               << ":query_ms=" << successor_query_duration_ms;
+        record_prepared_curve_failure(
+            typed_successor_failure == P4SuccessorFailure::NONE
+                ? P4PreparedCurveFailure::INCOMPLETE
+                : p4PreparedFailureForSuccessorFailure(
+                      typed_successor_failure),
+            detail.str());
         bspline_optimizer_->clearRiskSnapshot();
         clearPlanningRiskContext();
         return false;

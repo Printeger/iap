@@ -2748,6 +2748,35 @@ ego_planner::P4ForwardDecision makeForwardDecision(
   return decision;
 }
 
+TEST(P4ReboundFailureEvidence,
+     HoldDecisionPreservesGenerationFailure) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("rebound_bounded_guide_failure.csv").string());
+
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  auto decision = makeForwardDecision(snapshot, 0u);
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selected_guide.clear();
+  decision.candidates.clear();
+  manager.setP4ForwardDecisionForNextReplanForTest(std::move(decision));
+  const Eigen::Vector3d start(-16.5, 0.5, 1.5);
+  const Eigen::Vector3d target(-10.0, 0.5, 1.5);
+
+  EXPECT_FALSE(manager.reboundReplan(
+      start, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), target,
+      Eigen::Vector3d::Zero(), true, false, start));
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::SUPPORT);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "forward_decision_hold_required:risk_ranked_topology_selected:"
+            "successor_failure=NONE");
+}
+
 struct ActivatedRuntimeFeedbackFixture
 {
   std::unique_ptr<ego_planner::EGOPlannerManager> manager;
