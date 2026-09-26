@@ -7995,6 +7995,57 @@ TEST(P4SuccessorDeadlineScheduling,
       2.5 - 1.0e-12);
 }
 
+TEST(P4SuccessorDeadlineScheduling,
+     CompletedWorkerResultPreemptsStaleScheduleSuppression)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ExecutionCertificate certificate;
+  certificate.valid = true;
+  certificate.trajectory_id = 19;
+  certificate.start_time_ns = 10000000000LL;
+  certificate.duration_s = 30.0;
+  certificate.execution_deadline_s = 40.0;
+  certificate.latest_rolling_switch_elapsed_s = 23.0;
+  certificate.control_points_hash = "completed-worker-parent";
+  certificate.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  manager.local_data_.execution_instance_id_ = 1u;
+  manager.local_data_.traj_id_ = certificate.trajectory_id;
+  manager.local_data_.start_time_ =
+      rclcpp::Time(certificate.start_time_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = certificate.control_points_hash;
+  manager.local_data_.duration_ = certificate.duration_s;
+  manager.setP4ExecutionCertificateForTest(certificate);
+  manager.setTimeProvider([]() {
+    return rclcpp::Time(10000000000LL, RCL_ROS_TIME);
+  });
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
+
+  ego_planner::P4SuccessorPreparationResult completed;
+  completed.ready = true;
+  completed.parent_trajectory_id = certificate.trajectory_id;
+  completed.failure = ego_planner::P4SuccessorFailure::NONE;
+  completed.reason = "ready";
+  ASSERT_TRUE(manager.submitP4SuccessorWorkerResultForTest(
+      std::move(completed)));
+  // Reproduce the schedule suppression seen after the initial prepare-only
+  // callback: completion itself must remain observable for this parent.
+  manager.setP4SuccessorResultDeliveredForTest(true);
+
+  bool due = false;
+  for (int index = 0; index < 500 && !due; ++index)
+  {
+    due = manager.p4SuccessorPreparationDue(10.1);
+    if (!due) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(due);
+}
+
 struct RouteEvidenceFixture {
   std::shared_ptr<const FrozenOccupancyEpoch> epoch;
   ego_planner::P4DirectTrajectoryRiskEvidence evidence;

@@ -666,6 +666,34 @@ TEST(P4SuccessorPreparationWorker,
   EXPECT_EQ(calls.load(), 0);
 }
 
+TEST(P4SuccessorPreparationWorker,
+     ExposesCompletedResultForTheExpectedParentWithoutConsumingIt)
+{
+  ego_planner::P4SuccessorPreparationWorker worker;
+  ego_planner::P4SuccessorPreparationRequest request;
+  request.parent_trajectory_id = 13;
+  request.request_sequence = 1;
+  request.absolute_deadline_s = 100.0;
+  request.compute = []() {
+    ego_planner::P4SuccessorPreparationResult result;
+    result.ready = true;
+    result.reason = "ready";
+    return result;
+  };
+  ASSERT_TRUE(worker.submit(std::move(request)));
+
+  for (int index = 0;
+       index < 500 && !worker.resultReadyFor(13); ++index)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+  EXPECT_TRUE(worker.resultReadyFor(13));
+  EXPECT_FALSE(worker.resultReadyFor(14));
+  const auto completed = worker.poll(13);
+  ASSERT_TRUE(completed.has_value());
+  EXPECT_EQ(completed->reason, "ready");
+  EXPECT_FALSE(worker.resultReadyFor(13));
+}
+
 TEST(P4SuccessorAssuranceFailure,
      PreservesSpecificFailureInsteadOfCollapsingUnsafeAndIncomplete)
 {

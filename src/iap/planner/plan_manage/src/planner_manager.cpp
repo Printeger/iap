@@ -3565,6 +3565,14 @@ namespace ego_planner
     if (p4_cached_successor_bundle_ &&
         p4_cached_successor_bundle_->complete())
       return preparedP4SuccessorBundleDue(now_s);
+    // A completed worker result is an immutable terminal outcome for this
+    // parent request. Consume it promptly instead of inferring readiness from
+    // !busyFor(): schedule retry/suppression state can legitimately mask that
+    // inference until the fixed switch is already in the past. The result
+    // still passes the ordinary parent sample, deadline, curve, assurance and
+    // publication gates after polling.
+    if (p4_successor_worker_.resultReadyFor(parent_id))
+      return true;
     if (p4_successor_schedule_.awaiting_new_snapshot)
     {
       if (!p4SuccessorSnapshotRetryDue(

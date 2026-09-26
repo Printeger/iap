@@ -1016,6 +1016,7 @@ public:
     bool submit(P4SuccessorPreparationRequest request);
     std::optional<P4SuccessorPreparationResult> poll(
       int expected_parent_trajectory_id);
+    bool resultReadyFor(int parent_trajectory_id) const;
     bool busyFor(int parent_trajectory_id) const;
     void cancelParent(int parent_trajectory_id);
     std::uint64_t pendingOverwriteCount() const;

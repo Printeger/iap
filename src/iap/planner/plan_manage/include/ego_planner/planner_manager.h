@@ -1284,6 +1284,22 @@ namespace ego_planner
     {
       p4_successor_schedule_.prepared_route = std::move(result);
     }
+    bool submitP4SuccessorWorkerResultForTest(
+        P4SuccessorPreparationResult result)
+    {
+      P4SuccessorPreparationRequest request;
+      request.parent_trajectory_id = result.parent_trajectory_id;
+      request.request_sequence = 1u;
+      request.absolute_deadline_s = 1000.0;
+      request.compute = [result = std::move(result)]() mutable {
+        return std::move(result);
+      };
+      return p4_successor_worker_.submit(std::move(request));
+    }
+    void setP4SuccessorResultDeliveredForTest(const bool delivered)
+    {
+      p4_successor_schedule_.result_delivered = delivered;
+    }
     void setPreparedP4SuccessorForTest(P4PreparedSuccessor successor)
     {
       p4_prepared_successor_ = std::move(successor);

@@ -5154,6 +5154,14 @@ P4SuccessorPreparationWorker::poll(const int expected_parent_trajectory_id)
   return result;
 }
 
+bool P4SuccessorPreparationWorker::resultReadyFor(
+  const int parent_trajectory_id) const
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->result &&
+    impl_->result->parent_trajectory_id == parent_trajectory_id;
+}
+
 bool P4SuccessorPreparationWorker::busyFor(
   const int parent_trajectory_id) const
 {
