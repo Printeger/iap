@@ -2103,7 +2103,7 @@ TEST(P4ActualCurveClearanceOptimization,
   EXPECT_EQ(query_count, frozen_query_count);
   EXPECT_GT(iterations, 0);
   EXPECT_LT(minimum_queried_base_margin, 0.05);
-  EXPECT_GT(minimumDenseForkPlanningMargin(after, *clearance), 0.0)
+  EXPECT_GE(minimumDenseForkPlanningMargin(after, *clearance), 0.008)
       << "solver=" << optimizer->getLastP1OptimizationTrace().solver_result
       << " iterations=" << iterations << " final_cost=" << final_cost;
   auto nominal = sampleDenseForkCurve(after, "nominal");

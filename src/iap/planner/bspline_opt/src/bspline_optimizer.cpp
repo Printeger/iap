@@ -18,6 +18,13 @@ namespace ego_planner
 {
   namespace
   {
+    // The final local-assurance lattice found up to 2.9 mm of negative
+    // margin after the soft optimizer had targeted the exact 5 cm planning
+    // reserve.  Keep a bounded 5 mm convergence allowance in generation so
+    // solver and sampling tolerances cannot consume the authorization
+    // reserve.  Final assurance still evaluates the unchanged 5 cm policy.
+    constexpr double kP4ActualCurveClearanceConvergenceReserveM = 0.005;
+
     constexpr int kP1AcceptedProfileSampleCount = 200;
     constexpr const char *kP1AcceptedProfileCsvName =
         "planner_p1_accepted_trajectory_risk_profile.csv";
@@ -614,7 +621,9 @@ namespace ego_planner
     for (const auto &sample : samples)
     {
       const double required_displacement_m =
-          planning_clearance_buffer_m - sample.signed_margin_m;
+          planning_clearance_buffer_m +
+          kP4ActualCurveClearanceConvergenceReserveM -
+          sample.signed_margin_m;
       if (!std::isfinite(sample.time_s) ||
           !std::isfinite(required_displacement_m) ||
           required_displacement_m <= 0.0 ||
