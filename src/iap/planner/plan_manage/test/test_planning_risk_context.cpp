@@ -2623,7 +2623,8 @@ TEST(TrajectoryExecutionFeedbackTest,
       waiting.manager->validateCommittedP4TrajectoryExecution(
           waiting.evaluation_ros_s - 0.01, waiting_position);
   EXPECT_TRUE(waiting_result.allowed) << waiting_result.reason;
-  EXPECT_EQ(waiting_result.reason, "runtime_execution_contract_valid");
+  EXPECT_EQ(waiting_result.reason, "runtime_waiting_for_controller_trace");
+  EXPECT_FALSE(waiting_result.guard_braking_preschedule_requested);
 
   auto trace_before_position_command = makeActivatedRuntimeFeedbackFixture(
       "runtime_trace_before_position_command", 941);

@@ -12427,6 +12427,22 @@ namespace ego_planner
         !waiting_for_first_matching_controller_trace)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
+    if (controller_trace_required_ &&
+        waiting_for_first_matching_controller_trace)
+    {
+      // ACTIVATED installs a zero-progress placeholder solely to bridge the
+      // bounded controller-feedback handshake.  Do not use that synthetic
+      // state to select runtime corridor rows: it can resurrect support for
+      // an already-past curve origin and schedule an irreversible guard just
+      // before the first exact controller trace arrives.  The unchanged
+      // feedback timeout above still brakes if that trace never arrives.
+      out.allowed = true;
+      out.reason = "runtime_waiting_for_controller_trace";
+      p4_execution_revoked_ = false;
+      published_p4_forward_decision_.planning_disposition =
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+      return finish(out, "EXECUTION_ALLOWED");
+    }
     // Tracking is a controller property. A same-cycle command/feedback trace
     // must take precedence over localization odometry, whose estimation error
     // and callback skew belong to the navigation-integrity contract instead.
