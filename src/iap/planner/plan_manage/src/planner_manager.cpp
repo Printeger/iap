@@ -2988,7 +2988,29 @@ namespace ego_planner
         trajectory_id == pending_activation_trace_trajectory_id_ &&
         start_time_ns == pending_activation_trace_start_time_ns_ &&
         curve_hash == pending_activation_trace_curve_hash_;
-    if ((!identity_matches && !pending_activation_identity_matches) ||
+    bool pending_guard_identity_matches = false;
+    if (p4_pending_braking_anchor_ &&
+        p4_pending_braking_anchor_->anchor_index <
+            p4_braking_anchors_.size() &&
+        (p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::PUBLISHED ||
+         p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::QUEUED))
+    {
+      const auto &guard_anchor = p4_braking_anchors_[
+          p4_pending_braking_anchor_->anchor_index];
+      const int64_t guard_start_time_ns =
+          p4_execution_certificate_.start_time_ns +
+          static_cast<int64_t>(std::llround(
+              guard_anchor.trajectory_time_s * 1.0e9));
+      pending_guard_identity_matches =
+          execution_instance_id == execution_instance_id_ &&
+          trajectory_id == p4_pending_braking_anchor_->trajectory_id &&
+          start_time_ns == guard_start_time_ns &&
+          curve_hash == p4_pending_braking_anchor_->curve_hash;
+    }
+    if ((!identity_matches && !pending_activation_identity_matches &&
+         !pending_guard_identity_matches) ||
         execution_instance_id == 0 ||
         trajectory_id <= 0 ||
         start_time_ns <= 0 || curve_hash.empty() ||
@@ -3012,6 +3034,18 @@ namespace ego_planner
             pending_activation_trace_curve_hash_;
     if (buffered_trace_is_pending_child && identity_matches &&
         !pending_activation_identity_matches)
+      return false;
+    const bool buffered_trace_is_pending_guard =
+        trajectory_controller_trace_sample_.valid &&
+        p4_pending_braking_anchor_ &&
+        trajectory_controller_trace_sample_.execution_instance_id ==
+            execution_instance_id_ &&
+        trajectory_controller_trace_sample_.trajectory_id ==
+            p4_pending_braking_anchor_->trajectory_id &&
+        trajectory_controller_trace_sample_.curve_hash ==
+            p4_pending_braking_anchor_->curve_hash;
+    if (buffered_trace_is_pending_guard && identity_matches &&
+        !pending_guard_identity_matches)
       return false;
     if (trajectory_controller_trace_sample_.valid &&
         trajectory_controller_trace_sample_.execution_instance_id ==
@@ -13171,9 +13205,35 @@ namespace ego_planner
               trace.receive_steady_ns,
               kExecutionFeedbackFreshnessTimeoutS);
     }
+    bool pending_guard_controller_trace_matches = false;
+    if (!controller_trace_matches && p4_pending_braking_anchor_ &&
+        p4_pending_braking_anchor_->anchor_index <
+            p4_braking_anchors_.size() &&
+        (p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::PUBLISHED ||
+         p4_pending_braking_anchor_->server_state ==
+             P4GuardServerState::QUEUED))
+    {
+      const auto &guard_anchor = p4_braking_anchors_[
+          p4_pending_braking_anchor_->anchor_index];
+      const int64_t guard_start_time_ns =
+          p4_execution_certificate_.start_time_ns +
+          static_cast<int64_t>(std::llround(
+              guard_anchor.trajectory_time_s * 1.0e9));
+      double guard_elapsed_s = 0.0;
+      pending_guard_controller_trace_matches = trajectoryControllerTrace(
+          execution_instance_id_,
+          p4_pending_braking_anchor_->trajectory_id,
+          guard_start_time_ns, p4_pending_braking_anchor_->curve_hash,
+          evaluation_now_s, kExecutionFeedbackFreshnessTimeoutS,
+          &guard_elapsed_s, nullptr, nullptr, nullptr, nullptr, nullptr,
+          nullptr, nullptr) &&
+          guard_elapsed_s <= kExecutionFeedbackFreshnessTimeoutS + 1.0e-9;
+    }
     if (execution_clock_stale && !controller_trace_matches &&
         !activated_guard_controller_trace_matches &&
-        !pending_activation_controller_trace_matches)
+        !pending_activation_controller_trace_matches &&
+        !pending_guard_controller_trace_matches)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
     bool waiting_for_first_matching_controller_trace = false;
@@ -13197,6 +13257,7 @@ namespace ego_planner
     if (controller_trace_required_ && !controller_trace_matches &&
         !activated_guard_controller_trace_matches &&
         !pending_activation_controller_trace_matches &&
+        !pending_guard_controller_trace_matches &&
         !waiting_for_first_matching_controller_trace)
       return activate_failsafe_braking(
           "controller_execution_trace_stale", current_t);
@@ -13210,6 +13271,21 @@ namespace ego_planner
       // applies if the full-identity ACK still has not been processed.
       out.allowed = true;
       out.reason = "runtime_waiting_for_pending_activation_ack";
+      p4_execution_revoked_ = false;
+      published_p4_forward_decision_.planning_disposition =
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+      return finish(out, "EXECUTION_ALLOWED");
+    }
+    if (controller_trace_required_ &&
+        pending_guard_controller_trace_matches)
+    {
+      // The controller can cross the certified guard switch before the
+      // status callback runs.  The exact guard trace is bounded control
+      // evidence, not activation authority: retain the incumbent transaction
+      // only for the existing feedback handshake and still require the full
+      // ACTIVATED acknowledgement to commit the guard.
+      out.allowed = true;
+      out.reason = "runtime_waiting_for_pending_guard_activation_ack";
       p4_execution_revoked_ = false;
       published_p4_forward_decision_.planning_disposition =
           P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;

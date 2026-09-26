@@ -2959,6 +2959,55 @@ TEST(TrajectoryExecutionFeedbackTest,
 }
 
 TEST(TrajectoryExecutionFeedbackTest,
+     PendingGuardTraceBridgesBoundedActivationAckSkew)
+{
+  auto fixture = makeActivatedRuntimeFeedbackFixture(
+      "runtime_pending_guard_activation_ack", 941);
+  auto &manager = *fixture.manager;
+
+  // Let the incumbent feedback expire so the normal safety path creates a
+  // certified guard, then reproduce the production callback ordering where
+  // the reentrant controller trace arrives before the status ACK callback.
+  *fixture.steady_now_ns += 201'000'000LL;
+  const Eigen::Vector3d parent_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(0.5);
+  const auto scheduled = manager.validateCommittedP4TrajectoryExecution(
+      fixture.evaluation_ros_s, parent_position);
+  ASSERT_TRUE(scheduled.guard_braking_preschedule_requested)
+      << scheduled.reason;
+  auto guard = manager.pendingP4GuardBrakingCommand();
+  ASSERT_TRUE(guard.has_value());
+  ASSERT_TRUE(manager.markP4GuardCommandPublished(guard->trajectory_id));
+  manager.acknowledgeP4GuardStatus(guard->trajectory_id, "QUEUED");
+
+  auto guard_velocity = guard->trajectory.getDerivative();
+  auto guard_acceleration = guard_velocity.getDerivative();
+  constexpr double guard_elapsed_s = 0.05;
+  const Eigen::Vector3d guard_position =
+      guard->trajectory.evaluateDeBoorT(guard_elapsed_s);
+  const Eigen::Vector3d guard_velocity_at_sample =
+      guard_velocity.evaluateDeBoorT(guard_elapsed_s);
+  const Eigen::Vector3d guard_acceleration_at_sample =
+      guard_acceleration.evaluateDeBoorT(guard_elapsed_s);
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash,
+      1'725'000'001.0, guard_elapsed_s, guard_position,
+      guard_velocity_at_sample, guard_acceleration_at_sample,
+      guard_position, guard_velocity_at_sample,
+      guard_acceleration_at_sample, false));
+
+  const auto waiting = manager.validateCommittedP4TrajectoryExecution(
+      fixture.evaluation_ros_s, guard_position);
+  EXPECT_TRUE(waiting.allowed) << waiting.reason;
+  EXPECT_EQ(waiting.reason,
+            "runtime_waiting_for_pending_guard_activation_ack");
+  EXPECT_FALSE(waiting.failsafe_braking_activated);
+  EXPECT_EQ(manager.local_data_.traj_id_,
+            guard->parent_trajectory_id);
+}
+
+TEST(TrajectoryExecutionFeedbackTest,
      PendingChildTraceBridgesOnlyBoundedActivationAckSkew)
 {
   auto fixture = makeActivatedRuntimeFeedbackFixture(
