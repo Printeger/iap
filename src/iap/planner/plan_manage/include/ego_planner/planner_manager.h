@@ -660,6 +660,15 @@ namespace ego_planner
     std::size_t window_count = 0;
     std::uint64_t first_failure_window_id = 0;
     std::uint64_t runtime_window_evidence_sequence_id = 0;
+    // Compact local-motion evidence for the exact watchdog decision.  These
+    // fields mirror the already-computed LocalMotionAssurance result; they do
+    // not retain point clouds or per-voxel detail.
+    iap::LocalMotionAssuranceStatus local_assurance_status =
+        iap::LocalMotionAssuranceStatus::UNKNOWN;
+    std::string local_assurance_reason = "not_evaluated";
+    double local_minimum_margin_m =
+        std::numeric_limits<double>::quiet_NaN();
+    iap::LocalMotionSampleResult local_first_failure;
     // Decision-time global-navigation exposure. Certificate-level values
     // describe what was admitted originally; these fields describe the exact
     // watchdog evaluation that allowed or stopped the committed trajectory.

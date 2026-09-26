@@ -5081,6 +5081,61 @@ TEST(P4ForwardTerminalLineageTest,
   manager.restoreP4ExecutionCommitmentAfterCandidateRejection();
   EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   manager.setLatestRiskSnapshotForTest(snapshot);
+
+  // A runtime local-clearance rejection must carry its compact first-failure
+  // geometry in the watchdog result and execution event.  Standard lives do
+  // not retain the point cloud, so a reason string alone is insufficient to
+  // distinguish a newly observed obstacle from a curve-generation defect.
+  auto local_unsafe_execution = makeP4ExecutionSnapshot(
+      snapshot, directRiskCallback(0.5), 10.56, 77u);
+  auto local_unsafe_occupancy =
+      std::make_shared<ego_planner::P0OccupancyEpoch>(
+          *local_unsafe_execution->occupancy);
+  local_unsafe_occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  const Eigen::Vector3d local_failure_point =
+      manager.local_data_.position_traj_.evaluateDeBoorT(0.8);
+  const auto local_obstacles =
+      std::make_shared<const std::vector<Eigen::Vector3d>>(
+          std::vector<Eigen::Vector3d>{local_failure_point});
+  local_unsafe_occupancy->raw_occupied_voxel_centers = local_obstacles;
+  local_unsafe_occupancy->current_frame_occupied_voxel_centers =
+      local_obstacles;
+  local_unsafe_execution->occupancy = local_unsafe_occupancy;
+  local_unsafe_execution->source_identity.occupancy_generation =
+      local_unsafe_occupancy->generation;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.56, local_unsafe_occupancy, directRiskCallback(0.5),
+      local_unsafe_execution);
+  manager.preserveP4ExecutionCommitmentForCandidate();
+  const double local_failure_check_s = 10.57;
+  const auto local_clearance_rejected =
+      manager.validateCommittedP4TrajectoryExecution(
+          local_failure_check_s,
+          manager.local_data_.position_traj_.evaluateDeBoorT(
+              local_failure_check_s -
+              manager.local_data_.start_time_.seconds()));
+  EXPECT_EQ(local_clearance_rejected.reason.rfind(
+                "runtime_trajectory_assurance_rejected:"
+                "local_motion_assurance_unsafe:",
+                0),
+            0u)
+      << local_clearance_rejected.reason;
+  EXPECT_EQ(local_clearance_rejected.local_assurance_status,
+            iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(local_clearance_rejected.local_assurance_reason,
+            "local_clearance_margin_not_positive");
+  EXPECT_LE(local_clearance_rejected.local_minimum_margin_m, 0.0);
+  EXPECT_EQ(local_clearance_rejected.local_first_failure.curve_id,
+            "runtime-nominal");
+  EXPECT_TRUE(local_clearance_rejected.local_first_failure.position_map.
+                  allFinite());
+  EXPECT_TRUE(local_clearance_rejected.local_first_failure.
+                  nearest_obstacle_position_map.allFinite());
+  EXPECT_FALSE(local_clearance_rejected.local_first_failure.
+                   nearest_obstacle_identity.empty());
+  manager.restoreP4ExecutionCommitmentAfterCandidateRejection();
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
+
   const auto at_endpoint = manager.validateCommittedP4TrajectoryExecution(
       certificate.execution_deadline_s, certificate.approved_endpoint);
   EXPECT_TRUE(at_endpoint.allowed) << at_endpoint.reason;
@@ -5338,7 +5393,7 @@ TEST(P4ForwardTerminalLineageTest,
       }));
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
-        return row.at("schema_version") == "p4_execution_event_v11" &&
+        return row.at("schema_version") == "p4_execution_event_v12" &&
             row.at("event") == "EXECUTION_ALLOWED" &&
             row.at("execution_mode") == "MISSION_DEGRADED_EXECUTION" &&
             row.at("task_mode") == "mission_best_effort" &&
@@ -5358,6 +5413,16 @@ TEST(P4ForwardTerminalLineageTest,
                     "global_exceedance_integral_limit_ratio_s")) &&
             row.at("global_budget_failure_causes") ==
                 "PEAK_RATIO|CONTINUOUS_DURATION|EXCESS_INTEGRAL";
+      }));
+  EXPECT_TRUE(std::any_of(
+      execution_rows.begin(), execution_rows.end(), [](const auto &row) {
+        return row.at("local_assurance_status") == "UNSAFE" &&
+            row.at("local_assurance_reason") ==
+                "local_clearance_margin_not_positive" &&
+            row.at("local_first_failure_curve") == "runtime-nominal" &&
+            std::stod(row.at("local_minimum_margin_m")) <= 0.0 &&
+            std::isfinite(std::stod(row.at("local_first_failure_x"))) &&
+            !row.at("local_nearest_obstacle_identity").empty();
       }));
   std::ifstream satellite_detail(
       debug_path.string() + ".runtime_window_satellite.csv");

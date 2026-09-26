@@ -13227,6 +13227,13 @@ namespace ego_planner
           p4_direct_risk_evidence_.window_point_satellite_sets_hash ==
               p4WindowPointSatelliteSetsHash(
                   p4_direct_risk_evidence_.windows)));
+    const auto populate_local_assurance_diagnostics =
+        [&out](const iap::LocalMotionAssuranceResult &local) {
+          out.local_assurance_status = local.status;
+          out.local_assurance_reason = local.reason;
+          out.local_minimum_margin_m = local.minimum_margin_m;
+          out.local_first_failure = local.first_failure;
+        };
     if (!cache_matches)
     {
       P4ExecutionRiskWindowLayout runtime_layout;
@@ -13448,6 +13455,8 @@ namespace ego_planner
           iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                    p4_local_motion_policy_)
               .evaluate(runtime_assurance_request);
+      populate_local_assurance_diagnostics(
+          p4_direct_risk_evidence_.trajectory_assurance.local);
       populate_global_budget_diagnostics(
           p4_direct_risk_evidence_.trajectory_assurance.global,
           runtime_assurance_request.prior_global_episode);
@@ -13652,9 +13661,13 @@ namespace ego_planner
       }
     }
     if (p4_direct_risk_evidence_.trajectory_assurance_complete)
+    {
+      populate_local_assurance_diagnostics(
+          p4_direct_risk_evidence_.trajectory_assurance.local);
       populate_global_budget_diagnostics(
           p4_direct_risk_evidence_.trajectory_assurance.global,
           p4_global_exposure_ledger_.state());
+    }
     const auto cached_row_reachable =
         [this, runtime_windowed, current_t,
          &committed_window_selection](const std::size_t cache_index) {
@@ -14198,6 +14211,14 @@ namespace ego_planner
              "risk_confirmation_evidence_identity,common_satellite_ids,"
              "gnss_core_policy,window_layout_hash,window_count,"
              "first_failure_window_id,runtime_window_evidence_sequence_id,"
+             "local_assurance_status,local_assurance_reason,"
+             "local_minimum_margin_m,local_first_failure_curve,"
+             "local_first_failure_sample,local_first_failure_time_s,"
+             "local_first_failure_x,local_first_failure_y,"
+             "local_first_failure_z,local_first_failure_margin_m,"
+             "local_obstacle_clearance_m,local_required_envelope_m,"
+             "local_nearest_obstacle_x,local_nearest_obstacle_y,"
+             "local_nearest_obstacle_z,local_nearest_obstacle_identity,"
              "runtime_global_peak_ratio,"
              "global_peak_ratio_limit,"
              "runtime_global_maximum_continuous_exceedance_s,"
@@ -14214,7 +14235,7 @@ namespace ego_planner
              "global_prior_exceedance_integral_ratio_s,"
              "global_budget_failure_causes\n";
     csv << std::setprecision(17)
-        << "p4_execution_event_v11," << event << ',' << stamp_s << ','
+        << "p4_execution_event_v12," << event << ',' << stamp_s << ','
         << p4ExecutionAuthorityName(p4_execution_certificate_.authority)
         << ',' << p4_execution_certificate_.trajectory_id << ','
         << iap::trajectoryExecutionModeName(
@@ -14280,6 +14301,26 @@ namespace ego_planner
         << diagnostics.window_count << ','
         << diagnostics.first_failure_window_id << ','
         << diagnostics.runtime_window_evidence_sequence_id << ','
+        << iap::localMotionAssuranceStatusName(
+               diagnostics.local_assurance_status) << ','
+        << diagnostics.local_assurance_reason << ','
+        << diagnostics.local_minimum_margin_m << ','
+        << diagnostics.local_first_failure.curve_id << ','
+        << diagnostics.local_first_failure.sample_index << ','
+        << diagnostics.local_first_failure.relative_time_s << ','
+        << diagnostics.local_first_failure.position_map.x() << ','
+        << diagnostics.local_first_failure.position_map.y() << ','
+        << diagnostics.local_first_failure.position_map.z() << ','
+        << diagnostics.local_first_failure.margin_m << ','
+        << diagnostics.local_first_failure.obstacle_clearance_m << ','
+        << diagnostics.local_first_failure.required_envelope_m << ','
+        << diagnostics.local_first_failure.nearest_obstacle_position_map.x()
+        << ','
+        << diagnostics.local_first_failure.nearest_obstacle_position_map.y()
+        << ','
+        << diagnostics.local_first_failure.nearest_obstacle_position_map.z()
+        << ','
+        << diagnostics.local_first_failure.nearest_obstacle_identity << ','
         << diagnostics.global_peak_ratio << ','
         << diagnostics.global_peak_ratio_limit << ','
         << diagnostics.global_maximum_continuous_exceedance_s << ','
