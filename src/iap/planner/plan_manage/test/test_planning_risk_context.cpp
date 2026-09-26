@@ -7911,6 +7911,20 @@ TEST(P4SuccessorDeadlineScheduling,
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.499));
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.5));
 
+  // A completed route can yield more than one frozen channel whose actual
+  // curves must be prepared serially.  The pending channel is already the
+  // next bounded work item, so result_delivered must not suppress the FSM
+  // callback that consumes it.
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      certificate.trajectory_id, certificate.start_time_ns, 12.5,
+      "successor_next_channel_curve_pending", certificate.control_points_hash);
+  ego_planner::P4ForwardDecision pending_channel;
+  pending_channel.selected_channel_id = 2u;
+  manager.setP4PendingChannelWorkItemForTest(std::move(pending_channel));
+  manager.setP4SuccessorResultDeliveredForTest(true);
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.1));
+  manager.clearP4PendingChannelWorkItemForTest();
+
   manager.local_data_.traj_id_ = 8;
   manager.local_data_.duration_ = 1.0;
   certificate.trajectory_id = 8;

@@ -3625,6 +3625,14 @@ namespace ego_planner
               last_p4_forward_decision_,
               p4_execution_certificate_.authority);
     }
+    // A delivered successor route may contain several frozen channels whose
+    // actual curves are prepared serially. The next channel is already a
+    // bounded work item for this parent and must be consumed immediately;
+    // result_delivered only suppresses another route search, not this curve.
+    if (p4_pending_channel_work_item_ &&
+        p4_successor_preparation_state_ ==
+            P4SuccessorPreparationState::CURVE_PREPARING)
+      return true;
     if (p4_cached_successor_bundle_ &&
         p4_cached_successor_bundle_->complete())
       return preparedP4SuccessorBundleDue(now_s);
