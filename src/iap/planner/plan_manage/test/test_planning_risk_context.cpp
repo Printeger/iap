@@ -3195,6 +3195,23 @@ TEST(P4PublicationCertificate,
   EXPECT_EQ(failure, ego_planner::P4PreparedCurveFailure::NONE);
 }
 
+TEST(P4PublicationCertificate,
+     PublicationBoundaryPrefersLatestCausalExecutionSnapshot) {
+  const auto planning_bound = makeP4ExecutionSnapshot(
+      makeP4SelectionSnapshot(1.0, "map:test", true),
+      directRiskCallback(0.5), 10.0, 920u);
+  const auto latest_causal = makeP4ExecutionSnapshot(
+      makeP4SelectionSnapshot(1.1, "map:test", true),
+      directRiskCallback(0.5), 10.1, 921u);
+
+  EXPECT_EQ(ego_planner::p4PublicationValidationSnapshot(
+                latest_causal, planning_bound),
+            latest_causal);
+  EXPECT_EQ(ego_planner::p4PublicationValidationSnapshot(
+                nullptr, planning_bound),
+            planning_bound);
+}
+
 TEST(P4ExecutionIntegrityTest,
      CertifiedCurrentIntegrityOwnsTheLiveCurrentSafetyGate) {
   iap::CurrentIntegrityState current;

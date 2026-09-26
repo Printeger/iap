@@ -41,6 +41,11 @@ namespace ego_planner
   struct P0ExecutionRiskSnapshot;
   struct P5GateStatus;
 
+  std::shared_ptr<const P0ExecutionRiskSnapshot>
+  p4PublicationValidationSnapshot(
+      const std::shared_ptr<const P0ExecutionRiskSnapshot> &latest_causal,
+      const std::shared_ptr<const P0ExecutionRiskSnapshot> &planning_bound);
+
   struct P4ForwardGnssRiskDiagnosticDetail final
       : P4ForwardRiskDiagnosticDetail
   {

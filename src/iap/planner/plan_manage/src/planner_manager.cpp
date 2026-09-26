@@ -41,6 +41,14 @@ namespace ego_planner
     constexpr double kP4GeometryCommitMaximumChordLengthM = 0.05;
   }
 
+  std::shared_ptr<const P0ExecutionRiskSnapshot>
+  p4PublicationValidationSnapshot(
+      const std::shared_ptr<const P0ExecutionRiskSnapshot> &latest_causal,
+      const std::shared_ptr<const P0ExecutionRiskSnapshot> &planning_bound)
+  {
+    return latest_causal ? latest_causal : planning_bound;
+  }
+
   bool p4RequiresFullSuccessorChannelSearch(
       const P4ForwardDecision &parent_decision,
       const P4ExecutionAuthority parent_authority)
@@ -8699,9 +8707,15 @@ namespace ego_planner
             certificate.execution_snapshot_id)
       return finish(false, P4PreparedCurveFailure::SNAPSHOT_MISMATCH,
                     "p4_publication_snapshot_identity_invalid");
-    if (planning_risk_context_.execution_snapshot)
+    const auto publication_snapshot = p4PublicationValidationSnapshot(
+        p0_risk_grid_runtime_
+            ? p0_risk_grid_runtime_->
+                  acquireExecutionRiskSnapshotForEvaluation(now_s)
+            : nullptr,
+        planning_risk_context_.execution_snapshot);
+    if (publication_snapshot)
     {
-      const auto &current = *planning_risk_context_.execution_snapshot;
+      const auto &current = *publication_snapshot;
       const auto &identity = certificate.snapshot_identity;
       const uint64_t occupancy_generation = current.occupancy
           ? current.occupancy->generation : 0u;
