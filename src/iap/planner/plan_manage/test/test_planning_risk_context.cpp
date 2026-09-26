@@ -2116,6 +2116,29 @@ TEST(P4ActualCurveClearanceOptimization,
       << assurance.reason;
 }
 
+TEST(P4ActualCurveClearanceOptimization,
+     FreezesInitiallySafeSamplesAgainstOptimizationErosion) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_clearance_safe_sample.csv").string());
+
+  const Eigen::MatrixXd points = denseForkTangentControlPoints();
+  ego_planner::P4ActualCurveClearanceConstraintSample safe_sample;
+  safe_sample.time_s = 0.4;
+  safe_sample.signed_margin_m = 0.060;
+  safe_sample.escape_direction = Eigen::Vector3d::UnitY();
+  optimizer->setP4ActualCurveClearanceConstraints(
+      points, 0.2, {safe_sample}, 0.05);
+
+  const auto displacements = optimizer->
+      p4ActualCurveClearanceRequiredDisplacementsForTest();
+  ASSERT_EQ(displacements.size(), 1u);
+  EXPECT_NEAR(displacements.front(), -0.005, 1.0e-12);
+}
+
 TEST(P4ReboundFailureEvidence,
      BoundaryConditionDoesNotLeakInitializationPlaceholder) {
   auto map = std::make_shared<GridMap>();

@@ -626,11 +626,14 @@ namespace ego_planner
           sample.signed_margin_m;
       if (!std::isfinite(sample.time_s) ||
           !std::isfinite(required_displacement_m) ||
-          required_displacement_m <= 0.0 ||
           !sample.escape_direction.allFinite() ||
           sample.escape_direction.squaredNorm() <= 1.0e-12)
         continue;
 
+      // Keep every valid frozen half-space, including samples whose seed is
+      // already outside the target envelope.  A negative displacement lets
+      // the optimizer use that existing surplus, but prevents unrelated
+      // costs from consuming it past the same generation target.
       P4ActualCurveClearanceConstraint constraint;
       double weights[4] = {};
       if (!cubicBasisForTime(
@@ -649,6 +652,16 @@ namespace ego_planner
       p4_actual_curve_clearance_constraints_.push_back(
           std::move(constraint));
     }
+  }
+
+  std::vector<double>
+  BsplineOptimizer::p4ActualCurveClearanceRequiredDisplacementsForTest() const
+  {
+    std::vector<double> out;
+    out.reserve(p4_actual_curve_clearance_constraints_.size());
+    for (const auto &constraint : p4_actual_curve_clearance_constraints_)
+      out.push_back(constraint.required_displacement_m);
+    return out;
   }
 
   void BsplineOptimizer::setP4ActualCurveGuideCorridor(

@@ -569,6 +569,8 @@ namespace ego_planner
         mutation(p4_attempt_lineage_.front());
     }
     bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
+    std::vector<double>
+    p4ActualCurveClearanceRequiredDisplacementsForTest() const;
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
     const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
     const P1BasePrepassTrace &getLastP1BasePrepassTrace() const {
