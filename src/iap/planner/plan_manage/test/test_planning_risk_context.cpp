@@ -11348,6 +11348,21 @@ TEST(P4PreparedSuccessorPolicy,
   completed_route.reason = "ok";
   manager.setP4PreparedSuccessorRouteForTest(std::move(completed_route));
 
+  const auto awaiting_execution_sample =
+      manager.evaluateP4ForwardRouteForTest(
+      Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d(1.75, 0.0, 1.0));
+  EXPECT_EQ(awaiting_execution_sample.result_status,
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(awaiting_execution_sample.reason,
+            "successor_waiting_for_parent_execution_sample");
+
+  ASSERT_TRUE(manager.recordTrajectoryExecutionSample(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash, 10.1, 0.1,
+      manager.local_data_.position_traj_.evaluateDeBoorT(0.1),
+      manager.local_data_.velocity_traj_.evaluateDeBoorT(0.1),
+      manager.local_data_.acceleration_traj_.evaluateDeBoorT(0.1)));
   const auto worker_result = manager.evaluateP4ForwardRouteForTest(
       Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
       Eigen::Vector3d(1.75, 0.0, 1.0));

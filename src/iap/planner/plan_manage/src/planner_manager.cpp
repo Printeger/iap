@@ -5288,6 +5288,38 @@ namespace ego_planner
             completed.compute_duration_ms;
         successor.successor_failure = completed.failure;
         completed.decision = successor;
+        const auto &parent_sample = active_trajectory_execution_sample_;
+        const bool parent_execution_sample_ready =
+            parent_sample.valid && parent_sample.received_from_server &&
+            parent_sample.execution_instance_id ==
+                local_data_.execution_instance_id_ &&
+            parent_sample.trajectory_id == local_data_.traj_id_ &&
+            parent_sample.start_time_ns ==
+                local_data_.start_time_.nanoseconds() &&
+            parent_sample.curve_hash == local_data_.curve_hash_ &&
+            std::isfinite(parent_sample.trajectory_elapsed_s) &&
+            executionFeedbackFresh(
+                parent_sample.receive_steady_ns,
+                kExecutionFeedbackFreshnessTimeoutS);
+        if (completed.ready &&
+            completed.failure == P4SuccessorFailure::NONE &&
+            !parent_execution_sample_ready)
+        {
+          // Activation installs a zero-progress placeholder while the first
+          // real controller trace is in flight. A ready route is immutable
+          // and can be cached; generating and certifying its child before the
+          // trace arrives can only fail the mandatory parent-exposure seam.
+          // Keep the route and retry on the next callback. The existing
+          // controller-feedback timeout still schedules the guard if the
+          // server never supplies a matching sample.
+          p4_successor_schedule_.prepared_route = std::move(completed);
+          successor.result_status = P4ForwardResultStatus::PENDING;
+          successor.planning_disposition =
+              P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          successor.reason =
+              "successor_waiting_for_parent_execution_sample";
+          return successor;
+        }
         const auto retry_on_new_snapshot = [](const P4SuccessorFailure failure) {
           switch (failure)
           {
