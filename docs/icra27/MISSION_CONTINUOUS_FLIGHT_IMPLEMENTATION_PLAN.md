@@ -179,11 +179,20 @@ python3 scripts/dev_planner/run_icra_interface_integration.py \
   --scenario icra_dense_forest_four_fork_v2 \
   --gnss-arm bds \
   --task-mode mission_best_effort \
-  --repetitions 3 \
-  --retain-raw-risk-detail
+  --repetitions 3
 ```
 
 可加现有 `--rviz` 观察，但可视化不作为通过依据。180 秒是现有任务观察上限，不改变预测 horizon 或数据有效期；超时未到终点就是未完成。
+runner 在创建 session、执行 GPU preflight 或启动 ROS 前要求目标文件系统至少有
+`20 GiB` 可用空间；不足时以 `DISK_SPACE_LOW` 终止。普通开发、最终三次健康验收和
+选路/故障对照均使用默认 compact 模式。只有已经明确首因、确实需要逐点卫星分解的
+单次诊断运行才可显式添加 `--retain-raw-risk-detail`；该模式还必须使用
+`--raw-detail-reason` 记录已确认首因、固定 `--repetitions 1`，并使用
+`--raw-satellite-detail-max-rows` 的正数硬上限（默认仅 `5000` 行）。这类运行强制标记
+`diagnostic_only=true`、`acceptance_eligible=false`，即使过程通过也只能得到
+`DIAGNOSTIC_PASS`，不得用于标准 live、连续飞行验证或最终效果证明。runner 会在
+20 GiB 基线之上预留
+估算空间，达到上限后文件只追加一次 `TRUNCATED` 标记并停止详细行。
 
 ### 7.2 必须全部满足的健康验收
 
@@ -212,9 +221,20 @@ python3 scripts/dev_planner/run_icra_interface_integration.py \
 
 ### 7.4 保留什么证据
 
-每次保留 commit、有效参数、GPU preflight、运行命令、必要进程状态、按时间关联的执行事件、实际曲线身份、PositionCommand、controller trace、odom、各分叉候选比较及首次失败前后日志。保存足够复核的风险明细与局部输入；只有摘要不能证明生产首因。
+每次保留 commit 和 clean-worktree 身份、有效参数、GPU preflight、运行命令、owned
+process/退出状态、`execution_events.csv`、`runtime_window_batch.csv`、紧凑的
+`forward_channel_decisions.csv` 与必要候选对照，以及按时间关联的实际曲线、父子身份、
+PositionCommand、controller trace 和 odom 摘要。失败运行另保留首个真实首因前后的
+有界 stdout、lineage 和 runtime-window 行。最终证明依赖这些紧凑但充分的身份、控制、
+运动、候选比较和故障事件证据；不要求、也不得在每次验收中保存全部逐点/逐卫星原始
+CSV。
 
-证据放仓库内 `results/` 的本任务目录。调试阶段保留首个失败和最终验收输入，不在修复未闭合前自动清理关键 capture；必要时局部调整现有 runner 的保留行为。遵守 AGENTS 的删除规则，不建立仓库外归档，不开展磁盘清理。
+证据放仓库内 `results/` 的本任务目录。默认 compact 模式在生产端不创建
+`forward_risk_samples.csv`、`gnss_risk_detail.csv`、`runtime_window.csv` 或
+`runtime_window_satellite.csv`，而不是等运行结束后再删除。调试阶段保留首个失败和
+最终验收所需的关键 capture；可再生大文件只有在紧凑首因证据落盘、运行结束、非
+symlink、非 tracked 且无进程占用后才能按精确路径删除。遵守 AGENTS 的删除规则，
+不建立仓库外归档，不清理任务范围外数据。
 
 ## 8. 完成判定与交付报告
 
@@ -242,7 +262,7 @@ python3 scripts/dev_planner/run_icra_interface_integration.py \
 - 步骤 4 修改与 CPU 证据：typed failure 仍绑定不可变失败候选，下一冻结 guide 的新事务显式恢复 `RETAIN_COMMITTED_TRAJECTORY`；actual optimizer 使用固定 guide 投影约束拓扑管道，并在不改变最终硬 `0.5 m` corridor 的前提下预留一个 `0.05 m` geometry-commit chord。生产回归已从候选 B 生成前失败变为两个 actual bundle 均生成并完成比较；`test_planning_risk_context` 163/163、`test_trajectory_assurance` 42/42、`test_p5_runtime_integrity_gate` 46/46、bspline optimizer 6/6、runner 94/94 通过。
 - 步骤 4 干净 live：`36e82369e4028143b8d00b6a4797135bc6ab18d0`、`git_worktree_clean=true`、GPU preflight 通过并完整运行 180 s。trajectory 2 实际授权、匹配激活并运动，最大跟踪误差 `0.0243 m`，已越过旧 `bspline_count=0` 阻塞；随后错误排队 guard 并停在约 `(-15.327,-0.991,1.364)`，故不计入健康验收。首因是 watchdog 时刻 `1657065614.7482536` 与最新 snapshot `1657065614.7482538` 仅差约 `0.24 µs`，aggregate evaluation-time 使用零容差而同对象的 source stamps 已使用 `1 µs` 容差，导致 `runtime_execution_snapshot_missing`。证据：`/home/dev/ws_iap/live_worktrees/mission-step3/results/icra27/dev_runs/interface_integration/run-20260926T083316Z-698805`。
 - causal-tolerance 修复与 CPU 证据：`24e8e74` 仅将上述既有 `1 µs` causal tolerance 同步到 aggregate snapshot 时间；超过 `1 µs` 的未来数据和全部 freshness/局部安全门仍 fail closed。新增回归先红后绿；`test_p0_risk_grid_runtime` 117/117、`test_planning_risk_context` 163/163、`test_p5_runtime_integrity_gate` 46/46 通过。
-- `24e8e74` 干净 live：目录 `/home/dev/ws_iap/live_worktrees/mission-step3/results/icra27/dev_runs/interface_integration/run-20260926T084442Z-745536`；GPU preflight 通过并完整运行 180 s，未发布也未运动。首因发生在 decision event 252：通道 2 已形成局部安全的完整 actual bundle（全局 GNSS 仍如实为 `GNSS_GEOMETRY_DEGENERATE`，局部最小净空 `0.012194 m`），通道 1 actual curve 被硬局部门以 `trajectory_assurance_rejected:local_precheck:local_clearance_margin_not_positive` 拒绝；比较器正确恢复通道 2 并记录 `normal_channel_comparison_complete`，但 FSM 随后无条件 `reject_candidate()`，丢弃已恢复赢家。证据：同目录 `continuous-flight-r01-risk/exports/planner_p4_risk_astar_debug.csv.forward_lineage.csv` 及 channel-decision CSV。该失败运行不计入最终健康三次。
+- `24e8e74` 干净 live：目录 `/home/dev/ws_iap/live_worktrees/mission-step3/results/icra27/dev_runs/interface_integration/run-20260926T084442Z-745536`；GPU preflight 通过并完整运行 180 s，未发布也未运动。首因发生在 decision event 252：通道 2 已形成局部安全的完整 actual bundle（全局 GNSS 仍如实为 `GNSS_GEOMETRY_DEGENERATE`，局部最小净空 `0.012194 m`），通道 1 actual curve 被硬局部门以 `trajectory_assurance_rejected:local_precheck:local_clearance_margin_not_positive` 拒绝；比较器正确恢复通道 2 并记录 `normal_channel_comparison_complete`，但 FSM 随后无条件 `reject_candidate()`，丢弃已恢复赢家。证据：同目录 `compact_evidence/cause_lineage_excerpt.csv`、`compact_evidence/compact_failure_evidence.json` 及保留的 channel-decision CSV。该失败运行不计入最终健康三次。
 - 当前最小修复与 CPU 证据：末通道的类型化失败若已完成比较并恢复更早的完整 bundle，FSM 保留该 bundle、绑定当前 planning attempt，并继续既有 latest-snapshot/P5/身份/局部安全/制动发布链；失败通道仍保持不可变且不重试。新增生产路径回归先证明旧 FSM 返回 false，修复后证明实际发布通道 2 对应的既有赢家；`test_planning_risk_context` 164/164、`test_p0_risk_grid_runtime` 117/117、`test_p5_runtime_integrity_gate` 52/52、`test_trajectory_assurance` 42/42 通过。P0 初次复跑因测试二进制与更新后的共享库不一致在冻结快照用例段错误，原目标就地重建后 117/117 通过。
 - `d8dbc95` 干净 live：目录 `/home/dev/ws_iap/live_worktrees/mission-step3/results/icra27/dev_runs/interface_integration/run-20260926T092238Z-832138`；GPU `cuInit(0)`、device count 1 和 required processes 均通过。轨迹 121 被授权并匹配激活，实际移动、最大跟踪误差 `0.030908 m`，证明末通道已有赢家发布阻塞已解除；随后停在首个分叉前，故不计入最终健康三次。首因是安全 timer 使用的最新 odom stamp 冻结在 `1657065678.5507429`，同身份 controller trace 已推进约 `3.9 s`；P0 继续发布较新快照并最终从 32 项因果历史淘汰旧快照，watchdog 因而先记录 `runtime_execution_snapshot_missing`、调度 guard，再因冻结时间不能接受后续反馈而制动。证据：同目录 `summary.json`、`planner_p4_risk_astar_debug.csv.execution_events.csv` 及 `runtime_window_batch.csv`。
 - watchdog-clock 修复与 CPU 证据：`8a2a526` 仅让 runtime watchdog、同次 geometry check 与 P5 handoff 使用既有 `latest odom stamp + steady elapsed` 调度时钟；规划生成仍使用精确 sensor stamp，同身份 controller trace 提供实际状态，所有 snapshot/support/trace/碰撞/跟踪/制动 freshness 门不变。新增回归先红（20 ms 后仍为相同 odom stamp）后绿（odom callback 暂时饥饿期间 watchdog 仍继续推进）；`test_planning_risk_context` 165/165、`test_p0_risk_grid_runtime` 117/117、`test_p5_runtime_integrity_gate` 52/52、`test_trajectory_assurance` 42/42 通过。
@@ -251,4 +271,6 @@ python3 scripts/dev_planner/run_icra_interface_integration.py \
 - 认证制动域修复与 CPU 证据：`04b46f4` 只消除上述双重计入；反馈仍须同时满足认证 position/velocity error 和绝对 velocity/acceleration 动力学界，离开认证域后仍须让完整 latency-reachable excursion 落入剩余净空，否则原样撤权。回归先红后绿，并增加绝对速度超限仍失败的反例；`test_planning_risk_context` 165/165、`test_p0_risk_grid_runtime` 117/117、`test_p5_runtime_integrity_gate` 46/46、`test_trajectory_assurance` 42/42 通过，`ego_planner_node` 完整重建通过。
 - `83e27a9` 干净 live：目录 `/home/dev/ws_iap/live_worktrees/mission-step3/results/icra27/dev_runs/interface_integration/run-20260926T095429Z-947929`；GPU preflight、required processes 和完整 180 s 运行通过，但零发布、零位移，故不计入健康验收。最早失败事务为 decision event 2：通道 2 的 route-level MISSION degraded 状态先形成类型化 support 失败，通道 1 actual 又因 corridor support 过期失败；这两个失败 bundle 随后在相同 stable channel ID 和相同 snapshot 下被事件 3--296 错当成已完成通道，后续每个事件只生成通道 1，`normal_channel_typed_failure_complete` 从未重新排队通道 2。278 条 actual 均在 P5 前硬拒绝（184 条 local clearance、94 条 support expired）；这些硬门保持不变，缓存跨事件复用才是未尝试 runner-up 的首因。
 - 当前有界修复与 CPU 证据：`0775497` 将 normal prepared-bundle/typed-failure 事务按现有 `decision_event_id` 隔离；同事件冻结 siblings 仍共享比较身份，后续事件即使复用同一 snapshot 和 stable channel ID 也必须重新生成 actual curve。新增回归先红（新事件首通道失败直接得到 `normal_channel_all_preparations_failed`）后绿，并与同事件 runner-up 恢复、完整 actual bundle 比较用例共同通过；`test_planning_risk_context` 166/166 通过，`ego_planner_node` 完整重建通过。未改变 local clearance、support expiry、动力学、制动、P5 或发布标准。
-- 下一步：提交上述 event-isolation 修复，从新提交的独立干净 worktree 重建并重跑短 continuous-flight live；必须先证明后继在父轨迹仍运动时准备并至少两次按父子身份接管，再进入步骤 5 的完整森林、三次同版本健康验收、选路对照和故障保护。
+- 磁盘中断与清理：`42b2020` 的 `run-20260926T101027Z-1006013` 已经完整退出且 runner 的 launch/capture owned process group 均清空；因无界逐卫星记录耗尽文件系统，显式标记为 `DISK_SPACE_ABORTED`、`acceptance_eligible=false`，不计入健康或失败验收。7 个已结束失败开发 run 均已生成 clean commit、GPU/命令/process、首因、候选、控制/odom/轨迹和有界日志的 `compact_evidence/`；只按验证后的精确路径删除逐卫星、GNSS detail 和完整大 lineage，共释放 `44,138,055,001` bytes。清单：`/home/dev/ws_iap/live_worktrees/mission-step3/results/icra27/dev_runs/interface_integration/evidence_cleanup_manifest.json`；清理后 `df` 可用 `43,773,550,592` bytes。完整 capture/stdout 保留供步骤 4 时序复查，仓库其他位置未清理。
+- 防复发修改：默认 production writer 不再生成 raw point/window/satellite 文件；compact channel、candidate、execution event 和 runtime batch 保留。显式 raw 只允许一次有明确首因的诊断，默认 satellite 上限 `5000` 行，达到上限只写一次 `TRUNCATED`，并强制排除在标准/连续飞行/最终验收之外；runner 在 GPU/ROS 前执行 20 GiB 加 raw 估算的磁盘门禁。runner 98/98、launch contract 32/32 与 17/17、`test_planning_risk_context` 167/167、`test_p4_risk_astar` 19/19、`test_p4_forward_route` 125/125 通过，两个 hermetic launch 套件均确认外部 ROS 日志无变化。该清理与证据策略修改不是 Goal 完成，也不改变任何规划、安全或 live 验收门限。
+- 下一步：提交并在独立干净 worktree 重建上述 compact-evidence 版本；先报告最终 df、保留项和 runner 改动，再从步骤 4 原进度继续短 continuous-flight live。必须先证明后继在父轨迹仍运动时准备并至少两次按父子身份接管，再进入步骤 5 的完整森林、三次同版本健康验收、选路对照和故障保护；不重新实现步骤 1--3。

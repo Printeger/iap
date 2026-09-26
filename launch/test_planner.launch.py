@@ -2240,6 +2240,8 @@ ARG_DEFAULTS = [
     ("p4.debug_csv_enable", "false"),
     ("p4.require_risk_grid_ready_before_planning", "false"),
     ("p4.debug_csv_path", ""),
+    ("p4.raw_detail_enable", "false"),
+    ("p4.runtime_window_satellite_detail_max_rows", "5000"),
     ("p4.debug_generation_probe_enable", "false"),
     ("p4.profile_trace_enable", "false"),
     ("p4.profile_trace_path", ""),
@@ -3443,6 +3445,10 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_to
             {"p4.fallback_to_original_when_risk_not_ready": _param_bool(context, "p4.fallback_to_original_when_risk_not_ready")},
             {"p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable")},
             {"p4.debug_csv_path": p4_debug_path},
+            {"p4.raw_detail_enable": _param_bool(
+                context, "p4.raw_detail_enable")},
+            {"p4.runtime_window_satellite_detail_max_rows": _param_int(
+                context, "p4.runtime_window_satellite_detail_max_rows")},
             {"p4.debug_generation_probe_enable": _param_bool(
                 context, "p4.debug_generation_probe_enable")},
             {"p4.profile_trace_enable": p4_profile_trace_enable},

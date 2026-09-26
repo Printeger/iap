@@ -42,6 +42,11 @@ struct P4RiskAStarConfig
 	bool fallback_to_original_when_risk_not_ready = true;
 	bool debug_csv_enable = false;
 	std::string debug_csv_path;
+	// High-volume per-point/per-satellite diagnostics are opt-in. Compact
+	// candidate, channel, execution-event and runtime-batch evidence remains
+	// controlled by debug_csv_enable.
+	bool raw_detail_enable = false;
+	std::int64_t runtime_window_satellite_detail_max_rows = 5000;
 	bool profile_trace_enable = false;
 	std::string profile_trace_path;
 	double query_speed_mps = 1.0;

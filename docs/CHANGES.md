@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(bounded-live-evidence): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 —
+  make compact evidence the production default for interface-integration
+  development and acceptance runs. Candidate/channel comparisons, execution
+  events and runtime-window batch aggregates remain enabled; per-point GNSS,
+  risk and runtime-window decomposition is explicit diagnostic opt-in.
+  Per-satellite runtime detail has a 5,000-row default hard budget and emits
+  one `TRUNCATED` record at exhaustion. Any raw run is limited to one explicit
+  first-cause diagnostic and is marked ineligible for standard, continuous-
+  flight or final acceptance. The runner rejects a live before GPU
+  preflight or ROS startup when less than 20 GiB plus the bounded raw-detail
+  allowance is available, while interruption still cleans only its owned
+  process groups. Planning, authorization and safety thresholds are unchanged.
 - fix(p4-normal-channel-event-isolation): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — scope prepared normal-channel curves and typed failures to one
   immutable route `decision_event_id`. A later event may reuse stable topology

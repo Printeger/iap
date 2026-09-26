@@ -6226,6 +6226,11 @@ namespace ego_planner
     if (!candidates_csv.good())
       return false;
 
+    // Compact production evidence ends here. The remaining files contain
+    // high-rate point and satellite decomposition and are diagnostic opt-in.
+    if (!config.raw_detail_enable)
+      return true;
+
     const std::string samples_path =
         config.debug_csv_path + ".forward_risk_samples.csv";
     std::ifstream samples_existing(samples_path);
@@ -14346,6 +14351,12 @@ namespace ego_planner
           << evidence.timing.transition_advisory_ms << ','
           << evidence.timing.total_ms << '\n';
 
+    // Runtime batch aggregation is always retained. Per-window and
+    // per-satellite decomposition is explicitly enabled only for a bounded
+    // diagnostic run.
+    if (!config.raw_detail_enable)
+      return batch.good();
+
     const std::string window_path =
         config.debug_csv_path + ".runtime_window.csv";
     auto windows = write_header_if_needed(
@@ -14408,6 +14419,10 @@ namespace ego_planner
         "epoch_excluded,los_x,los_y,los_z,kappa,epoch_sigma_m,canopy_sigma_m,"
         "effective_sigma_m,sigma_source,exclusion_reason");
     if (!satellites) return false;
+    if (!p4_runtime_window_satellite_detail_budget_)
+      p4_runtime_window_satellite_detail_budget_.emplace(
+          static_cast<std::uint64_t>(
+              config.runtime_window_satellite_detail_max_rows));
     std::set<std::size_t> detailed_rows;
     if (point_valid(evidence.global_worst_nominal_index))
       detailed_rows.insert(evidence.global_worst_nominal_index);
@@ -14424,6 +14439,22 @@ namespace ego_planner
       const char *role = row.transition_overlap ? "transition" :
           row.nominal ? "nominal_worst" : "braking_failure";
       for (const auto &satellite : point.gnss_satellites)
+      {
+        const auto detail_write =
+            p4_runtime_window_satellite_detail_budget_->consume();
+        if (detail_write == P4RawDetailWriteDecision::STOP)
+          continue;
+        if (detail_write ==
+            P4RawDetailWriteDecision::WRITE_TRUNCATED_MARKER)
+        {
+          satellites
+              << "TRUNCATED," << evidence.sequence_id << ','
+              << p4_runtime_window_satellite_detail_budget_->writtenRows()
+              << ",0,0,nan,detail_limit,0,0,0,0,0,0,0,nan,nan,TRUNCATED,"
+                 "0,nan,nan,nan,nan,nan,nan,nan,none,"
+                 "runtime_window_satellite_detail_max_rows\n";
+          continue;
+        }
         satellites << std::setprecision(17)
                    << "p4_runtime_window_satellite_v2,"
                    << evidence.sequence_id << ',' << row_index << ','
@@ -14446,6 +14477,7 @@ namespace ego_planner
                    << satellite.canopy_sigma_m << ',' << satellite.sigma_eff_m
                    << ',' << satellite.sigma_source << ','
                    << satellite.exclusion_reason << '\n';
+      }
     }
     return batch.good() && windows.good() && satellites.good();
   }

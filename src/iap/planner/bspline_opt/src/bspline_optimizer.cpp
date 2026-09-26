@@ -370,6 +370,9 @@ namespace ego_planner
     node->declare_parameter("p4.fallback_to_original_when_risk_not_ready", true);
     node->declare_parameter("p4.debug_csv_enable", false);
     node->declare_parameter("p4.debug_csv_path", std::string(""));
+    node->declare_parameter("p4.raw_detail_enable", false);
+    node->declare_parameter(
+      "p4.runtime_window_satellite_detail_max_rows", 5000);
     node->declare_parameter("p4.profile_trace_enable", false);
     node->declare_parameter("p4.profile_trace_path", std::string(""));
     node->declare_parameter(
@@ -475,6 +478,20 @@ namespace ego_planner
     node->get_parameter("p4.fallback_to_original_when_risk_not_ready", p4_config_.fallback_to_original_when_risk_not_ready);
     node->get_parameter("p4.debug_csv_enable", p4_config_.debug_csv_enable);
     node->get_parameter("p4.debug_csv_path", p4_config_.debug_csv_path);
+    node->get_parameter(
+      "p4.raw_detail_enable", p4_config_.raw_detail_enable);
+    node->get_parameter(
+      "p4.runtime_window_satellite_detail_max_rows",
+      p4_config_.runtime_window_satellite_detail_max_rows);
+    if (p4_config_.runtime_window_satellite_detail_max_rows < 1)
+    {
+      RCLCPP_WARN(
+        rclcpp::get_logger("BsplineOptimizer"),
+        "invalid p4.runtime_window_satellite_detail_max_rows %ld; using 1",
+        static_cast<long>(
+          p4_config_.runtime_window_satellite_detail_max_rows));
+      p4_config_.runtime_window_satellite_detail_max_rows = 1;
+    }
     node->get_parameter("p4.profile_trace_enable", p4_config_.profile_trace_enable);
     node->get_parameter("p4.profile_trace_path", p4_config_.profile_trace_path);
     std::string p4_cost_query_policy;

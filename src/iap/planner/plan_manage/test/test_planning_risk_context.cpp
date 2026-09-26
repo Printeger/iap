@@ -72,6 +72,20 @@ iap::RiskGridMapParams params() {
   return out;
 }
 
+TEST(P4RawDetailRowBudget, EmitsOneTruncatedMarkerAtTheConfiguredLimit)
+{
+  ego_planner::P4RawDetailRowBudget budget(2);
+
+  EXPECT_EQ(budget.consume(),
+            ego_planner::P4RawDetailWriteDecision::WRITE_ROW);
+  EXPECT_EQ(budget.consume(),
+            ego_planner::P4RawDetailWriteDecision::WRITE_ROW);
+  EXPECT_EQ(budget.consume(),
+            ego_planner::P4RawDetailWriteDecision::WRITE_TRUNCATED_MARKER);
+  EXPECT_EQ(budget.consume(), ego_planner::P4RawDetailWriteDecision::STOP);
+  EXPECT_EQ(budget.writtenRows(), 2u);
+}
+
 std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(double value,
                                                           double stamp_s) {
   iap::RiskGridMap grid(params());
@@ -1876,7 +1890,8 @@ ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
     const GridMap::Ptr& map,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     const std::string& debug_path,
-    const uint64_t planning_attempt_id = 73) {
+    const uint64_t planning_attempt_id = 73,
+    const bool raw_detail_enable = false) {
   ensureRclcpp();
   rclcpp::NodeOptions options;
   options.parameter_overrides({
@@ -1908,6 +1923,7 @@ ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
   config.query_speed_mps = 10.0;
   config.debug_csv_enable = true;
   config.debug_csv_path = debug_path;
+  config.raw_detail_enable = raw_detail_enable;
   optimizer->setP4RiskAStarConfigForTest(config);
   optimizer->setP4RiskSnapshot(
       snapshot, 10.0, planning_attempt_id);
@@ -3167,7 +3183,8 @@ TEST(P4ForwardTerminalLineageTest,
       debug_path.string() + ".forward_candidates.csv"));
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".execution_events.csv"));
-  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, debug_path.string(), 1, true);
 
   ego_planner::EGOPlannerManager manager;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
@@ -3309,7 +3326,10 @@ TEST(P4ForwardTerminalLineageTest,
   const auto debug_path = p4LineageTestPath("forward_direct_reject.csv");
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
-  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  // This test explicitly validates diagnostic raw-lineage output;
+  // production and acceptance runs leave this opt-in disabled.
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, debug_path.string(), 1, true);
 
   std::vector<iap::ForwardRiskBatchRequest> requests;
   const auto unsafe_direct = [&requests](
@@ -4641,7 +4661,10 @@ TEST(P4ForwardTerminalLineageTest,
       debug_path.string() + ".gnss_risk_detail.csv"));
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".execution_events.csv"));
-  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  // This test explicitly validates the diagnostic satellite-detail schema;
+  // production and acceptance runs leave this opt-in disabled.
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, debug_path.string(), 1, true);
 
   ego_planner::EGOPlannerManager manager;
   manager.pp_.max_vel_ = 20.0;

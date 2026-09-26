@@ -737,6 +737,44 @@ namespace ego_planner
     double last_submission_s_ = -std::numeric_limits<double>::infinity();
   };
 
+  enum class P4RawDetailWriteDecision
+  {
+    WRITE_ROW = 0,
+    WRITE_TRUNCATED_MARKER,
+    STOP,
+  };
+
+  // A monotonic output budget for optional raw diagnostic rows.  This is
+  // deliberately independent of planning and authorization state.
+  class P4RawDetailRowBudget
+  {
+  public:
+    explicit P4RawDetailRowBudget(const std::uint64_t maximum_rows = 0)
+      : maximum_rows_(maximum_rows) {}
+
+    P4RawDetailWriteDecision consume()
+    {
+      if (written_rows_ < maximum_rows_)
+      {
+        ++written_rows_;
+        return P4RawDetailWriteDecision::WRITE_ROW;
+      }
+      if (!truncated_marker_written_)
+      {
+        truncated_marker_written_ = true;
+        return P4RawDetailWriteDecision::WRITE_TRUNCATED_MARKER;
+      }
+      return P4RawDetailWriteDecision::STOP;
+    }
+
+    std::uint64_t writtenRows() const { return written_rows_; }
+
+  private:
+    std::uint64_t maximum_rows_ = 0;
+    std::uint64_t written_rows_ = 0;
+    bool truncated_marker_written_ = false;
+  };
+
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called
 
@@ -1548,6 +1586,8 @@ namespace ego_planner
         p4_committed_risk_window_plan_;
     P4RuntimeWindowEvidence p4_last_runtime_window_evidence_;
     std::atomic<std::uint64_t> next_p4_runtime_window_evidence_sequence_{1};
+    std::optional<P4RawDetailRowBudget>
+        p4_runtime_window_satellite_detail_budget_;
     std::optional<P4PreparedSuccessor> p4_prepared_successor_;
     std::optional<P4PreparedSuccessorBundle>
         p4_cached_successor_bundle_;

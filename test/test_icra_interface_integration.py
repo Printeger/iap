@@ -879,6 +879,43 @@ class TestStageContracts(unittest.TestCase):
 
 
 class TestRunnerLifecycle(unittest.TestCase):
+    def test_compact_mode_disables_raw_production_writers(self):
+        self.assertEqual(
+            MODULE.raw_evidence_launch_args(False, 100_000),
+            {
+                "p4.raw_detail_enable": "false",
+                "p4.runtime_window_satellite_detail_max_rows": "0",
+            },
+        )
+
+    def test_raw_mode_forwards_a_bounded_satellite_row_budget(self):
+        self.assertEqual(
+            MODULE.raw_evidence_launch_args(True, 37),
+            {
+                "p4.raw_detail_enable": "true",
+                "p4.runtime_window_satellite_detail_max_rows": "37",
+            },
+        )
+
+    def test_raw_mode_requires_one_explicit_diagnostic_reason(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root)
+            args.retain_raw_risk_detail = True
+            with mock.patch.object(MODULE, "_gpu_preflight") as preflight:
+                with self.assertRaisesRegex(
+                        SystemExit, "requires --raw-detail-reason"):
+                    MODULE._run_main(args)
+            preflight.assert_not_called()
+
+            args.raw_detail_reason = "confirmed runtime-window cause"
+            args.repetitions = 2
+            with mock.patch.object(MODULE, "_gpu_preflight") as preflight:
+                with self.assertRaisesRegex(
+                        SystemExit, "one diagnostic repetition"):
+                    MODULE._run_main(args)
+            preflight.assert_not_called()
+
     def test_raw_evidence_retention_is_summary_first_and_run_scoped(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -914,15 +951,42 @@ class TestRunnerLifecycle(unittest.TestCase):
             self.assertEqual(len(retention["removed"]), len(raw_suffixes))
             self.assertTrue(all(path.is_file() for path in compact_paths))
             self.assertTrue(outside.is_file())
+            self.assertTrue((run_root / "summary.json").is_file())
+            compact_cause = run_root / "compact_failure_evidence.json"
+            compact_cause.write_text("compact cause\n")
 
             for suffix in raw_suffixes:
                 Path(f"{prefix}{suffix}").write_text("raw\n")
+            Path(f"{prefix}.runtime_window_satellite.csv").write_text(
+                "schema_version,value\n"
+                "p4_runtime_window_satellite_v2,one\n"
+                "TRUNCATED,runtime_window_satellite_detail_max_rows\n")
             retained = MODULE.apply_raw_evidence_retention(
                 run_root, retain_raw=True)
-            self.assertEqual(retained["policy"], "retain_full_detail")
+            self.assertEqual(retained["policy"], "retain_bounded_detail")
             self.assertEqual(retained["removed"], [])
             for suffix in raw_suffixes:
                 self.assertTrue(Path(f"{prefix}{suffix}").is_file())
+            self.assertTrue(compact_cause.is_file())
+            self.assertEqual(
+                retained["runtime_window_satellite"],
+                {"data_rows": 1, "truncated": True},
+            )
+
+    def test_low_disk_fails_before_gpu_or_ros_start(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root)
+            args._minimum_live_free_bytes = 20
+            with mock.patch.object(
+                    MODULE, "available_disk_bytes", return_value=19), \
+                    mock.patch.object(MODULE, "_gpu_preflight") as preflight, \
+                    mock.patch.object(MODULE, "_run_one") as run_one:
+                with self.assertRaisesRegex(SystemExit, "DISK_SPACE_LOW"):
+                    MODULE._run_main(args)
+
+            preflight.assert_not_called()
+            run_one.assert_not_called()
 
     def test_first_hit_runtime_logs_are_summarized(self):
         stdout = "\n".join((
@@ -964,6 +1028,7 @@ class TestRunnerLifecycle(unittest.TestCase):
             through=through,
             repetitions=1,
             rviz=rviz,
+            _minimum_live_free_bytes=1,
         )
 
     def test_cli_reports_session_stage_and_log_before_running(self):
@@ -1019,6 +1084,7 @@ class TestRunnerLifecycle(unittest.TestCase):
             root = Path(temporary_directory)
             args = self.runner_args(root)
             args.retain_raw_risk_detail = True
+            args.raw_detail_reason = "confirmed runtime-window cause"
             with mock.patch.object(
                     MODULE, "_gpu_preflight",
                     return_value={"gpu_ready": True}), mock.patch.object(
@@ -1032,6 +1098,9 @@ class TestRunnerLifecycle(unittest.TestCase):
                 "run-*/session_summary.json"))
             session = json.loads(session_path.read_text())
             self.assertTrue(session["retain_raw_risk_detail"])
+            self.assertTrue(session["diagnostic_only"])
+            self.assertFalse(session["acceptance_eligible"])
+            self.assertEqual(session["result"], "DIAGNOSTIC_PASS")
 
     def test_process_wait_reports_progress_periodically(self):
         now = [0.0]

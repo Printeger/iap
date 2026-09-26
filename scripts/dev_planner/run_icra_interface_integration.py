@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import signal
+import shutil
 import statistics
 import subprocess
 import sys
@@ -31,6 +32,9 @@ DEFAULT_RESULTS_ROOT = (
     REPOSITORY / "results/icra27/dev_runs/interface_integration"
 ).resolve()
 DEFAULT_INSTALL_ROOT = (REPOSITORY.parents[1] / "install").resolve()
+MINIMUM_LIVE_FREE_BYTES = 20 * 1024 ** 3
+DEFAULT_RAW_SATELLITE_DETAIL_MAX_ROWS = 5_000
+ESTIMATED_RAW_DETAIL_BYTES_PER_ROW = 1024
 STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
 STAGE_CHOICES = (*STAGE_ORDER, "limited-prefix", "continuous-flight")
 DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
@@ -94,6 +98,37 @@ RAW_RISK_EVIDENCE_SUFFIXES = (
     ".runtime_window.csv",
     ".runtime_window_satellite.csv",
 )
+
+
+def raw_evidence_launch_args(
+        retain_raw: bool, satellite_detail_max_rows: int) -> dict[str, str]:
+    """Return the production-side raw detail controls for one live run."""
+    if satellite_detail_max_rows < 1:
+        if retain_raw:
+            raise ValueError("raw satellite detail row limit must be positive")
+        satellite_detail_max_rows = 0
+    return {
+        "p4.raw_detail_enable": "true" if retain_raw else "false",
+        "p4.runtime_window_satellite_detail_max_rows": str(
+            satellite_detail_max_rows if retain_raw else 0),
+    }
+
+
+def available_disk_bytes(path: Path) -> int:
+    """Return free bytes on the filesystem containing path, without writing."""
+    probe = path.resolve()
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    return shutil.disk_usage(probe).free
+
+
+def required_live_free_bytes(
+        retain_raw: bool, satellite_detail_max_rows: int,
+        minimum_live_free_bytes: int = MINIMUM_LIVE_FREE_BYTES) -> int:
+    raw_allowance = (
+        satellite_detail_max_rows * ESTIMATED_RAW_DETAIL_BYTES_PER_ROW
+        if retain_raw else 0)
+    return minimum_live_free_bytes + raw_allowance
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
     "ego_final_bspline", "p5_final_pass_before_publish",
@@ -144,10 +179,29 @@ def apply_raw_evidence_retention(
             removed.append(str(path.relative_to(run_root)))
     retained = [str(path.relative_to(run_root)) for path in existing
                 if path.is_file()]
+    satellite_detail = None
+    satellite_path = Path(
+        f"{prefix}.runtime_window_satellite.csv")
+    if retain_raw and satellite_path.is_file():
+        data_rows = 0
+        truncated = False
+        with satellite_path.open(newline="", errors="replace") as stream:
+            for index, row in enumerate(csv.reader(stream)):
+                if index == 0:
+                    continue
+                if row and row[0] == "TRUNCATED":
+                    truncated = True
+                elif row:
+                    data_rows += 1
+        satellite_detail = {
+            "data_rows": data_rows,
+            "truncated": truncated,
+        }
     return {
-        "policy": "retain_full_detail" if retain_raw else "compact_default",
+        "policy": "retain_bounded_detail" if retain_raw else "compact_default",
         "removed": removed,
         "retained": retained,
+        "runtime_window_satellite": satellite_detail,
     }
 
 
@@ -4568,7 +4622,9 @@ def _run_one_impl(
         gnss_arm: str = "bds",
         gnss_core_policy: str = "braking_window_pointwise",
         task_mode: str = "mission_best_effort",
-        retain_raw_risk_detail: bool = False) -> dict:
+        retain_raw_risk_detail: bool = False,
+        raw_satellite_detail_max_rows: int =
+        DEFAULT_RAW_SATELLITE_DETAIL_MAX_ROWS) -> dict:
     spec = STAGES[stage]
     duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
@@ -4604,6 +4660,8 @@ def _run_one_impl(
     launch_args = stage_launch_args(
         stage, scenario, forest_variant, gnss_arm, gnss_core_policy,
         task_mode)
+    launch_args.update(raw_evidence_launch_args(
+        retain_raw_risk_detail, raw_satellite_detail_max_rows))
     if shutdown_variant == "baseline":
         launch_args.update({
             "experiment": "baseline_fused_nominal_off",
@@ -4844,7 +4902,9 @@ def _run_one(
         gnss_arm: str = "bds",
         gnss_core_policy: str = "braking_window_pointwise",
         task_mode: str = "mission_best_effort",
-        retain_raw_risk_detail: bool = False) -> dict:
+        retain_raw_risk_detail: bool = False,
+        raw_satellite_detail_max_rows: int =
+        DEFAULT_RAW_SATELLITE_DETAIL_MAX_ROWS) -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
@@ -4852,7 +4912,8 @@ def _run_one(
         return _run_one_impl(
             stage, run_root, install_root, start_rviz, shutdown_variant,
             owned_processes, owned_streams, scenario, forest_variant, gnss_arm,
-            gnss_core_policy, task_mode, retain_raw_risk_detail)
+            gnss_core_policy, task_mode, retain_raw_risk_detail,
+            raw_satellite_detail_max_rows)
     except KeyboardInterrupt:
         _emit(f"INTERRUPT stage={stage} cleanup=starting")
         process_status = {
@@ -4922,7 +4983,9 @@ def _session_root(results_root: Path) -> Path:
     return candidate
 
 
-def _successful_session_result(stages) -> str:
+def _successful_session_result(stages, diagnostic_only: bool = False) -> str:
+    if diagnostic_only:
+        return "DIAGNOSTIC_PASS"
     requested = set(stages)
     return "PASS" if {"full", "shutdown"}.issubset(requested) else "STAGE_PASS"
 
@@ -4992,7 +5055,30 @@ def _run_main(args: argparse.Namespace) -> int:
     task_mode = getattr(args, "task_mode", "mission_best_effort")
     retain_raw_risk_detail = bool(getattr(
         args, "retain_raw_risk_detail", False))
+    raw_detail_reason = str(getattr(args, "raw_detail_reason", "")).strip()
+    raw_satellite_detail_max_rows = int(getattr(
+        args, "raw_satellite_detail_max_rows",
+        DEFAULT_RAW_SATELLITE_DETAIL_MAX_ROWS))
+    if retain_raw_risk_detail and raw_satellite_detail_max_rows < 1:
+        raise SystemExit(
+            "raw satellite detail row limit must be positive")
+    if retain_raw_risk_detail and args.repetitions != 1:
+        raise SystemExit(
+            "raw risk detail is limited to one diagnostic repetition")
+    if retain_raw_risk_detail and not raw_detail_reason:
+        raise SystemExit(
+            "raw risk detail requires --raw-detail-reason")
     results_root = args.results_root.resolve()
+    minimum_live_free_bytes = int(getattr(
+        args, "_minimum_live_free_bytes", MINIMUM_LIVE_FREE_BYTES))
+    required_free = required_live_free_bytes(
+        retain_raw_risk_detail, raw_satellite_detail_max_rows,
+        minimum_live_free_bytes)
+    free_bytes = available_disk_bytes(results_root)
+    if free_bytes < required_free:
+        raise SystemExit(
+            f"DISK_SPACE_LOW available_bytes={free_bytes} "
+            f"required_bytes={required_free}")
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
     _emit(f"SESSION {session}")
@@ -5001,6 +5087,8 @@ def _run_main(args: argparse.Namespace) -> int:
         "development_only": True,
         "qualification_claim": False,
         "scientific_effect_claim": False,
+        "diagnostic_only": retain_raw_risk_detail,
+        "acceptance_eligible": not retain_raw_risk_detail,
         "stage_order": list(stages),
         "scenario": scenario,
         "forest_ab": forest_ab,
@@ -5008,6 +5096,15 @@ def _run_main(args: argparse.Namespace) -> int:
         "gnss_core_policy": gnss_core_policy,
         "task_mode": task_mode,
         "retain_raw_risk_detail": retain_raw_risk_detail,
+        "raw_detail_reason": raw_detail_reason if retain_raw_risk_detail else "",
+        "raw_satellite_detail_max_rows": (
+            raw_satellite_detail_max_rows
+            if retain_raw_risk_detail else 0),
+        "disk_preflight": {
+            "available_bytes": free_bytes,
+            "required_bytes": required_free,
+            "minimum_live_free_bytes": minimum_live_free_bytes,
+        },
         "forest_scene": (
             forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
@@ -5072,7 +5169,9 @@ def _run_main(args: argparse.Namespace) -> int:
                         gnss_arm=gnss_arm,
                         gnss_core_policy=gnss_core_policy,
                         task_mode=task_mode,
-                        retain_raw_risk_detail=retain_raw_risk_detail)
+                        retain_raw_risk_detail=retain_raw_risk_detail,
+                        raw_satellite_detail_max_rows=(
+                            raw_satellite_detail_max_rows))
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
@@ -5125,7 +5224,8 @@ def _run_main(args: argparse.Namespace) -> int:
         session_summary["shutdown_gate_complete"] = "shutdown" in stages
         session_summary["acceptance_complete"] = {
             "full", "shutdown"}.issubset(stages)
-        session_summary["result"] = _successful_session_result(stages)
+        session_summary["result"] = _successful_session_result(
+            stages, diagnostic_only=retain_raw_risk_detail)
         _json_write(session / "session_summary.json", session_summary)
         _emit(f"{session_summary['result']} {session}")
         return 0
@@ -5150,8 +5250,17 @@ def main() -> int:
         help="global-navigation task contract; best-effort is the default")
     parser.add_argument(
         "--retain-raw-risk-detail", action="store_true",
-        help=("retain per-sample risk and runtime-window CSVs; the default "
-              "keeps compact channel evidence only"))
+        help=("enable bounded per-sample risk and runtime-window detail; "
+              "the default never starts raw production writers"))
+    parser.add_argument(
+        "--raw-satellite-detail-max-rows", type=int,
+        default=DEFAULT_RAW_SATELLITE_DETAIL_MAX_ROWS,
+        help=("hard row limit for explicitly enabled runtime-window "
+              "satellite detail"))
+    parser.add_argument(
+        "--raw-detail-reason", default="",
+        help=("required explicit first-cause reason for the one diagnostic "
+              "run that enables raw detail"))
     parser.add_argument("--results-root", type=Path,
                         default=DEFAULT_RESULTS_ROOT)
     parser.add_argument("--install-root", type=Path,
