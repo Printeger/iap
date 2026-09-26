@@ -241,3 +241,6 @@ python3 scripts/dev_planner/run_icra_interface_integration.py \
 - CPU 证据：`test/test_icra_interface_integration.py` 94/94 通过；`test_planning_risk_context` 168/169 通过。唯一失败 `P4PreparedChannelPreparation.GuideSweptCollisionStillReachesActualCurvePreparation` 已定位为候选 A 失败后候选 B 继承 `HOLD_REQUIRED`，在 B 的 actual curve 生成前返回；这是步骤 4 范围内的真实恢复阻塞，不是本次诊断记录造成的授权变化。
 - 工作区：仅用户历史文件 `docs/whatsnext.md` 保持未跟踪、未修改；尚未进行本轮 live，不能计入最终验收。
 - 下一步：按步骤 2 核对局部安全依据与实际参数，再以一个贯通提交执行步骤 3 的 MISSION exposure 去授权化；随后在步骤 4 用上述生产红测修复候选 B 接棒，进入短 live。
+- 步骤 2 核对（`a751d5f` 后）：生产路径的 refinement、final certification、latest-snapshot reauthorization 和 runtime 均复用 `LocalMotionAssurance`/`LocalClearanceEvaluator`；registered current/active-window 障碍携带精确 source identity 与冻结 ICP 健康，support、注册、provenance、tracking、nominal 或 braking curve 缺失均 fail closed。`test_trajectory_assurance` 41/41 通过。
+- 步骤 2 参数与限制：当前森林 launch 沿用 `local_tracking_error_bound_m=0.15`、`local_safety_margin_m=0.20`、`local_surface_error_bound_m=0.02`、`local_surface_error_calibration_id=uncalibrated_default_v1`。仓库虽有仿真 truth/estimate 和 ICP 记录，但没有校准规约要求的 repeated-surface offset，不能产出三次 calibration + 一次 held-out 的部署标定；未改名、未缩小包络。后续 live 证据仅能声明当前仿真/开发配置适用性，不能冒充真实部署标定。
+- 更新后的下一步：执行步骤 3 的单一贯通逻辑改动并同步两份 spec；先用测试复现 prior `0.399975655 + 0.003279691 > 0.4` 在 MISSION 下不再拥有拒绝/制动权，同时保持 STRICT、局部净空、制动和 freshness 的硬失败。
