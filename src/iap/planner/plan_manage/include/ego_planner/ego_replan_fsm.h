@@ -87,13 +87,20 @@ namespace ego_planner
     return !planning_succeeded && prepared_successor_due;
   }
 
+  inline bool p4PlannerStateOwnsActiveCommand(
+      const bool executing, const bool replanning)
+  {
+    return executing || replanning;
+  }
+
   inline bool p4SafetyObserverShouldDriveSuccessorPlanning(
-      const bool executing, const bool execution_check_applicable,
+      const bool active_command_owned, const bool execution_check_applicable,
       const bool execution_allowed, const bool rolling_successor,
       const bool successor_due,
       const bool trajectory_command_awaiting_activation)
   {
-    return executing && execution_check_applicable && execution_allowed &&
+    return active_command_owned && execution_check_applicable &&
+        execution_allowed &&
         rolling_successor && successor_due &&
         !trajectory_command_awaiting_activation;
   }

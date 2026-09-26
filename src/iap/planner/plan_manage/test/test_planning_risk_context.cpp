@@ -7933,10 +7933,18 @@ TEST(P4PlanningCyclePolicy,
 }
 
 TEST(P4PlanningCyclePolicy,
-     AuthorizedSafetyObserverDrivesDueSuccessorWhenFsmTimerIsStarved)
+     AuthorizedActiveCommandDrivesDueSuccessorWhenFsmTimerIsStarved)
 {
+  EXPECT_TRUE(ego_planner::p4PlannerStateOwnsActiveCommand(true, false));
+  // A P5 request may have changed the planner state while traj_server keeps
+  // executing the acknowledged parent. That REPLAN state still owns the
+  // active command and must not suppress the due successor lane.
+  EXPECT_TRUE(ego_planner::p4PlannerStateOwnsActiveCommand(false, true));
+  EXPECT_FALSE(ego_planner::p4PlannerStateOwnsActiveCommand(false, false));
+
   EXPECT_TRUE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
-      true, true, true, true, true, false));
+      ego_planner::p4PlannerStateOwnsActiveCommand(false, true),
+      true, true, true, true, false));
   EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
       false, true, true, true, true, false));
   EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(

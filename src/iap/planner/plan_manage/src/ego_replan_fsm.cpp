@@ -1584,7 +1584,10 @@ namespace ego_planner
             planner_manager_->p4SuccessorPreparationDue(now_s);
         const bool p5_successor_handoff_ready =
             p4SafetyObserverShouldDriveSuccessorPlanning(
-                exec_state_ == EXEC_TRAJ, p4_execution_check.applicable,
+                p4PlannerStateOwnsActiveCommand(
+                    exec_state_ == EXEC_TRAJ,
+                    exec_state_ == REPLAN_TRAJ),
+                p4_execution_check.applicable,
                 p4_execution_check.allowed, p5_rolling_successor,
                 p5_successor_due,
                 planner_manager_->trajectoryCommandAwaitingActivation());
@@ -1616,7 +1619,17 @@ namespace ego_planner
     const bool successor_due = rolling_successor &&
         planner_manager_->p4SuccessorPreparationDue(now_s);
     if (p4SafetyObserverShouldDriveSuccessorPlanning(
-            exec_state_ == EXEC_TRAJ, p4_execution_check.applicable,
+            // REPLAN_TRAJ does not stop the acknowledged command. In
+            // particular, a P5 request can enter REPLAN just before the
+            // child's ACTIVATED ACK is observed, then temporarily defer for
+            // a fresh planning snapshot. The authorized parent is still
+            // physically executing, so the safety observer must keep the
+            // existing successor lane schedulable instead of waiting for a
+            // starved FSM timer to restore EXEC_TRAJ.
+            p4PlannerStateOwnsActiveCommand(
+                exec_state_ == EXEC_TRAJ,
+                exec_state_ == REPLAN_TRAJ),
+            p4_execution_check.applicable,
             p4_execution_check.allowed, rolling_successor, successor_due,
             planner_manager_->trajectoryCommandAwaitingActivation()))
     {
