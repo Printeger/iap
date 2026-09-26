@@ -3000,6 +3000,19 @@ namespace ego_planner
         !feedback_position.allFinite() || !feedback_velocity.allFinite() ||
         !feedback_acceleration.allFinite())
       return false;
+    const bool buffered_trace_is_pending_child =
+        trajectory_controller_trace_sample_.valid &&
+        trajectory_controller_trace_sample_.execution_instance_id ==
+            pending_activation_trace_execution_instance_id_ &&
+        trajectory_controller_trace_sample_.trajectory_id ==
+            pending_activation_trace_trajectory_id_ &&
+        trajectory_controller_trace_sample_.start_time_ns ==
+            pending_activation_trace_start_time_ns_ &&
+        trajectory_controller_trace_sample_.curve_hash ==
+            pending_activation_trace_curve_hash_;
+    if (buffered_trace_is_pending_child && identity_matches &&
+        !pending_activation_identity_matches)
+      return false;
     if (trajectory_controller_trace_sample_.valid &&
         trajectory_controller_trace_sample_.execution_instance_id ==
             execution_instance_id &&
@@ -10494,6 +10507,98 @@ namespace ego_planner
         });
     if (next_unprepared != bundle.decision.candidates.end())
     {
+      // A callback can spend hundreds of milliseconds preparing one actual
+      // curve while its ROS-time view stays frozen.  Do not start another
+      // immutable channel merely because that stale callback stamp still
+      // precedes the candidate deadline.  The identity-bound controller
+      // progress stamp is the physical execution clock already used by the
+      // rolling handoff bridge.  If a full WCET opportunity no longer fits,
+      // retain the complete certified winner and report a partial comparison
+      // instead of consuming the 200 ms traj_server queue margin.
+      double deadline_now_s = now_s;
+      if (p4_execution_commitment_backup_.active)
+      {
+        const auto &parent = p4_execution_commitment_backup_.local_data;
+        double progress_stamp_s =
+            std::numeric_limits<double>::quiet_NaN();
+        double progress_elapsed_s =
+            std::numeric_limits<double>::quiet_NaN();
+        if (trajectoryExecutionProgress(
+                parent.execution_instance_id_, bundle.boundary.parent_trajectory_id,
+                bundle.boundary.parent_start_time_ns, parent.curve_hash_, 0.2,
+                &progress_stamp_s, &progress_elapsed_s) &&
+            std::isfinite(progress_stamp_s))
+          deadline_now_s = std::max(deadline_now_s, progress_stamp_s);
+      }
+      const double candidate_deadline_s =
+          p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+      const bool next_channel_fits =
+          !std::isfinite(candidate_deadline_s) ||
+          deadline_now_s +
+                  p4_successor_deadline_policy_.successor_prepare_wcet_s <=
+              candidate_deadline_s + 1.0e-9;
+      if (!next_channel_fits)
+      {
+        std::vector<P4PreparedChannelRecord> deadline_records;
+        for (const auto &entry : p4_prepared_channel_bundles_)
+          if (entry.second.complete() &&
+              entry.second.channel_record.feasible() &&
+              entry.second.decision.decision_event_id ==
+                  bundle.decision.decision_event_id)
+            deadline_records.push_back(entry.second.channel_record);
+        const auto deadline_comparison = compareP4PreparedChannels(
+            deadline_records, bundle.decision.snapshot_identity,
+            deadline_records.size(),
+            p4_execution_certificate_.successor_channel_id);
+        const auto winner = p4_prepared_channel_bundles_.find(
+            deadline_comparison.winner_channel_id);
+        if (!deadline_records.empty() &&
+            deadline_comparison.winner_channel_id > 0u &&
+            winner != p4_prepared_channel_bundles_.end() &&
+            winner->second.complete())
+        {
+          P4PreparedSuccessorBundle selected_bundle = winner->second;
+          selected_bundle.decision.channel_comparison_state =
+              P4ChannelComparisonState::PARTIAL_COMPARISON;
+          selected_bundle.decision.selected_channel_id =
+              deadline_comparison.winner_channel_id;
+          selected_bundle.decision.runner_up_channel_id =
+              deadline_comparison.runner_up_channel_id;
+          selected_bundle.decision.selected_actual_endpoint =
+              selected_bundle.channel_record.actual_endpoint;
+          selected_bundle.decision.selected_unevaluated_suffix_m =
+              selected_bundle.channel_record.unevaluated_suffix_m;
+          selected_bundle.decision.reason =
+              "successor_deadline_complete_winner_cached";
+          p4_cached_successor_bundle_ = std::move(selected_bundle);
+          p4_cached_successor_activation_in_progress_ = false;
+          p4_successor_preparation_state_ =
+              P4SuccessorPreparationState::PREPARED_CERTIFIED;
+          p4_successor_schedule_.result_delivered = true;
+          last_p4_forward_decision_ =
+              p4_cached_successor_bundle_->decision;
+          p4_pending_channel_work_item_.reset();
+          p4_pending_channel_context_.reset();
+          appendP4ForwardDecision(
+              last_p4_forward_decision_,
+              "successor_deadline_complete_winner", deadline_now_s);
+          P4ExecutionCheckDiagnostics prepared;
+          prepared.applicable = true;
+          prepared.allowed = true;
+          prepared.identity_match = true;
+          prepared.execution_snapshot_id =
+              p4_cached_successor_bundle_->certificate.execution_snapshot_id;
+          prepared.direct_batch_duration_ms =
+              p4_cached_successor_bundle_->direct_risk_evidence.
+                  compute_duration_ms;
+          prepared.reason =
+              "successor_deadline_complete_winner_cached";
+          appendP4ExecutionEvent(
+              "SUCCESSOR_DEADLINE_WINNER_RETAINED", deadline_now_s,
+              prepared);
+          return finish(true, "successor_deadline_complete_winner_cached");
+        }
+      }
       last_p4_forward_decision_ = bundle.decision;
       last_p4_forward_decision_.selected_candidate_id =
           next_unprepared->candidate_id;

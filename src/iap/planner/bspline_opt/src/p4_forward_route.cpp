@@ -2666,7 +2666,8 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   result.candidate_ready_deadline_s = std::max(
     trajectory_start_s,
     result.planned_switch_time_s -
-      policy.latest_snapshot_reauthorization_budget_s);
+      std::max({policy.latest_snapshot_reauthorization_budget_s,
+        policy.scheduler_guard_s, 0.2}));
   result.valid = result.latest_prepare_start_s <=
     result.candidate_ready_deadline_s + kEpsilon;
   result.reason = result.valid ? "ok" : "insufficient_preparation_window";

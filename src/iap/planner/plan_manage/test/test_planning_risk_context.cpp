@@ -2965,6 +2965,10 @@ TEST(TrajectoryExecutionFeedbackTest,
       "runtime_pending_child_activation_ack", 942);
   auto &manager = *fixture.manager;
   const auto instance = manager.executionInstanceId();
+  const int parent_id = manager.local_data_.traj_id_;
+  const int64_t parent_start_ns =
+      manager.local_data_.start_time_.nanoseconds();
+  const std::string parent_hash = manager.local_data_.curve_hash_;
 
   ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
   const int child_id = 943;
@@ -3002,6 +3006,13 @@ TEST(TrajectoryExecutionFeedbackTest,
   ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
       instance, child_id, child_start_ns, child_hash,
       1'725'000'001.0, early_elapsed_s, early_position, early_velocity,
+      early_acceleration, early_position, early_velocity,
+      early_acceleration, false));
+  // A late parent packet must not replace the newer exact child evidence
+  // while its activation ACK is queued behind the safety callback.
+  EXPECT_FALSE(manager.recordTrajectoryControllerTrace(
+      instance, parent_id, parent_start_ns, parent_hash,
+      1'725'000'000.9, 0.9, early_position, early_velocity,
       early_acceleration, early_position, early_velocity,
       early_acceleration, false));
   const auto waiting = manager.validateCommittedP4TrajectoryExecution(
@@ -8394,7 +8405,7 @@ TEST(P4SuccessorDeadlineScheduling,
 
   const auto &reanchored = manager.p4SuccessorDeadlineForTest();
   EXPECT_NEAR(reanchored.latest_prepare_start_s, 21.2, 1.0e-12);
-  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 22.35, 1.0e-12);
+  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 22.3, 1.0e-12);
   EXPECT_NEAR(reanchored.planned_switch_time_s, 22.5, 1.0e-12);
 }
 
@@ -11474,6 +11485,36 @@ TEST(P4PreparedSuccessorPolicy,
   // next planning callback must receive the already-selected next channel,
   // rather than falling back to an unrelated route worker or ordinary replan.
   const auto single_channel_decision = manager.lastP4ForwardDecision();
+  auto deadline_limited_decision = single_channel_decision;
+  auto deadline_limited_peer = deadline_limited_decision.candidates.front();
+  deadline_limited_peer.candidate_id += 10u;
+  deadline_limited_peer.channel_id += 10u;
+  deadline_limited_peer.path[1].y() *= -1.0;
+  deadline_limited_peer.path_hash = "deadline-limited-runner-up-guide";
+  deadline_limited_decision.candidates.push_back(deadline_limited_peer);
+  manager.setP4ForwardDecisionForTest(deadline_limited_decision);
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      incumbent.traj_id_, incumbent.start_time_.nanoseconds(), 10.5,
+      "successor_full_search_fallback_ready",
+      ego_planner::p4ControlPointHash(
+          incumbent.position_traj_.getControlPoint()));
+  manager.setPreparedP4SuccessorForTest(prepared);
+  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
+      9.9, &cache_reason)) << cache_reason;
+  EXPECT_EQ(cache_reason, "successor_deadline_complete_winner_cached");
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()
+                ->decision.channel_comparison_state,
+            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+
+  // With a wide fixed window, the same production path still gives the peer
+  // its bounded actual-curve opportunity.
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      incumbent.traj_id_, incumbent.start_time_.nanoseconds(), 100.0,
+      "successor_full_search_fallback_ready",
+      ego_planner::p4ControlPointHash(
+          incumbent.position_traj_.getControlPoint()));
   auto multi_channel_decision = single_channel_decision;
   auto second_channel = multi_channel_decision.candidates.front();
   second_channel.candidate_id += 1u;

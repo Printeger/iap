@@ -196,8 +196,16 @@ TEST(P4SuccessorDeadlinePolicy,
     policy, 40.0, 72.0);
   ASSERT_TRUE(long_segment.valid);
   EXPECT_NEAR(long_segment.planned_switch_time_s, 42.5, 1.0e-12);
-  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 42.35, 1.0e-12);
+  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 42.3, 1.0e-12);
   EXPECT_LT(long_segment.planned_switch_time_s, 72.0 - 0.2);
+
+  auto low_scheduler_guard = policy;
+  low_scheduler_guard.scheduler_guard_s = 0.05;
+  const auto absolute_queue_floor = ego_planner::computeP4SuccessorDeadline(
+      low_scheduler_guard, 40.0, 72.0);
+  ASSERT_TRUE(absolute_queue_floor.valid);
+  EXPECT_NEAR(
+      absolute_queue_floor.candidate_ready_deadline_s, 42.3, 1.0e-12);
 
   const auto short_segment = ego_planner::computeP4SuccessorDeadline(
     policy, 20.0, 21.0);
