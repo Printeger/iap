@@ -11177,4 +11177,27 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
             ego_planner::P4SuccessorPreparationState::CURVE_PREPARING);
   EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+
+  ego_planner::P4SuccessorPreparationResult completed_route;
+  completed_route.ready = true;
+  completed_route.parent_trajectory_id = parent.trajectory_id;
+  completed_route.failure = ego_planner::P4SuccessorFailure::NONE;
+  completed_route.decision = decision;
+  // Reproduce the production worker result: route decisions default to HOLD
+  // until the manager binds them to the still-authoritative parent.
+  completed_route.decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
+  completed_route.reason = "ok";
+  manager.setP4PreparedSuccessorRouteForTest(std::move(completed_route));
+
+  const auto worker_result = manager.evaluateP4ForwardRouteForTest(
+      Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d(1.75, 0.0, 1.0));
+  EXPECT_EQ(worker_result.action,
+            ego_planner::P4ForwardAction::CANDIDATE_READY);
+  EXPECT_EQ(worker_result.reason, "successor_full_search_fallback_ready");
+  EXPECT_EQ(worker_result.successor_failure,
+            ego_planner::P4SuccessorFailure::NONE);
+  EXPECT_EQ(worker_result.planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
 }

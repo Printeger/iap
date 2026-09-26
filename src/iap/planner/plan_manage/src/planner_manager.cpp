@@ -5290,6 +5290,11 @@ namespace ego_planner
         successor.request_position = request.position;
         successor.local_target = request.local_target;
         successor.result_status = P4ForwardResultStatus::READY;
+        // A ready route is only the immutable input to child-curve
+        // preparation. The certified parent remains the sole motion authority
+        // until that child passes the existing actual-curve and switch gates.
+        successor.planning_disposition =
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
         successor.reason = request.successor_fast_path
             ? "successor_fast_path_ready"
             : "successor_full_search_fallback_ready";

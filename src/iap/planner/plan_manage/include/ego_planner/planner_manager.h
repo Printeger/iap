@@ -1265,6 +1265,11 @@ namespace ego_planner
       p4_pending_channel_work_item_.reset();
       p4_pending_channel_context_.reset();
     }
+    void setP4PreparedSuccessorRouteForTest(
+        P4SuccessorPreparationResult result)
+    {
+      p4_successor_schedule_.prepared_route = std::move(result);
+    }
     void setPreparedP4SuccessorForTest(P4PreparedSuccessor successor)
     {
       p4_prepared_successor_ = std::move(successor);
