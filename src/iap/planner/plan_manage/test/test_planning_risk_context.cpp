@@ -2136,9 +2136,9 @@ TEST(P4ActualCurveClearanceOptimization,
   const auto displacements = optimizer->
       p4ActualCurveClearanceRequiredDisplacementsForTest();
   ASSERT_EQ(displacements.size(), 1u);
-  // A 100 mm occupancy voxel has an 86.603 mm half diagonal. Preserve that
-  // frozen-frame representation bound plus the 5 mm solver allowance.
-  EXPECT_NEAR(displacements.front(), 0.0316025403784, 1.0e-12);
+  // A 100 mm occupancy voxel has a 173.205 mm full diagonal. Preserve that
+  // inter-frame representation bound plus the 5 mm solver allowance.
+  EXPECT_NEAR(displacements.front(), 0.1182050807569, 1.0e-12);
 }
 
 TEST(P4ActualCurveClearanceOptimization,
@@ -2153,12 +2153,12 @@ TEST(P4ActualCurveClearanceOptimization,
   const Eigen::MatrixXd points = denseForkTangentControlPoints();
   ego_planner::P4ActualCurveClearanceConstraintSample live_sample;
   live_sample.time_s = 0.4;
-  // The publication check reported +30.4112216661 mm after subtracting the
-  // 50 mm planning buffer, so its hard margin was 80.4112216661 mm.  The
-  // first later current-frame check reported -0.0220075644 mm hard margin.
-  constexpr double kPublicationHardMarginM = 0.0804112216661;
+  // The publication check reported +54.1887586660 mm after subtracting the
+  // 50 mm planning buffer, so its hard margin was 104.1887586660 mm.  The
+  // first later current-frame check reported -0.1673910782 mm hard margin.
+  constexpr double kPublicationHardMarginM = 0.1041887586660;
   constexpr double kMeasuredClearanceChangeM =
-      kPublicationHardMarginM + 0.0000220075644;
+      kPublicationHardMarginM + 0.0001673910782;
   live_sample.signed_margin_m = kPublicationHardMarginM;
   live_sample.escape_direction = Eigen::Vector3d::UnitY();
   optimizer->setP4ActualCurveClearanceConstraints(

@@ -625,10 +625,14 @@ namespace ego_planner
     // Freeze the sampled half-spaces before L-BFGS starts.  In particular,
     // neither the nearest obstacle nor its escape direction is reselected
     // from a trial point during a line search.
-    const double occupancy_half_diagonal_m =
-        0.5 * std::sqrt(3.0) * occupancy_resolution_m;
+    // Independent current frames can place returns from the same physical
+    // surface at opposite extremes of adjacent voxel representatives. The
+    // full voxel diagonal bounds that inter-frame representation change; a
+    // half diagonal only bounds one return relative to its own voxel center.
+    const double occupancy_interframe_bound_m =
+        std::sqrt(3.0) * occupancy_resolution_m;
     const double generation_target_hard_margin_m =
-        std::max(planning_clearance_buffer_m, occupancy_half_diagonal_m) +
+        std::max(planning_clearance_buffer_m, occupancy_interframe_bound_m) +
         kP4ActualCurveClearanceSolverAllowanceM;
     p4_actual_curve_clearance_constraints_.reserve(samples.size());
     for (const auto &sample : samples)
