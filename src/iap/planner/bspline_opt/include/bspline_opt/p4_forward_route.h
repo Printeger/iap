@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <bspline_opt/p4_geometry_commit.h>
+#include <iap/map/local_occupancy.hpp>
 #include <iap/map/trusted_local_map_support.hpp>
 #include <iap/predictor/predictor_types.hpp>
 
@@ -769,6 +770,11 @@ namespace ego_planner
     Eigen::Vector3d map_extent = Eigen::Vector3d::Zero();
     std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+    // Producer-native, lexicographically sorted raw occupancy keys. The
+    // successor lane can query this immutable sparse set directly instead of
+    // rebuilding a second index or expanding every diagnostic query.
+    std::shared_ptr<const std::vector<iap::VoxelKey>>
+      raw_occupied_voxel_keys;
     P4ObservationSensorModel observation_sensor_model;
     double map_inflation_m = 0.0;
     double virtual_ceiling_height_m = -1.0;

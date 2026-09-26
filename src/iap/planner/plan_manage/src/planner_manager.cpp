@@ -4848,6 +4848,13 @@ namespace ego_planner
       }
       request.raw_occupied_voxel_centers = p4_raw_occupied_centers_;
     }
+    if (occupancy->raw_identity)
+    {
+      request.raw_occupied_voxel_keys =
+          std::shared_ptr<const std::vector<iap::VoxelKey>>(
+              occupancy->raw_identity,
+              &occupancy->raw_identity->keys());
+    }
     if (occupancy->frozen_grid_map_epoch &&
         occupancy->frozen_grid_map_epoch->local_evidence_snapshot)
     {

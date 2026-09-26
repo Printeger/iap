@@ -1636,6 +1636,9 @@ TEST(P4ForwardRoute,
   request.raw_occupied_voxel_centers =
     std::make_shared<const std::vector<Eigen::Vector3d>>(
       10000u, Eigen::Vector3d(3.0, 2.0, 1.0));
+  request.raw_occupied_voxel_keys =
+    std::make_shared<const std::vector<iap::VoxelKey>>(
+      std::vector<iap::VoxelKey>{{30, 20, 10}});
   int geometry_queries = 0;
   request.geometry = [&geometry_queries](const Eigen::Vector3d &) {
       ++geometry_queries;
@@ -1644,11 +1647,35 @@ TEST(P4ForwardRoute,
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_GT(geometry_queries, 0)
-    << "the frozen guide should not wait for a full raw-index rebuild";
+  EXPECT_EQ(geometry_queries, 0)
+    << "the fast path must use the producer-native sparse occupancy keys";
   EXPECT_EQ(decision.channel_search_termination,
             "successor_reuse_guide_clear");
   EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
+}
+
+TEST(P4ForwardRoute,
+     SuccessorFastPathNativeKeysPreserveSweptVehicleCollisionCheck)
+{
+  auto request = straightRequest();
+  request.successor_fast_path = true;
+  request.incumbent_channel_id = 42u;
+  request.successor_reuse_guide = request.nominal_local_reference;
+  request.limits.vehicle_radius_m = 0.35;
+  request.raw_occupied_voxel_keys =
+    std::make_shared<const std::vector<iap::VoxelKey>>(
+      std::vector<iap::VoxelKey>{{30, 33, 10}});
+  int geometry_queries = 0;
+  request.geometry = [&geometry_queries](const Eigen::Vector3d &) {
+      ++geometry_queries;
+      return P4ForwardGeometryState::CLEAR;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(geometry_queries, 0);
+  EXPECT_NE(decision.channel_search_termination,
+            "successor_reuse_guide_clear");
 }
 
 TEST(P4ForwardRoute,

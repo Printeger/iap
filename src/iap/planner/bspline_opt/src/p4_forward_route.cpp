@@ -202,12 +202,14 @@ public:
     resolution_(request.limits.topology_resolution_m)
   {
     dimensions_ = (request.map_extent / resolution_).array().floor().cast<int>();
-    // The rolling fast path only validates one already-committed guide. Its
-    // frozen geometry callback addresses the same immutable occupancy and is
-    // cached below with the vehicle envelope, so rebuilding the complete raw
-    // hit index can only delay that bounded check. If the guide is blocked,
-    // the same callback remains fail-closed for the ordinary fallback search.
-    // Normal multi-channel planning keeps the raw sparse index.
+    if (request.successor_fast_path && request.raw_occupied_voxel_keys) {
+      raw_occupied_voxel_keys_ = request.raw_occupied_voxel_keys;
+    }
+    // The rolling fast path only validates one already-committed guide. Reuse
+    // the producer-native sorted keys above instead of rebuilding the complete
+    // raw-hit index. If native keys are unavailable, the frozen geometry
+    // callback remains fail-closed. Normal multi-channel planning keeps the
+    // raw sparse index.
     if (request.raw_occupied_voxel_centers &&
       !request.successor_fast_path)
     {
@@ -277,6 +279,54 @@ public:
           request_.virtual_ceiling_height_m - kEpsilon)
     {
       return P4ForwardGeometryState::OCCUPIED;
+    }
+    if (raw_occupied_voxel_keys_) {
+      const double radius = configuration_space_radius;
+      const Eigen::Vector3d lower = center.array() - radius;
+      const Eigen::Vector3d upper = center.array() + radius;
+      if ((lower.array() < request_.map_origin.array()).any() ||
+        (upper.array() >=
+        (request_.map_origin + request_.map_extent).array()).any())
+      {
+        return P4ForwardGeometryState::OUT_OF_BOUNDS;
+      }
+      const double resolution = request_.limits.occupancy_resolution_m;
+      const Eigen::Vector3i minimum = ((lower - request_.map_origin) /
+        resolution).array().floor().cast<int>();
+      const Eigen::Vector3i maximum = ((upper - request_.map_origin) /
+        resolution).array().floor().cast<int>();
+      const auto key_less = [](const iap::VoxelKey & lhs,
+        const iap::VoxelKey & rhs) {
+          if (lhs.x != rhs.x) return lhs.x < rhs.x;
+          if (lhs.y != rhs.y) return lhs.y < rhs.y;
+          return lhs.z < rhs.z;
+        };
+      for (int x = minimum.x(); x <= maximum.x(); ++x) {
+        for (int y = minimum.y(); y <= maximum.y(); ++y) {
+          auto occupied = std::lower_bound(
+            raw_occupied_voxel_keys_->begin(),
+            raw_occupied_voxel_keys_->end(),
+            iap::VoxelKey{x, y, minimum.z()}, key_less);
+          while (occupied != raw_occupied_voxel_keys_->end() &&
+            occupied->x == x && occupied->y == y &&
+            occupied->z <= maximum.z())
+          {
+            const Eigen::Vector3d cell_min = request_.map_origin + resolution *
+              Eigen::Vector3d(occupied->x, occupied->y, occupied->z);
+            const Eigen::Vector3d cell_max =
+              cell_min + Eigen::Vector3d::Constant(resolution);
+            const Eigen::Vector3d closest =
+              center.cwiseMax(cell_min).cwiseMin(cell_max);
+            if ((closest - center).squaredNorm() <=
+              radius * radius + kEpsilon)
+            {
+              return P4ForwardGeometryState::OCCUPIED;
+            }
+            ++occupied;
+          }
+        }
+      }
+      return P4ForwardGeometryState::CLEAR;
     }
     if (has_raw_configuration_space_) {
       const double radius = configuration_space_radius;
@@ -861,6 +911,7 @@ private:
   mutable std::unordered_map<GridIndex, bool, GridIndexHash>
     topology_state_cache_;
   mutable std::unordered_map<GridEdge, bool, GridEdgeHash> edge_state_cache_;
+  std::shared_ptr<const std::vector<iap::VoxelKey>> raw_occupied_voxel_keys_;
   std::unordered_set<GridIndex, GridIndexHash> raw_occupied_cells_;
   std::unordered_map<GridIndex, std::vector<GridIndex>, GridIndexHash>
     raw_occupied_buckets_;
