@@ -3005,6 +3005,38 @@ TEST(TrajectoryExecutionFeedbackTest,
   EXPECT_FALSE(waiting.failsafe_braking_activated);
   EXPECT_EQ(manager.local_data_.traj_id_,
             guard->parent_trajectory_id);
+
+  // ACTIVATED makes the exact guard the active identity before the watchdog
+  // atomically installs its curve.  The pre-ACK trace must keep its overwrite
+  // protection against the old parent, while later samples for that same
+  // full guard identity remain refreshable.
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash,
+      guard->start_time.nanoseconds()));
+  manager.acknowledgeP4GuardStatus(guard->trajectory_id, "ACTIVATED");
+  *fixture.steady_now_ns += 10'000'000LL;
+  constexpr double refreshed_guard_elapsed_s = 0.06;
+  const Eigen::Vector3d refreshed_guard_position =
+      guard->trajectory.evaluateDeBoorT(refreshed_guard_elapsed_s);
+  const Eigen::Vector3d refreshed_guard_velocity =
+      guard_velocity.evaluateDeBoorT(refreshed_guard_elapsed_s);
+  const Eigen::Vector3d refreshed_guard_acceleration =
+      guard_acceleration.evaluateDeBoorT(refreshed_guard_elapsed_s);
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash,
+      1'725'000'001.01, refreshed_guard_elapsed_s,
+      refreshed_guard_position, refreshed_guard_velocity,
+      refreshed_guard_acceleration, refreshed_guard_position,
+      refreshed_guard_velocity, refreshed_guard_acceleration, false));
+  double observed_guard_elapsed_s = 0.0;
+  ASSERT_TRUE(manager.trajectoryControllerTrace(
+      guard->execution_instance_id, guard->trajectory_id,
+      guard->start_time.nanoseconds(), guard->curve_hash,
+      fixture.evaluation_ros_s, 0.2, &observed_guard_elapsed_s,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
+  EXPECT_DOUBLE_EQ(observed_guard_elapsed_s, refreshed_guard_elapsed_s);
 }
 
 TEST(TrajectoryExecutionFeedbackTest,

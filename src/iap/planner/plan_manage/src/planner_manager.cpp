@@ -3044,8 +3044,16 @@ namespace ego_planner
             p4_pending_braking_anchor_->trajectory_id &&
         trajectory_controller_trace_sample_.curve_hash ==
             p4_pending_braking_anchor_->curve_hash;
+    const bool incoming_trace_matches_buffered =
+        trajectory_controller_trace_sample_.valid &&
+        trajectory_controller_trace_sample_.execution_instance_id ==
+            execution_instance_id &&
+        trajectory_controller_trace_sample_.trajectory_id == trajectory_id &&
+        trajectory_controller_trace_sample_.start_time_ns == start_time_ns &&
+        trajectory_controller_trace_sample_.curve_hash == curve_hash;
     if (buffered_trace_is_pending_guard && identity_matches &&
-        !pending_guard_identity_matches)
+        !pending_guard_identity_matches &&
+        !incoming_trace_matches_buffered)
       return false;
     if (trajectory_controller_trace_sample_.valid &&
         trajectory_controller_trace_sample_.execution_instance_id ==
