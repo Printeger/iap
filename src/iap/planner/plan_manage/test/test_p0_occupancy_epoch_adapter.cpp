@@ -45,6 +45,10 @@ struct FakeFrozenOccupancyEpoch {
   std::string frame_contract_id = "planner_map_contract:test";
   double cloud_stamp_s = 0.0;
   uint64_t generation = 0;
+  Eigen::Vector3d current_vehicle_position =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double current_vehicle_clearance_radius_m =
+      std::numeric_limits<double>::quiet_NaN();
 };
 
 FakeFrozenOccupancyEpoch makeEpoch(
@@ -60,6 +64,8 @@ FakeFrozenOccupancyEpoch makeEpoch(
   epoch.frame_id = "map";
   epoch.cloud_stamp_s = 100.0;
   epoch.generation = 7u;
+  epoch.current_vehicle_position = Eigen::Vector3d(0.1, 0.2, 0.3);
+  epoch.current_vehicle_clearance_radius_m = 0.4;
   epoch.diagnostic_query = [epoch_generation = epoch.generation](
       const Eigen::Vector3d& position) {
     FakeOccupancyDiagnostic out;
@@ -158,6 +164,9 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_EQ(adapted->frame_contract_id, "planner_map_contract:test");
   EXPECT_TRUE(adapted->geometry.origin_w.isApprox(
       Eigen::Vector3d(0.35, -0.2, 0.6)));
+  EXPECT_TRUE(adapted->current_vehicle_position.isApprox(
+      Eigen::Vector3d(0.1, 0.2, 0.3)));
+  EXPECT_DOUBLE_EQ(adapted->current_vehicle_clearance_radius_m, 0.4);
 
   const auto observed = adapted->diagnostic_query(
       Eigen::Vector3d(1.5, 0.0, 0.0));
@@ -171,6 +180,8 @@ TEST(P0OccupancyEpochAdapterTest,
      TrueObservedFreeCompletesSupportWithoutChangingModelAuthority) {
   ego_planner::P0OccupancyEpoch epoch;
   epoch.cloud_stamp_s = 100.0;
+  epoch.frame_id = "map";
+  epoch.generation = 7u;
   auto trusted = std::make_shared<iap::TrustedLocalMapSupport>();
   trusted->T_map_sensor = Eigen::Isometry3d::Identity();
   trusted->retained_min_map = Eigen::Vector3d(-1.0, -1.0, -1.0);
@@ -191,6 +202,9 @@ TEST(P0OccupancyEpochAdapterTest,
     out.state = position.y() == 0.0
         ? iap::RiskOccupancyState::OBSERVED_FREE
         : iap::RiskOccupancyState::OCCUPIED;
+    out.frame_id = "map";
+    out.cloud_stamp_s = 100.0;
+    out.occupancy_generation = 7u;
     return out;
   };
 
@@ -232,6 +246,118 @@ TEST(P0OccupancyEpochAdapterTest,
             iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
   EXPECT_NE(support.authority,
             iap::LocalMapSupportAuthority::STRICT_OBSERVATION);
+}
+
+TEST(P0OccupancyEpochAdapterTest,
+     CurrentVehicleFootprintCompletesSupportInsideSensorBlindRange) {
+  auto epoch = makeDualSupportEpoch();
+  epoch.cloud_stamp_s = 100.5;
+  auto trusted = makeTrustedModelSupport();
+  trusted->stamp_s = 100.5;
+  trusted->valid_until_s = 101.5;
+  epoch.trusted_local_map_support = std::move(trusted);
+  epoch.current_vehicle_position = Eigen::Vector3d::Zero();
+  epoch.current_vehicle_clearance_radius_m = 0.5;
+  epoch.diagnostic_query = [](const Eigen::Vector3d&) {
+    iap::RiskOccupancyDiagnostic out;
+    out.available = true;
+    out.observed = true;
+    out.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    out.frame_id = "map";
+    out.cloud_stamp_s = 100.5;
+    out.occupancy_generation = 7u;
+    out.source = "arbitrary_diagnostic_label";
+    return out;
+  };
+  const Eigen::Vector3d point(0.05, 0.0, 0.0);
+
+  const auto footprint_support = ego_planner::queryP0LocalMapSupport(
+      epoch, point, 100.6, 105.0);
+
+  EXPECT_TRUE(footprint_support.complete());
+  EXPECT_EQ(footprint_support.authority,
+            iap::LocalMapSupportAuthority::STRICT_OBSERVATION);
+  EXPECT_DOUBLE_EQ(footprint_support.observation_stamp_s, 100.5);
+  EXPECT_NEAR(footprint_support.observation_age_s, 0.1, 1.0e-9);
+
+  epoch.current_vehicle_position = Eigen::Vector3d(2.0, 0.0, 0.0);
+  epoch.diagnostic_query = [](const Eigen::Vector3d&) {
+    iap::RiskOccupancyDiagnostic out;
+    out.available = true;
+    out.observed = true;
+    out.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    out.frame_id = "map";
+    out.cloud_stamp_s = 100.5;
+    out.occupancy_generation = 7u;
+    out.source = "ordinary_observed_free";
+    return out;
+  };
+  const auto ordinary_support = ego_planner::queryP0LocalMapSupport(
+      epoch, point, 100.6, 105.0);
+  EXPECT_FALSE(ordinary_support.complete());
+
+  epoch.current_vehicle_position = Eigen::Vector3d::Zero();
+  epoch.diagnostic_query = [](const Eigen::Vector3d&) {
+    iap::RiskOccupancyDiagnostic out;
+    out.available = true;
+    out.observed = true;
+    out.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    out.frame_id = "map";
+    out.cloud_stamp_s = 100.5;
+    out.occupancy_generation = 7u;
+    out.source = "current_vehicle_footprint";
+    return out;
+  };
+  const auto stale_footprint = ego_planner::queryP0LocalMapSupport(
+      epoch, point, 101.6, 105.0);
+  EXPECT_EQ(stale_footprint.status,
+            iap::LocalMapSupportStatus::EXPIRED);
+
+  epoch.frame_contract_id = "map:wrong-contract";
+  const auto identity_mismatch = ego_planner::queryP0LocalMapSupport(
+      epoch, point, 100.6, 105.0);
+  EXPECT_EQ(identity_mismatch.status,
+            iap::LocalMapSupportStatus::FRAME_INVALID);
+
+  epoch.frame_contract_id = "map:trusted-model-test";
+  epoch.diagnostic_query = [](const Eigen::Vector3d&) {
+    iap::RiskOccupancyDiagnostic out;
+    out.available = true;
+    out.observed = true;
+    out.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    out.frame_id = "map";
+    out.cloud_stamp_s = 100.5;
+    out.occupancy_generation = 8u;
+    out.source = "current_vehicle_footprint";
+    return out;
+  };
+  const auto diagnostic_identity_mismatch =
+      ego_planner::queryP0LocalMapSupport(
+          epoch, point, 100.6, 105.0);
+  EXPECT_EQ(diagnostic_identity_mismatch.status,
+            iap::LocalMapSupportStatus::FRAME_INVALID);
+
+  epoch.diagnostic_query = [](const Eigen::Vector3d&) {
+    iap::RiskOccupancyDiagnostic out;
+    out.available = true;
+    out.observed = true;
+    out.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    out.frame_id = "map";
+    out.cloud_stamp_s = 100.5;
+    out.occupancy_generation = 7u;
+    out.source = "current_vehicle_footprint";
+    return out;
+  };
+  const auto outside_minimum_range = ego_planner::queryP0LocalMapSupport(
+      epoch, Eigen::Vector3d(0.2, 0.0, 0.0), 100.6, 105.0);
+  EXPECT_TRUE(outside_minimum_range.complete());
+  EXPECT_EQ(outside_minimum_range.authority,
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+
+  epoch.trusted_local_map_support.reset();
+  const auto missing_trusted_identity = ego_planner::queryP0LocalMapSupport(
+      epoch, point, 100.6, 105.0);
+  EXPECT_FALSE(missing_trusted_identity.complete());
 }
 
 TEST(P0OccupancyEpochAdapterTest,

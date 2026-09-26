@@ -811,6 +811,10 @@ TEST(GridMapOccupancyEpochTest,
   const auto frozen = map.captureFrozenExecutionOccupancyEpoch();
   ASSERT_TRUE(frozen);
   ASSERT_TRUE(frozen->diagnostic_query);
+  EXPECT_TRUE(frozen->current_vehicle_position.isApprox(
+      Eigen::Vector3d::Zero()));
+  EXPECT_TRUE(std::isfinite(frozen->current_vehicle_clearance_radius_m));
+  EXPECT_GE(frozen->current_vehicle_clearance_radius_m, 0.0);
   const auto diagnostic = frozen->diagnostic_query(
       Eigen::Vector3d(0.1, 0.1, 0.1));
   EXPECT_TRUE(diagnostic.available);

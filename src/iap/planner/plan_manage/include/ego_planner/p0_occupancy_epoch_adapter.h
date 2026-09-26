@@ -1,6 +1,8 @@
 #ifndef _P0_OCCUPANCY_EPOCH_ADAPTER_H_
 #define _P0_OCCUPANCY_EPOCH_ADAPTER_H_
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -55,6 +57,29 @@ template <typename Epoch>
 std::shared_ptr<const LocalEvidenceSnapshot> localEvidenceSnapshot(
     const Epoch&, long) {
   return nullptr;
+}
+
+template <typename Epoch>
+auto currentVehiclePosition(const Epoch& epoch, int)
+    -> decltype(epoch.current_vehicle_position) {
+  return epoch.current_vehicle_position;
+}
+
+template <typename Epoch>
+Eigen::Vector3d currentVehiclePosition(const Epoch&, long) {
+  return Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+}
+
+template <typename Epoch>
+auto currentVehicleClearanceRadius(const Epoch& epoch, int)
+    -> decltype(epoch.current_vehicle_clearance_radius_m) {
+  return epoch.current_vehicle_clearance_radius_m;
+}
+
+template <typename Epoch>
+double currentVehicleClearanceRadius(const Epoch&, long) {
+  return std::numeric_limits<double>::quiet_NaN();
 }
 }  // namespace p0_occupancy_detail
 
@@ -145,6 +170,10 @@ struct P0OccupancyEpoch {
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   std::string frame_id;
   std::string frame_contract_id;
+  Eigen::Vector3d current_vehicle_position =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double current_vehicle_clearance_radius_m =
+      std::numeric_limits<double>::quiet_NaN();
 };
 
 // Resolve one point against the two independent local-map authorities. A
@@ -154,6 +183,44 @@ struct P0OccupancyEpoch {
 inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
     const P0OccupancyEpoch& epoch, const Eigen::Vector3d& position,
     const double evaluation_time_s, const double query_time_s) {
+  const auto strict_observed_free =
+      [&epoch, evaluation_time_s](
+          const iap::RiskOccupancyDiagnostic& observed,
+          const double hard_lifetime_s) {
+        iap::LocalMapSupportQuery strict;
+        strict.authority =
+            iap::LocalMapSupportAuthority::STRICT_OBSERVATION;
+        strict.observation_stamp_s = observed.cloud_stamp_s;
+        strict.observation_age_s =
+            evaluation_time_s - observed.cloud_stamp_s;
+        if (!observed.available || !observed.observed ||
+            observed.state != iap::RiskOccupancyState::OBSERVED_FREE ||
+            observed.frame_id != epoch.frame_id ||
+            observed.occupancy_generation != epoch.generation ||
+            !std::isfinite(observed.cloud_stamp_s) ||
+            !std::isfinite(epoch.cloud_stamp_s) ||
+            std::abs(observed.cloud_stamp_s - epoch.cloud_stamp_s) > 1.0e-6 ||
+            std::isnan(hard_lifetime_s) || hard_lifetime_s < 0.0) {
+          strict.status = iap::LocalMapSupportStatus::FRAME_INVALID;
+          return strict;
+        }
+        strict.status = strict.observation_age_s >= -1.0e-6 &&
+                strict.observation_age_s <= hard_lifetime_s
+            ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+            : iap::LocalMapSupportStatus::EXPIRED;
+        return strict;
+      };
+  const auto strict_observation_lifetime = [&epoch]() {
+    if (epoch.trusted_local_map_support &&
+        epoch.trusted_local_map_support->valid()) {
+      return epoch.trusted_local_map_support->valid_until_s -
+          epoch.trusted_local_map_support->stamp_s;
+    }
+    // Preserve the legacy diagnostic-only contract when no trusted support
+    // owns a configured lifetime. The typed vehicle-footprint exception
+    // below always requires valid trusted support and cannot take this path.
+    return std::numeric_limits<double>::infinity();
+  };
   iap::LocalMapSupportQuery model;
   if (epoch.trusted_local_map_support) {
     model = epoch.trusted_local_map_support->query(
@@ -192,6 +259,41 @@ inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
     // mismatches above remain fail-closed and can never fall back.
     if (model.complete())
       return model;
+    // The sparse execution epoch deliberately records the vehicle's current
+    // physical footprint as observed free before committing a new pose.  That
+    // point can be inside the LiDAR minimum range, where neither the strict
+    // voxel window nor the hit-only model can provide support.  Preserve only
+    // this producer-owned typed footprint; the diagnostic source label is
+    // not authority, and ordinary free space must continue to use the
+    // immutable local-evidence authority above.
+    if (epoch.diagnostic_query && epoch.trusted_local_map_support &&
+        epoch.trusted_local_map_support->valid() && position.allFinite() &&
+        std::isfinite(evaluation_time_s) && std::isfinite(query_time_s)) {
+      const auto observed = epoch.diagnostic_query(position);
+      const auto& trusted = *epoch.trusted_local_map_support;
+      const Eigen::Vector3d point_sensor = trusted.T_map_sensor.linear()
+          .transpose() * (position - trusted.T_map_sensor.translation());
+      const bool inside_retained_envelope =
+          (position.array() >= trusted.retained_min_map.array()).all() &&
+          (position.array() <= trusted.retained_max_map.array()).all();
+      const bool inside_minimum_range =
+          point_sensor.allFinite() &&
+          point_sensor.norm() < trusted.min_range_m;
+      const bool inside_current_vehicle_footprint =
+          epoch.current_vehicle_position.allFinite() &&
+          std::isfinite(epoch.current_vehicle_clearance_radius_m) &&
+          epoch.current_vehicle_clearance_radius_m >= 0.0 &&
+          (position - epoch.current_vehicle_position).norm() <=
+              epoch.current_vehicle_clearance_radius_m;
+      const bool bound_to_current_observation =
+          trusted.frame_id == epoch.frame_id &&
+          std::abs(trusted.stamp_s - epoch.cloud_stamp_s) <= 1.0e-6;
+      if (inside_current_vehicle_footprint && inside_retained_envelope &&
+          inside_minimum_range && bound_to_current_observation) {
+        return strict_observed_free(
+            observed, strict_observation_lifetime());
+      }
+    }
     return strict;
   }
   if (!epoch.diagnostic_query || !position.allFinite() ||
@@ -203,20 +305,7 @@ inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
       observed.state != iap::RiskOccupancyState::OBSERVED_FREE) {
     return model;
   }
-  const double hard_lifetime_s = epoch.trusted_local_map_support
-      ? epoch.trusted_local_map_support->valid_until_s -
-            epoch.trusted_local_map_support->stamp_s
-      : -1.0;
-  const double age_s = evaluation_time_s - epoch.cloud_stamp_s;
-  iap::LocalMapSupportQuery strict;
-  strict.authority = iap::LocalMapSupportAuthority::STRICT_OBSERVATION;
-  strict.observation_stamp_s = epoch.cloud_stamp_s;
-  strict.observation_age_s = age_s;
-  strict.status = std::isfinite(epoch.cloud_stamp_s) && age_s >= -1.0e-6 &&
-          (hard_lifetime_s < 0.0 || age_s <= hard_lifetime_s)
-      ? iap::LocalMapSupportStatus::MODEL_COMPLETE
-      : iap::LocalMapSupportStatus::EXPIRED;
-  return strict;
+  return strict_observed_free(observed, strict_observation_lifetime());
 }
 
 enum class P0OccupancyEpochCaptureStatus {
@@ -296,6 +385,10 @@ class P0OccupancyEpochAdapter {
     if (adapted) {
       adapted->local_evidence_snapshot =
           p0_occupancy_detail::localEvidenceSnapshot(epoch, 0);
+      adapted->current_vehicle_position =
+          p0_occupancy_detail::currentVehiclePosition(epoch, 0);
+      adapted->current_vehicle_clearance_radius_m =
+          p0_occupancy_detail::currentVehicleClearanceRadius(epoch, 0);
     }
     return adapted;
   }

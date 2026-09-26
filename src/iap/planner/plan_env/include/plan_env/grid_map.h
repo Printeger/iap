@@ -243,6 +243,10 @@ struct FrozenOccupancyEpoch
   int64_t current_frame_id = -1;
   std::string current_frame_content_hash;
   std::string frame_contract_id;
+  Eigen::Vector3d current_vehicle_position =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double current_vehicle_clearance_radius_m =
+      std::numeric_limits<double>::quiet_NaN();
 };
 
 struct OccupancyCollisionVoxelChange

@@ -2868,6 +2868,9 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
   epoch->current_frame_content_hash = state->current_frame
       ? state->current_frame->content_hash : std::string{};
   epoch->frame_contract_id = state->frame_contract_id;
+  epoch->current_vehicle_position = state->current_vehicle_position;
+  epoch->current_vehicle_clearance_radius_m =
+      state->current_vehicle_clearance_radius_m;
 
   constexpr double kPi = 3.14159265358979323846;
   const auto &frame = *state->current_frame;
