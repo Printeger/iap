@@ -3928,59 +3928,6 @@ namespace ego_planner
       throw std::invalid_argument(
           "P4 control capability profile is invalid or exceeds the 0.15 m "
           "tracking envelope");
-    if (p4_global_exposure_policy_.task_mode ==
-        iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT)
-    {
-      UniformBspline minimum_terminal_stop;
-      const auto minimum = buildP4MinimumTerminalStopFixture(
-          p4_forward_limits_.min_creep_progress_m, pp_.ctrl_pt_dist,
-          p4_forward_limits_.max_observe_speed_mps,
-          p4_control_profile_, pp_.feasibility_tolerance_,
-          &minimum_terminal_stop);
-      const auto fresh_budget = p4MissionExposureDurationBudget(
-          p4_global_exposure_policy_,
-          iap::GlobalNavigationEpisodeState{});
-      const double minimum_duration_s = minimum.success
-          ? minimum_terminal_stop.getTimeSum()
-          : std::numeric_limits<double>::infinity();
-      const double required_integral =
-          std::max(0.0, p4_global_exposure_policy_.maximum_ratio - 1.0) *
-          minimum_duration_s;
-      RCLCPP_INFO(
-          node->get_logger(),
-          "P4 MISSION exposure fixture minimum_progress=%.6f "
-          "T_min=%.9f affordable=%.9f ratio=%.6f continuous=%.9f "
-          "integral=%.9f required_integral=%.9f",
-          p4_forward_limits_.min_creep_progress_m, minimum_duration_s,
-          fresh_budget.full_fresh_affordable_duration_s,
-          p4_global_exposure_policy_.maximum_ratio,
-          p4_global_exposure_policy_.maximum_continuous_exceedance_s,
-          p4_global_exposure_policy_.maximum_exceedance_integral_ratio_s,
-          required_integral);
-      if (!minimum.success || !fresh_budget.valid ||
-          minimum_duration_s >
-              fresh_budget.full_fresh_affordable_duration_s + 1.0e-9)
-      {
-        std::ostringstream reason;
-        reason <<
-            "mission_exposure_policy_incompatible_with_minimum_terminal_stop"
-            ":minimum_progress_m=" <<
-            p4_forward_limits_.min_creep_progress_m <<
-            ":minimum_terminal_stop_duration_s=" << minimum_duration_s <<
-            ":affordable_duration_s=" <<
-            fresh_budget.full_fresh_affordable_duration_s <<
-            ":maximum_ratio=" <<
-            p4_global_exposure_policy_.maximum_ratio <<
-            ":continuous_limit_s=" <<
-            p4_global_exposure_policy_.maximum_continuous_exceedance_s <<
-            ":integral_limit_ratio_s=" <<
-            p4_global_exposure_policy_.
-                maximum_exceedance_integral_ratio_s <<
-            ":required_minimum_integral_ratio_s=" << required_integral <<
-            ":fixture_reason=" << minimum.reason;
-        throw std::invalid_argument(reason.str());
-      }
-    }
     if (!std::isfinite(p4_local_tracking_error_bound_m_) ||
         p4_local_tracking_error_bound_m_ < 0.0 ||
         p4_local_tracking_error_bound_m_ > p4_max_tracking_error_m_)
@@ -7555,10 +7502,6 @@ namespace ego_planner
     const bool final_global_evidence_degradable =
         p4GlobalEvidenceFailureWhitelisted(
             direct_result, direct_points.size());
-    const bool final_global_only_degradation =
-        p4_global_exposure_policy_.task_mode ==
-            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-        final_global_evidence_degradable;
     const bool direct_snapshot_identity_match =
         direct_result.combined_snapshot_identity ==
             direct_request.combined_snapshot_identity;
@@ -7590,7 +7533,6 @@ namespace ego_planner
     }
     std::vector<iap::GlobalNavigationExposureSample>
         rolling_parent_bridge_global_samples;
-    bool rolling_parent_bridge_global_degraded = false;
     std::string rolling_exposure_identity = direct_identity;
     if (!rolling_parent_bridge_points.empty())
     {
@@ -7624,10 +7566,6 @@ namespace ego_planner
       const bool bridge_global_evidence_degradable =
           p4GlobalEvidenceFailureWhitelisted(
               bridge_result, rolling_parent_bridge_points.size());
-      rolling_parent_bridge_global_degraded =
-          p4_global_exposure_policy_.task_mode ==
-              iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-          bridge_global_evidence_degradable && !bridge_result.complete;
       const bool bridge_identity_matches =
           bridge_result.combined_snapshot_identity ==
               bridge_request.combined_snapshot_identity;
@@ -7714,9 +7652,6 @@ namespace ego_planner
       assurance_request.global_samples =
           std::move(rolling_parent_bridge_global_samples);
     }
-    assurance_request.conservative_incomplete_global_navigation =
-        (final_global_only_degradation && !direct_result.complete) ||
-        rolling_parent_bridge_global_degraded;
     assurance_request.committed_duration_s = executable_times.empty()
         ? std::numeric_limits<double>::quiet_NaN()
         : rolling_parent_bridge_duration_s + executable_times.back();
@@ -7759,7 +7694,7 @@ namespace ego_planner
           assurance.local.status == iap::LocalMotionAssuranceStatus::UNSAFE
           ? P4PreparedCurveFailure::LOCAL_CLEARANCE
           : p4_global_exposure_policy_.task_mode ==
-                iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+                iap::GlobalNavigationTaskMode::STRICT_GLOBAL &&
               assurance.global.complete && !assurance.global.within_budget
             ? P4PreparedCurveFailure::EXPOSURE_BUDGET
             : P4PreparedCurveFailure::GNSS_RISK;
@@ -8570,7 +8505,7 @@ namespace ego_planner
       p4_execution_certificate_.global_exposure_integral_ratio_s =
           p4_direct_risk_evidence_.trajectory_assurance.global.
               exceedance_integral_ratio_s;
-      p4_execution_certificate_.global_exposure_within_budget =
+      p4_execution_certificate_.global_exposure_within_diagnostic_limits =
           p4_direct_risk_evidence_.trajectory_assurance_complete &&
           p4_direct_risk_evidence_.trajectory_assurance.authorized() &&
           p4_direct_risk_evidence_.trajectory_assurance.global.within_budget;
@@ -8763,10 +8698,6 @@ namespace ego_planner
         now_s > certificate.execution_deadline_s + 1.0e-9)
       return finish(false, P4PreparedCurveFailure::FRESHNESS,
                     "p4_publication_execution_deadline_expired");
-    if (!certificate.global_exposure_within_budget ||
-        p4_global_exposure_ledger_.state().budget_exhausted)
-      return finish(false, P4PreparedCurveFailure::EXPOSURE_BUDGET,
-                    "p4_publication_exposure_budget_exhausted");
     if (certificate.task_mode != p4_global_exposure_policy_.task_mode)
       return finish(false, P4PreparedCurveFailure::IDENTITY,
                     "p4_publication_task_mode_mismatch");
@@ -8782,6 +8713,12 @@ namespace ego_planner
          !normal_execution))
       return finish(false, P4PreparedCurveFailure::GNSS_RISK,
                     "p4_publication_execution_mode_not_authorized");
+    if (certificate.task_mode ==
+            iap::GlobalNavigationTaskMode::STRICT_GLOBAL &&
+        (!certificate.global_exposure_within_diagnostic_limits ||
+         p4_global_exposure_ledger_.state().budget_exhausted))
+      return finish(false, P4PreparedCurveFailure::EXPOSURE_BUDGET,
+                    "p4_publication_exposure_budget_exhausted");
     if (certificate.trajectory_assurance_hash.empty() ||
         certificate.local_motion_certificate_hash.empty())
       return finish(false, P4PreparedCurveFailure::IDENTITY,
@@ -9110,10 +9047,6 @@ namespace ego_planner
             std::chrono::steady_clock::now() - risk_started).count();
     const bool global_evidence_degradable =
         p4GlobalEvidenceFailureWhitelisted(risk_result, points.size());
-    const bool global_only_degradation =
-        p4_global_exposure_policy_.task_mode ==
-            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-        global_evidence_degradable;
     if ((!risk_result.complete && !global_evidence_degradable) ||
         risk_result.combined_snapshot_identity !=
             request.combined_snapshot_identity ||
@@ -9134,8 +9067,6 @@ namespace ego_planner
     assurance.global_samples = iap::globalNavigationSamplesFromForwardRisk(
         risk_result.points, times, execution->risk_policy.alert_limit_h_m,
         execution->risk_policy.alert_limit_v_m);
-    assurance.conservative_incomplete_global_navigation =
-        global_only_degradation && !risk_result.complete;
     assurance.committed_duration_s = times.empty()
         ? std::numeric_limits<double>::quiet_NaN() : times.back();
     assurance.global_evidence_identity = identity;
@@ -11415,7 +11346,6 @@ namespace ego_planner
       }
       std::vector<iap::GlobalNavigationExposureSample>
           parent_bridge_global_samples;
-      bool parent_bridge_global_degraded = false;
       std::string continuous_exposure_identity = request_identity;
       if (!parent_bridge_points.empty())
       {
@@ -11444,10 +11374,6 @@ namespace ego_planner
             execution->forward_risk_batch(bridge_request);
         const bool bridge_degradable = p4GlobalEvidenceFailureWhitelisted(
             bridge_result, parent_bridge_points.size());
-        parent_bridge_global_degraded =
-            p4_global_exposure_policy_.task_mode ==
-                iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-            bridge_degradable && !bridge_result.complete;
         if ((!bridge_result.complete && !bridge_degradable) ||
             bridge_result.combined_snapshot_identity !=
                 bridge_request.combined_snapshot_identity ||
@@ -11508,9 +11434,6 @@ namespace ego_planner
           assurance_request.global_samples.end());
       assurance_request.global_samples =
           std::move(parent_bridge_global_samples);
-      assurance_request.conservative_incomplete_global_navigation =
-          (successor_global_only_degradation && !result.complete) ||
-          parent_bridge_global_degraded;
       assurance_request.committed_duration_s = times.empty()
           ? std::numeric_limits<double>::quiet_NaN()
           : parent_bridge_duration_s +
@@ -11572,7 +11495,9 @@ namespace ego_planner
               "brake-") == 0u
               ? P4SuccessorFailure::BRAKING_CURVE_UNSAFE
               : P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
-        else if (assurance.global.complete && !assurance.global.within_budget)
+        else if (p4_global_exposure_policy_.task_mode ==
+                     iap::GlobalNavigationTaskMode::STRICT_GLOBAL &&
+                 assurance.global.complete && !assurance.global.within_budget)
           assurance_failure =
               P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED;
         return finish(false, "successor_latest_trajectory_assurance_changed:" +
@@ -11607,7 +11532,7 @@ namespace ego_planner
       p4_execution_certificate_.global_exposure_integral_ratio_s =
           p4_direct_risk_evidence_.trajectory_assurance.global.
               exceedance_integral_ratio_s;
-      p4_execution_certificate_.global_exposure_within_budget =
+      p4_execution_certificate_.global_exposure_within_diagnostic_limits =
           p4_direct_risk_evidence_.trajectory_assurance.authorized() &&
           p4_direct_risk_evidence_.trajectory_assurance.global.within_budget;
       p4_execution_certificate_.window_layout_hash =
@@ -13317,8 +13242,6 @@ namespace ego_planner
       const bool runtime_global_evidence_degradable =
           p4GlobalEvidenceFailureWhitelisted(
               result, direct_points.size());
-      const bool runtime_global_only_degradation = runtime_best_effort &&
-          runtime_global_evidence_degradable;
       if ((!result.complete && !runtime_global_evidence_degradable) ||
           result.combined_snapshot_identity !=
               request.combined_snapshot_identity ||
@@ -13350,8 +13273,6 @@ namespace ego_planner
               runtime_policy.alert_limit_h_m,
               runtime_policy.alert_limit_v_m,
               p4_direct_risk_evidence_.nominal_sample_rows);
-      runtime_assurance_request.conservative_incomplete_global_navigation =
-          runtime_global_only_degradation && !result.complete;
       runtime_assurance_request.committed_duration_s = std::max(
           0.0, p4_execution_certificate_.duration_s - current_t);
       runtime_assurance_request.global_evidence_identity = request_identity;
@@ -13518,14 +13439,6 @@ namespace ego_planner
           current_global_ratio_complete = true;
         }
       }
-      if (!current_global_ratio_complete &&
-          runtime_assurance_request.
-              conservative_incomplete_global_navigation &&
-          p4_direct_risk_evidence_.trajectory_assurance.authorized())
-      {
-        current_global_ratio = p4_global_exposure_policy_.maximum_ratio;
-        current_global_ratio_complete = true;
-      }
       p4_global_exposure_ledger_.noteTrajectoryReplacement(
           static_cast<std::uint64_t>(local_data_.traj_id_));
       const std::string episode_identity =
@@ -13538,30 +13451,26 @@ namespace ego_planner
               evaluation_now_s, current_global_ratio, episode_identity);
       if (exposure_ledger_updated)
         p4_global_exposure_last_observation_stamp_s_ = evaluation_now_s;
-      if ((current_global_ratio_complete && !exposure_ledger_updated) ||
-          p4_global_exposure_ledger_.state().budget_exhausted)
+      if (p4_global_exposure_ledger_.state().budget_exhausted)
       {
-        if (p4_global_exposure_ledger_.state().budget_exhausted)
-        {
-          const auto &episode = p4_global_exposure_ledger_.state();
-          iap::GlobalNavigationExposureResult episode_result;
-          episode_result.complete = true;
-          episode_result.normal = false;
-          episode_result.within_budget = false;
-          episode_result.peak_ratio = episode.peak_ratio;
-          episode_result.maximum_continuous_exceedance_s =
-              episode.continuous_exceedance_s;
-          episode_result.exceedance_integral_ratio_s =
-              episode.exceedance_integral_ratio_s;
-          iap::annotateGlobalNavigationBudgetFailures(
-              &episode_result, p4_global_exposure_policy_,
-              episode_before_update.budget_exhausted);
-          populate_global_budget_diagnostics(
-              episode_result, episode_before_update);
-          return activate_failsafe_braking(
-              "runtime_global_navigation_episode_budget_exhausted",
-              current_t);
-        }
+        // Keep the historical episode thresholds as telemetry and routing
+        // evidence. They do not revoke a locally safe MISSION certificate;
+        // STRICT_GLOBAL has already failed through TrajectoryAssurance above.
+        const auto &episode = p4_global_exposure_ledger_.state();
+        iap::GlobalNavigationExposureResult episode_result;
+        episode_result.complete = true;
+        episode_result.normal = false;
+        episode_result.within_budget = false;
+        episode_result.peak_ratio = episode.peak_ratio;
+        episode_result.maximum_continuous_exceedance_s =
+            episode.continuous_exceedance_s;
+        episode_result.exceedance_integral_ratio_s =
+            episode.exceedance_integral_ratio_s;
+        iap::annotateGlobalNavigationBudgetFailures(
+            &episode_result, p4_global_exposure_policy_,
+            episode_before_update.budget_exhausted);
+        populate_global_budget_diagnostics(
+            episode_result, episode_before_update);
       }
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
       p4_runtime_risk_cache_.valid = true;
@@ -15235,11 +15144,6 @@ namespace ego_planner
     int64_t frozen_handoff_start_time_ns =
         frozen_candidate_start_time_ns;
     bool frozen_successor_curve_preparation = false;
-    std::optional<P4MissionExposureDurationBudget>
-        p4_mission_exposure_duration_budget;
-    double p4_exposure_minimum_progress_m =
-        p4_forward_limits_.min_creep_progress_m;
-    double p4_exposure_parent_to_switch_s = 0.0;
     bool p4_selected_candidate_is_degraded = false;
     // This value is part of the immutable parent/child handoff contract.  It
     // must be captured at the same instant as the p/v/a boundary used to
@@ -15538,33 +15442,6 @@ namespace ego_planner
                selected_candidate->mission_degraded_candidate);
           if (p4_selected_candidate_is_degraded)
           {
-            if (!preparing_successor)
-            {
-              p4_mission_exposure_duration_budget =
-                  p4MissionExposureDurationBudget(
-                      p4_global_exposure_policy_,
-                      p4_global_exposure_ledger_.state());
-              if (!p4_mission_exposure_duration_budget->valid)
-              {
-                last_p4_forward_decision_.planning_disposition =
-                    P4PlanningDisposition::HOLD_REQUIRED;
-                last_p4_forward_decision_.selection_authority =
-                    P4ForwardSelectionAuthority::NONE;
-                last_p4_forward_decision_.formal_support = false;
-                last_p4_forward_decision_.reason =
-                    p4_mission_exposure_duration_budget->reason;
-                appendP4ForwardDecision(
-                    last_p4_forward_decision_,
-                    "bounded_actual_duration_budget_invalid",
-                    plannerNow().seconds());
-                record_prepared_curve_failure(
-                    P4PreparedCurveFailure::EXPOSURE_BUDGET,
-                    std::string("bounded_actual_duration_budget_invalid:") +
-                        p4_mission_exposure_duration_budget->reason);
-                continous_failures_count_++;
-                return false;
-              }
-            }
             planning_max_vel = std::min(
                 planning_max_vel,
                 p4_forward_limits_.max_observe_speed_mps);
@@ -15731,17 +15608,6 @@ namespace ego_planner
         start_acc = successor_start_acceleration;
         frozen_parent_switch_elapsed_s =
             p4_successor_schedule_.frozen_parent_switch_elapsed_s;
-        const auto &fixed_guide =
-            p4_successor_schedule_.fixed_bounded_guide;
-        if (fixed_guide.valid &&
-            std::isfinite(fixed_guide.approved_endpoint_station_m) &&
-            std::isfinite(fixed_guide.minimum_progress_m))
-        {
-          p4_exposure_minimum_progress_m = std::max(
-              p4_exposure_minimum_progress_m,
-              fixed_guide.approved_endpoint_station_m +
-                  fixed_guide.minimum_progress_m);
-        }
       }
       else if (has_existing_trajectory &&
           last_activated_execution_instance_id_ ==
@@ -15789,65 +15655,6 @@ namespace ego_planner
             "parent_switch_anchor_unavailable");
         continous_failures_count_++;
         return false;
-      }
-    }
-
-    if (frozen_successor_curve_preparation &&
-        !p4_mission_exposure_duration_budget)
-    {
-      if (p4_selected_candidate_is_degraded)
-      {
-        auto budget = p4MissionExposureDurationBudget(
-            p4_global_exposure_policy_,
-            p4_global_exposure_ledger_.state());
-        const auto &parent_sample = active_trajectory_execution_sample_;
-        const bool parent_sample_matches = parent_sample.valid &&
-            parent_sample.received_from_server &&
-            parent_sample.execution_instance_id ==
-                local_data_.execution_instance_id_ &&
-            parent_sample.trajectory_id == local_data_.traj_id_ &&
-            parent_sample.start_time_ns ==
-                local_data_.start_time_.nanoseconds() &&
-            parent_sample.curve_hash == local_data_.curve_hash_ &&
-            executionFeedbackFresh(
-                parent_sample.receive_steady_ns,
-                kExecutionFeedbackFreshnessTimeoutS);
-        if (!budget.valid || !parent_sample_matches)
-        {
-          record_prepared_curve_failure(
-              parent_sample_matches
-                  ? P4PreparedCurveFailure::EXPOSURE_BUDGET
-                  : P4PreparedCurveFailure::FRESHNESS,
-              parent_sample_matches ? budget.reason :
-                  "successor_parent_execution_sample_unavailable");
-          continous_failures_count_++;
-          return false;
-        }
-        const auto bridge = p4RollingSuccessorExposureBridge(
-            parent_sample.receive_ros_stamp_s,
-            parent_sample.trajectory_elapsed_s,
-            frozen_parent_switch_elapsed_s, local_data_.duration_,
-            p4_global_exposure_last_observation_stamp_s_);
-        if (!bridge.valid)
-        {
-          record_prepared_curve_failure(
-              P4PreparedCurveFailure::FRESHNESS, bridge.reason);
-          continous_failures_count_++;
-          return false;
-        }
-        budget = p4MissionExposureDurationBudgetAfterBridge(
-            budget, bridge.duration_s);
-        if (!budget.valid)
-        {
-          record_prepared_curve_failure(
-              P4PreparedCurveFailure::EXPOSURE_BUDGET, budget.reason);
-          continous_failures_count_++;
-          return false;
-        }
-        p4_exposure_parent_to_switch_s = bridge.duration_s;
-        p4_mission_exposure_duration_budget = budget;
-        planning_max_vel = std::min(
-            planning_max_vel, p4_forward_limits_.max_observe_speed_mps);
       }
     }
 
@@ -17408,92 +17215,6 @@ namespace ego_planner
             "P4 terminal stop retimed final spline from %.3f s to %.3f s",
             terminal.original_duration_s, terminal.final_duration_s);
       }
-      if (p4_mission_exposure_duration_budget)
-      {
-        const auto exposure_fit = fitP4TerminalStopToExposureDuration(
-            &pos, P4TerminalStartState{start_pt, start_vel, start_acc},
-            p4_control_profile_, pp_.feasibility_tolerance_,
-            pp_.ctrl_pt_dist, planning_max_vel,
-            p4_exposure_minimum_progress_m,
-            *p4_mission_exposure_duration_budget);
-        if (!exposure_fit.success)
-        {
-          p4_last_actual_curve_certification_ = {};
-          p4_last_actual_curve_certification_.failure =
-              P4PreparedCurveFailure::EXPOSURE_BUDGET;
-          std::ostringstream detail;
-          detail << exposure_fit.reason << ":minimum_progress_m="
-                 << exposure_fit.minimum_progress_m
-                 << ":minimum_terminal_stop_duration_s="
-                 << exposure_fit.minimum_terminal_stop_duration_s
-                 << ":affordable_duration_s="
-                 << exposure_fit.affordable_duration_s
-                 << ":maximum_ratio=" << exposure_fit.maximum_ratio
-                 << ":continuous_limit_s="
-                 << exposure_fit.continuous_limit_s
-                 << ":integral_limit_ratio_s="
-                 << exposure_fit.integral_limit_ratio_s
-                 << ":required_minimum_integral_ratio_s="
-                 << exposure_fit.required_minimum_integral_ratio_s
-                 << ":actually_consumed_continuous_s="
-                 << p4_global_exposure_ledger_.state().
-                        current_continuous_exceedance_s
-                 << ":actually_consumed_integral_ratio_s="
-                 << p4_global_exposure_ledger_.state().
-                        exceedance_integral_ratio_s
-                 << ":parent_observation_to_switch_s="
-                 << p4_exposure_parent_to_switch_s
-                 << ":child_after_switch_including_terminal_stop_s="
-                 << exposure_fit.minimum_terminal_stop_duration_s
-                 << ":remaining_budget_s="
-                 << p4_mission_exposure_duration_budget->
-                        affordable_duration_s;
-          p4_last_actual_curve_certification_.detail = detail.str();
-          last_p4_forward_decision_.planning_disposition =
-              P4PlanningDisposition::HOLD_REQUIRED;
-          last_p4_forward_decision_.selection_authority =
-              P4ForwardSelectionAuthority::NONE;
-          last_p4_forward_decision_.formal_support = false;
-          last_p4_forward_decision_.reason = detail.str();
-          p4_planning_disposition_ =
-              P4PlanningDisposition::HOLD_REQUIRED;
-          appendP4ForwardDecision(
-              last_p4_forward_decision_,
-              "bounded_actual_duration_rejected", plannerNow().seconds());
-          RCLCPP_WARN(
-              rclcpp::get_logger("ego_planner"),
-              "P4 bounded actual rejected by exposure duration: %s",
-              detail.str().c_str());
-          continous_failures_count_++;
-          return false;
-        }
-        if (exposure_fit.duration_adjusted)
-        {
-          local_target_pt = pos.evaluateDeBoorT(pos.getTimeSum());
-          RCLCPP_INFO(
-              rclcpp::get_logger("ego_planner"),
-              "P4 actual exposure-duration fit progress %.3f->%.3f m "
-              "duration %.3f->%.3f s budget=%.3f s generations=%d",
-              exposure_fit.original_progress_m,
-              exposure_fit.selected_progress_m,
-              exposure_fit.original_duration_s,
-              exposure_fit.final_duration_s,
-              exposure_fit.affordable_duration_s,
-              exposure_fit.generation_count);
-          RCLCPP_INFO(
-              rclcpp::get_logger("ego_planner"),
-              "P4 exposure split consumed_continuous=%.3f "
-              "consumed_integral=%.6f parent_to_switch=%.3f "
-              "child_with_stop=%.3f remaining=%.3f",
-              p4_global_exposure_ledger_.state().
-                  current_continuous_exceedance_s,
-              p4_global_exposure_ledger_.state().
-                  exceedance_integral_ratio_s,
-              p4_exposure_parent_to_switch_s,
-              exposure_fit.final_duration_s,
-              p4_mission_exposure_duration_budget->affordable_duration_s);
-        }
-      }
       const auto final_limits = pos.checkDerivativeLimits(
           p4_control_profile_, pp_.feasibility_tolerance_);
       if (!final_limits.valid || !final_limits.velocity_ok ||
@@ -18156,7 +17877,9 @@ namespace ego_planner
               : P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
           prepared.assurance.detail = assurance.local.reason;
         }
-        else if (assurance.global.complete &&
+        else if (p4_global_exposure_policy_.task_mode ==
+                     iap::GlobalNavigationTaskMode::STRICT_GLOBAL &&
+                 assurance.global.complete &&
                  !assurance.global.within_budget)
         {
           prepared.assurance.failure =

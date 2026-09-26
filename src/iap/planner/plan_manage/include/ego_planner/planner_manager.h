@@ -349,7 +349,9 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN();
     double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
     double global_exposure_integral_ratio_s = 0.0;
-    bool global_exposure_within_budget = false;
+    // Diagnostic threshold result. MISSION authorization must not depend on
+    // this value; STRICT_GLOBAL publication retains its strict GNSS gate.
+    bool global_exposure_within_diagnostic_limits = false;
     // Immutable successor geometry captured with the execution certificate.
     // Runtime planning must not reconstruct this from a later decision row.
     uint64_t successor_channel_id = 0;

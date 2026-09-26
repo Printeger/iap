@@ -617,10 +617,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluate(
       !context.direct_risk->trajectory_assurance.certificate_hash.empty() &&
       context.direct_risk->trajectory_assurance.local.status ==
           iap::LocalMotionAssuranceStatus::SAFE &&
-      (context.direct_risk->trajectory_assurance.mode ==
-           iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION ||
-       (context.direct_risk->trajectory_assurance.global.complete &&
-        context.direct_risk->trajectory_assurance.global.within_budget)) &&
       context.direct_risk->execution_snapshot &&
       context.direct_risk->execution_snapshot->localFreshAt(context.now_s);
   // The legacy current gate mixes global navigation quality with local SLAM
@@ -1074,9 +1070,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   const bool direct_evidence_valid = direct_evidence &&
       // MISSION_DEGRADED_EXECUTION deliberately preserves the provider's
       // truthful top-level `complete=false` when every missing row is a typed
-      // global-navigation failure covered by the bounded-exposure
-      // certificate.  The per-window/per-point contract above still rejects
-      // computation, identity, local-support, and untyped failures.
+      // global-navigation failure and the unified assurance result retains
+      // MISSION local authority. The per-window/per-point contract above
+      // still rejects computation, identity, local-support, and untyped
+      // failures.
       (direct_evidence->complete || mission_degraded_evidence) &&
       (!mission_degraded_evidence ||
        direct_evidence->task_mode ==
@@ -1136,11 +1133,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       direct_evidence->trajectory_assurance.authorized() &&
       !direct_evidence->trajectory_assurance.certificate_hash.empty() &&
       direct_evidence->trajectory_assurance.local.status ==
-          iap::LocalMotionAssuranceStatus::SAFE &&
-      (direct_evidence->trajectory_assurance.mode ==
-           iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION ||
-       (direct_evidence->trajectory_assurance.global.complete &&
-        direct_evidence->trajectory_assurance.global.within_budget));
+          iap::LocalMotionAssuranceStatus::SAFE;
   const bool controlled_degraded = trajectory_assurance_valid &&
       (direct_evidence->trajectory_assurance.mode ==
            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION ||

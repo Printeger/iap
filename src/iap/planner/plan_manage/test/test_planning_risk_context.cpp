@@ -177,7 +177,6 @@ iap::TrajectoryAssuranceRequest locallySafeIncompleteRequest(
   request.global_samples = {
       {0.0, NAN, NAN, 20.0, 40.0, false},
       {duration_s, NAN, NAN, 20.0, 40.0, false}};
-  request.conservative_incomplete_global_navigation = true;
   request.committed_duration_s = duration_s;
   request.global_evidence_identity = identity;
   request.local_evidence.complete = true;
@@ -284,370 +283,6 @@ TEST(P4ForwardSeedTiming,
       0.6, 1.0e-12);
 }
 
-TEST(P4ExposureDurationSeam,
-     DistanceProxyWouldAcceptButActualDurationExceedsBudget)
-{
-  ego_planner::P4ForwardLimits limits;
-  limits.min_creep_progress_m = 0.25;
-  limits.max_observe_speed_mps = 0.5;
-  ego_planner::P4BoundedExecutionGuideInput bounded_input;
-  bounded_input.frozen_guide = {
-      Eigen::Vector3d(0.0, 0.0, 1.5),
-      Eigen::Vector3d(2.0, 0.0, 1.5)};
-  bounded_input.start_position = bounded_input.frozen_guide.front();
-  bounded_input.start_velocity.setZero();
-  bounded_input.start_acceleration.setZero();
-  bounded_input.decision_horizon_m = 2.0;
-  bounded_input.local_support_frontier_m = 2.0;
-  const double affordable_duration_s = 0.5;
-  const double legacy_distance_proxy_m =
-      limits.max_observe_speed_mps * affordable_duration_s;
-  bounded_input.limits = limits;
-
-  const auto bounded = ego_planner::p4BoundExecutionGuide(bounded_input);
-  ASSERT_TRUE(bounded.valid) << bounded.reason;
-  ASSERT_GT(bounded.target_station_m, legacy_distance_proxy_m);
-
-  std::vector<Eigen::Vector3d> samples;
-  for (int index = 0; index <= 6; ++index)
-    samples.push_back(bounded.guide.front() +
-        static_cast<double>(index) / 6.0 *
-            (bounded.guide.back() - bounded.guide.front()));
-  const std::vector<Eigen::Vector3d> derivatives{
-      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
-  const double interval_s = ego_planner::p4ForwardSeedTimeInterval(
-      bounded.target_station_m, 0.4, limits.max_observe_speed_mps);
-  Eigen::MatrixXd control_points;
-  ego_planner::UniformBspline::parameterizeToBspline(
-      interval_s, samples, derivatives, control_points);
-  ASSERT_EQ(control_points.rows(), 3);
-  ASSERT_GT(control_points.cols(), 3);
-  ego_planner::UniformBspline actual(control_points, 3, interval_s);
-  ego_planner::P4ControlCapabilityProfile profile;
-  profile.maximum_velocity_mps = Eigen::Vector3d::Constant(2.0);
-  profile.maximum_acceleration_mps2 = Eigen::Vector3d::Constant(3.0);
-  profile.maximum_jerk_mps3 = Eigen::Vector3d::Constant(4.0);
-  profile.position_tracking_bound_m = Eigen::Vector3d::Constant(0.125);
-  profile.velocity_tracking_bound_mps = Eigen::Vector3d::Constant(0.25);
-  profile.controller_identity = "unit-controller";
-  profile.simulator_identity = "unit-simulator";
-  profile.code_version = "unit-code";
-  const auto terminal = ego_planner::imposeP4TerminalStop(
-      &actual,
-      {bounded_input.start_position, bounded_input.start_velocity,
-       bounded_input.start_acceleration},
-      profile, 0.05);
-  ASSERT_TRUE(terminal.success) << terminal.reason;
-
-  iap::GlobalNavigationExposurePolicy policy;
-  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  policy.maximum_ratio = 1.05;
-  policy.maximum_continuous_exceedance_s = 1.0;
-  policy.maximum_exceedance_integral_ratio_s = 0.025;
-  const auto budget = ego_planner::p4MissionExposureDurationBudget(
-      policy, iap::GlobalNavigationEpisodeState{});
-  auto fitted = actual;
-  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
-      &fitted,
-      {bounded_input.start_position, bounded_input.start_velocity,
-       bounded_input.start_acceleration},
-      profile, 0.05, 0.4, limits.max_observe_speed_mps,
-      0.237, budget);
-
-  iap::TrajectoryAssuranceRequest request;
-  request.global_samples = {
-      {0.0, NAN, NAN, 20.0, 40.0, false},
-      {actual.getTimeSum(), NAN, NAN, 20.0, 40.0, false}};
-  request.conservative_incomplete_global_navigation = true;
-  request.committed_duration_s = actual.getTimeSum();
-  request.global_evidence_identity = "distance-proxy-red";
-  request.local_evidence.complete = true;
-  request.local_evidence.support_fresh = true;
-  request.local_evidence.registration_health_valid = true;
-  request.local_evidence.icp_degenerate = false;
-  request.local_evidence.icp_rmse_m = 0.01;
-  request.local_evidence.icp_gamma = 1.0;
-  request.local_evidence.certified_empty_clearance_m = 5.0;
-  request.local_evidence.identity = "local-clear";
-  iap::LocalMotionCurve nominal;
-  nominal.curve_id = "nominal";
-  constexpr int kSampleCount = 40;
-  for (int index = 0; index <= kSampleCount; ++index)
-  {
-    const double time_s = actual.getTimeSum() *
-        static_cast<double>(index) / kSampleCount;
-    nominal.samples.push_back(
-        {time_s, actual.evaluateDeBoorT(time_s), 0.05});
-  }
-  auto braking = nominal;
-  braking.curve_id = "brake";
-  braking.braking_curve = true;
-  request.local_curves = {nominal, braking};
-  request.certified_braking_available = true;
-  const auto assurance = iap::TrajectoryAssurance(policy).evaluate(request);
-
-  ASSERT_GT(actual.getTimeSum(), affordable_duration_s);
-  ASSERT_EQ(assurance.local.status, iap::LocalMotionAssuranceStatus::SAFE)
-      << assurance.local.reason;
-  ASSERT_FALSE(assurance.authorized());
-  ASSERT_EQ(assurance.reason,
-            "global_navigation_exposure_budget_exhausted");
-  EXPECT_FALSE(fit.success);
-  EXPECT_EQ(fit.failure,
-            ego_planner::P4ExposureDurationFailure::POLICY_INCOMPATIBLE);
-  EXPECT_EQ(fit.reason,
-            "mission_exposure_policy_incompatible_with_minimum_terminal_stop")
-      << "actual_progress=" << fit.original_progress_m;
-  EXPECT_GT(fit.minimum_terminal_stop_duration_s,
-            budget.full_fresh_affordable_duration_s);
-}
-
-TEST(P4ExposureDurationSeam,
-     MissionBoundedActualFitsRealExposureDuration)
-{
-  ego_planner::P4ForwardLimits limits;
-  limits.min_creep_progress_m = 0.25;
-  limits.max_observe_speed_mps = 0.5;
-  ego_planner::P4BoundedExecutionGuideInput bounded_input;
-  bounded_input.frozen_guide = {
-      Eigen::Vector3d(0.0, 0.0, 1.5),
-      Eigen::Vector3d(4.0, 0.0, 1.5)};
-  bounded_input.start_position = bounded_input.frozen_guide.front();
-  bounded_input.start_velocity.setZero();
-  bounded_input.start_acceleration.setZero();
-  bounded_input.decision_horizon_m = 4.0;
-  bounded_input.local_support_frontier_m = 4.0;
-  bounded_input.limits = limits;
-  const auto bounded = ego_planner::p4BoundExecutionGuide(bounded_input);
-  ASSERT_TRUE(bounded.valid) << bounded.reason;
-  ASSERT_NEAR(
-      bounded.target_station_m,
-      4.0 - ego_planner::p4StoppingDistance(0.0, limits), 1.0e-12);
-  ASSERT_GT(bounded.target_station_m, 1.25);
-
-  std::vector<Eigen::Vector3d> samples;
-  for (int index = 0; index <= 6; ++index)
-    samples.push_back(bounded.guide.front() +
-        static_cast<double>(index) / 6.0 *
-            (bounded.guide.back() - bounded.guide.front()));
-  const std::vector<Eigen::Vector3d> derivatives{
-      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-      Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
-  const double interval_s = ego_planner::p4ForwardSeedTimeInterval(
-      bounded.target_station_m, 0.4, limits.max_observe_speed_mps);
-  Eigen::MatrixXd control_points;
-  ego_planner::UniformBspline::parameterizeToBspline(
-      interval_s, samples, derivatives, control_points);
-  ego_planner::UniformBspline actual(control_points, 3, interval_s);
-  const auto profile = missionExposureControlProfile();
-  const auto terminal = ego_planner::imposeP4TerminalStop(
-      &actual,
-      {bounded_input.start_position, bounded_input.start_velocity,
-       bounded_input.start_acceleration},
-      profile, 0.05);
-  ASSERT_TRUE(terminal.success) << terminal.reason;
-
-  iap::GlobalNavigationExposurePolicy policy;
-  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  policy.maximum_ratio = 1.05;
-  policy.maximum_continuous_exceedance_s = 2.3;
-  policy.maximum_exceedance_integral_ratio_s = 0.115;
-  const auto budget = ego_planner::p4MissionExposureDurationBudget(
-      policy, iap::GlobalNavigationEpisodeState{});
-  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
-      &actual,
-      {bounded_input.start_position, bounded_input.start_velocity,
-       bounded_input.start_acceleration},
-      profile, 0.05, 0.4, limits.max_observe_speed_mps,
-      limits.min_creep_progress_m, budget);
-
-  ASSERT_TRUE(fit.success) << fit.reason
-      << " T_min=" << fit.minimum_terminal_stop_duration_s
-      << " affordable=" << fit.affordable_duration_s;
-  RecordProperty("minimum_terminal_stop_duration_s",
-                 fit.minimum_terminal_stop_duration_s);
-  RecordProperty("required_minimum_integral_ratio_s",
-                 fit.required_minimum_integral_ratio_s);
-  EXPECT_TRUE(fit.duration_adjusted);
-  EXPECT_GE(fit.selected_progress_m, limits.min_creep_progress_m);
-  EXPECT_LE(actual.getTimeSum(), budget.affordable_duration_s + 1.0e-9);
-  const double duration_s = actual.getTimeSum();
-  EXPECT_LE(actual.getDerivative().evaluateDeBoorT(duration_s).norm(),
-            1.0e-9);
-  EXPECT_LE(actual.getDerivative().getDerivative()
-                .evaluateDeBoorT(duration_s).norm(), 1.0e-8);
-
-  auto request = locallySafeIncompleteRequest(
-      actual, "mission-duration-fit");
-  const auto assurance = iap::TrajectoryAssurance(policy).evaluate(request);
-  ASSERT_TRUE(assurance.authorized()) << assurance.reason;
-  EXPECT_EQ(assurance.mode,
-            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
-  EXPECT_LE(assurance.global.maximum_continuous_exceedance_s,
-            policy.maximum_continuous_exceedance_s + 1.0e-9);
-  EXPECT_LE(assurance.global.exceedance_integral_ratio_s,
-            policy.maximum_exceedance_integral_ratio_s + 1.0e-9);
-}
-
-TEST(P4ExposureDurationSeam, IncompatiblePolicyReportsTypedFailure)
-{
-  auto actual = makeMovingCurvedP4Trajectory(0.2);
-  const auto profile = missionExposureControlProfile();
-  const auto start = terminalStartState(actual);
-  const auto terminal = ego_planner::imposeP4TerminalStop(
-      &actual, start, profile, 0.05);
-  ASSERT_TRUE(terminal.success) << terminal.reason;
-  iap::GlobalNavigationExposurePolicy policy;
-  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  policy.maximum_ratio = 1.05;
-  policy.maximum_continuous_exceedance_s = 0.2;
-  policy.maximum_exceedance_integral_ratio_s = 0.01;
-  const auto budget = ego_planner::p4MissionExposureDurationBudget(
-      policy, iap::GlobalNavigationEpisodeState{});
-
-  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
-      &actual, start, profile, 0.05, 0.4, 0.5, 0.25, budget);
-
-  EXPECT_FALSE(fit.success);
-  EXPECT_EQ(fit.failure,
-            ego_planner::P4ExposureDurationFailure::POLICY_INCOMPATIBLE);
-  EXPECT_EQ(fit.reason,
-            "mission_exposure_policy_incompatible_with_minimum_terminal_stop");
-  EXPECT_EQ(fit.generation_count, 1);
-}
-
-TEST(P4ExposureDurationSeam, ExistingEpisodeBudgetIsNotReset)
-{
-  const auto profile = missionExposureControlProfile();
-  ego_planner::UniformBspline actual;
-  const auto terminal = ego_planner::buildP4MinimumTerminalStopFixture(
-      1.25, 0.4, 0.5, profile, 0.05, &actual);
-  ASSERT_TRUE(terminal.success) << terminal.reason;
-  const ego_planner::P4TerminalStartState start;
-  iap::GlobalNavigationExposurePolicy policy;
-  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  policy.maximum_ratio = 1.05;
-  policy.maximum_continuous_exceedance_s = 2.3;
-  policy.maximum_exceedance_integral_ratio_s = 0.115;
-  iap::GlobalNavigationEpisodeState episode;
-  episode.active = true;
-  episode.current_continuous_exceedance_s = 1.0;
-  episode.exceedance_integral_ratio_s = 0.06;
-  const auto budget = ego_planner::p4MissionExposureDurationBudget(
-      policy, episode);
-
-  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
-      &actual, start, profile, 0.05, 0.4, 0.5, 0.25, budget);
-
-  EXPECT_FALSE(fit.success);
-  EXPECT_EQ(fit.failure,
-            ego_planner::P4ExposureDurationFailure::REMAINING_BUDGET);
-  EXPECT_EQ(fit.reason, "mission_exposure_remaining_budget_insufficient");
-  EXPECT_LT(fit.affordable_duration_s,
-            fit.minimum_terminal_stop_duration_s);
-  EXPECT_GT(fit.full_fresh_affordable_duration_s,
-            fit.minimum_terminal_stop_duration_s);
-}
-
-TEST(P4ExposureDurationSeam,
-     ParentBridgeAndChildStopShareTheExistingMissionBudget)
-{
-  iap::GlobalNavigationExposurePolicy policy;
-  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  policy.maximum_ratio = 1.05;
-  policy.maximum_continuous_exceedance_s = 8.0;
-  policy.maximum_exceedance_integral_ratio_s = 0.4;
-
-  iap::GlobalNavigationEpisodeState affordable_episode;
-  affordable_episode.active = true;
-  affordable_episode.current_continuous_exceedance_s = 2.5;
-  affordable_episode.exceedance_integral_ratio_s = 0.125;
-  const auto affordable =
-      ego_planner::p4MissionExposureDurationBudgetAfterBridge(
-          ego_planner::p4MissionExposureDurationBudget(
-              policy, affordable_episode),
-          0.0);
-  ASSERT_TRUE(affordable.valid) << affordable.reason;
-  EXPECT_GE(affordable.affordable_duration_s, 2.3);
-  EXPECT_LE(2.5 + 2.3, policy.maximum_continuous_exceedance_s);
-  EXPECT_LE(0.125 + 0.115,
-            policy.maximum_exceedance_integral_ratio_s);
-
-  iap::GlobalNavigationEpisodeState exhausted_episode;
-  exhausted_episode.active = true;
-  exhausted_episode.current_continuous_exceedance_s = 6.0;
-  exhausted_episode.exceedance_integral_ratio_s = 0.3;
-  const auto exhausted =
-      ego_planner::p4MissionExposureDurationBudgetAfterBridge(
-          ego_planner::p4MissionExposureDurationBudget(
-              policy, exhausted_episode),
-          0.0);
-  ASSERT_TRUE(exhausted.valid) << exhausted.reason;
-  EXPECT_LT(exhausted.affordable_duration_s, 2.3);
-  EXPECT_GT(6.0 + 2.3, policy.maximum_continuous_exceedance_s);
-  EXPECT_GT(0.3 + 0.115,
-            policy.maximum_exceedance_integral_ratio_s);
-
-  const auto with_parent_bridge =
-      ego_planner::p4MissionExposureDurationBudgetAfterBridge(
-          affordable, 0.5);
-  ASSERT_TRUE(with_parent_bridge.valid) << with_parent_bridge.reason;
-  EXPECT_NEAR(with_parent_bridge.affordable_duration_s,
-              affordable.affordable_duration_s - 0.5, 1.0e-12);
-}
-
-TEST(P4ExposureDurationSeam,
-     SuccessorSelectsTheFarthestAffordableStoppedEndpointAfterParentBridge)
-{
-  const auto profile = missionExposureControlProfile();
-  ego_planner::UniformBspline minimum_child;
-  const auto minimum_terminal =
-      ego_planner::buildP4MinimumTerminalStopFixture(
-          1.5, 0.4, 0.5, profile, 0.05, &minimum_child);
-  ASSERT_TRUE(minimum_terminal.success) << minimum_terminal.reason;
-  ego_planner::UniformBspline farthest_child;
-  const auto farthest_terminal =
-      ego_planner::buildP4MinimumTerminalStopFixture(
-          4.0, 0.4, 0.5, profile, 0.05, &farthest_child);
-  ASSERT_TRUE(farthest_terminal.success) << farthest_terminal.reason;
-  ASSERT_GT(farthest_child.getTimeSum(), minimum_child.getTimeSum());
-
-  constexpr double parent_bridge_s = 0.5;
-  const double child_budget_s = 0.5 *
-      (minimum_child.getTimeSum() + farthest_child.getTimeSum());
-  ego_planner::P4MissionExposureDurationBudget before_bridge;
-  before_bridge.valid = true;
-  before_bridge.remaining_continuous_s =
-      child_budget_s + parent_bridge_s;
-  before_bridge.remaining_integral_duration_s =
-      child_budget_s + parent_bridge_s;
-  before_bridge.affordable_duration_s =
-      child_budget_s + parent_bridge_s;
-  before_bridge.full_fresh_affordable_duration_s =
-      child_budget_s + parent_bridge_s;
-  const auto after_bridge =
-      ego_planner::p4MissionExposureDurationBudgetAfterBridge(
-          before_bridge, parent_bridge_s);
-  ASSERT_TRUE(after_bridge.valid) << after_bridge.reason;
-
-  const ego_planner::P4TerminalStartState start;
-  const auto fit = ego_planner::fitP4TerminalStopToExposureDuration(
-      &farthest_child, start, profile, 0.05, 0.4, 0.5, 1.5,
-      after_bridge);
-
-  ASSERT_TRUE(fit.success) << fit.reason;
-  EXPECT_TRUE(fit.duration_adjusted);
-  EXPECT_GE(fit.selected_progress_m, 1.5);
-  EXPECT_LT(fit.selected_progress_m, fit.original_progress_m);
-  EXPECT_LE(farthest_child.getTimeSum(), child_budget_s + 1.0e-9);
-  EXPECT_LE(farthest_child.getDerivative()
-                .evaluateDeBoorT(farthest_child.getTimeSum()).norm(),
-            1.0e-9);
-  EXPECT_LE(farthest_child.getDerivative().getDerivative()
-                .evaluateDeBoorT(farthest_child.getTimeSum()).norm(),
-            1.0e-8);
-}
 
 TEST(P4RollingExposureSeam,
      LatestRunParentBridgeStopsAtFrozenSwitchInsteadOfObsoleteSuffix)
@@ -749,7 +384,7 @@ TEST(P4RollingExposureSeam,
 }
 
 TEST(P4RollingExposureSeam,
-     PriorConsumedPlusBridgePlusChildStillRejectsTrueBudgetExhaustion)
+     PriorObservedPlusBridgePlusChildKeepsMissionLocalAuthority)
 {
   auto trajectory = makeMovingCurvedP4Trajectory(0.2);
   const auto terminal = ego_planner::imposeP4TerminalStop(
@@ -758,7 +393,6 @@ TEST(P4RollingExposureSeam,
   ASSERT_TRUE(terminal.success) << terminal.reason;
   auto request = locallySafeIncompleteRequest(
       trajectory, "rolling-continuous-exposure");
-  request.conservative_incomplete_global_navigation = false;
   request.has_prior_global_episode = true;
   request.prior_global_episode.active = true;
   request.prior_global_episode.peak_ratio = 1.05;
@@ -785,9 +419,11 @@ TEST(P4RollingExposureSeam,
   request.global_samples.back().relative_time_s = 1.2;
   request.committed_duration_s = 1.2;
   const auto continuous = iap::TrajectoryAssurance(policy).evaluate(request);
-  EXPECT_FALSE(continuous.authorized());
+  EXPECT_TRUE(continuous.authorized()) << continuous.reason;
+  EXPECT_EQ(continuous.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_EQ(continuous.reason,
-            "global_navigation_episode_budget_exceeded");
+            "mission_degraded_global_exposure_diagnostic_exceeded");
   EXPECT_TRUE(continuous.global.exceedance_integral_exceeded);
   EXPECT_NEAR(continuous.global.exceedance_integral_ratio_s,
               0.12, 1.0e-12);
@@ -3408,12 +3044,11 @@ TEST(P4PublicationCertificate,
       "p4_publication_execution_deadline_expired");
 
   mutated_certificate = valid_certificate;
-  mutated_certificate.global_exposure_within_budget = false;
+  mutated_certificate.global_exposure_within_diagnostic_limits = false;
   manager.setP4ExecutionCertificateForTest(mutated_certificate);
-  expect_rejected(
-      valid_trajectory, 10.2,
-      ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET,
-      "p4_publication_exposure_budget_exhausted");
+  EXPECT_TRUE(manager.validateP4PublicationCertificate(
+      valid_trajectory, 10.2, &failure, &reason)) << reason;
+  EXPECT_EQ(failure, ego_planner::P4PreparedCurveFailure::NONE);
 
   manager.setP4TaskModeForTest(
       iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
@@ -3439,10 +3074,9 @@ TEST(P4PublicationCertificate,
   manager.setP4ExecutionCertificateForTest(valid_certificate);
   ASSERT_TRUE(manager.updateP4GlobalExposureForTest(
       10.2, 1.06, "post-certificate-exposure"));
-  expect_rejected(
-      valid_trajectory, 10.2,
-      ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET,
-      "p4_publication_exposure_budget_exhausted");
+  EXPECT_TRUE(manager.validateP4PublicationCertificate(
+      valid_trajectory, 10.2, &failure, &reason)) << reason;
+  EXPECT_EQ(failure, ego_planner::P4PreparedCurveFailure::NONE);
 }
 
 TEST(P4ExecutionIntegrityTest,
@@ -5028,7 +4662,7 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_FALSE(marginal_armed.guard_braking_preschedule_requested);
   EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
-            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION);
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_EQ(manager.local_data_.traj_id_, 35);
 
   const auto recovered_marginal_snapshot = makeP4ExecutionSnapshot(
@@ -5080,14 +4714,11 @@ TEST(P4ForwardTerminalLineageTest,
       during_execution_s, commanded_position);
   EXPECT_TRUE(risk_revoke.allowed);
   EXPECT_TRUE(risk_revoke.known_future_risk_unsafe);
-  EXPECT_TRUE(risk_revoke.failsafe_braking_available);
+  EXPECT_FALSE(risk_revoke.failsafe_braking_available);
   EXPECT_FALSE(risk_revoke.failsafe_braking_active);
-  EXPECT_EQ(
-      risk_revoke.reason,
-      "failsafe_braking_scheduled:runtime_trajectory_assurance_rejected:"
-      "global_navigation_exposure_budget_exhausted:safe");
+  EXPECT_EQ(risk_revoke.reason, "runtime_mission_degraded_execution");
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
-            iap::TrajectoryExecutionMode::NORMAL_EXECUTION);
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_EQ(risk_revoke.current_risk_generation,
             unsafe_snapshot->generation_id());
   EXPECT_GT(risk_revoke.current_risk_generation,
@@ -5111,7 +4742,7 @@ TEST(P4ForwardTerminalLineageTest,
       risk_revoke.global_maximum_continuous_exceedance_s));
   EXPECT_TRUE(std::isfinite(
       risk_revoke.global_exceedance_integral_ratio_s));
-  EXPECT_TRUE(manager.pendingP4GuardBrakingCommand().has_value());
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   manager.setPlanningRiskContextForTest(
       snapshot, 10.52, nullptr, directRiskCallback(0.5),
       makeP4ExecutionSnapshot(
@@ -5386,13 +5017,11 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
         return row.at("schema_version") == "p4_execution_event_v11" &&
-            row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
-            row.at("execution_mode") == "NORMAL_EXECUTION" &&
+            row.at("event") == "EXECUTION_ALLOWED" &&
+            row.at("execution_mode") == "MISSION_DEGRADED_EXECUTION" &&
             row.at("task_mode") == "mission_best_effort" &&
             row.at("current_risk_generation") == "2" &&
-            row.at("reason").find(
-                "runtime_trajectory_assurance_rejected") !=
-                std::string::npos &&
+            row.at("reason") == "runtime_mission_degraded_execution" &&
             std::stod(row.at("violation_hpl_m")) >=
                 std::stod(row.at("alert_limit_h_m")) &&
             std::stod(row.at("runtime_global_peak_ratio")) >
@@ -10749,7 +10378,7 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
-     NewSnapshotIdentityReauthorizesExactCurveButRiskChangeRejects)
+     NewSnapshotIdentityReauthorizesExactCurveAndMissionRiskIsDiagnostic)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -10994,19 +10623,17 @@ TEST(P4PreparedSuccessorPolicy,
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy_c, directRiskCallback(1.01),
       bound_execution_c);
-  EXPECT_FALSE(manager.validatePreparedP4SuccessorBeforePublish(
-      incumbent, reauthorization_ros_s, &reason));
-  EXPECT_EQ(reason,
-            "successor_latest_trajectory_assurance_changed:"
-            "global_navigation_exposure_budget_exhausted:safe");
+  EXPECT_TRUE(manager.validatePreparedP4SuccessorBeforePublish(
+      incumbent, reauthorization_ros_s, &reason)) << reason;
+  EXPECT_EQ(reason, "prepared_successor_publish_revalidated");
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
   EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->state,
-            ego_planner::P4SuccessorPreparationState::FAILED);
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleForTest()->complete());
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
 
-  // Reauthorization failure is terminal for this child attempt. The exact
-  // cached curve remains available for diagnostics, but it cannot be queued
-  // and no alternate-channel/full-search attempt is authorized.
+  // The same immutable child remains activatable after the MISSION GNSS
+  // diagnostic changes; its local certificate and parent identity still bind
+  // the handoff.
   auto parent_certificate = manager.p4ExecutionCertificate();
   parent_certificate.valid = true;
   parent_certificate.trajectory_id = incumbent.traj_id_;
@@ -11015,10 +10642,10 @@ TEST(P4PreparedSuccessorPolicy,
       incumbent.position_traj_.getControlPoint());
   manager.local_data_ = incumbent;
   manager.setP4ExecutionCertificateForTest(parent_certificate);
-  EXPECT_FALSE(manager.activatePreparedP4SuccessorBundle(10.15, &reason));
-  EXPECT_EQ(reason, "successor_prepared_bundle_not_due");
-  EXPECT_FALSE(manager.activatingPreparedP4SuccessorBundle());
-  EXPECT_EQ(manager.local_data_.traj_id_, incumbent.traj_id_);
+  EXPECT_TRUE(manager.activatePreparedP4SuccessorBundle(10.15, &reason));
+  EXPECT_EQ(reason, "successor_prepared_bundle_activated");
+  EXPECT_TRUE(manager.activatingPreparedP4SuccessorBundle());
+  EXPECT_EQ(manager.local_data_.traj_id_, 92);
 }
 
 TEST(P4PreparedSuccessorPolicy,

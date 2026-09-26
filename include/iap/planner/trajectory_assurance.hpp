@@ -46,6 +46,8 @@ struct GlobalNavigationExposurePolicy {
 struct GlobalNavigationExposureResult {
   bool complete = false;
   bool normal = false;
+  // Legacy field name retained for CSV/API compatibility. In MISSION this is
+  // only a diagnostic threshold comparison and never motion authority.
   bool within_budget = false;
   bool recovery_predicted = false;
   double peak_ratio = std::numeric_limits<double>::quiet_NaN();
@@ -60,9 +62,8 @@ struct GlobalNavigationExposureResult {
   double duration_budget_utilization = 0.0;
   double integral_budget_utilization = 0.0;
   double maximum_budget_utilization = 0.0;
-  // Structured rejection attribution. These flags are evaluated against the
-  // exact policy used for authorization after any persistent episode state is
-  // folded in; they are diagnostics and do not introduce another gate.
+  // Structured threshold attribution. In STRICT_GLOBAL these can explain a
+  // rejection; in MISSION they are diagnostics/ranking data only.
   bool hard_global_exceedance = false;
   bool peak_ratio_exceeded = false;
   bool continuous_exceedance_exceeded = false;
@@ -108,6 +109,8 @@ globalNavigationSamplesFromForwardRisk(
 struct GlobalNavigationEpisodeState {
   bool valid = true;
   bool active = false;
+  // Legacy compatibility name: diagnostic thresholds were exceeded. This
+  // state does not revoke MISSION motion authority.
   bool budget_exhausted = false;
   double peak_ratio = 0.0;
   // Duration of the currently open r>1 interval.  The public
@@ -350,15 +353,14 @@ class LocalMotionAssurance {
 
 struct TrajectoryAssuranceRequest {
   std::vector<GlobalNavigationExposureSample> global_samples;
-  // A bounded actual may retain locally safe motion when its GNSS-only
-  // evidence is incomplete.  No finite PL is invented: the whole committed
-  // duration is charged at the policy's maximum admissible degraded ratio.
+  // Deprecated compatibility field. Incomplete GNSS remains unknown; this
+  // flag no longer synthesizes a finite ratio or changes authorization.
   bool conservative_incomplete_global_navigation = false;
   double committed_duration_s =
       std::numeric_limits<double>::quiet_NaN();
   std::string global_evidence_identity;
-  // Persistent task-level episode state.  Replanning or changing trajectory
-  // identity may not mint a fresh exposure budget.
+  // Persistent task-level diagnostic episode state. Replanning or changing
+  // trajectory identity must not erase the recorded exposure history.
   bool has_prior_global_episode = false;
   GlobalNavigationEpisodeState prior_global_episode;
   LocalMotionEvidence local_evidence;
@@ -380,6 +382,8 @@ struct TrajectoryAssuranceResult {
   double worst_budget_utilization = std::numeric_limits<double>::infinity();
   double mission_progress_m = 0.0;
   double lidar_observability_improvement = 0.0;
+  // Deprecated telemetry retained for ABI/log compatibility. No synthetic
+  // incomplete-GNSS charge is produced.
   bool conservative_global_charge_applied = false;
   double conservative_global_charge_ratio =
       std::numeric_limits<double>::quiet_NaN();

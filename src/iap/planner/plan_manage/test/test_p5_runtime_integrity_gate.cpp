@@ -1478,13 +1478,13 @@ TEST(P5RuntimeIntegrityGateTest,
   rebuildPointwiseWindowHashes(&direct);
   direct.trajectory_assurance_complete = true;
   direct.trajectory_assurance.mode =
-      iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
-  direct.trajectory_assurance.certificate_hash = "controlled-cert";
+      iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
+  direct.trajectory_assurance.certificate_hash = "mission-cert";
   direct.trajectory_assurance.local.status =
       iap::LocalMotionAssuranceStatus::SAFE;
   direct.trajectory_assurance.local.certificate_hash = "local-cert";
   direct.trajectory_assurance.global.complete = true;
-  direct.trajectory_assurance.global.within_budget = true;
+  direct.trajectory_assurance.global.within_budget = false;
 
   auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
   execution->execution_snapshot_id = 44u;

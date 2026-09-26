@@ -131,10 +131,11 @@
   the configured freshness window. Unsafe or invalid newer causal samples must
   not be hidden by older valid samples.
 - P4 is the sole pre-execution authority for the actual B-spline, its local
-  envelope, braking library, GNSS evidence and exposure. Publication only
+  envelope, braking library and task-mode GNSS contract. Publication only
   validates the resulting `P4ExecutionCertificate` identity, freshness,
-  deadline, task/execution mode and remaining exposure; it never replays the
-  direct batch. P5 starts only after a full-identity `ACTIVATED` acknowledgement
+  deadline and task/execution mode; it never replays the direct batch or adds
+  a second MISSION exposure gate. P5 starts only after a full-identity
+  `ACTIVATED` acknowledgement
   and evaluates newly reachable runtime evidence. Ordinary RiskGrid PL is
   never a publication or P5 authority.
 - Runtime execution feedback is matched by the complete active execution
@@ -258,7 +259,7 @@
   segment. Whole-guide `route_evidence_complete` remains a ranking diagnostic:
   incomplete evidence on an uncommitted route suffix does not override an
   actual bundle already authorized by P4 `TrajectoryAssurance` under the
-  bounded MISSION exposure contract.
+  MISSION local-motion contract.
 - `PENDING` and `RATE_LIMITED` are typed worker results. If the committed
   certificate still passes identity, tracking, collision and runtime Integrity
   checks, the FSM continues it without retrying initialization or changing its
@@ -279,7 +280,7 @@
   certification while the parent keeps executing.
   The lane is single-flight/latest-wins and bypasses ordinary P4 rate limiting.
   It consumes one already-generated frozen guide. Any geometry, clearance,
-  corridor, GNSS, support, freshness or budget failure terminates that
+  corridor, STRICT GNSS, support or freshness failure terminates that
   child attempt; it does not launch topology/A*, switch channels or regenerate
   the immutable child. The parent retains authority and stops on its certified
   curve.
@@ -322,8 +323,8 @@
   bypasses the P1/RiskGrid planning-context publish gate; RiskGrid remains a
   search hint rather than a second execution veto.
   This exact-curve reauthorization also runs when the snapshot ID is unchanged,
-  because evaluation time and the already-consumed global-exposure episode can
-  advance without changing the sensor tuple. Runtime P5 begins only after the
+  because local freshness and GNSS diagnostics can advance without changing
+  the sensor tuple. Runtime P5 begins only after the
   child is activated.
 - A successor is computed against one immutable execution snapshot. At the
   serialization boundary, a newer snapshot ID by itself is not a rejection:
@@ -333,8 +334,8 @@
   is left to the runtime watchdog. Rejections name the changed semantic source
   (`direct_risk`, `support`, `Integrity/GNSS`, collision, incomplete query or
   curve identity), not a generic authority-ID mismatch.
-- Successor failures are typed as GNSS limit/exposure, support or individual
-  input staleness, local clearance, braking, direct-query timeout,
+- Successor failures are typed as STRICT GNSS limit/exposure, support or
+  individual input staleness, local clearance, braking, direct-query timeout,
   latest-snapshot semantic change, collision, dynamics, insufficient progress,
   compute budget, missed deadline or invalid corridor. A missed deadline never
   extends the parent curve; it reaches its approved stopped endpoint.
@@ -344,9 +345,11 @@
   checks every nominal, braking and dual-transition sample at its actual
   arrival time. Local motion and braking must be entirely safe. Exact GNSS
   evidence grants `NORMAL_EXECUTION`; in `MISSION_BEST_EFFORT`, a bounded
-  actual may instead receive degraded authority while it remains inside the
-  hard exposure budget. Only that complete actual bundle is promoted
-  atomically to `RISK_SELECTED`. The first failure retains curve position, arc length,
+  actual instead receives degraded authority when its local motion and
+  braking proof are valid, even when GNSS exposure diagnostics exceed their
+  configured comparison thresholds. Only that complete actual bundle is
+  promoted atomically to `RISK_SELECTED`. The first failure retains curve
+  position, arc length,
   arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
   growth. A braking-branch failure is projected to its anchor station on the
   nominal B-spline; that projection is diagnostic and must not sum braking
@@ -485,8 +488,8 @@
   repeated watchdog reads and snapshot-ID-only changes do not count. A newer
   complete SAFE tuple disarms without changing trajectory identity. Armed
   motion cannot pass the reserved guard anchor. Larger/current violations,
-  insufficient stopping margin, UNKNOWN/over-budget data, stale inputs,
-  collision, hard occlusion, tracking loss or current Integrity failure are
+  insufficient stopping margin, stale/unknown local inputs, STRICT GNSS
+  failure, collision, hard occlusion, tracking loss or current Integrity failure are
   HARD and schedule braking immediately. Once a brake is scheduled for a HARD
   condition or actually activated, it cannot be canceled.
 - Candidate mutation, P4 certification and publication form one execution-
@@ -557,20 +560,17 @@
 - Execution authorization separates task-global navigation quality from local
   obstacle-relative motion safety. Direct GNSS ForwardRisk samples of the
   exact nominal B-spline define global exposure; fused PL and LiDAR FIM do not
-  replace this channel. The default policy permits
-  `CONTROLLED_DEGRADED_EXECUTION` only when peak ratio is at most `1.05`, one
-  continuous exceedance is at most `2.3 s`, the positive exceedance integral
-  is at most `0.115 ratio*s`, and either recovery is predicted within `2.0 s`
-  or a currently certified braking curve remains available. The public task
-  contract is `p4.assurance.task_mode`: `STRICT_GLOBAL` retains strict
-  `GNSS PL < AL`, while `MISSION_BEST_EFFORT` permits only degraded motion
-  that remains inside the same hard exposure budget. Whitelisted incomplete
-  GNSS evidence never receives a fabricated finite PL; it charges the entire
-  bounded segment at `maximum_ratio`, with duplicate semantic evidence
-  identities charged once. Budget exhaustion rejects a new bundle and makes
-  runtime execution take its already certified brake. It is never reported as
-  integrity satisfaction. An exposure episode survives trajectory ID changes
-  and ends only after `0.5 s` continuously below `0.95*AL`.
+  replace this channel. The public task contract is
+  `p4.assurance.task_mode`: `STRICT_GLOBAL` retains strict `GNSS PL < AL` and
+  fails closed on incomplete global evidence. In `MISSION_BEST_EFFORT`, local
+  clearance, fresh registered support, complete nominal/braking curves,
+  identity and a usable certified brake are the motion gates. Peak ratio,
+  continuous exceedance, positive integral, recovery and persistent episode
+  thresholds remain truthful diagnostics and route-ordering inputs, but do
+  not reject publication, successor activation or runtime continuation.
+  Incomplete GNSS remains incomplete/unknown with its typed cause; no finite
+  PL or conservative synthetic ratio is invented. `MISSION_DEGRADED_EXECUTION`
+  does not claim global integrity.
 - Every immediate actual trajectory is bounded before B-spline resampling.
   Route generation, channel comparison and topology freezing consume the full
   decision horizon; only the selected actual execution seed is cropped.
@@ -579,36 +579,17 @@
   that still reserves the complete current `p/v/a` stopping distance. The
   successor switch cadence (normally at most `2.5 s`) never caps that endpoint,
   and required successor progress is only an acceptance floor, not a target
-  distance. Exposure never becomes a distance proxy.
-  For a degraded MISSION candidate, the generator computes remaining exposure
-  in seconds, subtracts the parent interval from the latest charged observation
-  to the fixed switch, generates the child from the true switch `p/v/a`,
-  applies the production terminal-stop time law, and uses a fixed 16-step
-  monotone endpoint search until the real child duration fits that same time
-  budget. The lower endpoint bound must still extend the certified parent by
-  the required progress and retain the complete stop. Every regenerated curve
-  receives new control points, knots and identity before collision, clearance,
-  dynamics, braking and P4 certification. The full guide remains only a
-  channel/successor reference and cannot obtain execution authority.
-- The MISSION exposure values are an explicit risk-acceptance policy, not PL
-  fabrication or permission to treat unknown as free. The zero-speed
-  production fixture for `min_creep_progress_m=0.25` requires
-  `T_min=2.280084270 s` and `0.114004213 ratio*s` at ratio `1.05`; defaults
-  `2.3 s` and `0.115 ratio*s` add only numerical tolerance. Startup rejects an
-  incompatible MISSION configuration with the typed detail
-  `mission_exposure_policy_incompatible_with_minimum_terminal_stop`.
+  distance. Exposure never becomes a distance proxy or an endpoint-duration
+  constraint. Every generated curve receives new control points, knots and
+  identity before collision, clearance, dynamics, braking and P4
+  certification. The full guide remains only a channel/successor reference
+  and cannot obtain execution authority.
+- The exposure parameters, including the dense-forest profile's `1.05`,
+  `8.0 s` and `0.4 ratio*s`, are diagnostic comparison thresholds. The
+  persistent episode ledger survives trajectory replacement so logs and route
+  comparisons remain continuous, but its legacy `budget_exhausted` field is
+  not a consumable MISSION balance and has no motion authority.
   `STRICT_GLOBAL` is unchanged.
-- The `icra_dense_forest_four_fork_v2` task profile has a longer, internally
-  consistent MISSION horizon while retaining `maximum_ratio=1.05`. Two
-  `2.5 s` bounded parent executions, the `2.280084270 s` minimum terminal
-  stop, a `0.2 s` switch margin, and a `0.2 s` scheduler guard total
-  `7.680084270 s`; the task rounds this upward to a continuous limit of
-  `8.0 s` and therefore sets the matching worst-case integral limit to
-  `(1.05 - 1.0) * 8.0 = 0.4 ratio*s`. This is a task-specific profile, not a
-  change to the general defaults. Actual exposure, parent-to-switch exposure,
-  and child-after-switch exposure including its terminal stop all consume the
-  same persistent mission ledger; trajectory replacement, guard handoff, ACK,
-  and successor activation do not reset it.
 - A received GNSS epoch certifies reception only at the exact receiver
   reference; no measured-support radius grants future candidate positions
   synthetic map support. Every candidate LOS records its sample count,
@@ -641,14 +622,15 @@
   once. In `STRICT_GLOBAL`, incomplete evidence on an unselected alternative
   does not block another complete safe route; the selected route itself
   remains fail-closed.
-- A runtime stop attributed to global-navigation exposure must report the
-  decision-time decomposition, not only the first point above AL. The
-  execution event records the evaluated peak ratio, maximum continuous
+- A STRICT_GLOBAL runtime stop attributed to global-navigation failure must
+  report the decision-time decomposition, not only the first point above AL.
+  The execution event records the evaluated peak ratio, maximum continuous
   exceedance, positive exceedance integral, their exact policy limits, the
   carried episode state, and independent flags for hard-global, peak,
   duration, integral, and already-exhausted-episode causes. The first unsafe
   point remains spatial evidence, but it is not by itself the explanation for
-  an aggregate-budget stop. Repeated watchdog reads do not consume budget.
+  a strict stop. In MISSION these same fields are diagnostic and cannot name a
+  stop cause. Repeated watchdog reads do not duplicate episode observations.
 - `LocalMotionAssurance` independently checks the exact nominal curve and all
   reachable braking curves at no more than `0.2 s` spacing. Its directional
   margin subtracts vehicle radius, measured tracking bound, a deployment-
@@ -750,9 +732,9 @@
   only from post-activation facts. A newer-snapshot successor must rebuild that
   complete P4 certificate; its execution mode, assurance hash, and snapshot
   identity are atomically carried into publication. A GNSS-only recheck
-  cannot reuse the old local-motion hash. New route
-  authorization consumes the active episode's remaining duration/integral
-  budget before publication, not only on the next runtime watchdog tick.
+  cannot reuse the old local-motion hash. New MISSION route authorization
+  retains the active episode metrics for ordering and telemetry, but does not
+  consume a remaining duration/integral balance.
 - `p4.debug_generation_probe_enable` is diagnostic-only and defaults false.
   For two adjacent snapshots that are both fresh at one evaluation time, it
   holds approved-trajectory positions and arrival times fixed and evaluates

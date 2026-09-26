@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(mission-exposure-authority): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — make local motion and certified braking the MISSION execution
+  gates while retaining GNSS peak, duration, integral, unknown and episode
+  metrics for truthful diagnostics and route ordering. Remove the
+  exposure-duration endpoint fitter and its launch-configuration rejection;
+  publication, prepared-successor reauthorization, runtime manager and P5 no
+  longer reject or brake a locally safe MISSION curve because legacy exposure
+  thresholds are exhausted. Incomplete GNSS remains incomplete and no finite
+  PL or synthetic conservative ratio is invented. `STRICT_GLOBAL`, local
+  clearance, support/freshness, identity, dynamics and braking gates are
+  unchanged. This policy supersedes earlier Unreleased entries that described
+  the MISSION exposure ledger as a hard consumable motion budget.
 - fix(active-feedback-callback-skew): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — let a fresh controller trace for the exact active execution
   identity supply elapsed time and commanded `p/v/a` while PositionCommand

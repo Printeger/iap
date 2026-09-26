@@ -64,8 +64,9 @@ For each candidate trajectory τ:
   RiskGrid. RiskGrid is a bounded, discard-on-timeout background search
   product; its delay or absence is not execution revocation evidence. A cached
   direct batch is reusable only for the same curve and execution snapshot.
-  Publication validates the P4 certificate identity, freshness, deadline,
-  mode and exposure without replaying that batch. P5 begins after ACTIVATED
+  Publication validates the P4 certificate identity, freshness, deadline and
+  task/execution mode without replaying that batch or adding another MISSION
+  exposure gate. P5 begins after ACTIVATED
   and monitors current-time evidence. The execution snapshot path is
   occupancy-generation-driven, single-slot/latest-wins; its 50 ms timer is
   only a missed-notification watchdog. Commit callbacks execute outside the
@@ -192,8 +193,9 @@ For each candidate trajectory τ:
   P5 state. At handoff the planner does not rerun route search, A* or
   optimization; it only reauthorizes the exact cached curve and braking
   evidence once against the latest execution snapshot. That reauthorization
-  is mandatory even when the snapshot ID is unchanged, so elapsed exposure
-  budget. Publication then validates the rebound P4 certificate once.
+  is mandatory even when the snapshot ID is unchanged because local freshness
+  and GNSS diagnostics can advance. Publication then validates the rebound P4
+  certificate once.
   Shared-corridor risk must not worsen and the extension is independently
   certified. The successor is published
   only if parent identity, switch window, position/velocity/acceleration
@@ -223,8 +225,8 @@ For each candidate trajectory τ:
   namespaced per drone;
   three distinct semantic tuples confirm braking, while an updated SAFE tuple
   disarms without changing the original trajectory. A larger/current
-  exceedance, stale/unknown/over-budget input, inadequate stopping margin,
-  current Integrity failure, collision or tracking loss is immediately HARD.
+  exceedance in STRICT_GLOBAL, stale/unknown local input, inadequate stopping
+  margin, current Integrity failure, collision or tracking loss is immediately HARD.
   HARD-scheduled and activated braking cannot be canceled. Ordinary replanning
   is suspended while that braking certificate is active, so worker/generation
   churn cannot relabel the stopping curve. Planner-side time alone cannot
@@ -255,25 +257,24 @@ For each candidate trajectory τ:
 - Global GNSS degradation and local collision avoidance are separate
   contracts. GNSS advisory is evaluated on the actual curve as task-position
   exposure (peak, continuous duration, positive integral, 0.5 s rolling worst
-  section, time-weighted CVaR90 and predicted recovery). The default controlled
-  budget is `r<=1.05`, `continuous<=2.3 s`, `integral<=0.115 ratio*s`, with
-  recovery within `2.0 s` or an immediately usable certified brake. A
-  `STRICT_GLOBAL` mission never uses this exception. The default
-  `MISSION_BEST_EFFORT` mode uses the bounds to classify and order candidates;
-  whitelisted globally incomplete evidence becomes
-  `MISSION_DEGRADED_EXECUTION` only while local motion, certified braking and
-  the exposure budget all remain valid. It does not claim global integrity.
-  Replanning cannot reset an
-  active episode; `0.5 s` below `0.95*AL` is required to end it.
+  section, time-weighted CVaR90 and predicted recovery). The comparison
+  thresholds are `r<=1.05`, `continuous<=2.3 s`,
+  `integral<=0.115 ratio*s`; the dense-forest profile uses `8.0 s` and
+  `0.4 ratio*s`. `STRICT_GLOBAL` still requires complete `PL < AL` evidence.
+  `MISSION_BEST_EFFORT` uses exposure and recovery only to classify, record
+  and order candidates. Locally safe motion with a usable certified brake is
+  `MISSION_DEGRADED_EXECUTION` even when those diagnostic thresholds are
+  exceeded or GNSS is incomplete. It does not claim global integrity.
+  Replanning does not reset the diagnostic episode; `0.5 s` below `0.95*AL`
+  ends it.
   Predicted recovery uses that same sustained `0.95*AL` condition; merely
-  crossing back below AL for one sample is not recovery. Candidate admission
-  includes the already-consumed episode budget before a replacement publishes.
-  Runtime braking diagnostics expose all four distinct explanations: a hard or
+  crossing back below AL for one sample is not recovery. Runtime diagnostics
+  expose all four threshold explanations: a hard or
   peak limit, excessive continuous duration, excessive positive integral, or
   a previously exhausted persistent episode. Values and thresholds come from
   the same `TrajectoryAssurance` evaluation that made the decision. A logged
   first point just above AL locates the exposure; it must not be presented as
-  proof that this one point alone triggered an aggregate-budget brake.
+  proof that this one point triggered a MISSION brake.
 - GNSS reception at the receiver is not extrapolated through a `0.45 m`
   measured-support bubble. Candidate LOS support is sampled explicitly. In
   strict mode, an unknown sample is fail-closed. In mission-best-effort mode,
@@ -303,21 +304,17 @@ For each candidate trajectory τ:
   winner is installed. Hard failures are eliminated first; incomplete work is
   reported as `PARTIAL_COMPARISON` and can authorize only the already
   certified finite prefix. `STRICT_GLOBAL` admits only formal GNSS evidence.
-  `MISSION_BEST_EFFORT` may choose the least-risk degraded actual only while
-  its exposure remains inside the hard budget; exhaustion causes certified
-  braking rather than unbounded degraded continuation. Ordering is formal
+  `MISSION_BEST_EFFORT` may choose the least-risk degraded actual whenever
+  its local-motion and braking certificate is valid. Exposure exhaustion is
+  diagnostic and cannot independently cause braking. Ordering is formal
   before degraded, then conservative peak ratio, continuous exceedance,
   positive exposure integral, actual/braking-tube unknown exposure, actual
   progress and a stable bundle hash, with the old stable channel used only as
   a true-key tie-break. Complete locally safe bundles are therefore still
   orderable when their GNSS intervals overlap.
-  The generator expresses remaining MISSION exposure only as time. It applies
-  the production terminal-stop timing law and performs a deterministic,
-  bounded endpoint search on the exact actual curve; `maximum speed * time`
-  is not execution authority. The calibrated 0.25 m zero-speed fixture has
-  `T_min=2.280084270 s` and requires `0.114004213 ratio*s` at ratio `1.05`, so
-  the explicit defaults are `2.3 s` and `0.115 ratio*s`. An incompatible
-  launch configuration is rejected explicitly; STRICT remains unchanged.
+  The generator bounds the endpoint only by visible local support, required
+  progress, terminal stopping and dynamics. It does not crop or regenerate a
+  curve to fit an exposure duration. STRICT remains unchanged.
   Winner, runner-up, actual endpoints, unevaluated suffixes and the full
   geometry/time/risk decomposition are retained. Execution remains a rolling
   reaction-and-stop envelope and is re-evaluated on every new immutable
@@ -379,12 +376,13 @@ For each candidate trajectory τ:
   larger controller threshold is reserved for immediate loss-of-control
   revocation.
 - The public execution state is `NORMAL_EXECUTION`,
-  `CONTROLLED_DEGRADED_EXECUTION`, or `RECOVERY_OR_EXIT`. A route preference
+  `CONTROLLED_DEGRADED_EXECUTION`, `MISSION_DEGRADED_EXECUTION`, or
+  `RECOVERY_OR_EXIT`. A route preference
   has no motion authority. Only the reaction-and-stopping envelope certified
   by one immutable execution snapshot is published; P4, P5 and runtime bind
-  the same actual-curve, braking, obstacle-source, exposure and assurance
-  identities. Budget exhaustion or loss of local proof activates the existing
-  certified brake before the approved boundary.
+  the same actual-curve, braking, obstacle-source and assurance identities.
+  Loss of local proof activates the existing certified brake before the
+  approved boundary; MISSION exposure threshold exhaustion does not.
 
 ## Frozen beam evidence and interval channel decisions
 
@@ -410,12 +408,10 @@ For each candidate trajectory τ:
   itself is not `PARTIAL_COMPARISON`. Whole-grid unknown fraction is
   diagnostic only. Final-curve, clearance-tube, every braking tube, and GNSS
   LOS support remain route-scoped evidence.
-- Whitelisted incomplete GNSS evidence in `MISSION_BEST_EFFORT` is charged for
-  the whole bounded commitment at the existing maximum degraded ratio without
-  inventing finite PL. Repeated semantic evidence identity is not charged
-  twice. Insufficient remaining duration or integral budget is
-  `EXPOSURE_BUDGET`; runtime exhaustion immediately selects an already
-  certified brake.
+- Whitelisted incomplete GNSS evidence in `MISSION_BEST_EFFORT` remains
+  incomplete/unknown with its typed failure; no finite PL or synthetic ratio
+  is invented. The episode fields remain diagnostic observations and route
+  comparison inputs, not a consumable execution balance.
 - When two incomplete channels cannot yet be ordered, their executable common
   region is the nominal path contained by every candidate's safe tube, not a
   requirement that candidate centerlines coincide. A feasible result is an
