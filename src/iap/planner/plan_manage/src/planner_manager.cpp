@@ -193,7 +193,9 @@ namespace ego_planner
         const bool support_fresh,
         const std::vector<
             P0ExecutionRiskSnapshot::LocalObstacleSourceCertification>
-            *source_certifications)
+            *source_certifications,
+        const double evaluation_time_s,
+        const double curve_time_origin_s)
     {
       iap::LocalMotionEvidence evidence;
       evidence.complete = occupancy &&
@@ -205,6 +207,30 @@ namespace ego_planner
       evidence.icp_degenerate = integrity.icp_degenerate;
       evidence.icp_rmse_m = integrity.icp_rmse;
       evidence.icp_gamma = integrity.icp_gamma_lidar;
+      evidence.local_navigation_source = integrity.local_navigation_source;
+      evidence.local_navigation_model = integrity.local_navigation_model;
+      const double local_navigation_age_s = evaluation_time_s -
+          integrity.local_navigation_source.stamp_s;
+      evidence.local_navigation_fresh = support_fresh &&
+          integrity.local_navigation_source.valid &&
+          integrity.local_navigation_source.estimation_frame_id ==
+              integrity.estimation_frame_id &&
+          std::isfinite(evaluation_time_s) &&
+          std::isfinite(integrity.local_navigation_source.stamp_s) &&
+          std::isfinite(curve_time_origin_s) &&
+          local_navigation_age_s >= -1.0e-6;
+      evidence.local_navigation_curve_time_origin_s =
+          curve_time_origin_s - local_navigation_age_s;
+      evidence.task_frame_valid = occupancy && occupancy->geometry.valid() &&
+          !occupancy->frame_contract_id.empty() &&
+          integrity.frame_id == occupancy->geometry.frame_id &&
+          occupancy->frame_id == occupancy->geometry.frame_id;
+      if (evidence.task_frame_valid) {
+        evidence.task_frame_id = occupancy->geometry.frame_id;
+        evidence.geofence_min_map = occupancy->geometry.origin_w;
+        evidence.geofence_max_map = occupancy->geometry.origin_w +
+            occupancy->geometry.extent_m;
+      }
       evidence.certified_empty_clearance_m = 12.0;
       evidence.identity = "execution_snapshot=" +
           std::to_string(execution_snapshot_id) + ";occupancy=" +
@@ -215,7 +241,10 @@ namespace ego_planner
           ";lidar_content=" +
           (occupancy && occupancy->frozen_grid_map_epoch
               ? occupancy->frozen_grid_map_epoch->current_frame_content_hash
-              : std::string{});
+              : std::string{}) + ";task_contract=" +
+          (occupancy ? occupancy->frame_contract_id : std::string{}) +
+          ";task_geometry=" +
+          (occupancy ? occupancy->geometry.geometry_id : std::string{});
       if (!evidence.complete ||
           !std::isfinite(occupancy->geometry.resolution_m) ||
           occupancy->geometry.resolution_m <= 0.0 || curves.empty())
@@ -366,7 +395,7 @@ namespace ego_planner
       const std::vector<iap::LocalMotionCurve> curves{curve};
       const auto evidence = buildP4LocalMotionEvidence(
           occupancy, integrity, curves, execution_snapshot_id,
-          support_fresh, source_certifications);
+          support_fresh, source_certifications, integrity.stamp, 0.0);
       const iap::LocalClearanceEvaluator clearance(evidence, policy);
       for (const auto &sample : curve.samples)
       {
@@ -1430,6 +1459,27 @@ namespace ego_planner
           if (order != 0)
             return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         }
+        const auto higher = [epsilon](double lhs, double rhs) {
+            if (!std::isfinite(lhs)) lhs =
+                -std::numeric_limits<double>::infinity();
+            if (!std::isfinite(rhs)) rhs =
+                -std::numeric_limits<double>::infinity();
+            if (lhs > rhs + epsilon) return -1;
+            if (rhs > lhs + epsilon) return 1;
+            return 0;
+          };
+        const int local_navigation_margin = higher(
+            left->minimum_local_navigation_margin_m,
+            right->minimum_local_navigation_margin_m);
+        if (local_navigation_margin != 0)
+          return local_navigation_margin < 0
+              ? Ordering::LEFT : Ordering::RIGHT;
+        const int local_clearance_margin = higher(
+            left->minimum_local_clearance_margin_m,
+            right->minimum_local_clearance_margin_m);
+        if (local_clearance_margin != 0)
+          return local_clearance_margin < 0
+              ? Ordering::LEFT : Ordering::RIGHT;
         const int progress = lower(
             right->actual_progress_m, left->actual_progress_m);
         if (progress != 0)
@@ -4930,7 +4980,8 @@ namespace ego_planner
         const auto clearance_evidence = buildP4LocalMotionEvidence(
             occupancy, refinement_integrity, clearance_curves,
             refinement_execution_snapshot_id, refinement_support_fresh,
-            &refinement_source_certifications);
+            &refinement_source_certifications,
+            refinement_integrity.stamp, 0.0);
         const auto clearance = std::make_shared<iap::LocalClearanceEvaluator>(
             clearance_evidence, p4_local_motion_policy_);
         const P4ForwardClearanceQuery clearance_query =
@@ -7342,7 +7393,8 @@ namespace ego_planner
                   execution_snapshot
                       ? &execution_snapshot->
                             local_obstacle_source_certifications
-                      : nullptr)
+                      : nullptr,
+                  stamp_s, 0.0)
             : iap::LocalMotionEvidence{};
     const bool trajectory_assurance_required =
         execution_snapshot && use_braking_windows;
@@ -8523,6 +8575,9 @@ namespace ego_planner
                     minimum_hard_margin_m
               : p4_direct_risk_evidence_.trajectory_assurance.local.
                     minimum_margin_m;
+      p4_execution_certificate_.local_navigation_minimum_margin_m =
+          p4_direct_risk_evidence_.trajectory_assurance.local.
+              minimum_localization_adjusted_margin_m;
       p4_execution_certificate_.global_peak_ratio =
           p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio;
       p4_execution_certificate_.global_exposure_integral_ratio_s =
@@ -8721,8 +8776,17 @@ namespace ego_planner
         now_s > certificate.execution_deadline_s + 1.0e-9)
       return finish(false, P4PreparedCurveFailure::FRESHNESS,
                     "p4_publication_execution_deadline_expired");
-    if (!certificate.global_exposure_within_budget ||
-        p4_global_exposure_ledger_.state().budget_exhausted)
+    const bool mission_local_authority =
+        certificate.task_mode ==
+            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+        certificate.execution_mode ==
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION &&
+        !certificate.local_motion_certificate_hash.empty() &&
+        std::isfinite(certificate.local_navigation_minimum_margin_m) &&
+        certificate.local_navigation_minimum_margin_m > 0.0;
+    if ((!certificate.global_exposure_within_budget ||
+         p4_global_exposure_ledger_.state().budget_exhausted) &&
+        !mission_local_authority)
       return finish(false, P4PreparedCurveFailure::EXPOSURE_BUDGET,
                     "p4_publication_exposure_budget_exhausted");
     if (certificate.task_mode != p4_global_exposure_policy_.task_mode)
@@ -9108,7 +9172,7 @@ namespace ego_planner
     assurance.local_evidence = buildP4LocalMotionEvidence(
         execution->occupancy, execution->integrity_anchor.current,
         assurance.local_curves, execution->execution_snapshot_id, true,
-        &execution->local_obstacle_source_certifications);
+        &execution->local_obstacle_source_certifications, now_s, 0.0);
     evidence.trajectory_assurance =
         iap::TrajectoryAssurance(
             p4_global_exposure_policy_, p4_local_motion_policy_)
@@ -9875,6 +9939,9 @@ namespace ego_planner
       bundle.channel_record.fim_integral = selected_candidate->fim_integral;
       bundle.channel_record.minimum_local_clearance_margin_m =
           selected_candidate->minimum_local_clearance_margin_m;
+      bundle.channel_record.minimum_local_navigation_margin_m =
+          bundle.direct_risk_evidence.trajectory_assurance.local.
+              minimum_localization_adjusted_margin_m;
       bundle.channel_record.actual_progress_m =
           bundle.decision.request_position.allFinite()
           ? (bundle.channel_record.actual_endpoint -
@@ -10602,6 +10669,8 @@ namespace ego_planner
         selected_candidate->global_recovery_time_s;
     record.minimum_local_clearance_margin_m =
         bundle.certificate.local_motion_minimum_margin_m;
+    record.minimum_local_navigation_margin_m =
+        bundle.certificate.local_navigation_minimum_margin_m;
     if (!std::isfinite(record.minimum_local_clearance_margin_m))
       record.minimum_local_clearance_margin_m =
           selected_candidate->minimum_local_clearance_margin_m;
@@ -11509,7 +11578,7 @@ namespace ego_planner
           assurance_request.local_curves, execution->execution_snapshot_id,
           successor_strict_global ? execution->freshAt(now_s)
                                   : execution->localFreshAt(now_s),
-          &execution->local_obstacle_source_certifications);
+          &execution->local_obstacle_source_certifications, now_s, 0.0);
       p4_direct_risk_evidence_.trajectory_assurance =
           iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                    p4_local_motion_policy_)
@@ -11560,6 +11629,9 @@ namespace ego_planner
                     minimum_hard_margin_m
               : p4_direct_risk_evidence_.trajectory_assurance.local.
                     minimum_margin_m;
+      p4_execution_certificate_.local_navigation_minimum_margin_m =
+          p4_direct_risk_evidence_.trajectory_assurance.local.
+              minimum_localization_adjusted_margin_m;
       p4_execution_certificate_.global_peak_ratio =
           p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio;
       p4_execution_certificate_.global_exposure_integral_ratio_s =
@@ -13381,7 +13453,8 @@ namespace ego_planner
                     ? runtime_execution_snapshot->localFreshAt(
                           evaluation_now_s)
                     : runtime_execution_snapshot->freshAt(evaluation_now_s),
-                &runtime_execution_snapshot->local_obstacle_source_certifications);
+                &runtime_execution_snapshot->local_obstacle_source_certifications,
+                evaluation_now_s, current_t);
       p4_direct_risk_evidence_.trajectory_assurance =
           iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                    p4_local_motion_policy_)
@@ -13451,6 +13524,9 @@ namespace ego_planner
                       minimum_hard_margin_m
                 : p4_direct_risk_evidence_.trajectory_assurance.local.
                       minimum_margin_m;
+        p4_execution_certificate_.local_navigation_minimum_margin_m =
+            p4_direct_risk_evidence_.trajectory_assurance.local.
+                minimum_localization_adjusted_margin_m;
         p4_execution_certificate_.global_peak_ratio =
             p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio;
         p4_execution_certificate_.global_exposure_integral_ratio_s =
@@ -13516,9 +13592,11 @@ namespace ego_planner
               episode_before_update.budget_exhausted);
           populate_global_budget_diagnostics(
               episode_result, episode_before_update);
-          return activate_failsafe_braking(
-              "runtime_global_navigation_episode_budget_exhausted",
-              current_t);
+          if (p4_direct_risk_evidence_.trajectory_assurance.mode !=
+              iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION)
+            return activate_failsafe_braking(
+                "runtime_global_navigation_episode_budget_exhausted",
+                current_t);
         }
       }
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
@@ -15783,7 +15861,8 @@ namespace ego_planner
                     planning_risk_context_.planning_start_s)
               : execution->freshAt(
                     planning_risk_context_.planning_start_s),
-          &execution->local_obstacle_source_certifications);
+          &execution->local_obstacle_source_certifications,
+          planning_risk_context_.planning_start_s, 0.0);
       p4_actual_curve_clearance_evaluator_ =
           std::make_shared<const iap::LocalClearanceEvaluator>(
               p4_actual_curve_clearance_evidence_, p4_local_motion_policy_);

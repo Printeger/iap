@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <iap/predictor/predictor_types.hpp>
+#include <iap/integrity/local_navigation_integrity.hpp>
 
 namespace iap {
 
@@ -176,6 +177,20 @@ struct LocalMotionEvidence {
   double certified_empty_clearance_m =
       std::numeric_limits<double>::quiet_NaN();
   std::vector<LocalObstacleEvidence> obstacles;
+  // Online, estimator-owned GNSS-independent localization evidence.  It is
+  // consumed only when mission mode needs local integrity to replace GNSS as
+  // the execution authority; normal GNSS execution keeps the same clearance
+  // checks as before.
+  bool local_navigation_fresh = false;
+  double local_navigation_curve_time_origin_s = 0.0;
+  bool task_frame_valid = false;
+  std::string task_frame_id;
+  Eigen::Vector3d geofence_min_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d geofence_max_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  LocalNavigationSourceEvidence local_navigation_source;
+  LocalNavigationPropagationModel local_navigation_model;
   std::string identity;
 };
 
@@ -296,6 +311,14 @@ struct LocalMotionSampleResult {
   double drift_error_m = 0.0;
   double required_envelope_m = std::numeric_limits<double>::quiet_NaN();
   double margin_m = std::numeric_limits<double>::quiet_NaN();
+  double local_navigation_horizontal_bound_m =
+      std::numeric_limits<double>::quiet_NaN();
+  double local_navigation_vertical_bound_m =
+      std::numeric_limits<double>::quiet_NaN();
+  double localization_adjusted_margin_m =
+      std::numeric_limits<double>::quiet_NaN();
+  double geofence_adjusted_margin_m =
+      std::numeric_limits<double>::quiet_NaN();
   double clearance_utilization = std::numeric_limits<double>::quiet_NaN();
   Eigen::Vector3d nearest_obstacle_position_map = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
@@ -310,6 +333,12 @@ struct LocalMotionAssuranceResult {
   bool nominal_curve_checked = false;
   bool braking_curves_checked = false;
   double minimum_margin_m = std::numeric_limits<double>::quiet_NaN();
+  double minimum_localization_adjusted_margin_m =
+      std::numeric_limits<double>::quiet_NaN();
+  bool local_navigation_integrity_required = false;
+  bool local_navigation_integrity_valid = false;
+  std::string local_navigation_source_identity;
+  std::string local_navigation_model_identity;
   double maximum_required_envelope_m = 0.0;
   double maximum_clearance_utilization = 0.0;
   // Run-level diagnostics are populated for SAFE as well as rejected
@@ -319,6 +348,7 @@ struct LocalMotionAssuranceResult {
   double raw_icp_gamma = std::numeric_limits<double>::quiet_NaN();
   double surface_error_bound_m = std::numeric_limits<double>::quiet_NaN();
   std::string surface_error_calibration_id;
+  bool surface_error_authority_valid = false;
   double planning_buffer_m = 0.0;
   bool initial_clearance_recovery = false;
   bool initial_clearance_recovery_complete = false;
@@ -340,7 +370,8 @@ class LocalMotionAssurance {
       const LocalMotionEvidence& evidence,
       const std::vector<LocalMotionCurve>& curves,
       double planning_buffer_m = 0.0,
-      LocalMotionInitialClearanceRecovery initial_recovery = {}) const;
+      LocalMotionInitialClearanceRecovery initial_recovery = {},
+      bool require_local_navigation_integrity = false) const;
 
   const LocalMotionAssurancePolicy& policy() const { return policy_; }
 

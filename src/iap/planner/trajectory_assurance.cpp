@@ -241,10 +241,15 @@ LocalClearanceResult LocalClearanceEvaluator::query(
     return result;
   }
 
+  const double authorized_surface_error_bound_m =
+      impl_->policy.surface_error_calibration_id ==
+              "uncalibrated_default_v1"
+          ? 0.0
+          : impl_->policy.surface_error_bound_m;
   result.required_envelope_m = impl_->policy.vehicle_radius_m +
       impl_->policy.safety_margin_m +
       impl_->policy.curve_approximation_error_m + tracking_error_m +
-      impl_->policy.surface_error_bound_m;
+      authorized_surface_error_bound_m;
   result.planning_required_envelope_m =
       result.required_envelope_m + planning_buffer_m;
   // Authorization and feedback only need obstacles capable of entering the
@@ -729,7 +734,8 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
     const LocalMotionEvidence& evidence,
     const std::vector<LocalMotionCurve>& curves,
     const double planning_buffer_m,
-    const LocalMotionInitialClearanceRecovery initial_recovery) const {
+    const LocalMotionInitialClearanceRecovery initial_recovery,
+    const bool require_local_navigation_integrity) const {
   LocalMotionAssuranceResult result;
   result.evidence_identity = evidence.identity;
   result.raw_icp_rmse_m = evidence.icp_rmse_m;
@@ -737,8 +743,16 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
   result.surface_error_bound_m = policy_.surface_error_bound_m;
   result.surface_error_calibration_id =
       policy_.surface_error_calibration_id;
+  result.surface_error_authority_valid =
+      policy_.surface_error_calibration_id != "uncalibrated_default_v1";
   result.planning_buffer_m = planning_buffer_m;
   result.initial_clearance_recovery = initial_recovery.enabled;
+  result.local_navigation_integrity_required =
+      require_local_navigation_integrity;
+  result.local_navigation_source_identity =
+      evidence.local_navigation_source.source_identity;
+  result.local_navigation_model_identity =
+      evidence.local_navigation_model.identity;
   if (!std::isfinite(planning_buffer_m) || planning_buffer_m < 0.0) {
     result.reason = "local_planning_buffer_invalid";
     return result;
@@ -768,15 +782,34 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
     result.reason = "local_motion_curves_empty";
     return result;
   }
+  if (require_local_navigation_integrity &&
+      !evidence.local_navigation_fresh) {
+    result.reason = "local_navigation_evidence_stale";
+    return result;
+  }
+  if (require_local_navigation_integrity &&
+      (!evidence.task_frame_valid || evidence.task_frame_id.empty() ||
+       !evidence.geofence_min_map.allFinite() ||
+       !evidence.geofence_max_map.allFinite() ||
+       (evidence.geofence_max_map.array() <=
+        evidence.geofence_min_map.array()).any())) {
+    result.reason = "local_navigation_task_frame_invalid";
+    return result;
+  }
 
   const LocalClearanceEvaluator clearance(evidence, policy_);
 
   result.minimum_margin_m = std::numeric_limits<double>::infinity();
+  result.minimum_localization_adjusted_margin_m =
+      std::numeric_limits<double>::infinity();
   result.minimum_hard_margin_m = std::numeric_limits<double>::infinity();
   std::ostringstream identity;
   identity << evidence.identity << ';' << std::hexfloat
            << "initial_recovery=" << initial_recovery.enabled << ':'
-           << initial_recovery.maximum_transition_duration_s << ';';
+           << initial_recovery.maximum_transition_duration_s << ';'
+           << "task_frame=" << evidence.task_frame_id << ':'
+           << evidence.geofence_min_map.transpose() << ':'
+           << evidence.geofence_max_map.transpose() << ';';
   bool have_nominal = false;
   bool have_brake = false;
   bool recovery_complete = false;
@@ -818,6 +851,24 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
       sample_result.sample_index = index;
       sample_result.position_map = sample.position_map;
       sample_result.relative_time_s = sample.relative_time_s;
+      LocalNavigationIntegrityResult local_navigation;
+      if (require_local_navigation_integrity) {
+        local_navigation = evaluateLocalNavigationIntegrity(
+            evidence.local_navigation_source,
+            evidence.local_navigation_model,
+            {sample.relative_time_s -
+             evidence.local_navigation_curve_time_origin_s});
+        if (!local_navigation.valid || local_navigation.samples.size() != 1u) {
+          result.reason = local_navigation.reason;
+          result.first_failure = sample_result;
+          return result;
+        }
+        result.local_navigation_integrity_valid = true;
+        sample_result.local_navigation_horizontal_bound_m =
+            local_navigation.samples.front().horizontal_bound_m;
+        sample_result.local_navigation_vertical_bound_m =
+            local_navigation.samples.front().vertical_bound_m;
+      }
       const auto planning_clearance = clearance.query(
           sample.position_map, sample.tracking_error_m, planning_buffer_m);
       const auto hard_clearance = initial_recovery.enabled
@@ -864,6 +915,54 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
       sample_result.nearest_obstacle_identity =
           authorization_clearance.nearest_obstacle_identity;
       sample_result.provenance = authorization_clearance.provenance;
+      if (require_local_navigation_integrity) {
+        const double horizontal_support =
+            authorization_clearance.escape_direction_map.head<2>().norm();
+        const double vertical_support = std::abs(
+            authorization_clearance.escape_direction_map.z());
+        const double localization_support_m =
+            horizontal_support > kEpsilon || vertical_support > kEpsilon
+                ? horizontal_support *
+                      sample_result.local_navigation_horizontal_bound_m +
+                      vertical_support *
+                      sample_result.local_navigation_vertical_bound_m
+                : std::max(
+                      sample_result.local_navigation_horizontal_bound_m,
+                      sample_result.local_navigation_vertical_bound_m);
+        sample_result.localization_adjusted_margin_m =
+            sample_result.margin_m - localization_support_m;
+        const double horizontal_bound_m =
+            sample_result.local_navigation_horizontal_bound_m;
+        const double vertical_bound_m =
+            sample_result.local_navigation_vertical_bound_m;
+        sample_result.geofence_adjusted_margin_m = std::min({
+            sample.position_map.x() - evidence.geofence_min_map.x() -
+                horizontal_bound_m,
+            evidence.geofence_max_map.x() - sample.position_map.x() -
+                horizontal_bound_m,
+            sample.position_map.y() - evidence.geofence_min_map.y() -
+                horizontal_bound_m,
+            evidence.geofence_max_map.y() - sample.position_map.y() -
+                horizontal_bound_m,
+            sample.position_map.z() - evidence.geofence_min_map.z() -
+                vertical_bound_m,
+            evidence.geofence_max_map.z() - sample.position_map.z() -
+                vertical_bound_m});
+        sample_result.localization_adjusted_margin_m = std::min(
+            sample_result.localization_adjusted_margin_m,
+            sample_result.geofence_adjusted_margin_m);
+        sample_result.margin_m =
+            sample_result.localization_adjusted_margin_m;
+        result.minimum_localization_adjusted_margin_m = std::min(
+            result.minimum_localization_adjusted_margin_m,
+            sample_result.localization_adjusted_margin_m);
+      } else {
+        sample_result.localization_adjusted_margin_m =
+            sample_result.margin_m;
+        result.minimum_localization_adjusted_margin_m = std::min(
+            result.minimum_localization_adjusted_margin_m,
+            sample_result.margin_m);
+      }
       sample_result.clearance_utilization =
           finitePositive(sample_result.obstacle_clearance_m)
               ? sample_result.required_envelope_m /
@@ -885,7 +984,24 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
                << ':' << sample.position_map.y() << ':'
                << sample.position_map.z() << ':'
                << planning_clearance.signed_margin_m << ':'
-               << hard_clearance.signed_margin_m << ';';
+               << hard_clearance.signed_margin_m << ':'
+               << sample_result.localization_adjusted_margin_m << ':'
+               << sample_result.geofence_adjusted_margin_m << ':'
+               << result.local_navigation_source_identity << ':'
+               << result.local_navigation_model_identity << ';';
+
+      if (require_local_navigation_integrity &&
+          !(sample_result.localization_adjusted_margin_m > 0.0)) {
+        result.status = LocalMotionAssuranceStatus::UNSAFE;
+        result.first_failure = sample_result;
+        result.reason = !(sample_result.geofence_adjusted_margin_m > 0.0)
+            ? "local_navigation_task_frame_margin_not_positive"
+            : "localization_adjusted_margin_not_positive";
+        result.nominal_curve_checked = have_nominal;
+        result.braking_curves_checked = have_brake;
+        result.certificate_hash = stableHash(identity.str());
+        return result;
+      }
 
       if (initial_recovery.enabled &&
           !(hard_clearance.signed_margin_m > 0.0)) {
@@ -947,7 +1063,9 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
         result.first_failure = sample_result;
         result.reason = sample_result.obstacle_clearance_m <= kEpsilon
                             ? "hard_collision"
-                            : "local_clearance_margin_not_positive";
+                            : (require_local_navigation_integrity
+                                ? "localization_adjusted_margin_not_positive"
+                                : "local_clearance_margin_not_positive");
         result.nominal_curve_checked = have_nominal;
         result.braking_curves_checked = have_brake;
         result.certificate_hash = stableHash(identity.str());
@@ -1085,10 +1203,14 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
         ? "controlled_degradation_within_remaining_episode_budget"
         : "global_navigation_episode_budget_exceeded";
   }
+  const bool require_local_navigation_integrity =
+      policy.task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+      !result.global.normal;
   result.local = local_.evaluate(
       request.local_evidence, request.local_curves,
       request.local_planning_buffer_m,
-      request.local_initial_clearance_recovery);
+      request.local_initial_clearance_recovery,
+      require_local_navigation_integrity);
   result.mission_progress_m = request.mission_progress_m;
   result.lidar_observability_improvement =
       request.lidar_observability_improvement;
@@ -1103,14 +1225,17 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
   } else if (result.global.normal) {
     result.mode = TrajectoryExecutionMode::NORMAL_EXECUTION;
     result.reason = "normal_execution";
-  } else if (request.conservative_incomplete_global_navigation &&
-             result.global.complete && result.global.within_budget &&
-             policy.task_mode ==
+  } else if (policy.task_mode ==
                  GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+             !result.global.normal &&
+             result.local.local_navigation_integrity_valid &&
+             result.local.minimum_localization_adjusted_margin_m > 0.0 &&
              request.certified_braking_available) {
     result.mode = TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
-    result.reason = "mission_degraded_conservative_global_charge";
-  } else if (result.global.complete && result.global.within_budget &&
+    result.reason = "mission_degraded_local_integrity";
+  } else if (policy.task_mode !=
+             GlobalNavigationTaskMode::STRICT_GLOBAL &&
+             result.global.complete && result.global.within_budget &&
              (result.global.recovery_predicted ||
               request.certified_braking_available)) {
     result.mode = TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;

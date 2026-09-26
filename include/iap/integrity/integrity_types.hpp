@@ -4,6 +4,7 @@
 // §1.13: Three-state integrity state machine
 
 #include <Eigen/Core>
+#include <iap/integrity/local_navigation_integrity.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -214,6 +215,11 @@ struct IntegrityReport {
   double lidar_HPL     = 1e9;  ///< lidar_certified_hpl [m]
   double lidar_VPL     = 1e9;  ///< lidar_certified_vpl [m]
   std::string lidar_worst_mode = "NONE";
+
+  // Online GNSS-independent local-navigation authority evidence.  These
+  // fields remain separate from the monitor-fused global PL channel.
+  LocalNavigationSourceEvidence local_navigation_source;
+  LocalNavigationPropagationModel local_navigation_model;
 
   // --- Monitor-fused PL source diagnostics --------------------------------
   std::string final_HPL_source = "UNKNOWN";

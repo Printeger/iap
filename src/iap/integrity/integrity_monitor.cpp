@@ -12,7 +12,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 
 namespace iap {
 
@@ -612,6 +614,76 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   const auto fallback_src = buildFallbackSource(frame, report);
   const auto gnss_src     = evaluateGnssSource(epoch, trunk, report);
   const auto lidar_src    = evaluateLidarSource(lidar_snapshot, fgo_info, report);
+  const bool local_sources_aligned = lidar_snapshot != nullptr &&
+      fgo_info != nullptr &&
+      lidar_snapshot->frame_id == fgo_info->frame_id &&
+      fgo_info->local_navigation_source.estimation_frame_id ==
+          fgo_info->frame_id &&
+      fgo_info->frame_id == frame.id &&
+      std::isfinite(lidar_snapshot->stamp) &&
+      std::isfinite(fgo_info->stamp) &&
+      std::abs(lidar_snapshot->stamp - fgo_info->stamp) <= 1.0e-3;
+  if (local_sources_aligned &&
+      fgo_info->local_navigation_source.valid &&
+      fgo_info->local_navigation_model.valid) {
+    LidarAraimSnapshot local_snapshot = *lidar_snapshot;
+    local_snapshot.blocks.erase(
+        std::remove_if(local_snapshot.blocks.begin(),
+                       local_snapshot.blocks.end(),
+                       [](const LidarAraimBlock& block) {
+                         return !block.target_is_fixed;
+                       }),
+        local_snapshot.blocks.end());
+    local_snapshot.valid = local_snapshot.valid &&
+        !local_snapshot.blocks.empty();
+    FGOPositionInfo local_fgo = *fgo_info;
+    local_fgo.pose_cov_6x6 =
+        fgo_info->local_navigation_source.state_covariance.block<6, 6>(0, 0);
+    local_fgo.sigma_p =
+        fgo_info->local_navigation_source.state_covariance.block<3, 3>(3, 3);
+    local_fgo.pose_cov_valid = local_fgo.pose_cov_6x6.allFinite();
+    local_fgo.valid = local_fgo.pose_cov_valid;
+    const auto local_lidar = lidar_araim_.run(local_snapshot, local_fgo);
+    report.local_navigation_source = fgo_info->local_navigation_source;
+    report.local_navigation_model = fgo_info->local_navigation_model;
+    report.local_navigation_source.icp_degenerate =
+        lidar_snapshot->current_icp_quality.degeneracy_flag;
+    report.local_navigation_source.current_lidar_hpl_m = local_lidar.HPL;
+    report.local_navigation_source.current_lidar_vpl_m = local_lidar.VPL;
+    report.local_navigation_model.coverage_multiplier = std::max(
+        local_lidar.K_ff_used, local_lidar.K_fa_used);
+    std::ostringstream model_identity;
+    model_identity << report.local_navigation_model.identity
+                   << ":coverage=" << std::hexfloat
+                   << report.local_navigation_model.coverage_multiplier;
+    report.local_navigation_model.identity = model_identity.str();
+    report.local_navigation_source.model_identity =
+        report.local_navigation_model.identity;
+    std::ostringstream source_identity;
+    source_identity << report.local_navigation_source.source_identity
+                    << ":fixed_lidar=" << local_snapshot.frame_id << ':'
+                    << std::hexfloat << local_snapshot.stamp << ':'
+                    << local_lidar.HPL << ':' << local_lidar.VPL << ':'
+                    << local_lidar.n_hypotheses << ':'
+                    << local_lidar.worst_mode;
+    report.local_navigation_source.source_identity = source_identity.str();
+    report.local_navigation_source.valid = local_lidar.valid &&
+        !report.local_navigation_source.icp_degenerate &&
+        std::isfinite(local_lidar.HPL) && local_lidar.HPL > 0.0 &&
+        std::isfinite(local_lidar.VPL) && local_lidar.VPL > 0.0 &&
+        report.local_navigation_model.coverage_multiplier > 0.0;
+    report.local_navigation_source.invalid_reason =
+        report.local_navigation_source.valid ? "valid" :
+        "local_lidar_araim_or_registration_invalid";
+  } else if (fgo_info != nullptr) {
+    report.local_navigation_source = fgo_info->local_navigation_source;
+    report.local_navigation_model = fgo_info->local_navigation_model;
+    if (!local_sources_aligned) {
+      report.local_navigation_source.valid = false;
+      report.local_navigation_source.invalid_reason =
+          "local_lidar_fgo_frame_or_stamp_mismatch";
+    }
+  }
   if (epoch != nullptr) {
     report.gnss_epoch_identity =
         gnss_epoch_identity(*epoch, report.excluded_sats);

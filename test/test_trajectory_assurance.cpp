@@ -13,6 +13,36 @@ iap::LocalMotionEvidence clearCurrentFrameEvidence() {
   evidence.icp_rmse_m = 0.01;
   evidence.icp_gamma = 1.0;
   evidence.certified_empty_clearance_m = 5.0;
+  evidence.task_frame_valid = true;
+  evidence.task_frame_id = "map";
+  evidence.geofence_min_map = Eigen::Vector3d(-100.0, -100.0, -100.0);
+  evidence.geofence_max_map = Eigen::Vector3d(100.0, 100.0, 100.0);
+  evidence.local_navigation_fresh = true;
+  evidence.local_navigation_source.valid = true;
+  evidence.local_navigation_source.stamp_s = 10.0;
+  evidence.local_navigation_source.estimation_frame_id = 7;
+  evidence.local_navigation_source.source_contains_gnss = false;
+  evidence.local_navigation_source.icp_degenerate = false;
+  evidence.local_navigation_source.state_covariance =
+      Eigen::Matrix<double, 15, 15>::Identity() * 1.0e-4;
+  evidence.local_navigation_source.current_lidar_hpl_m = 0.05;
+  evidence.local_navigation_source.current_lidar_vpl_m = 0.05;
+  evidence.local_navigation_source.source_identity = "local-fgo-1";
+  evidence.local_navigation_source.model_identity = "imu-model-1";
+  evidence.local_navigation_model.valid = true;
+  evidence.local_navigation_model.identity = "imu-model-1";
+  evidence.local_navigation_model.accelerometer_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-4;
+  evidence.local_navigation_model.gyroscope_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-4;
+  evidence.local_navigation_model.integration_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-6;
+  evidence.local_navigation_model.accelerometer_bias_random_walk_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-8;
+  evidence.local_navigation_model.gyroscope_bias_random_walk_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-8;
+  evidence.local_navigation_model.maximum_horizon_s = 10.0;
+  evidence.local_navigation_model.coverage_multiplier = 6.0;
   evidence.identity = "local-evidence-1";
   return evidence;
 }
@@ -58,7 +88,7 @@ std::vector<iap::GlobalNavigationExposureSample> slightVplExceedance() {
   };
 }
 
-TEST(TrajectoryAssuranceTest, BriefSlightVplExceedanceIsControlledDegraded) {
+TEST(TrajectoryAssuranceTest, BriefSlightVplExceedanceUsesLocalAuthority) {
   iap::TrajectoryAssuranceRequest request;
   request.global_samples = slightVplExceedance();
   request.local_evidence = clearCurrentFrameEvidence();
@@ -69,7 +99,7 @@ TEST(TrajectoryAssuranceTest, BriefSlightVplExceedanceIsControlledDegraded) {
 
   EXPECT_TRUE(result.authorized());
   EXPECT_EQ(result.mode,
-            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION);
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_NEAR(result.global.peak_ratio, 1.0185, 1.0e-12);
   EXPECT_LT(result.global.exceedance_duration_s, 1.0);
   EXPECT_LT(result.global.exceedance_integral_ratio_s, 0.025);
@@ -99,9 +129,10 @@ TEST(GlobalNavigationExposureTest, UsesGnssChannelInsteadOfFusedOrLidar) {
   EXPECT_DOUBLE_EQ(samples.front().val_m, 40.0);
 }
 
-TEST(TrajectoryAssuranceTest, PeakAboveFivePercentExhaustsTheMissionBudget) {
+TEST(TrajectoryAssuranceTest,
+     MissionPeakAtObservedRatioUsesIndependentLocalIntegrity) {
   auto global = slightVplExceedance();
-  global[1].vpl_m = 42.01;
+  global[1].vpl_m = 40.0 * 1.062960;
   iap::TrajectoryAssuranceRequest request;
   request.global_samples = global;
   request.local_evidence = clearCurrentFrameEvidence();
@@ -110,18 +141,142 @@ TEST(TrajectoryAssuranceTest, PeakAboveFivePercentExhaustsTheMissionBudget) {
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
-  EXPECT_EQ(result.reason, "global_navigation_budget_exceeded");
+  EXPECT_TRUE(result.authorized()) << result.reason;
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_EQ(result.reason, "mission_degraded_local_integrity");
   EXPECT_TRUE(result.global.peak_ratio_exceeded);
   EXPECT_FALSE(result.global.continuous_exceedance_exceeded);
   EXPECT_FALSE(result.global.exceedance_integral_exceeded);
   EXPECT_FALSE(result.global.prior_episode_budget_exhausted);
   EXPECT_EQ(result.global.budget_failure_causes, "PEAK_RATIO");
+  EXPECT_TRUE(result.local.local_navigation_integrity_valid);
+  EXPECT_GT(result.local.minimum_localization_adjusted_margin_m, 0.0);
+}
+
+TEST(TrajectoryAssuranceTest, StrictModeStillRejectsObservedGnssPeak) {
+  auto global = slightVplExceedance();
+  global[1].vpl_m = 40.0 * 1.062960;
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
 }
 
 TEST(TrajectoryAssuranceTest,
-     BestEffortRejectsLocallySafeCurveWhenExposureBudgetIsExhausted) {
+     UncalibratedSurfaceConstantCannotAuthorizeMissionFallback) {
+  auto global = slightVplExceedance();
+  global[1].vpl_m = 40.0 * 1.062960;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_evidence.local_navigation_fresh = false;
+  request.local_evidence.local_navigation_source.valid = false;
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance().evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_EQ(result.reason, "local_motion_assurance_unknown");
+  EXPECT_FALSE(result.local.surface_error_authority_valid);
+}
+
+TEST(LocalClearanceEvaluatorTest,
+     UncalibratedSurfaceConstantDoesNotEnterAuthorizationEnvelope) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalMotionAssurancePolicy small;
+  small.surface_error_bound_m = 0.02;
+  small.surface_error_calibration_id = "uncalibrated_default_v1";
+  auto large = small;
+  large.surface_error_bound_m = 1.0;
+
+  const auto small_result = iap::LocalClearanceEvaluator(
+      evidence, small).query(Eigen::Vector3d::Zero(), 0.05);
+  const auto large_result = iap::LocalClearanceEvaluator(
+      evidence, large).query(Eigen::Vector3d::Zero(), 0.05);
+
+  ASSERT_EQ(small_result.status, iap::LocalClearanceStatus::VALID);
+  ASSERT_EQ(large_result.status, iap::LocalClearanceStatus::VALID);
+  EXPECT_DOUBLE_EQ(small_result.required_envelope_m,
+                   large_result.required_envelope_m);
+  EXPECT_DOUBLE_EQ(small_result.signed_margin_m,
+                   large_result.signed_margin_m);
+  EXPECT_DOUBLE_EQ(small_result.surface_error_bound_m, 0.02);
+  EXPECT_DOUBLE_EQ(large_result.surface_error_bound_m, 1.0);
+}
+
+TEST(TrajectoryAssuranceTest,
+     MissionFallbackChargesLocalIntegrityAgainstTaskGeofence) {
+  auto global = slightVplExceedance();
+  global[1].vpl_m = 40.0 * 1.062960;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_evidence.geofence_min_map.x() = -0.01;
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance().evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.local.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(result.local.reason,
+            "local_navigation_task_frame_margin_not_positive");
+  EXPECT_LE(result.local.first_failure.geofence_adjusted_margin_m, 0.0);
+}
+
+TEST(TrajectoryAssuranceTest,
+     MissionFallbackPropagationIncludesCertificateAge) {
+  auto global = slightVplExceedance();
+  global[1].vpl_m = 40.0 * 1.062960;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_evidence.local_navigation_model.maximum_horizon_s = 0.5;
+  // The curve begins now, but the estimator certificate is already 0.6 s
+  // old. The propagation offset is therefore 0.6 s at its first sample.
+  request.local_evidence.local_navigation_curve_time_origin_s = -0.6;
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance().evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.local.reason, "local_navigation_horizon_invalid");
+}
+
+TEST(TrajectoryAssuranceTest,
+     MissionFallbackRejectsExhaustedLocalizationAdjustedClearance) {
+  auto global = slightVplExceedance();
+  global[1].vpl_m = 40.0 * 1.062960;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_evidence.local_navigation_source.current_lidar_hpl_m = 5.0;
+  request.local_evidence.local_navigation_source.current_lidar_vpl_m = 5.0;
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance().evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.local.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(result.local.reason,
+            "localization_adjusted_margin_not_positive");
+}
+
+TEST(TrajectoryAssuranceTest,
+     BestEffortKeepsLocallySafeCurveWhenExposureBudgetIsExhausted) {
   auto global = slightVplExceedance();
   global[1].vpl_m = 48.0;
   iap::GlobalNavigationExposurePolicy policy;
@@ -134,10 +289,11 @@ TEST(TrajectoryAssuranceTest,
 
   const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
+  EXPECT_TRUE(result.authorized());
   EXPECT_FALSE(result.global.within_budget);
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
-  EXPECT_EQ(result.reason, "global_navigation_budget_exceeded");
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_EQ(result.reason, "mission_degraded_local_integrity");
 }
 
 TEST(TrajectoryAssuranceTest,
@@ -167,7 +323,7 @@ TEST(TrajectoryAssuranceTest,
 }
 
 TEST(TrajectoryAssuranceTest,
-     IncompleteGnssRejectsWhenWholeSegmentChargeExceedsBudget) {
+     IncompleteGnssBudgetRemainsDiagnosticUnderLocalAuthority) {
   iap::TrajectoryAssuranceRequest request;
   request.global_samples = {
       {0.0, NAN, NAN, 20.0, 40.0, false},
@@ -181,9 +337,10 @@ TEST(TrajectoryAssuranceTest,
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
-  EXPECT_EQ(result.reason, "global_navigation_exposure_budget_exhausted");
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_EQ(result.reason, "mission_degraded_local_integrity");
   EXPECT_TRUE(result.global.exceedance_integral_exceeded);
 }
 
@@ -214,14 +371,14 @@ TEST(TrajectoryAssuranceTest,
 
   EXPECT_TRUE(result.authorized()) << result.reason;
   EXPECT_EQ(result.mode,
-            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION);
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_NEAR(result.global.maximum_continuous_exceedance_s, 4.8, 1.0e-12);
   EXPECT_NEAR(result.global.exceedance_integral_ratio_s, 0.24, 1.0e-12);
   EXPECT_TRUE(result.global.within_budget);
 }
 
 TEST(TrajectoryAssuranceTest,
-     DenseForestMissionBudgetRejectsTrueExhaustionWithoutLedgerReset) {
+     DenseForestMissionBudgetExhaustionDoesNotResetOrVetoLocalAuthority) {
   iap::GlobalNavigationExposurePolicy policy;
   policy.maximum_ratio = 1.05;
   policy.maximum_continuous_exceedance_s = 8.0;
@@ -245,9 +402,10 @@ TEST(TrajectoryAssuranceTest,
 
   const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
-  EXPECT_EQ(result.reason, "global_navigation_episode_budget_exceeded");
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_EQ(result.reason, "mission_degraded_local_integrity");
   EXPECT_NEAR(result.global.maximum_continuous_exceedance_s, 8.3, 1.0e-12);
   EXPECT_NEAR(result.global.exceedance_integral_ratio_s, 0.415, 1.0e-12);
   EXPECT_TRUE(result.global.continuous_exceedance_exceeded);
@@ -370,8 +528,9 @@ TEST(TrajectoryAssuranceTest,
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_TRUE(result.global.prior_episode_budget_exhausted);
   EXPECT_FALSE(result.global.peak_ratio_exceeded);
   EXPECT_FALSE(result.global.continuous_exceedance_exceeded);
@@ -471,7 +630,7 @@ TEST(LocalMotionAssuranceTest,
      HealthyRegisteredSlamDoesNotInventTimeLinearDrift) {
   auto evidence = clearCurrentFrameEvidence();
   iap::LocalObstacleEvidence obstacle;
-  // Surface clearance is 0.90 m. The measured/local envelope is 0.622 m;
+  // Surface clearance is 0.90 m. The measured/local envelope is 0.602 m;
   // extending the same healthy registered geometry to 8.6 s must not add an
   // uncalibrated 0.86 m error that the SLAM producer never reported.
   obstacle.center_map = Eigen::Vector3d(0.0, 0.95, 1.0);
@@ -491,8 +650,8 @@ TEST(LocalMotionAssuranceTest,
       << " clearance=" << result.first_failure.obstacle_clearance_m
       << " envelope=" << result.first_failure.required_envelope_m
       << " drift=" << result.first_failure.drift_error_m;
-  EXPECT_NEAR(result.minimum_margin_m, 0.278, 1.0e-12);
-  EXPECT_NEAR(result.maximum_required_envelope_m, 0.622, 1.0e-12);
+  EXPECT_NEAR(result.minimum_margin_m, 0.298, 1.0e-12);
+  EXPECT_NEAR(result.maximum_required_envelope_m, 0.602, 1.0e-12);
 }
 
 TEST(LocalMotionAssuranceTest, RegistrationAndSupportFailuresRemainFailClosed) {
@@ -545,7 +704,7 @@ TEST(LocalMotionAssuranceTest, IcpResidualIsHealthOnlyNotEnvelopeDistance) {
       evidence, shortCurve());
 
   EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE);
-  EXPECT_NEAR(result.maximum_required_envelope_m, 0.622, 1.0e-12);
+  EXPECT_NEAR(result.maximum_required_envelope_m, 0.602, 1.0e-12);
   EXPECT_GT(result.minimum_margin_m, 1.0);
 }
 
@@ -769,7 +928,8 @@ TEST(LocalMotionAssuranceTest,
 
   recovery.maximum_transition_duration_s = 0.5;
   for (auto& curve : curves) {
-    curve.samples.back().position_map.y() = -0.015;
+    curve.samples[1].position_map.y() = -0.0005;
+    curve.samples.back().position_map.y() = -0.001;
   }
   const auto incomplete = iap::LocalMotionAssurance().evaluate(
       evidence, curves, 0.05, recovery);
@@ -922,8 +1082,9 @@ TEST(TrajectoryAssuranceTest, ReplanningConsumesRemainingEpisodeBudget) {
   request.prior_global_episode.exceedance_integral_ratio_s = 0.111;
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
-  EXPECT_FALSE(result.authorized());
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_GT(result.global.exceedance_integral_ratio_s, 0.115);
   EXPECT_EQ(result.global.reason,
             "global_navigation_episode_budget_exceeded");
@@ -970,8 +1131,9 @@ TEST(TrajectoryAssuranceTest,
   request.prior_global_episode.exceedance_integral_ratio_s = 0.03;
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
-  EXPECT_FALSE(result.authorized());
-  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_FALSE(result.global.within_budget);
   EXPECT_EQ(result.global.reason,
             "global_navigation_episode_budget_exceeded");

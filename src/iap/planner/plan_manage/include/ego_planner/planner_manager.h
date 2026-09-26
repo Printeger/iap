@@ -347,6 +347,8 @@ namespace ego_planner
     std::string local_motion_certificate_hash;
     double local_motion_minimum_margin_m =
         std::numeric_limits<double>::quiet_NaN();
+    double local_navigation_minimum_margin_m =
+        std::numeric_limits<double>::quiet_NaN();
     double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
     double global_exposure_integral_ratio_s = 0.0;
     bool global_exposure_within_budget = false;
@@ -479,6 +481,8 @@ namespace ego_planner
     bool route_evidence_evaluated = false;
     bool route_evidence_complete = false;
     double minimum_local_clearance_margin_m =
+        -std::numeric_limits<double>::infinity();
+    double minimum_local_navigation_margin_m =
         -std::numeric_limits<double>::infinity();
     bool final_curve_evaluated = false;
     bool local_geometry_passed = false;

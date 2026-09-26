@@ -169,6 +169,46 @@ ego_planner::P4ControlCapabilityProfile missionExposureControlProfile()
   return profile;
 }
 
+void addValidLocalNavigationEvidence(iap::LocalMotionEvidence *evidence)
+{
+  ASSERT_NE(evidence, nullptr);
+  evidence->local_navigation_fresh = true;
+  evidence->task_frame_valid = true;
+  evidence->task_frame_id = "map";
+  evidence->geofence_min_map = Eigen::Vector3d(-100.0, -100.0, -100.0);
+  evidence->geofence_max_map = Eigen::Vector3d(100.0, 100.0, 100.0);
+  auto &source = evidence->local_navigation_source;
+  source.valid = true;
+  source.stamp_s = 10.0;
+  source.estimation_frame_id = 7;
+  source.source_contains_gnss = false;
+  source.icp_degenerate = false;
+  source.stamp_s = 10.0;
+  source.state_covariance =
+      Eigen::Matrix<double, 15, 15>::Identity() * 1.0e-6;
+  source.world_R_body = Eigen::Matrix3d::Identity();
+  source.current_lidar_hpl_m = 0.01;
+  source.current_lidar_vpl_m = 0.01;
+  source.source_identity = "test-local-fgo";
+  source.model_identity = "test-imu-model";
+  source.invalid_reason = "valid";
+  auto &model = evidence->local_navigation_model;
+  model.valid = true;
+  model.identity = source.model_identity;
+  model.accelerometer_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-8;
+  model.gyroscope_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-8;
+  model.integration_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-10;
+  model.accelerometer_bias_random_walk_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-10;
+  model.gyroscope_bias_random_walk_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-10;
+  model.maximum_horizon_s = 10.0;
+  model.coverage_multiplier = 6.0;
+}
+
 iap::TrajectoryAssuranceRequest locallySafeIncompleteRequest(
     ego_planner::UniformBspline trajectory, const std::string &identity)
 {
@@ -188,6 +228,7 @@ iap::TrajectoryAssuranceRequest locallySafeIncompleteRequest(
   request.local_evidence.icp_gamma = 1.0;
   request.local_evidence.certified_empty_clearance_m = 5.0;
   request.local_evidence.identity = "local-clear";
+  addValidLocalNavigationEvidence(&request.local_evidence);
   iap::LocalMotionCurve nominal;
   nominal.curve_id = "nominal";
   const int sample_count = std::max(
@@ -370,6 +411,7 @@ TEST(P4ExposureDurationSeam,
   request.local_evidence.icp_gamma = 1.0;
   request.local_evidence.certified_empty_clearance_m = 5.0;
   request.local_evidence.identity = "local-clear";
+  addValidLocalNavigationEvidence(&request.local_evidence);
   iap::LocalMotionCurve nominal;
   nominal.curve_id = "nominal";
   constexpr int kSampleCount = 40;
@@ -390,9 +432,10 @@ TEST(P4ExposureDurationSeam,
   ASSERT_GT(actual.getTimeSum(), affordable_duration_s);
   ASSERT_EQ(assurance.local.status, iap::LocalMotionAssuranceStatus::SAFE)
       << assurance.local.reason;
-  ASSERT_FALSE(assurance.authorized());
-  ASSERT_EQ(assurance.reason,
-            "global_navigation_exposure_budget_exhausted");
+  ASSERT_TRUE(assurance.authorized()) << assurance.reason;
+  ASSERT_EQ(assurance.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_FALSE(assurance.global.within_budget);
   EXPECT_FALSE(fit.success);
   EXPECT_EQ(fit.failure,
             ego_planner::P4ExposureDurationFailure::POLICY_INCOMPATIBLE);
@@ -749,7 +792,7 @@ TEST(P4RollingExposureSeam,
 }
 
 TEST(P4RollingExposureSeam,
-     PriorConsumedPlusBridgePlusChildStillRejectsTrueBudgetExhaustion)
+     PriorConsumedPlusBridgePlusChildKeepsBudgetExhaustionDiagnostic)
 {
   auto trajectory = makeMovingCurvedP4Trajectory(0.2);
   const auto terminal = ego_planner::imposeP4TerminalStop(
@@ -785,9 +828,9 @@ TEST(P4RollingExposureSeam,
   request.global_samples.back().relative_time_s = 1.2;
   request.committed_duration_s = 1.2;
   const auto continuous = iap::TrajectoryAssurance(policy).evaluate(request);
-  EXPECT_FALSE(continuous.authorized());
-  EXPECT_EQ(continuous.reason,
-            "global_navigation_episode_budget_exceeded");
+  EXPECT_TRUE(continuous.authorized()) << continuous.reason;
+  EXPECT_EQ(continuous.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_TRUE(continuous.global.exceedance_integral_exceeded);
   EXPECT_NEAR(continuous.global.exceedance_integral_ratio_s,
               0.12, 1.0e-12);
@@ -2028,7 +2071,10 @@ makeP4ExecutionSnapshot(
   occupancy->cloud_stamp_s = stamp_s;
   occupancy->frame_id = "map";
   occupancy->frame_contract_id = "map:test";
-  occupancy->geometry.origin_w = Eigen::Vector3d(-10.0, -10.0, -2.0);
+  occupancy->geometry.frame_id = "map";
+  occupancy->geometry.origin_w = Eigen::Vector3d(-100.0, -100.0, -20.0);
+  occupancy->geometry.extent_m = Eigen::Vector3d(200.0, 200.0, 60.0);
+  occupancy->geometry.voxel_dimensions = Eigen::Vector3i(400, 400, 120);
   occupancy->geometry.resolution_m = 0.5;
   occupancy->geometry.geometry_id = risk->params().geometry_id.empty()
       ? "map:test-geometry" : risk->params().geometry_id;
@@ -2053,6 +2099,8 @@ makeP4ExecutionSnapshot(
   execution->occupancy = occupancy;
   execution->integrity_anchor.current.valid = true;
   execution->integrity_anchor.current.stamp = stamp_s;
+  execution->integrity_anchor.current.frame_id = "map";
+  execution->integrity_anchor.current.estimation_frame_id = 7;
   execution->integrity_anchor.current.hpl = 1.0;
   execution->integrity_anchor.current.vpl = 1.0;
   execution->integrity_anchor.current.hal = 10.0;
@@ -2078,6 +2126,36 @@ makeP4ExecutionSnapshot(
   execution->integrity_anchor.current.icp_rmse = 0.01;
   execution->integrity_anchor.current.icp_condition = 10.0;
   execution->integrity_anchor.current.icp_gamma_lidar = 1.0;
+  auto& local = execution->integrity_anchor.current.local_navigation_source;
+  auto& model = execution->integrity_anchor.current.local_navigation_model;
+  local.valid = absolute_lidar_integrity_valid;
+  local.source_contains_gnss = false;
+  local.icp_degenerate = !absolute_lidar_integrity_valid;
+  local.stamp_s = stamp_s;
+  local.estimation_frame_id =
+      execution->integrity_anchor.current.estimation_frame_id;
+  local.state_covariance =
+      Eigen::Matrix<double, 15, 15>::Identity() * 1.0e-4;
+  local.current_lidar_hpl_m = 0.05;
+  local.current_lidar_vpl_m = 0.05;
+  local.source_identity = "test-local-fgo";
+  local.model_identity = "test-imu-model";
+  local.invalid_reason = absolute_lidar_integrity_valid
+      ? "valid" : "test_local_navigation_invalid";
+  model.valid = absolute_lidar_integrity_valid;
+  model.identity = local.model_identity;
+  model.accelerometer_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-4;
+  model.gyroscope_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-4;
+  model.integration_noise_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-6;
+  model.accelerometer_bias_random_walk_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-8;
+  model.gyroscope_bias_random_walk_covariance =
+      Eigen::Matrix3d::Identity() * 1.0e-8;
+  model.maximum_horizon_s = 10.0;
+  model.coverage_multiplier = 6.0;
   execution->source_identity = risk->sourceIdentity();
   execution->risk_policy = risk->params();
   execution->frame_contract_id = "map:test";
@@ -3359,10 +3437,9 @@ TEST(P4PublicationCertificate,
   mutated_certificate = valid_certificate;
   mutated_certificate.global_exposure_within_budget = false;
   manager.setP4ExecutionCertificateForTest(mutated_certificate);
-  expect_rejected(
-      valid_trajectory, 10.2,
-      ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET,
-      "p4_publication_exposure_budget_exhausted");
+  EXPECT_TRUE(manager.validateP4PublicationCertificate(
+      valid_trajectory, 10.2, &failure, &reason)) << reason;
+  EXPECT_EQ(reason, "p4_publication_certificate_valid");
 
   manager.setP4TaskModeForTest(
       iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
@@ -3388,10 +3465,9 @@ TEST(P4PublicationCertificate,
   manager.setP4ExecutionCertificateForTest(valid_certificate);
   ASSERT_TRUE(manager.updateP4GlobalExposureForTest(
       10.2, 1.06, "post-certificate-exposure"));
-  expect_rejected(
-      valid_trajectory, 10.2,
-      ego_planner::P4PreparedCurveFailure::EXPOSURE_BUDGET,
-      "p4_publication_exposure_budget_exhausted");
+  EXPECT_TRUE(manager.validateP4PublicationCertificate(
+      valid_trajectory, 10.2, &failure, &reason)) << reason;
+  EXPECT_EQ(reason, "p4_publication_certificate_valid");
 }
 
 TEST(P4ExecutionIntegrityTest,
@@ -4977,7 +5053,7 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_FALSE(marginal_armed.guard_braking_preschedule_requested);
   EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
-            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION);
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_EQ(manager.local_data_.traj_id_, 35);
 
   const auto recovered_marginal_snapshot = makeP4ExecutionSnapshot(
@@ -5029,14 +5105,11 @@ TEST(P4ForwardTerminalLineageTest,
       during_execution_s, commanded_position);
   EXPECT_TRUE(risk_revoke.allowed);
   EXPECT_TRUE(risk_revoke.known_future_risk_unsafe);
-  EXPECT_TRUE(risk_revoke.failsafe_braking_available);
+  EXPECT_FALSE(risk_revoke.failsafe_braking_available);
   EXPECT_FALSE(risk_revoke.failsafe_braking_active);
-  EXPECT_EQ(
-      risk_revoke.reason,
-      "failsafe_braking_scheduled:runtime_trajectory_assurance_rejected:"
-      "global_navigation_exposure_budget_exhausted:safe");
+  EXPECT_EQ(risk_revoke.reason, "runtime_mission_degraded_execution");
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
-            iap::TrajectoryExecutionMode::NORMAL_EXECUTION);
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_EQ(risk_revoke.current_risk_generation,
             unsafe_snapshot->generation_id());
   EXPECT_GT(risk_revoke.current_risk_generation,
@@ -5060,7 +5133,7 @@ TEST(P4ForwardTerminalLineageTest,
       risk_revoke.global_maximum_continuous_exceedance_s));
   EXPECT_TRUE(std::isfinite(
       risk_revoke.global_exceedance_integral_ratio_s));
-  EXPECT_TRUE(manager.pendingP4GuardBrakingCommand().has_value());
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   manager.setPlanningRiskContextForTest(
       snapshot, 10.52, nullptr, directRiskCallback(0.5),
       makeP4ExecutionSnapshot(
@@ -5332,30 +5405,11 @@ TEST(P4ForwardTerminalLineageTest,
             row.at("gnss_epoch_identity") == std::to_string(
                 execution_snapshot->source_identity.gnss_epoch_identity);
       }));
-  EXPECT_TRUE(std::any_of(
+  EXPECT_FALSE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
-        return row.at("schema_version") == "p4_execution_event_v11" &&
-            row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
-            row.at("execution_mode") == "NORMAL_EXECUTION" &&
-            row.at("task_mode") == "mission_best_effort" &&
-            row.at("current_risk_generation") == "2" &&
-            row.at("reason").find(
-                "runtime_trajectory_assurance_rejected") !=
-                std::string::npos &&
-            std::stod(row.at("violation_hpl_m")) >=
-                std::stod(row.at("alert_limit_h_m")) &&
-            std::stod(row.at("runtime_global_peak_ratio")) >
-                std::stod(row.at("global_peak_ratio_limit")) &&
-            std::stod(row.at(
-                "runtime_global_maximum_continuous_exceedance_s")) >
-                std::stod(row.at(
-                    "global_continuous_exceedance_limit_s")) &&
-            std::stod(row.at(
-                "runtime_global_exceedance_integral_ratio_s")) >
-                std::stod(row.at(
-                    "global_exceedance_integral_limit_ratio_s")) &&
-            row.at("global_budget_failure_causes") ==
-                "PEAK_RATIO|CONTINUOUS_DURATION|EXCESS_INTEGRAL";
+        return row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
+            row.at("reason").find("global_navigation_exposure_budget") !=
+                std::string::npos;
       }));
 }
 
@@ -8835,6 +8889,25 @@ TEST(P4PreparedChannelComparison,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id, positive_y.channel_id);
 
+  // GNSS risk remains the first degraded ranking metric. Once it ties, the
+  // larger online localization-adjusted margin precedes raw clearance and
+  // progress.
+  negative_y.global_peak_ratio = 1.01;
+  negative_y.global_rolling_worst_ratio = 1.01;
+  negative_y.global_peak_ratio_lower = 1.01;
+  negative_y.global_peak_ratio_upper = 1.01;
+  negative_y.global_rolling_worst_ratio_lower = 1.01;
+  negative_y.global_rolling_worst_ratio_upper = 1.01;
+  negative_y.minimum_local_navigation_margin_m = 0.3;
+  positive_y.minimum_local_navigation_margin_m = 0.2;
+  positive_y.minimum_local_clearance_margin_m = 2.0;
+  positive_y.actual_progress_m = 100.0;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {negative_y, positive_y}, snapshot, 2u);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, negative_y.channel_id);
+
   // Unknown evidence does not force PARTIAL by itself. A formally separated
   // interval remains orderable without any unknown threshold.
   negative_y.global_peak_ratio_lower = 0.50;
@@ -10698,7 +10771,7 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
-     NewSnapshotIdentityReauthorizesExactCurveButRiskChangeRejects)
+     NewSnapshotIdentityReauthorizesExactCurveAcrossGnssRiskChange)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -10943,19 +11016,17 @@ TEST(P4PreparedSuccessorPolicy,
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy_c, directRiskCallback(1.01),
       bound_execution_c);
-  EXPECT_FALSE(manager.validatePreparedP4SuccessorBeforePublish(
-      incumbent, reauthorization_ros_s, &reason));
-  EXPECT_EQ(reason,
-            "successor_latest_trajectory_assurance_changed:"
-            "global_navigation_exposure_budget_exhausted:safe");
+  EXPECT_TRUE(manager.validatePreparedP4SuccessorBeforePublish(
+      incumbent, reauthorization_ros_s, &reason)) << reason;
+  EXPECT_EQ(reason, "prepared_successor_publish_revalidated");
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
   EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->state,
-            ego_planner::P4SuccessorPreparationState::FAILED);
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleForTest()->complete());
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
 
-  // Reauthorization failure is terminal for this child attempt. The exact
-  // cached curve remains available for diagnostics, but it cannot be queued
-  // and no alternate-channel/full-search attempt is authorized.
+  // A GNSS-only risk increase remains a truthful replan signal, but does not
+  // invalidate this exact child while its online local-navigation certificate
+  // remains valid.
   auto parent_certificate = manager.p4ExecutionCertificate();
   parent_certificate.valid = true;
   parent_certificate.trajectory_id = incumbent.traj_id_;
@@ -10964,10 +11035,11 @@ TEST(P4PreparedSuccessorPolicy,
       incumbent.position_traj_.getControlPoint());
   manager.local_data_ = incumbent;
   manager.setP4ExecutionCertificateForTest(parent_certificate);
-  EXPECT_FALSE(manager.activatePreparedP4SuccessorBundle(10.15, &reason));
-  EXPECT_EQ(reason, "successor_prepared_bundle_not_due");
-  EXPECT_FALSE(manager.activatingPreparedP4SuccessorBundle());
-  EXPECT_EQ(manager.local_data_.traj_id_, incumbent.traj_id_);
+  EXPECT_TRUE(manager.activatePreparedP4SuccessorBundle(10.15, &reason))
+      << reason;
+  EXPECT_EQ(reason, "successor_prepared_bundle_activated");
+  EXPECT_TRUE(manager.activatingPreparedP4SuccessorBundle());
+  EXPECT_EQ(manager.local_data_.traj_id_, 92);
 }
 
 TEST(P4PreparedSuccessorPolicy,

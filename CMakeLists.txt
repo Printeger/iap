@@ -155,6 +155,7 @@ add_library(iap SHARED
   # ARAIM engine (IAP-RQ-241–246)
   src/iap/integrity/araim.cpp
   src/iap/integrity/lidar_araim.cpp
+  src/iap/integrity/local_navigation_integrity.cpp
   # FGO information matrix extraction (IAP-RQ-300)
   src/iap/integrity/fgo_information_manager.cpp
   # predictor-side advisory integrity support (IAP-RQ-331)
@@ -735,6 +736,10 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_trajectory_assurance test/test_trajectory_assurance.cpp)
       target_link_libraries(test_trajectory_assurance iap)
+
+      ament_add_gtest(test_local_navigation_integrity
+        test/test_local_navigation_integrity.cpp)
+      target_link_libraries(test_local_navigation_integrity iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
       ament_add_gtest(test_forked_forest_geometry

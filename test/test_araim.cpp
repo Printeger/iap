@@ -2754,6 +2754,7 @@ TEST(IntegrityReportMappingTest, HvMarginsMapToRosMessage) {
 
 TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   IntegrityReport report;
+  report.estimation_frame_id = 42;
   report.gnss_valid = 1;
   report.gnss_HPL = 3.0;
   report.gnss_VPL = 10.0;
@@ -2773,6 +2774,30 @@ TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   report.icp_rmse = 0.12;
   report.icp_condition = 345.0;
   report.gamma_lidar = 1.7;
+  report.local_navigation_source.valid = true;
+  report.local_navigation_source.source_contains_gnss = false;
+  report.local_navigation_source.icp_degenerate = false;
+  report.local_navigation_source.stamp_s = 123.5;
+  report.local_navigation_source.estimation_frame_id =
+      report.estimation_frame_id;
+  report.local_navigation_source.state_covariance =
+      Eigen::Matrix<double, 15, 15>::Identity() * 0.25;
+  report.local_navigation_source.world_R_body =
+      Eigen::Matrix3d::Identity();
+  report.local_navigation_source.corrected_specific_force_body =
+      Eigen::Vector3d(1.0, 2.0, 3.0);
+  report.local_navigation_source.corrected_angular_rate_body =
+      Eigen::Vector3d(4.0, 5.0, 6.0);
+  report.local_navigation_source.current_lidar_hpl_m = 0.4;
+  report.local_navigation_source.current_lidar_vpl_m = 0.5;
+  report.local_navigation_source.source_identity = "local-source";
+  report.local_navigation_source.model_identity = "local-model-reference";
+  report.local_navigation_model.valid = true;
+  report.local_navigation_model.identity = "local-model";
+  report.local_navigation_model.accelerometer_noise_covariance =
+      Eigen::Matrix3d::Identity() * 0.01;
+  report.local_navigation_model.maximum_horizon_s = 10.0;
+  report.local_navigation_model.coverage_multiplier = 6.0;
 
   report.fallback_HPL = 5.0;
   report.fallback_VPL = 5.0;
@@ -2819,6 +2844,21 @@ TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   EXPECT_DOUBLE_EQ(msg.icp_rmse, report.icp_rmse);
   EXPECT_DOUBLE_EQ(msg.icp_condition, report.icp_condition);
   EXPECT_DOUBLE_EQ(msg.icp_gamma_lidar, report.gamma_lidar);
+  EXPECT_TRUE(msg.local_navigation_valid);
+  EXPECT_FALSE(msg.local_navigation_source_contains_gnss);
+  EXPECT_EQ(msg.local_navigation_estimation_frame_id,
+            report.estimation_frame_id);
+  EXPECT_EQ(msg.local_navigation_source_identity, "local-source");
+  EXPECT_EQ(msg.local_navigation_source_model_identity,
+            "local-model-reference");
+  EXPECT_EQ(msg.local_navigation_model_identity, "local-model");
+  EXPECT_DOUBLE_EQ(msg.local_navigation_state_covariance[0], 0.25);
+  EXPECT_DOUBLE_EQ(msg.local_navigation_state_covariance[16], 0.25);
+  EXPECT_DOUBLE_EQ(msg.local_navigation_specific_force_body[2], 3.0);
+  EXPECT_DOUBLE_EQ(
+      msg.local_navigation_accelerometer_noise_covariance[0], 0.01);
+  EXPECT_DOUBLE_EQ(msg.local_navigation_maximum_horizon, 10.0);
+  EXPECT_DOUBLE_EQ(msg.local_navigation_coverage_multiplier, 6.0);
   EXPECT_EQ(msg.fusion_mode, report.fusion_mode_str);
   EXPECT_EQ(msg.final_hpl_source, report.final_HPL_source);
   EXPECT_EQ(msg.final_vpl_source, report.final_VPL_source);

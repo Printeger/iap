@@ -13,11 +13,13 @@
 
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/integrity/lidar_araim.hpp>
+#include <iap/integrity/local_navigation_integrity.hpp>
 
 namespace iap {
 
 struct CurrentIntegrityState {
   double stamp = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_id;
   std::int64_t estimation_frame_id = -1;
   bool valid = false;
   bool gnss_valid = false;
@@ -36,6 +38,9 @@ struct CurrentIntegrityState {
   double icp_rmse = std::numeric_limits<double>::quiet_NaN();
   double icp_condition = std::numeric_limits<double>::quiet_NaN();
   double icp_gamma_lidar = std::numeric_limits<double>::quiet_NaN();
+
+  LocalNavigationSourceEvidence local_navigation_source;
+  LocalNavigationPropagationModel local_navigation_model;
 
   int integrity_state = -1;
 
