@@ -120,6 +120,12 @@ namespace ego_planner
     double stopping_distance_m, double minimum_progress_m,
     double maximum_projection_distance_m);
 
+  double p4RequiredRollingSuccessorFrontier(
+    const std::vector<Eigen::Vector3d> & frozen_guide,
+    const Eigen::Vector3d & parent_approved_endpoint,
+    double stopping_distance_m, double minimum_progress_m,
+    double maximum_projection_distance_m);
+
   // Preserve the certified physical path up to the parent's real endpoint,
   // then bridge to the remaining selected route.  This prevents a refined
   // B-spline endpoint from becoming unmatchable merely because it is not on

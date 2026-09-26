@@ -3417,9 +3417,11 @@ namespace ego_planner
 
   Eigen::Vector3d EGOPlannerManager::p4SuccessorMissionTarget(
       const Eigen::Vector3d &switch_position,
-      const Eigen::Vector3d &current_local_target)
+      const Eigen::Vector3d &current_local_target,
+      const double minimum_lookahead_m)
   {
     if (!switch_position.allFinite() || !current_local_target.allFinite() ||
+        !std::isfinite(minimum_lookahead_m) || minimum_lookahead_m < 0.0 ||
         !std::isfinite(pp_.planning_horizen_) ||
         pp_.planning_horizen_ <= 0.0 || !std::isfinite(pp_.max_vel_) ||
         pp_.max_vel_ <= 0.0 ||
@@ -3429,10 +3431,10 @@ namespace ego_planner
         !std::isfinite(global_data_.last_progress_time_))
       return current_local_target;
 
-    const double successor_lookahead_m = std::max(
-        pp_.planning_horizen_,
+    const double successor_lookahead_m = std::max({
+        pp_.planning_horizen_, minimum_lookahead_m,
         std::isfinite(p4_forward_limits_.max_lookahead_m)
-            ? p4_forward_limits_.max_lookahead_m : 0.0);
+            ? p4_forward_limits_.max_lookahead_m : 0.0});
 
     // The ordinary FSM lookahead is measured from the vehicle state at the
     // beginning of the planning callback. A rolling child, however, starts at
@@ -5167,6 +5169,8 @@ namespace ego_planner
           local_data_.position_traj_.evaluateDeBoorT(planned_parent_t_s);
       request.velocity =
           local_data_.velocity_traj_.evaluateDeBoorT(planned_parent_t_s);
+      request.acceleration =
+          local_data_.acceleration_traj_.evaluateDeBoorT(planned_parent_t_s);
       request.query_time_s = planned_switch_time_s;
       request.local_target = p4SuccessorMissionTarget(
           request.position, request.local_target);
@@ -5200,12 +5204,49 @@ namespace ego_planner
       if (reuse_guide.size() < 2u)
         reuse_guide = last_p4_forward_decision_.geometry_common_corridor;
       reuse_guide = p4RemainingPath(reuse_guide, request.position);
+      const double successor_stopping_distance_m = p4StoppingDistance(
+          request.velocity, request.acceleration, request.limits);
+      const double maximum_endpoint_projection_distance_m = std::max(
+          p4_local_tracking_error_bound_m_ +
+              p4_planning_clearance_buffer_m_,
+          p4RefinementCorridorRadius(request.limits));
+      const double required_successor_frontier_m =
+          p4RequiredRollingSuccessorFrontier(
+              reuse_guide, p4_execution_certificate_.approved_endpoint,
+              successor_stopping_distance_m,
+              p4_successor_progress_jitter_floor_m_,
+              maximum_endpoint_projection_distance_m);
+      const double reuse_frontier_m = std::min({
+          p4PolylineLength(reuse_guide), request.limits.max_lookahead_m,
+          request.limits.sensing_range_m -
+              successor_stopping_distance_m,
+          0.5 * request.map_extent.norm()});
+      const bool reuse_has_successor_progress =
+          !std::isfinite(required_successor_frontier_m) ||
+          reuse_frontier_m + 1.0e-9 >= required_successor_frontier_m;
+      if (!reuse_has_successor_progress)
+      {
+        // The committed topology is a finite parent-era seed. If its suffix
+        // cannot cover the approved parent endpoint, the future boundary's
+        // stopping reserve and the existing successor progress floor, search
+        // a fresh channel to exactly that derived frontier. This may extend
+        // the ordinary 8 m comparison horizon, but never beyond the existing
+        // sensing-minus-stopping or map bounds applied by the route planner.
+        request.limits.max_lookahead_m = std::max(
+            request.limits.max_lookahead_m,
+            required_successor_frontier_m);
+        request.local_target = p4SuccessorMissionTarget(
+            request.position, request.local_target,
+            required_successor_frontier_m);
+        request.nominal_local_reference = {
+            request.position, request.local_target};
+      }
       // Route search owns the complete frozen horizon. Endpoint, stopping and
       // exposure bounds are applied only after a channel is selected, to the
       // actual B-spline seed that may receive execution authority.
       const bool reuse_complete_guide =
           !p4_successor_schedule_.force_full_search &&
-          reuse_guide.size() >= 2u;
+          reuse_guide.size() >= 2u && reuse_has_successor_progress;
       request.successor_fast_path = reuse_complete_guide;
       request.incumbent_channel_id =
           reuse_complete_guide ? incumbent_channel_id : 0u;

@@ -1741,7 +1741,8 @@ namespace ego_planner
         const Eigen::Vector3d &local_target_pt);
     Eigen::Vector3d p4SuccessorMissionTarget(
         const Eigen::Vector3d &switch_position,
-        const Eigen::Vector3d &current_local_target);
+        const Eigen::Vector3d &current_local_target,
+        double minimum_lookahead_m = 0.0);
     bool appendP4ForwardDecision(const P4ForwardDecision &decision,
                                  const std::string &stage,
                                  double stamp_s);

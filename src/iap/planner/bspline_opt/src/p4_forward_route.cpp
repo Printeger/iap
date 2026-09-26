@@ -2739,6 +2739,24 @@ P4BoundedExecutionGuide p4BoundRollingSuccessorGuide(
   return result;
 }
 
+double p4RequiredRollingSuccessorFrontier(
+  const std::vector<Eigen::Vector3d> & frozen_guide,
+  const Eigen::Vector3d & parent_approved_endpoint,
+  const double stopping_distance_m, const double minimum_progress_m,
+  const double maximum_projection_distance_m)
+{
+  const auto bounded = p4BoundRollingSuccessorGuide(
+    frozen_guide, parent_approved_endpoint, stopping_distance_m,
+    minimum_progress_m, maximum_projection_distance_m);
+  if (!std::isfinite(bounded.approved_endpoint_station_m) ||
+    bounded.failure == P4BoundedExecutionFailure::FROZEN_GUIDE_MISMATCH)
+  {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return bounded.approved_endpoint_station_m + stopping_distance_m +
+    minimum_progress_m;
+}
+
 P4BoundedExecutionGuide composeP4RollingSuccessorPath(
   const std::vector<Eigen::Vector3d> & certified_parent_curve,
   const std::vector<Eigen::Vector3d> & selected_route,

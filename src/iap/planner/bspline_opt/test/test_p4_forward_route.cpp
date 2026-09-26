@@ -449,6 +449,43 @@ TEST(P4RollingSuccessorGuide,
             "frozen_guide_has_insufficient_successor_progress");
 }
 
+TEST(P4RollingSuccessorGuide,
+     LiveSlowParentRequiresDerivedSearchHorizonBeyondReusableGuide)
+{
+  // Representative geometry from run-20260926T134737Z-1722200: the
+  // committed topology ends inside the configured 8 m route horizon, but
+  // the future handoff state needs another 1.259 m of stopping reserve after
+  // reaching the parent's approved endpoint.
+  const std::vector<Eigen::Vector3d> reusable_guide{
+    {0.0, 0.0, 1.0}, {6.675, 0.0, 1.0}, {7.72, 0.0, 1.0}};
+  constexpr double kStoppingDistanceM = 1.2592266211353202;
+  constexpr double kSuccessorProgressM = 0.10;
+
+  const auto reusable = ego_planner::p4BoundRollingSuccessorGuide(
+    reusable_guide, Eigen::Vector3d(6.675, 0.0, 1.0),
+    kStoppingDistanceM, kSuccessorProgressM, 0.20);
+  ASSERT_FALSE(reusable.valid);
+  ASSERT_EQ(reusable.reason,
+            "frozen_guide_has_insufficient_successor_progress");
+
+  const double required_frontier =
+    ego_planner::p4RequiredRollingSuccessorFrontier(
+      reusable_guide, Eigen::Vector3d(6.675, 0.0, 1.0),
+      kStoppingDistanceM, kSuccessorProgressM, 0.20);
+  EXPECT_GT(required_frontier, 8.0);
+  EXPECT_LT(required_frontier, 8.1);
+
+  const std::vector<Eigen::Vector3d> searched_guide{
+    reusable_guide[0], reusable_guide[1],
+    Eigen::Vector3d(required_frontier + 0.01, 0.0, 1.0)};
+  const auto searched = ego_planner::p4BoundRollingSuccessorGuide(
+    searched_guide, Eigen::Vector3d(6.675, 0.0, 1.0),
+    kStoppingDistanceM, kSuccessorProgressM, 0.20);
+  EXPECT_TRUE(searched.valid) << searched.reason;
+  EXPECT_GE(searched.target_station_m,
+            searched.approved_endpoint_station_m + kSuccessorProgressM);
+}
+
 TEST(P4RollingSuccessorGuide, RejectsParentEndpointOutsideFrozenGuide)
 {
   const std::vector<Eigen::Vector3d> guide{
