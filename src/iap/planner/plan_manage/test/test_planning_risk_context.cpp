@@ -7716,6 +7716,23 @@ TEST(P4PlanningCyclePolicy,
       false, false));
 }
 
+TEST(P4PlanningCyclePolicy,
+     AuthorizedSafetyObserverDrivesDueSuccessorWhenFsmTimerIsStarved)
+{
+  EXPECT_TRUE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
+      true, true, true, true, true));
+  EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
+      false, true, true, true, true));
+  EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
+      true, false, true, true, true));
+  EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
+      true, true, false, true, true));
+  EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
+      true, true, true, false, true));
+  EXPECT_FALSE(ego_planner::p4SafetyObserverShouldDriveSuccessorPlanning(
+      true, true, true, true, false));
+}
+
 TEST(P4ExecutionParameterContract, TrackingErrorLimitMustBeFiniteAndBounded)
 {
   EXPECT_TRUE(ego_planner::validP4TrackingErrorLimit(0.75));

@@ -87,6 +87,15 @@ namespace ego_planner
     return !planning_succeeded && prepared_successor_due;
   }
 
+  inline bool p4SafetyObserverShouldDriveSuccessorPlanning(
+      const bool executing, const bool execution_check_applicable,
+      const bool execution_allowed, const bool rolling_successor,
+      const bool successor_due)
+  {
+    return executing && execution_check_applicable && execution_allowed &&
+        rolling_successor && successor_due;
+  }
+
   inline bool p4ExecutionUsesRollingSuccessor(
       const P4ExecutionCertificate &certificate,
       const bool execution_revoked)

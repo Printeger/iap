@@ -1567,6 +1567,27 @@ namespace ego_planner
         return;
       }
     }
+
+    // Runtime certification can legitimately consume longer than the 50 ms
+    // safety-timer period. Both timers intentionally share the default
+    // mutually-exclusive callback group, so an overdue safety timer may be
+    // selected repeatedly while a completed successor waits behind the FSM
+    // timer. Drive exactly one existing FSM turn here when the still-authorized
+    // parent reports due successor work. This changes no deadline or authority:
+    // execFSMCallback() reuses the ordinary latest-snapshot, actual-curve,
+    // local-assurance, P5, identity and publication transaction.
+    const bool rolling_successor = p4ExecutionUsesRollingSuccessor(
+        planner_manager_->p4ExecutionCertificate(),
+        planner_manager_->p4ExecutionRevoked());
+    const bool successor_due = rolling_successor &&
+        planner_manager_->p4SuccessorPreparationDue(now_s);
+    if (p4SafetyObserverShouldDriveSuccessorPlanning(
+            exec_state_ == EXEC_TRAJ, p4_execution_check.applicable,
+            p4_execution_check.allowed, rolling_successor, successor_due))
+    {
+      changeFSMExecState(REPLAN_TRAJ, "P4_SUCCESSOR_SAFETY_HANDOFF");
+      execFSMCallback();
+    }
   }
 
   bool EGOReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
