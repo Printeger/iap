@@ -7670,6 +7670,17 @@ TEST(P4PlanningCyclePolicy, RevokedCycleRequiresEmergencyBeforeRetain)
       ego_planner::P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT));
 }
 
+TEST(P4PlanningCyclePolicy,
+     PreparedSuccessorDueRunsOneBoundedFollowupBeforeReturningToExecutor)
+{
+  EXPECT_TRUE(ego_planner::p4PreparedSuccessorNeedsImmediateFollowup(
+      false, true));
+  EXPECT_FALSE(ego_planner::p4PreparedSuccessorNeedsImmediateFollowup(
+      true, true));
+  EXPECT_FALSE(ego_planner::p4PreparedSuccessorNeedsImmediateFollowup(
+      false, false));
+}
+
 TEST(P4ExecutionParameterContract, TrackingErrorLimitMustBeFiniteAndBounded)
 {
   EXPECT_TRUE(ego_planner::validP4TrackingErrorLimit(0.75));
@@ -11350,6 +11361,8 @@ TEST(P4PreparedSuccessorPolicy,
       incumbent.position_traj_.getControlPoint());
   manager.local_data_ = incumbent;
   manager.setP4ExecutionCertificateForTest(parent_certificate);
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(
+      10.15, bound_execution_c->execution_snapshot_id));
   EXPECT_TRUE(manager.activatePreparedP4SuccessorBundle(10.15, &reason));
   EXPECT_EQ(reason, "successor_prepared_bundle_activated");
   EXPECT_TRUE(manager.activatingPreparedP4SuccessorBundle());

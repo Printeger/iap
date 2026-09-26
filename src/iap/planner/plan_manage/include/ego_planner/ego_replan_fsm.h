@@ -81,6 +81,12 @@ namespace ego_planner
     return result == P4PlanningCycleResult::EXECUTION_REVOKED;
   }
 
+  inline bool p4PreparedSuccessorNeedsImmediateFollowup(
+      const bool planning_succeeded, const bool prepared_successor_due)
+  {
+    return !planning_succeeded && prepared_successor_due;
+  }
+
   inline bool p4ExecutionUsesRollingSuccessor(
       const P4ExecutionCertificate &certificate,
       const bool execution_revoked)

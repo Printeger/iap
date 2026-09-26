@@ -1147,6 +1147,15 @@ namespace ego_planner
     start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
 
     bool success = callReboundReplan(false, false);
+    // Final actual-channel comparison can cache a complete child in this
+    // callback. Consume a due bundle once before yielding to the executor;
+    // otherwise a loaded callback group can delay the next 10 ms FSM tick
+    // beyond the parent's support window. The follow-up reuses the ordinary
+    // latest-snapshot reauthorization and publication transaction.
+    if (p4PreparedSuccessorNeedsImmediateFollowup(
+            success, planner_manager_->preparedP4SuccessorBundleDue(
+                         plannerNow().seconds())))
+      success = callReboundReplan(false, false);
     auto cycle_result = classifyP4PlanningCycle(
         success, planner_manager_->p4PlanningDisposition(),
         planner_manager_->committedP4TrajectoryReachedEndpoint(
