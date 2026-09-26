@@ -1129,14 +1129,10 @@ def run_process_failures(
         graph_failures: list[str]) -> list[str]:
     """Return process failures that are part of the selected stage contract."""
     failures: list[str] = []
-    # continuous-flight is accepted only from captured closed-loop evidence.
-    # A timed launch is stopped by the runner, so its signal-derived exit code
-    # and early-exit heuristic are diagnostics rather than flight evidence.
-    if stage != "continuous-flight":
-        if early_exit:
-            failures.append("launch_exited_early")
-        if launch_exit_code != 0:
-            failures.append("launch_exit_nonzero")
+    if early_exit:
+        failures.append("launch_exited_early")
+    if launch_exit_code != 0:
+        failures.append("launch_exit_nonzero")
     if not launch_group_cleared or not capture_group_cleared:
         failures.append("owned_process_group_remaining")
     failures.extend(graph_failures)

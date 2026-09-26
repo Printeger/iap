@@ -265,12 +265,13 @@ class TestStageContracts(unittest.TestCase):
         self.assertIn("position_command_identity_incomplete",
                       failed["failures"])
 
-    def test_continuous_stage_process_result_ignores_launch_exit(self):
+    def test_continuous_stage_process_result_rejects_launch_exit(self):
         failures = MODULE.run_process_failures(
             "continuous-flight", early_exit=True, launch_exit_code=-9,
             launch_group_cleared=True, capture_group_cleared=True,
             graph_failures=[])
-        self.assertEqual(failures, [])
+        self.assertEqual(
+            failures, ["launch_exited_early", "launch_exit_nonzero"])
 
         failures = MODULE.run_process_failures(
             "full", early_exit=True, launch_exit_code=-9,
