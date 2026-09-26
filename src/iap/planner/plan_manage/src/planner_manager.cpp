@@ -3064,8 +3064,10 @@ namespace ego_planner
 
     // PositionCommand shares the planning callback group and can be delayed
     // by a long certification pass. The controller trace is already the
-    // watchdog's identity-bound, reentrant control evidence; reuse its latest
-    // commanded progress without changing any freshness or identity limit.
+    // watchdog's identity-bound, reentrant control evidence. Its sample ROS
+    // stamp is copied from the exact PositionCommand that supplied elapsed,
+    // so keep that pair together even when the planner's odometry clock is
+    // frozen by the mutually-exclusive callback group.
     {
       std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
       const auto &trace = trajectory_controller_trace_sample_;
@@ -3080,7 +3082,7 @@ namespace ego_planner
           (!found || trace.trajectory_elapsed_s >= selected_elapsed_s))
       {
         found = true;
-        selected_receive_s = trace.receive_ros_stamp_s;
+        selected_receive_s = trace.sample_ros_stamp_s;
         selected_elapsed_s = trace.trajectory_elapsed_s;
       }
     }

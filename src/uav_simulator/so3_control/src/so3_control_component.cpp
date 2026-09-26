@@ -117,6 +117,7 @@ void SO3ControlComponent::publishSO3Command(void)
         trace.trajectory_id = latest_position_command_.trajectory_id;
         trace.trajectory_start_time =
             latest_position_command_.trajectory_start_time;
+        trace.position_command_stamp = latest_position_command_.header.stamp;
         trace.trajectory_elapsed_s =
             latest_position_command_.trajectory_elapsed_s;
         trace.curve_hash = latest_position_command_.curve_hash;

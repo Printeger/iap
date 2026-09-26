@@ -157,7 +157,7 @@ namespace ego_planner
                   static_cast<int>(message->trajectory_id),
                   rclcpp::Time(message->trajectory_start_time).nanoseconds(),
                   message->curve_hash,
-                  rclcpp::Time(message->header.stamp).seconds(),
+                  rclcpp::Time(message->position_command_stamp).seconds(),
                   message->trajectory_elapsed_s,
                   Eigen::Vector3d(message->commanded_position.x,
                                   message->commanded_position.y,

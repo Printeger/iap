@@ -6756,6 +6756,58 @@ TEST(PlanningTimeProviderTest,
 }
 
 TEST(PlanningTimeProviderTest,
+     ReentrantControllerProgressKeepsItsCommandClockWhilePlannerOdomFreezes) {
+  ego_planner::EGOPlannerManager manager;
+  constexpr double frozen_planner_ros_s = 12.0;
+  constexpr double command_ros_s = 12.18;
+  constexpr double command_elapsed_s = 0.18;
+  constexpr double switch_elapsed_s = 0.20;
+  int64_t steady_now_ns = 5'000'000'000LL;
+  manager.setTimeProvider([] {
+    return rclcpp::Time(
+        static_cast<int64_t>(frozen_planner_ros_s * 1.0e9),
+        RCL_ROS_TIME);
+  });
+  manager.setSteadyTimeProvider([&steady_now_ns] {
+    return steady_now_ns;
+  });
+
+  const auto instance = manager.executionInstanceId();
+  constexpr int trajectory_id = 94;
+  constexpr int64_t start_ns = 10'000'000'000LL;
+  constexpr char curve_hash[] = "starved-planner-parent-94";
+  manager.local_data_.execution_instance_id_ = instance;
+  manager.local_data_.traj_id_ = trajectory_id;
+  manager.local_data_.start_time_ = rclcpp::Time(start_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = curve_hash;
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      instance, trajectory_id, start_ns, curve_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      instance, trajectory_id, start_ns, curve_hash));
+
+  const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+  ASSERT_TRUE(manager.recordTrajectoryControllerTrace(
+      instance, trajectory_id, start_ns, curve_hash,
+      command_ros_s, command_elapsed_s,
+      zero, zero, zero, zero, zero, zero, false));
+
+  double progress_ros_s = std::numeric_limits<double>::quiet_NaN();
+  double progress_elapsed_s = std::numeric_limits<double>::quiet_NaN();
+  ASSERT_TRUE(manager.trajectoryExecutionProgress(
+      instance, trajectory_id, start_ns, curve_hash, 0.2,
+      &progress_ros_s, &progress_elapsed_s));
+  EXPECT_DOUBLE_EQ(progress_ros_s, command_ros_s);
+  EXPECT_DOUBLE_EQ(progress_elapsed_s, command_elapsed_s);
+
+  const auto bridge = ego_planner::p4RollingSuccessorExposureBridge(
+      progress_ros_s, progress_elapsed_s, switch_elapsed_s, 2.0,
+      command_ros_s);
+  EXPECT_TRUE(bridge.valid) << bridge.reason;
+  EXPECT_EQ(bridge.reason, "ok");
+  EXPECT_NEAR(bridge.begin_parent_elapsed_s, command_elapsed_s, 1.0e-12);
+}
+
+TEST(PlanningTimeProviderTest,
      OrdinaryChildSerializesTheSameFrozenParentAnchorUsedForItsBoundary) {
   ego_planner::EGOPlannerManager manager;
   double local_ros_s = 12.0;
