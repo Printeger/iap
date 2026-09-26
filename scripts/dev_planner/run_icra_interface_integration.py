@@ -1004,8 +1004,9 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
     published_normal = {identity(payload(row)) for row in normal_splines}
     published_guards = {identity(payload(row)) for row in guard_splines}
     published = published_normal | published_guards
-    activated = [payload(row) for row in statuses
-                 if payload(row).get("state") == "ACTIVATED"]
+    activated_rows = [row for row in statuses
+                      if payload(row).get("state") == "ACTIVATED"]
+    activated = [payload(row) for row in activated_rows]
     rejected = [payload(row) for row in statuses
                 if payload(row).get("state") == "REJECTED"]
     activation_identities = [identity(row) for row in activated]
@@ -1023,25 +1024,107 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
     if non_nominal_activations:
         failures.append("non_nominal_trajectory_activation")
     distinct_activations = []
-    for item in activation_identities:
+    activation_receive_s: dict[tuple[int, int, int, str], float] = {}
+    for row, item in zip(activated_rows, activation_identities):
         if item not in published_normal:
             continue
         if not distinct_activations or distinct_activations[-1] != item:
             distinct_activations.append(item)
+            try:
+                activation_receive_s[item] = float(row["receive_steady_s"])
+            except (KeyError, TypeError, ValueError):
+                activation_receive_s[item] = math.inf
     normal_by_identity = {
         identity(payload(row)): payload(row) for row in normal_splines
     }
+    traces_by_identity: dict[tuple[int, int, int, str], list[dict]] = {}
+    for row in traces:
+        traces_by_identity.setdefault(identity(payload(row)), []).append(row)
+    for rows in traces_by_identity.values():
+        rows.sort(key=lambda row: float(row.get("receive_steady_s", math.inf)))
+
+    def vector3(value: object) -> list[float] | None:
+        if not isinstance(value, list) or len(value) != 3:
+            return None
+        try:
+            result = [float(component) for component in value]
+        except (TypeError, ValueError):
+            return None
+        return result if all(math.isfinite(component) for component in result) \
+            else None
+
+    def vector_distance(left: list[float], right: list[float]) -> float:
+        return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+
     successor_switches = 0
     successor_parent_mismatches = 0
+    zero_speed_switches = 0
+    discontinuous_switches = 0
+    switch_evidence_missing = 0
     for parent, child in zip(
             distinct_activations, distinct_activations[1:]):
         child_curve = normal_by_identity.get(child, {})
-        if parent_identity(child_curve) == parent:
-            successor_switches += 1
-        else:
+        if parent_identity(child_curve) != parent:
             successor_parent_mismatches += 1
+            continue
+        child_activation_s = activation_receive_s.get(child, math.inf)
+        child_traces = [
+            row for row in traces_by_identity.get(child, [])
+            if float(row.get("receive_steady_s", math.inf)) + 0.05 >=
+            child_activation_s
+        ]
+        if not child_traces:
+            switch_evidence_missing += 1
+            continue
+        child_trace = child_traces[0]
+        child_receive_s = float(
+            child_trace.get("receive_steady_s", math.inf))
+        parent_traces = [
+            row for row in traces_by_identity.get(parent, [])
+            if float(row.get("receive_steady_s", -math.inf)) <=
+            child_receive_s
+        ]
+        if not parent_traces:
+            switch_evidence_missing += 1
+            continue
+        parent_trace = parent_traces[-1]
+        child_payload = payload(child_trace)
+        parent_payload = payload(parent_trace)
+        feedback_velocity = vector3(
+            child_payload.get("feedback_velocity_xyz"))
+        if feedback_velocity is None:
+            switch_evidence_missing += 1
+            continue
+        if vector_distance(feedback_velocity, [0.0, 0.0, 0.0]) < 0.05:
+            zero_speed_switches += 1
+            continue
+        boundary_fields = (
+            ("position_xyz", 0.02),
+            ("velocity_xyz", 0.05),
+            ("acceleration_xyz", 0.10),
+        )
+        boundary_continuous = True
+        for field, tolerance in boundary_fields:
+            parent_value = vector3(parent_payload.get(field))
+            child_value = vector3(child_payload.get(field))
+            if parent_value is None or child_value is None:
+                boundary_continuous = False
+                break
+            if vector_distance(parent_value, child_value) > tolerance:
+                boundary_continuous = False
+                break
+        if not boundary_continuous:
+            discontinuous_switches += 1
+            continue
+        successor_switches += 1
     if successor_parent_mismatches:
         failures.append("successor_parent_identity_mismatch")
+    if zero_speed_switches:
+        failures.append("successor_switch_not_at_nonzero_speed")
+    if discontinuous_switches:
+        failures.append("successor_command_boundary_discontinuous")
+    if switch_evidence_missing:
+        failures.append("successor_switch_motion_evidence_missing")
     if successor_switches < 2:
         failures.append("fewer_than_two_successor_switches")
 
@@ -1147,6 +1230,9 @@ def analyze_continuous_flight(records: list[dict]) -> dict:
         non_nominal_activation_count=len(non_nominal_activations),
         successor_switch_count=successor_switches,
         successor_parent_mismatch_count=successor_parent_mismatches,
+        zero_speed_switch_count=zero_speed_switches,
+        discontinuous_switch_count=discontinuous_switches,
+        switch_evidence_missing_count=switch_evidence_missing,
         maximum_tracking_error_m=maximum_tracking_error_m,
         saturated_count=saturated_count,
         longest_nonterminal_pause_s=longest_nonterminal_pause_s,

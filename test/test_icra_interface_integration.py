@@ -145,7 +145,8 @@ class TestStageContracts(unittest.TestCase):
                        f"curve-{trajectory}")
                       for trajectory in (10, 11, 12)]
         previous = None
-        for execution, trajectory, start_ns, curve_hash in identities:
+        for index, (execution, trajectory, start_ns, curve_hash) in enumerate(
+                identities, start=1):
             common = {
                 "execution_instance_id": execution,
                 "trajectory_id": trajectory,
@@ -160,14 +161,21 @@ class TestStageContracts(unittest.TestCase):
                     "parent_curve_hash": previous[3],
                 })
             records.extend([
-                {"kind": "normal_bspline", "payload": common},
-                {"kind": "trajectory_status", "payload": {
+                {"kind": "normal_bspline", "receive_steady_s": index - .1,
+                 "payload": common},
+                {"kind": "trajectory_status", "receive_steady_s": index,
+                 "payload": {
                     **common, "state": "ACTIVATED"}},
-                {"kind": "poscmd", "payload": {
+                {"kind": "poscmd", "receive_steady_s": index + .01,
+                 "payload": {
                     **common, "position_xyz": [0.0, 0.0, 1.5]}},
-                {"kind": "controller_trace", "payload": {
+                {"kind": "controller_trace", "receive_steady_s": index + .02,
+                 "payload": {
                     **common, "position_xyz": [0.0, 0.0, 1.5],
+                    "velocity_xyz": [1.0, 0.0, 0.0],
+                    "acceleration_xyz": [0.0, 0.0, 0.0],
                     "feedback_position_xyz": [0.05, 0.0, 1.5],
+                    "feedback_velocity_xyz": [1.0, 0.0, 0.0],
                     "saturated": False}},
             ])
             previous = (execution, trajectory, start_ns, curve_hash)
@@ -219,7 +227,7 @@ class TestStageContracts(unittest.TestCase):
 
         summary = MODULE.analyze_continuous_flight(records)
 
-        self.assertEqual(summary["successor_switch_count"], 1)
+        self.assertEqual(summary["successor_switch_count"], 0)
         self.assertEqual(summary["non_nominal_activation_count"], 1)
         self.assertIn("non_nominal_trajectory_activation",
                       summary["failures"])
@@ -246,6 +254,51 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(summary["successor_switch_count"], 0)
         self.assertEqual(summary["successor_parent_mismatch_count"], 2)
         self.assertIn("successor_parent_identity_mismatch",
+                      summary["failures"])
+
+    def test_continuous_flight_requires_nonzero_continuous_switch_motion(self):
+        records = []
+        previous = None
+        for index in range(1, 4):
+            common = {
+                "execution_instance_id": 7,
+                "trajectory_id": index,
+                "start_time_ns": index * 1_000_000_000,
+                "curve_hash": f"curve-{index}",
+            }
+            if previous is not None:
+                common.update({
+                    "parent_execution_instance_id": previous[0],
+                    "parent_trajectory_id": previous[1],
+                    "parent_start_time_ns": previous[2],
+                    "parent_curve_hash": previous[3],
+                })
+            receive_s = float(index)
+            records.extend([
+                {"kind": "normal_bspline", "receive_steady_s": receive_s - .1,
+                 "payload": common},
+                {"kind": "trajectory_status", "receive_steady_s": receive_s,
+                 "payload": {**common, "state": "ACTIVATED"}},
+                {"kind": "controller_trace",
+                 "receive_steady_s": receive_s + .01,
+                 "payload": {
+                     **common,
+                     "position_xyz": [0.0, 0.0, 1.5],
+                     "velocity_xyz": [1.0, 0.0, 0.0],
+                     "acceleration_xyz": [0.0, 0.0, 0.0],
+                     "feedback_position_xyz": [0.0, 0.0, 1.5],
+                     "feedback_velocity_xyz": [0.0, 0.0, 0.0],
+                     "saturated": False,
+                 }},
+            ])
+            previous = (7, index, index * 1_000_000_000,
+                        f"curve-{index}")
+
+        summary = MODULE.analyze_continuous_flight(records)
+
+        self.assertEqual(summary["successor_switch_count"], 0)
+        self.assertEqual(summary["zero_speed_switch_count"], 2)
+        self.assertIn("successor_switch_not_at_nonzero_speed",
                       summary["failures"])
 
     def test_continuous_flight_allows_unbound_hover_before_first_activation(self):
@@ -290,12 +343,15 @@ class TestStageContracts(unittest.TestCase):
                  "payload": {**common, "state": "ACTIVATED"}},
                 {"kind": "poscmd", "receive_steady_s": stamp + .01,
                  "payload": {**common,
-                             "position_xyz": [float(index), 0.0, 1.5]}},
+                             "position_xyz": [index * .01, 0.0, 1.5]}},
                 {"kind": "controller_trace", "receive_steady_s": stamp + .02,
                  "payload": {
                      **common,
-                     "position_xyz": [float(index), 0.0, 1.5],
-                     "feedback_position_xyz": [float(index), 0.0, 1.5],
+                     "position_xyz": [index * .01, 0.0, 1.5],
+                     "velocity_xyz": [1.0, 0.0, 0.0],
+                     "acceleration_xyz": [0.0, 0.0, 0.0],
+                     "feedback_position_xyz": [index * .01, 0.0, 1.5],
+                     "feedback_velocity_xyz": [1.0, 0.0, 0.0],
                      "saturated": False,
                  }},
             ])
