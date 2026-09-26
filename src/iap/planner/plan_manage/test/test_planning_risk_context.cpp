@@ -2103,7 +2103,7 @@ TEST(P4ActualCurveClearanceOptimization,
   EXPECT_EQ(query_count, frozen_query_count);
   EXPECT_GT(iterations, 0);
   EXPECT_LT(minimum_queried_base_margin, 0.05);
-  EXPECT_GE(minimumDenseForkPlanningMargin(after, *clearance), 0.008)
+  EXPECT_GE(minimumDenseForkPlanningMargin(after, *clearance), 0.018)
       << "solver=" << optimizer->getLastP1OptimizationTrace().solver_result
       << " iterations=" << iterations << " final_cost=" << final_cost;
   auto nominal = sampleDenseForkCurve(after, "nominal");
@@ -2136,7 +2136,11 @@ TEST(P4ActualCurveClearanceOptimization,
   const auto displacements = optimizer->
       p4ActualCurveClearanceRequiredDisplacementsForTest();
   ASSERT_EQ(displacements.size(), 1u);
-  EXPECT_NEAR(displacements.front(), -0.005, 1.0e-12);
+  // The live current-frame map moved the limiting obstacle by 9.68 mm
+  // relative to the publication frame.  A sample with 10 mm seed surplus
+  // therefore still needs 5 mm of outward generation displacement once the
+  // existing 5 mm solver allowance and 10 mm frame reserve are combined.
+  EXPECT_NEAR(displacements.front(), 0.005, 1.0e-12);
 }
 
 TEST(P4ReboundFailureEvidence,
