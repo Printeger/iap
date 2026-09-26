@@ -9713,25 +9713,81 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
-     AnySuccessorCurveRejectionLeavesPreparingState)
+     FreshnessRejectionRetriesOnlyAfterExecutionSnapshotAdvances)
 {
   ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ExecutionCertificate certificate;
+  certificate.valid = true;
+  certificate.trajectory_id = 17;
+  certificate.start_time_ns = 10000000000LL;
+  certificate.duration_s = 30.0;
+  certificate.execution_deadline_s = 40.0;
+  certificate.latest_rolling_switch_elapsed_s = 20.0;
+  certificate.control_points_hash = "freshness-parent";
+  certificate.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  manager.local_data_.execution_instance_id_ = 1u;
+  manager.local_data_.traj_id_ = certificate.trajectory_id;
+  manager.local_data_.start_time_ =
+      rclcpp::Time(certificate.start_time_ns, RCL_ROS_TIME);
+  manager.local_data_.curve_hash_ = certificate.control_points_hash;
+  manager.local_data_.duration_ = certificate.duration_s;
+  manager.setP4ExecutionCertificateForTest(certificate);
+  manager.setTimeProvider([]() {
+    return rclcpp::Time(10000000000LL, RCL_ROS_TIME);
+  });
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      1u, certificate.trajectory_id, certificate.start_time_ns,
+      certificate.control_points_hash));
   manager.setP4SuccessorPreparationBoundaryForTest(
-      17, 10000000000LL, 11.0);
+      17, 10000000000LL, 13.0,
+      "successor_fast_path_ready", certificate.control_points_hash);
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.selected_candidate_id = 1u;
+  decision.selected_channel_id = 2u;
+  decision.selected_guide = {
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitX()};
+  decision.snapshot_identity.execution_snapshot_id = 182u;
+  manager.setP4ForwardDecisionForTest(std::move(decision));
   ASSERT_TRUE(manager.preparingP4SuccessorCurve());
 
   manager.recordPreparedP4SuccessorCurveFailure(
       10.95, ego_planner::P4PreparedCurveFailure::FRESHNESS,
       "publication_certificate_stale");
 
-  EXPECT_FALSE(manager.preparingP4SuccessorCurve());
+  EXPECT_TRUE(manager.preparingP4SuccessorCurve());
+  EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 182u);
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(manager.lastP4ForwardDecision().planning_disposition,
             ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
   EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
-            ego_planner::P4SuccessorFailure::LOCAL_MAP_STALE);
-  EXPECT_NE(manager.lastP4ForwardDecision().reason.find(
-                "successor_curve_preparation_failed"),
-            std::string::npos);
+            ego_planner::P4SuccessorFailure::NONE);
+  EXPECT_EQ(manager.lastP4ForwardDecision().reason,
+            "successor_curve_waiting_for_new_snapshot");
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.95, 182u));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u));
+  EXPECT_FALSE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+}
+
+TEST(P4PreparedSuccessorPolicy,
+     HardSuccessorCurveRejectionLeavesPreparingState)
+{
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      17, 10000000000LL, 11.0);
+  ASSERT_TRUE(manager.preparingP4SuccessorCurve());
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.95, ego_planner::P4PreparedCurveFailure::DYNAMICS,
+      "terminal_bspline_refinement_collision_or_dynamics");
+  EXPECT_FALSE(manager.preparingP4SuccessorCurve());
+  EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
+            ego_planner::P4SuccessorFailure::DYNAMICS_INVALID);
 
   ego_planner::EGOPlannerManager overwritten_reason_manager;
   overwritten_reason_manager.setP4SuccessorPreparationBoundaryForTest(

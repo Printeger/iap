@@ -1260,6 +1260,14 @@ namespace ego_planner
     {
       return p4_pending_channel_work_item_;
     }
+    bool p4SuccessorAwaitingNewSnapshotForTest() const
+    {
+      return p4_successor_schedule_.awaiting_new_snapshot;
+    }
+    uint64_t p4SuccessorLastAttemptSnapshotIdForTest() const
+    {
+      return p4_successor_schedule_.last_attempt_execution_snapshot_id;
+    }
     std::size_t pendingP4NormalCurveCountForTest() const
     {
       return static_cast<std::size_t>(std::count_if(

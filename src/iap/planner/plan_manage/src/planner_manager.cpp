@@ -3682,7 +3682,8 @@ namespace ego_planner
     // actual curves are prepared serially. The next channel is already a
     // bounded work item for this parent and must be consumed immediately;
     // result_delivered only suppresses another route search, not this curve.
-    if (p4_pending_channel_work_item_ &&
+    if (!p4_successor_schedule_.awaiting_new_snapshot &&
+        p4_pending_channel_work_item_ &&
         p4_successor_preparation_state_ ==
             P4SuccessorPreparationState::CURVE_PREPARING)
       return true;
@@ -3737,6 +3738,10 @@ namespace ego_planner
     if (!deadline.valid || p4_successor_schedule_.result_delivered ||
         now_s > p4_execution_certificate_.execution_deadline_s + 1.0e-9)
       return false;
+    if (p4_pending_channel_work_item_ &&
+        p4_successor_preparation_state_ ==
+            P4SuccessorPreparationState::CURVE_PREPARING)
+      return true;
     // latest_prepare_start_s is a deadline, not a release time. Route output
     // is consumed immediately so the actual B-spline, braking library and
     // direct certificate can be prepared and cached well before handoff.
@@ -10126,6 +10131,59 @@ namespace ego_planner
     const std::string failure_reason = preserve_first_typed_failure
         ? last_p4_forward_decision_.reason
         : "successor_curve_preparation_failed:" + detail;
+
+    // Snapshot freshness is not a property of the immutable child curve.
+    // Keep the frozen channel as a bounded work item and retry it only after
+    // execution authority advances to a different snapshot.  The previous
+    // curve remains rejected and is not relabeled or mutated; the retry runs
+    // the ordinary actual-curve, braking, local-assurance and P5 pipeline and
+    // therefore receives a new curve identity.  Other typed failures remain
+    // terminal below.
+    const uint64_t failed_snapshot_id =
+        last_p4_forward_decision_.snapshot_identity.execution_snapshot_id != 0u
+        ? last_p4_forward_decision_.snapshot_identity.execution_snapshot_id
+        : p4_direct_risk_evidence_.execution_snapshot_id;
+    if (failure == P4SuccessorFailure::LOCAL_MAP_STALE &&
+        failed_snapshot_id != 0u)
+    {
+      P4ForwardDecision failed_decision = last_p4_forward_decision_;
+      failed_decision.successor_failure = failure;
+      failed_decision.reason = failure_reason;
+      appendP4ForwardDecision(
+          failed_decision, "successor_curve_freshness_retry_pending", now_s);
+
+      P4ForwardDecision retry = last_p4_forward_decision_;
+      retry.result_status = P4ForwardResultStatus::PENDING;
+      retry.planning_disposition =
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+      retry.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      retry.successor_failure = P4SuccessorFailure::NONE;
+      retry.reason = "successor_curve_waiting_for_new_snapshot";
+      last_p4_forward_decision_ = retry;
+      p4_pending_channel_work_item_ = std::move(retry);
+      p4_pending_channel_context_.reset();
+      p4_prepared_successor_.reset();
+      p4_prepared_channel_bundles_.clear();
+      p4_cached_successor_bundle_.reset();
+      p4_cached_successor_activation_in_progress_ = false;
+      p4_successor_preparation_state_ =
+          P4SuccessorPreparationState::CURVE_PREPARING;
+      p4_successor_schedule_.last_attempt_execution_snapshot_id =
+          failed_snapshot_id;
+      p4_successor_schedule_.last_failure = failure;
+      p4_successor_schedule_.result_delivered = false;
+      p4_successor_schedule_.awaiting_new_snapshot = true;
+      P4ExecutionCheckDiagnostics pending;
+      pending.applicable = true;
+      pending.allowed = true;
+      pending.identity_match = true;
+      pending.execution_snapshot_id = failed_snapshot_id;
+      pending.reason = "successor_curve_waiting_for_new_snapshot";
+      appendP4ExecutionEvent(
+          "SUCCESSOR_CURVE_FRESHNESS_RETRY_PENDING", now_s, pending);
+      return;
+    }
 
     // A typed failure rejects only this immutable channel curve.  When an
     // earlier channel from the same frozen comparison already owns a complete
