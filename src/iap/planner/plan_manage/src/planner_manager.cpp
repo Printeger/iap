@@ -5887,6 +5887,25 @@ namespace ego_planner
       unavailable.reason = "successor_worker_pending";
       return unavailable;
     }
+    if (p4_successor_schedule_.awaiting_new_snapshot &&
+        p4_pending_channel_work_item_ &&
+        p4_successor_preparation_state_ ==
+            P4SuccessorPreparationState::CURVE_PREPARING)
+    {
+      // This item belongs to the rolling-successor transaction above.  When
+      // its execution snapshot has not advanced, do not let it fall through
+      // into the ordinary multi-channel lane: that lane consumes without the
+      // successor attempt rebind and the exact child is then rejected only
+      // because its frozen decision carries the previous attempt identity.
+      // Keep the certified parent authoritative until a newer execution
+      // snapshot makes p4SuccessorPreparationDue() consume and rebind it.
+      P4ForwardDecision waiting = *p4_pending_channel_work_item_;
+      waiting.result_status = P4ForwardResultStatus::PENDING;
+      waiting.planning_disposition =
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+      waiting.reason = "successor_curve_waiting_for_new_snapshot";
+      return waiting;
+    }
     if (auto pending_channel = consume_pending_channel_work_item(false))
       return std::move(*pending_channel);
     const bool same_snapshot =

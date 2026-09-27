@@ -9908,6 +9908,129 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
+     FreshnessRetryCannotFallThroughToNormalPendingConsumption)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen, nullptr);
+  const auto snapshot = makeP4SelectionSnapshot(
+      10.0, frozen->geometry_id, true);
+  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(
+      *makeP4ExecutionSnapshot(
+          snapshot, directRiskCallback(0.5), 10.0, 182u));
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen;
+  execution->occupancy = occupancy;
+
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("successor_freshness_fallthrough.csv").string(), 1);
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, execution->forward_risk_batch, execution);
+  manager.setTimeProvider([] {
+    return rclcpp::Time(10, 100000000, RCL_ROS_TIME);
+  });
+
+  Eigen::MatrixXd control_points(3, 8);
+  for (int index = 0; index < control_points.cols(); ++index)
+    control_points.col(index) = Eigen::Vector3d(
+        0.25 * static_cast<double>(index), 0.0, 1.0);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(control_points, 3, 0.5);
+  manager.local_data_.velocity_traj_ =
+      manager.local_data_.position_traj_.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+  manager.local_data_.traj_id_ = 17;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  manager.local_data_.curve_hash_ = "freshness-parent";
+
+  ego_planner::P4ExecutionCertificate parent;
+  parent.valid = true;
+  parent.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  parent.trajectory_id = manager.local_data_.traj_id_;
+  parent.start_time_ns = manager.local_data_.start_time_.nanoseconds();
+  parent.duration_s = manager.local_data_.duration_;
+  parent.execution_deadline_s = 12.0;
+  parent.latest_rolling_switch_elapsed_s = 2.0;
+  parent.control_points_hash = manager.local_data_.curve_hash_;
+  parent.approved_endpoint = Eigen::Vector3d(1.75, 0.0, 1.0);
+  manager.setP4ExecutionCertificateForTest(parent);
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash));
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      parent.trajectory_id, parent.start_time_ns, 11.5,
+      "successor_fast_path_ready", parent.control_points_hash);
+
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.executable_intent =
+      ego_planner::P4ExecutableIntent::FINAL_CHANNEL;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+  decision.selected_candidate_id = decision.candidates.front().candidate_id;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  decision.selected_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.75, 0.0, 1.0)};
+  decision.snapshot_identity.execution_snapshot_id = 182u;
+  const uint64_t failed_attempt_id = decision.planning_attempt_id;
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.05, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "successor_exposure_ledger_anchor_invalid");
+  ASSERT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.05, occupancy, execution->forward_risk_batch, execution);
+  ASSERT_NE(manager.planningRiskContext().planning_attempt_id,
+            failed_attempt_id);
+  const auto same_snapshot = manager.evaluateP4ForwardRouteForTest(
+      Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+      parent.approved_endpoint);
+  EXPECT_EQ(same_snapshot.result_status,
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(same_snapshot.reason,
+            "successor_curve_waiting_for_new_snapshot");
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
+            failed_attempt_id);
+
+  auto advanced_execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
+  advanced_execution->execution_snapshot_id = 183u;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.06, occupancy, advanced_execution->forward_risk_batch,
+      advanced_execution);
+  const uint64_t retry_attempt_id =
+      manager.planningRiskContext().planning_attempt_id;
+  const auto advanced_snapshot = manager.evaluateP4ForwardRouteForTest(
+      Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+      parent.approved_endpoint);
+  EXPECT_EQ(advanced_snapshot.result_status,
+            ego_planner::P4ForwardResultStatus::READY);
+  EXPECT_EQ(advanced_snapshot.reason,
+            "successor_curve_waiting_for_new_snapshot");
+  EXPECT_EQ(advanced_snapshot.planning_attempt_id, retry_attempt_id);
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+}
+
+TEST(P4PreparedSuccessorPolicy,
      HardSuccessorCurveRejectionLeavesPreparingState)
 {
   ego_planner::EGOPlannerManager manager;
