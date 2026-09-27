@@ -2169,10 +2169,68 @@ TEST(PredictorModuleTest,
       << iap::forwardRiskFailureReasonName(result.failure_reason);
   EXPECT_EQ(result.timing.evidence_reuse_count, 1u);
   EXPECT_EQ(result.timing.candidate_cache_hit_count, 1u);
-  // One hit is the upper-bound receiver advisory and one is the matching
-  // lower-bound advisory. Neither GNSS solve should repeat for the overlap.
-  EXPECT_EQ(result.timing.receiver_cache_hit_count, 2u);
+  // The transition row consumes the source row directly, so it performs no
+  // receiver-cache lookup and no second upper/lower GNSS solve.
+  EXPECT_EQ(result.timing.receiver_cache_hit_count, 0u);
   EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 1u);
+}
+
+TEST(PredictorModuleTest,
+     ProductionScaleTransitionShapeCompletesWithinTheUnchangedBudget) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  params.execution_batch_worker_count = 8;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot_with_epoch(make_epoch(16), true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "production-scale-transition-shape";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.compute_budget_ms = 150.0;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_POINTWISE;
+  request.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+
+  constexpr std::size_t kUniqueEvidencePoints = 1635u;
+  constexpr std::size_t kTransitionReuseRows = 671u;
+  request.points.reserve(kUniqueEvidencePoints + kTransitionReuseRows);
+  for (std::size_t index = 0; index < kUniqueEvidencePoints; ++index) {
+    const double fraction = static_cast<double>(index) /
+        static_cast<double>(kUniqueEvidencePoints - 1u);
+    const double relative_time_s = 16.0 * fraction;
+    request.points.push_back(iap::ForwardRiskQueryPoint{
+        Eigen::Vector3d(
+            6.4 * fraction, 0.5 * std::sin(4.0 * fraction), 0.0),
+        snapshot.stamp + relative_time_s, relative_time_s, 1u,
+        static_cast<std::uint64_t>(index + 1u),
+        static_cast<std::uint64_t>(1u + index / 12u)});
+  }
+  for (std::size_t index = 0; index < kTransitionReuseRows; ++index) {
+    auto transition = request.points[index];
+    transition.satellite_window_id = static_cast<std::uint64_t>(
+        1000u + index / 12u);
+    request.points.push_back(std::move(transition));
+  }
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete)
+      << iap::forwardRiskFailureReasonName(result.failure_reason)
+      << " total_ms=" << result.timing.total_ms;
+  EXPECT_EQ(result.points.size(), 2306u);
+  EXPECT_EQ(result.timing.unique_evidence_point_count,
+            kUniqueEvidencePoints);
+  EXPECT_EQ(result.timing.evidence_reuse_count, kTransitionReuseRows);
+  EXPECT_EQ(result.timing.candidate_cache_hit_count,
+            kTransitionReuseRows);
+  EXPECT_LT(result.timing.total_ms, request.compute_budget_ms);
 }
 
 TEST(PredictorModuleTest,

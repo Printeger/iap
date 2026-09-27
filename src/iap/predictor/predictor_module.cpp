@@ -1343,7 +1343,6 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         ++out.timing.candidate_cache_hit_count;
         // The duplicate consumes the source row's upper and lower receiver
         // advisories without another lookup, copy, or GNSS solve.
-        out.timing.receiver_cache_hit_count += 2u;
         break;
       }
     }
