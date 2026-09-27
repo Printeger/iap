@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-route-preference-disposition): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — mark a normal `CANDIDATE_READY` route preference as retained
+  work awaiting actual-curve certification instead of leaving the structural
+  default `HOLD_REQUIRED`. The omitted disposition caused the manager to
+  record the preferred channel as a typed failure without generating its
+  actual curve, then evaluate a lower-ranked sibling. This change grants no
+  motion authority: the actual B-spline, swept collision/clearance, dynamics,
+  braking, identity, freshness, P5 and publication gates remain mandatory.
 - fix(p4-successor-freshness-state-watermark): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — after an actual successor curve is rejected for stale exposure
   evidence, require both a newer execution snapshot and a newer exact planning

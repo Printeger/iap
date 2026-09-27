@@ -2726,6 +2726,12 @@ TEST(P4ForwardRoute, BestEffortChoosesLeastBadWhenEveryChannelExceedsBudget)
 
   ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
       << decision.reason;
+  EXPECT_EQ(decision.reason,
+            "route_preference_mission_degraded_candidate_ready");
+  EXPECT_EQ(decision.planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
+      << "a route preference is pending actual-curve certification, not a "
+         "typed HOLD failure";
   ASSERT_GE(decision.candidates.size(), 2u);
   const auto selected = std::find_if(
       decision.candidates.begin(), decision.candidates.end(),

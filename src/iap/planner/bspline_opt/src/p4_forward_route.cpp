@@ -5062,6 +5062,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   decision.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
   decision.selection_authority = P4ForwardSelectionAuthority::NONE;
   decision.formal_support = false;
+  // A route preference is only a seed for the manager's actual-curve
+  // pipeline. Keep the incumbent (or startup hover) authoritative while that
+  // curve is generated and certified; the default HOLD disposition would
+  // misclassify this ready work item as a typed channel failure.
+  decision.planning_disposition =
+    P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
   decision.trigger_reason = multiple_safe_channels ?
     P4ForwardTriggerReason::MULTIPLE_CHANNELS :
     P4ForwardTriggerReason::SINGLE_CHANNEL;
