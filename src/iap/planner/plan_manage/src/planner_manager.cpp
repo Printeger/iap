@@ -7375,6 +7375,8 @@ namespace ego_planner
             "limited_prefix_stopping_reserve_insufficient");
     }
     const auto snapshot = planning_risk_context_.snapshot;
+    const bool normal_selected_reauthorization_stage =
+        stage == "normal_selected_bundle_latest_reauthorization";
     std::set<uint64_t> normal_prepared_channel_ids;
     if (stage == "final_bspline_before_p5" && !limited_prefix_intent)
       for (const auto &candidate : last_p4_forward_decision_.candidates)
@@ -7382,7 +7384,8 @@ namespace ego_planner
           normal_prepared_channel_ids.insert(candidate.channel_id);
     const bool frozen_normal_channel_comparison =
         normal_prepared_channel_ids.size() >= 2u &&
-        planning_risk_context_.execution_snapshot;
+        planning_risk_context_.execution_snapshot &&
+        !normal_selected_reauthorization_stage;
     const bool initial_actual_curve_certification =
         stage == "final_bspline_before_p5" ||
         stage == "successor_curve_before_p5";
@@ -7395,14 +7398,22 @@ namespace ego_planner
             planning_risk_context_.execution_snapshot->execution_snapshot_id &&
         p4_actual_curve_clearance_occupancy_generation_ ==
             planning_risk_context_.execution_snapshot->occupancy->generation;
-    const auto execution_snapshot =
-        (frozen_normal_channel_comparison ||
-         frozen_actual_clearance_identity)
-        ? planning_risk_context_.execution_snapshot
-        : (p0_risk_grid_runtime_
-            ? p0_risk_grid_runtime_->
-                acquireExecutionRiskSnapshotForEvaluation(stamp_s)
-            : planning_risk_context_.execution_snapshot);
+    const auto latest_causal_execution_snapshot =
+        normal_selected_reauthorization_stage && p0_risk_grid_runtime_
+        ? p0_risk_grid_runtime_->
+            acquireExecutionRiskSnapshotForEvaluation(stamp_s)
+        : nullptr;
+    const auto execution_snapshot = normal_selected_reauthorization_stage
+        ? p4PublicationValidationSnapshot(
+              latest_causal_execution_snapshot,
+              planning_risk_context_.execution_snapshot)
+        : (frozen_normal_channel_comparison ||
+           frozen_actual_clearance_identity)
+            ? planning_risk_context_.execution_snapshot
+            : (p0_risk_grid_runtime_
+                ? p0_risk_grid_runtime_->
+                    acquireExecutionRiskSnapshotForEvaluation(stamp_s)
+                : planning_risk_context_.execution_snapshot);
     if (!snapshot && !execution_snapshot)
       return reject_final_identity(
           P4GeometryCommitVerdict::POLICY_MISMATCH,
@@ -9058,8 +9069,6 @@ namespace ego_planner
         stage == "successor_curve_before_p5";
     const bool prepared_nominal_stage =
         stage == "final_bspline_before_p5";
-    const bool normal_selected_reauthorization_stage =
-        stage == "normal_selected_bundle_latest_reauthorization";
     p4_lineage_telemetry_fault_ = !written;
     if (prepared_successor_stage || prepared_nominal_stage ||
         normal_selected_reauthorization_stage)
@@ -9256,6 +9265,21 @@ namespace ego_planner
       }
       last_p4_execution_diagnostics_ = P4ExecutionCheckDiagnostics{};
       p4_execution_revoked_ = false;
+    }
+    if (normal_selected_reauthorization_stage &&
+        p4_channel_preparation_lifecycle_.diagnostics.decision_event_id ==
+            last_p4_forward_decision_.decision_event_id &&
+        !p4_channel_preparation_lifecycle_.diagnostics.terminal)
+    {
+      P4ChannelPreparationTransition finish_cohort;
+      finish_cohort.kind =
+          P4ChannelPreparationTransitionKind::FINISH_COHORT;
+      finish_cohort.decision = &last_p4_forward_decision_;
+      finish_cohort.clear_bundles = true;
+      finish_cohort.detail = "normal_channel_comparison_complete";
+      if (!transitionP4ChannelPreparation(
+              finish_cohort, stamp_s, nullptr))
+        return false;
     }
     return certification_stage ? true : written;
   }
@@ -12609,17 +12633,6 @@ namespace ego_planner
     appendP4ForwardDecision(
         last_p4_forward_decision_,
         "normal_channel_comparison_complete", now_s);
-    P4ChannelPreparationTransition finish_cohort;
-    finish_cohort.kind =
-        P4ChannelPreparationTransitionKind::FINISH_COHORT;
-    finish_cohort.decision = &last_p4_forward_decision_;
-    finish_cohort.clear_bundles = true;
-    finish_cohort.detail = "normal_channel_comparison_complete";
-    if (!transitionP4ChannelPreparation(
-            finish_cohort, now_s, reason))
-      return finish(
-          P4NormalChannelPreparationDisposition::REJECTED,
-          p4_channel_preparation_lifecycle_.diagnostics.terminal_reason);
     return finish(
         P4NormalChannelPreparationDisposition::READY_TO_PUBLISH,
         "normal_channel_comparison_complete");

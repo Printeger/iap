@@ -11410,10 +11410,32 @@ TEST(P4PreparedChannelPreparation,
             second_retry_channel_id);
   EXPECT_FALSE(
       manager.lastP4ForwardDecision().runner_up_actual_endpoint.allFinite());
-  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+  EXPECT_EQ(manager.preparedP4NormalChannelRecordsForTest().size(), 1u)
+      << "the selected certified winner must remain available until latest "
+         "snapshot reauthorization succeeds";
+  const auto selected_lifecycle =
+      manager.p4ChannelPreparationLifecycleForTest();
+  EXPECT_FALSE(selected_lifecycle.terminal)
+      << "winner selection must remain non-terminal until the exact restored "
+         "curve succeeds on the latest execution snapshot";
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "normal_selected_bundle_latest_reauthorization", 11.1))
+      << manager.lastP4ActualCurveCertification().detail;
   const auto completed_lifecycle =
       manager.p4ChannelPreparationLifecycleForTest();
   EXPECT_TRUE(completed_lifecycle.terminal);
+  EXPECT_EQ(completed_lifecycle.terminal_reason,
+            "normal_channel_comparison_complete");
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+  EXPECT_TRUE(manager.preparedP4NormalChannelRecordsForTest().empty());
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "normal_selected_bundle_latest_reauthorization", 11.1))
+      << "a publication-boundary refresh of the same exact winner must not "
+         "re-enter or re-finish its already terminal cohort";
+  EXPECT_TRUE(manager.p4ChannelPreparationLifecycleForTest().terminal);
+  EXPECT_EQ(
+      manager.p4ChannelPreparationLifecycleForTest().transition_count,
+      completed_lifecycle.transition_count);
   EXPECT_EQ(completed_lifecycle.expected_channel_count, 2u);
   EXPECT_EQ(completed_lifecycle.freshness_retry_count, 1u);
   EXPECT_EQ(completed_lifecycle.pending_schedule_count, 3u);
