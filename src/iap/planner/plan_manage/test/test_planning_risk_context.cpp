@@ -9867,7 +9867,9 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.95, 182u));
   manager.clearPlanningRiskContext();
   ASSERT_EQ(manager.planningRiskContext().planning_attempt_id, 0u);
-  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.96, 183u));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u))
+      << "the safety observer must schedule the existing FSM lane that "
+         "creates the planning transaction";
   EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(
@@ -9881,6 +9883,7 @@ TEST(P4PreparedSuccessorPolicy,
   ASSERT_NE(retry_attempt_id, failed_attempt_id);
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u));
   EXPECT_FALSE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 183u);
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(
       manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
@@ -9891,6 +9894,17 @@ TEST(P4PreparedSuccessorPolicy,
       182u)
       << "the frozen guide keeps its source lineage until the replacement "
          "actual curve passes latest-snapshot certification";
+
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.97, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "successor_exposure_ledger_anchor_invalid");
+  EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 183u)
+      << "a repeated freshness rejection must retain the snapshot actually "
+         "used by the retry, not regress to the frozen guide snapshot";
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.97, 183u));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.98, 184u));
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 184u);
 }
 
 TEST(P4PreparedSuccessorPolicy,

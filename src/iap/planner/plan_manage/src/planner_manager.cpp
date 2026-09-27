@@ -3829,16 +3829,17 @@ namespace ego_planner
               p4_successor_schedule_.last_attempt_execution_snapshot_id,
               effective_execution_snapshot_id))
         return false;
+      // A safety callback can observe the advancing execution snapshot while
+      // no planning transaction is active.  Report the work as schedulable so
+      // the existing FSM lane can enter ordinary planning and install a real
+      // attempt id, but do not consume or rebind the frozen work item here.
+      // Returning false creates a circular wait: the FSM is the producer of
+      // the PlanningRiskContext, yet it is only driven when this function
+      // reports the retry due.
+      if (planning_risk_context_.planning_attempt_id == 0u)
+        return true;
       if (p4_pending_channel_work_item_)
       {
-        // The safety observer can see the new execution snapshot before a
-        // planning callback has installed its PlanningRiskContext.  Attempt
-        // id zero is not a transaction identity: consuming the retry here
-        // would bind the frozen work item to zero and make the next real
-        // attempt fail the mandatory final-commit identity gate.  Keep the
-        // retry pending until the ordinary planning entry owns a valid id.
-        if (planning_risk_context_.planning_attempt_id == 0u)
-          return false;
         // The frozen guide remains search lineage from the failed snapshot,
         // but its replacement actual curve belongs to this new planning
         // attempt.  Normal cached-curve recertification performs the same
@@ -3848,6 +3849,11 @@ namespace ego_planner
         p4_pending_channel_work_item_->planning_attempt_id =
             planning_risk_context_.planning_attempt_id;
       }
+      // The retry just consumed this execution snapshot.  If its exact child
+      // is rejected for freshness again, another retry must wait for a newer
+      // snapshot instead of repeatedly reusing the original route snapshot.
+      p4_successor_schedule_.last_attempt_execution_snapshot_id =
+          effective_execution_snapshot_id;
       p4_successor_schedule_.awaiting_new_snapshot = false;
       p4_successor_schedule_.result_delivered = false;
     }
@@ -10301,8 +10307,9 @@ namespace ego_planner
       p4_cached_successor_activation_in_progress_ = false;
       p4_successor_preparation_state_ =
           P4SuccessorPreparationState::CURVE_PREPARING;
-      p4_successor_schedule_.last_attempt_execution_snapshot_id =
-          failed_snapshot_id;
+      p4_successor_schedule_.last_attempt_execution_snapshot_id = std::max(
+          p4_successor_schedule_.last_attempt_execution_snapshot_id,
+          failed_snapshot_id);
       p4_successor_schedule_.last_failure = failure;
       p4_successor_schedule_.result_delivered = false;
       p4_successor_schedule_.awaiting_new_snapshot = true;
