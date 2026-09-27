@@ -10874,24 +10874,26 @@ namespace ego_planner
     auto &commitment = *p4_committed_topology_;
     const double corridor_radius_m =
         p4RefinementCorridorRadius(p4_forward_limits_);
-    // The refinement tube contains stopping reserve so the optimizer can
-    // safely reshape a curve.  It is deliberately much wider than the graph
-    // discretization and therefore cannot prove that actual odometry has
-    // crossed a topology's merge.  Complete only when odometry is both near
-    // the committed graph path and at its graph-derived exit station.
-    const double exit_lateral_tolerance_m = std::max(
-        1.5 * p4_forward_limits_.topology_resolution_m,
-        p4_forward_limits_.occupancy_resolution_m);
-    const double exit_station_tolerance_m = std::max(
+    // The refinement tube permits an actual curve to cut a discretized graph
+    // corner near the merge.  Membership in that broad tube alone is not an
+    // exit: odometry must also cross the forward plane from the committed
+    // path origin to its graph-derived exit.
+    const Eigen::Vector3d topology_forward =
+        commitment.exit_point - commitment.path.front();
+    const double topology_span_m = topology_forward.norm();
+    if (!std::isfinite(topology_span_m) || topology_span_m <= 1.0e-9)
+      return;
+    const double exit_plane_tolerance_m = std::max(
         0.5 * p4_forward_limits_.topology_resolution_m,
         p4_forward_limits_.occupancy_resolution_m);
     const auto projection = projectP4Polyline(commitment.path, position);
     if (!std::isfinite(projection.distance_m))
       return;
     const bool at_exit =
-        projection.distance_m <= exit_lateral_tolerance_m &&
-        projection.station_m + exit_station_tolerance_m >=
-            commitment.exit_station_m;
+        projection.distance_m <= corridor_radius_m &&
+        (position - commitment.exit_point).dot(
+            topology_forward / topology_span_m) >=
+            -exit_plane_tolerance_m;
     // Reaching the shared merge without first observing the selected branch
     // is not evidence that the selected topology was entered or completed.
     if (commitment.pending_entry && at_exit)

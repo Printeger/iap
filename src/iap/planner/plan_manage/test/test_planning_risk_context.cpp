@@ -13745,17 +13745,25 @@ TEST(P4CommittedTopology, ActualExitCompletesCommitmentWithoutHardFailure)
   // The optimizer's refinement tube includes stopping reserve and can reach
   // well behind the graph-derived merge.  Merely entering that broad tube is
   // not actual-odometry evidence that the selected topology was completed.
-  const Eigen::Vector3d final_segment =
-      selected.common_anchor - selected.candidates.front().path[3];
+  const Eigen::Vector3d topology_forward =
+      (selected.common_anchor - selected.candidates.front().path.front())
+          .normalized();
   const Eigen::Vector3d before_exit =
-      selected.common_anchor - 0.5 * final_segment.normalized();
+      selected.common_anchor - topology_forward;
   manager.updateP4CommittedTopologyForTest(
       before_exit, Eigen::Vector3d(0.4, 0.0, 0.0),
       Eigen::Vector3d::Zero());
   EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
 
+  // An actual curve may cut the graph discretization corner while remaining
+  // inside the already-certified topology tube.  Crossing the graph-derived
+  // exit plane is completion even when odometry does not enter a small ball
+  // around the centerline anchor.
+  const Eigen::Vector3d lateral(
+      -topology_forward.y(), topology_forward.x(), 0.0);
   manager.updateP4CommittedTopologyForTest(
-      selected.common_anchor, Eigen::Vector3d(0.4, 0.0, 0.0),
+      selected.common_anchor + 0.1 * topology_forward + lateral,
+      Eigen::Vector3d(0.4, 0.0, 0.0),
       Eigen::Vector3d::Zero());
   EXPECT_FALSE(manager.p4CommittedTopologyActiveForTest());
   EXPECT_FALSE(manager.p4CommittedTopologyPendingForTest());
