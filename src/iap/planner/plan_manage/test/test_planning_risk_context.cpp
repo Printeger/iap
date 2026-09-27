@@ -13047,6 +13047,116 @@ TEST(P4CommittedTopology, ActualExitCompletesCommitmentWithoutHardFailure)
   EXPECT_FALSE(manager.p4CommittedTopologyPendingForTest());
 }
 
+TEST(P4CommittedTopology,
+     ActualExitStagesAlreadyPublishedNextTopologyBeforeGuardRecovery)
+{
+  ego_planner::EGOPlannerManager manager;
+  const auto candidate = [](const uint64_t candidate_id,
+                            const uint64_t channel_id,
+                            std::vector<Eigen::Vector3d> path) {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = candidate_id;
+    value.channel_id = channel_id;
+    value.path = path;
+    value.topology_path = std::move(path);
+    value.path_hash = "successive-topology-" + std::to_string(channel_id);
+    value.occupancy_supported = true;
+    value.geometry_state = ego_planner::P4ForwardGeometryState::CLEAR;
+    return value;
+  };
+
+  ego_planner::P4ForwardDecision current;
+  current.result_status = ego_planner::P4ForwardResultStatus::READY;
+  current.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  current.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  current.decision_event_id = 910u;
+  current.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
+  current.candidates = {
+      candidate(1u, 21u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           current.common_anchor}),
+      candidate(2u, 22u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, 2.0, 1.0),
+           Eigen::Vector3d(5.0, 2.0, 1.0),
+           current.common_anchor})};
+  current.selected_candidate_id = 1u;
+  current.selected_channel_id = 21u;
+  current.selected_guide = current.candidates.front().path;
+  ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(current));
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.4, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  // A rolling successor can publish the winner for the next fork before
+  // odometry has crossed the current fork's merge.  Publication cannot
+  // replace the active commitment, but completion must hand it off rather
+  // than discard the already-certified next topology.
+  ego_planner::P4ForwardDecision next;
+  next.result_status = ego_planner::P4ForwardResultStatus::READY;
+  next.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  next.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  next.decision_event_id = 911u;
+  next.common_anchor = Eigen::Vector3d(12.0, 0.0, 1.0);
+  next.candidates = {
+      candidate(11u, 31u,
+          {Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0),
+           Eigen::Vector3d(7.0, 0.0, 1.0),
+           Eigen::Vector3d(9.0, 2.0, 1.0),
+           Eigen::Vector3d(11.0, 2.0, 1.0),
+           next.common_anchor}),
+      candidate(12u, 32u,
+          {Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0),
+           Eigen::Vector3d(7.0, 0.0, 1.0),
+           Eigen::Vector3d(9.0, -2.0, 1.0),
+           Eigen::Vector3d(11.0, -2.0, 1.0),
+           next.common_anchor})};
+  next.selected_candidate_id = 11u;
+  next.selected_channel_id = 31u;
+  next.selected_guide = next.candidates.front().path;
+  manager.setP4ForwardDecisionForTest(next);
+  EXPECT_FALSE(manager.stageP4CommittedTopologyForTest(next));
+
+  manager.updateP4CommittedTopologyForTest(
+      current.common_anchor, Eigen::Vector3d(0.4, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  EXPECT_TRUE(manager.p4CommittedTopologyPendingForTest());
+  EXPECT_FALSE(manager.p4CommittedTopologyActiveForTest());
+
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(9.0, 2.0, 1.0),
+      Eigen::Vector3d(0.4, 0.0, 0.0), Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  auto guard_recovery = next;
+  guard_recovery.decision_event_id = 912u;
+  guard_recovery.action =
+      ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  guard_recovery.request_position = Eigen::Vector3d(9.0, 2.0, 1.0);
+  guard_recovery.candidates = {
+      candidate(21u, 41u,
+          {guard_recovery.request_position,
+           Eigen::Vector3d(11.0, 2.0, 1.0), next.common_anchor}),
+      candidate(22u, 42u,
+          {guard_recovery.request_position,
+           Eigen::Vector3d(7.0, 0.0, 1.0),
+           Eigen::Vector3d(9.0, -2.0, 1.0), next.common_anchor})};
+  ASSERT_TRUE(manager.constrainP4DecisionToCommittedTopologyForTest(
+      &guard_recovery));
+  ASSERT_EQ(guard_recovery.candidates.size(), 1u);
+  EXPECT_EQ(guard_recovery.selected_candidate_id, 21u);
+  EXPECT_EQ(guard_recovery.reason, "committed_topology_single_continuation");
+}
+
 TEST(P4PreparedChannelPreparation,
      TwoForkReplaySelectsRightThenLeftWithFormalLineage)
 {

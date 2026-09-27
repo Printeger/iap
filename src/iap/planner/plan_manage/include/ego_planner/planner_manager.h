@@ -1683,6 +1683,8 @@ namespace ego_planner
 
     struct P4CommittedTopology
     {
+      uint64_t decision_event_id = 0;
+      uint64_t queued_next_decision_event_id = 0;
       std::vector<Eigen::Vector3d> path;
       Eigen::Vector3d exit_point = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());

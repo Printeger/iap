@@ -10626,8 +10626,6 @@ namespace ego_planner
   bool EGOPlannerManager::stageP4CommittedTopology(
       const P4ForwardDecision &decision)
   {
-    if (p4_committed_topology_ && p4_committed_topology_->active)
-      return false;
     std::set<uint64_t> channel_ids;
     for (const auto &candidate : decision.candidates)
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
@@ -10662,6 +10660,25 @@ namespace ego_planner
         !std::isfinite(exit_projection.distance_m) ||
         exit_projection.station_m <= entry_station_m + 1.0e-6)
       return false;
+
+    if (p4_committed_topology_ && p4_committed_topology_->active)
+    {
+      // A rolling successor may be certified and published before odometry
+      // reaches the active topology's merge.  It cannot replace the active
+      // commitment early, but remember that this exact published decision is
+      // eligible for handoff when odometry completes the current topology.
+      // The decision itself remains owned by last_p4_forward_decision_; a
+      // later callback that replaces it cannot accidentally resurrect this
+      // queued identity.
+      if (decision.decision_event_id > 0u &&
+          decision.decision_event_id !=
+              p4_committed_topology_->decision_event_id)
+      {
+        p4_committed_topology_->queued_next_decision_event_id =
+            decision.decision_event_id;
+      }
+      return false;
+    }
 
     if (p4_committed_topology_ &&
         p4_committed_topology_->pending_entry)
@@ -10703,6 +10720,7 @@ namespace ego_planner
     }
 
     P4CommittedTopology commitment;
+    commitment.decision_event_id = decision.decision_event_id;
     commitment.path = path;
     commitment.exit_point = exit;
     commitment.divergence_station_m = entry_station_m;
@@ -10759,6 +10777,8 @@ namespace ego_planner
       return;
     if (at_exit)
     {
+      const uint64_t queued_next_decision_event_id =
+          commitment.queued_next_decision_event_id;
       P4ExecutionCheckDiagnostics completed;
       completed.applicable = true;
       completed.allowed = true;
@@ -10767,6 +10787,12 @@ namespace ego_planner
       appendP4ExecutionEvent(
           "COMMITTED_TOPOLOGY_COMPLETED", plannerNow().seconds(), completed);
       p4_committed_topology_.reset();
+      if (queued_next_decision_event_id > 0u &&
+          last_p4_forward_decision_.decision_event_id ==
+              queued_next_decision_event_id)
+      {
+        (void)stageP4CommittedTopology(last_p4_forward_decision_);
+      }
       return;
     }
     if (commitment.active && commitment.hard_failure_proven &&
