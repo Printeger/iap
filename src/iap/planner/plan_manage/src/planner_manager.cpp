@@ -117,8 +117,8 @@ namespace ego_planner
                 if (selected || candidate.channel_id == 0u ||
                     !candidate.occupancy_supported)
                   return true;
-                const auto &sibling_path = candidate.topology_path.size() >= 2u
-                    ? candidate.topology_path : candidate.path;
+                const auto &sibling_path = candidate.path.size() >= 2u
+                    ? candidate.path : candidate.topology_path;
                 return projectP4Polyline(sibling_path, point).distance_m >
                     corridor_radius_m;
               });
@@ -10559,8 +10559,11 @@ namespace ego_planner
         });
     if (selected == decision.candidates.end())
       return false;
-    const auto &path = selected->topology_path.size() >= 2u
-        ? selected->topology_path : selected->path;
+    // The raw grid walk is regenerated from every planning origin and is not
+    // a stable topology identity.  Commit the collision-checked graph
+    // shortcut that is also used to build and certify the actual curve.
+    const auto &path = selected->path.size() >= 2u
+        ? selected->path : selected->topology_path;
     if (path.size() < 2u)
       return false;
     const Eigen::Vector3d exit = decision.common_anchor.allFinite()
@@ -10718,8 +10721,8 @@ namespace ego_planner
         p4RefinementCorridorRadius(p4_forward_limits_);
     const auto compatible = [&commitment, corridor_radius_m](
         const P4ForwardCandidate &candidate) {
-      const auto &path = candidate.topology_path.size() >= 2u
-          ? candidate.topology_path : candidate.path;
+      const auto &path = candidate.path.size() >= 2u
+          ? candidate.path : candidate.topology_path;
       if (path.size() < 2u)
         return false;
       const auto start = projectP4Polyline(

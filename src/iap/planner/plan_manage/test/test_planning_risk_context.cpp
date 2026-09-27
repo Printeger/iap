@@ -12660,6 +12660,16 @@ TEST(P4CommittedTopology,
   selected.selected_candidate_id = 1u;
   selected.selected_channel_id = 41u;
   selected.selected_guide = selected.candidates.front().path;
+  // Rebuilding the same graph branch from a new start can change the raw
+  // grid walk while preserving its collision-checked shortcut/homotopy.
+  // Topology commitment must not depend on identical grid discretization.
+  selected.candidates.front().topology_path = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.0, 1.0),
+      Eigen::Vector3d(2.0, -3.0, 1.0),
+      Eigen::Vector3d(3.5, -3.0, 1.0),
+      Eigen::Vector3d(5.0, -3.0, 1.0),
+      Eigen::Vector3d(6.0, 0.0, 1.0)};
 
   ego_planner::EGOPlannerManager pending_manager;
   ASSERT_TRUE(pending_manager.stageP4CommittedTopologyForTest(selected));
@@ -12732,6 +12742,13 @@ TEST(P4CommittedTopology,
            Eigen::Vector3d(2.0, 2.0, 1.0),
            Eigen::Vector3d(5.0, 2.0, 1.0),
            Eigen::Vector3d(6.0, 0.0, 1.0)})};
+  recovery.candidates.front().topology_path = {
+      Eigen::Vector3d(1.1, -0.2, 1.0),
+      Eigen::Vector3d(2.0, -1.0, 1.0),
+      Eigen::Vector3d(3.5, -1.0, 1.0),
+      Eigen::Vector3d(5.0, -1.0, 1.0),
+      Eigen::Vector3d(6.0, 0.0, 1.0),
+      Eigen::Vector3d(8.0, 0.0, 1.0)};
   // The junction reroute deliberately advertises the lower partial GNSS
   // number. It still cannot enter the ordinary sibling comparison.
   recovery.candidates[0].global_peak_ratio = 1.23;
