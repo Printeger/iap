@@ -10735,14 +10735,35 @@ namespace ego_planner
       return true;
     }
 
+    const uint64_t frozen_candidate_id = decision->selected_candidate_id;
+    const uint64_t frozen_channel_id = decision->selected_channel_id;
+    const uint64_t frozen_route_preference =
+        decision->route_preference_channel_id;
     decision->candidates = std::move(continuations);
-    const auto &first = decision->candidates.front();
-    decision->selected_candidate_id = first.candidate_id;
-    decision->selected_channel_id = first.channel_id;
-    decision->route_preference_channel_id = first.channel_id;
+    auto selected = std::find_if(
+        decision->candidates.begin(), decision->candidates.end(),
+        [frozen_candidate_id, frozen_channel_id](
+            const P4ForwardCandidate &candidate) {
+          return (frozen_candidate_id > 0u &&
+                  candidate.candidate_id == frozen_candidate_id) ||
+              (frozen_candidate_id == 0u && frozen_channel_id > 0u &&
+               candidate.channel_id == frozen_channel_id);
+        });
+    if (selected == decision->candidates.end())
+      selected = decision->candidates.begin();
+    decision->selected_candidate_id = selected->candidate_id;
+    decision->selected_channel_id = selected->channel_id;
+    const bool frozen_preference_survives = std::any_of(
+        decision->candidates.begin(), decision->candidates.end(),
+        [frozen_route_preference](const P4ForwardCandidate &candidate) {
+          return frozen_route_preference > 0u &&
+              candidate.channel_id == frozen_route_preference;
+        });
+    decision->route_preference_channel_id = frozen_preference_survives
+        ? frozen_route_preference : selected->channel_id;
     decision->runner_up_candidate_id = 0u;
     decision->runner_up_channel_id = 0u;
-    decision->selected_guide = first.path;
+    decision->selected_guide = selected->path;
     decision->selection_authority = P4ForwardSelectionAuthority::NONE;
     decision->formal_support = false;
     decision->executable_intent = P4ExecutableIntent::FINAL_CHANNEL;

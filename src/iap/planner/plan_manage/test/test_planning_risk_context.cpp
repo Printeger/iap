@@ -12728,6 +12728,37 @@ TEST(P4CommittedTopology,
   EXPECT_EQ(recovery.selected_channel_id, 501u);
   EXPECT_EQ(recovery.reason, "committed_topology_single_continuation");
   EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  // Multiple siblings can share the remainder of the committed branch and
+  // diverge only after its exit.  Filtering must not replace the lifecycle's
+  // frozen current sibling with the first compatible candidate.
+  ego_planner::P4ForwardDecision next_fork = selected;
+  next_fork.decision_event_id = 726u;
+  next_fork.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  next_fork.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+  next_fork.request_position = Eigen::Vector3d(3.0, -2.0, 1.0);
+  next_fork.candidates = {
+      candidate(21u, 601u,
+          {Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0),
+           Eigen::Vector3d(8.0, -2.0, 1.0)}),
+      candidate(22u, 602u,
+          {Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0),
+           Eigen::Vector3d(8.0, 2.0, 1.0)})};
+  next_fork.selected_candidate_id = 22u;
+  next_fork.selected_channel_id = 602u;
+  next_fork.route_preference_channel_id = 602u;
+  next_fork.selected_guide = next_fork.candidates.back().path;
+  ASSERT_TRUE(
+      manager.constrainP4DecisionToCommittedTopologyForTest(&next_fork));
+  ASSERT_EQ(next_fork.candidates.size(), 2u);
+  EXPECT_EQ(next_fork.selected_candidate_id, 22u);
+  EXPECT_EQ(next_fork.selected_channel_id, 602u);
+  EXPECT_EQ(next_fork.route_preference_channel_id, 602u);
 }
 
 TEST(P4CommittedTopology,
