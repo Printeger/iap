@@ -13460,6 +13460,83 @@ TEST(P4CommittedTopology,
 }
 
 TEST(P4CommittedTopology,
+     DenseForwardContinuationMayTraverseTheExistingExitMergeRegion)
+{
+  ego_planner::EGOPlannerManager manager;
+  const auto candidate = [](const uint64_t candidate_id,
+                            const uint64_t channel_id,
+                            std::vector<Eigen::Vector3d> path) {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = candidate_id;
+    value.channel_id = channel_id;
+    value.path = path;
+    value.topology_path = std::move(path);
+    value.path_hash = "dense-exit-" + std::to_string(channel_id);
+    value.occupancy_supported = true;
+    value.geometry_state = ego_planner::P4ForwardGeometryState::CLEAR;
+    return value;
+  };
+
+  ego_planner::P4ForwardDecision selected;
+  selected.result_status = ego_planner::P4ForwardResultStatus::READY;
+  selected.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  selected.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  selected.decision_event_id = 750u;
+  selected.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
+  selected.candidates = {
+      candidate(1u, 41u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(2.0, -3.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, 0.0, 1.0), selected.common_anchor}),
+      candidate(2u, 42u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(2.0, 3.0, 1.0),
+           Eigen::Vector3d(5.0, 2.0, 1.0),
+           Eigen::Vector3d(5.0, 0.0, 1.0), selected.common_anchor})};
+  selected.selected_candidate_id = 1u;
+  selected.selected_channel_id = 41u;
+  selected.selected_guide = selected.candidates.front().path;
+  ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.6666666667, 1.0),
+      Eigen::Vector3d(0.5, 0.0, 0.0), Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  // The dense continuation enters the graph-derived exit tolerance ball
+  // before its nearest-point station reaches the equivalent station bound.
+  // Every point still moves through the existing merge and then forward;
+  // sampling the merge more densely must not turn it into a topology return.
+  ego_planner::P4ForwardDecision continuation;
+  continuation.result_status = ego_planner::P4ForwardResultStatus::READY;
+  continuation.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  continuation.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  continuation.decision_event_id = 751u;
+  continuation.candidates = {
+      candidate(3u, 43u,
+          {Eigen::Vector3d(3.0, -2.6666666667, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -1.0, 1.0),
+           Eigen::Vector3d(5.0, -0.9, 1.0),
+           selected.common_anchor,
+           Eigen::Vector3d(8.0, 0.0, 1.0)})};
+  continuation.selected_candidate_id = 3u;
+  continuation.selected_channel_id = 43u;
+  continuation.selected_guide = continuation.candidates.front().path;
+
+  ASSERT_TRUE(manager.constrainP4DecisionToCommittedTopologyForTest(
+      &continuation));
+  EXPECT_EQ(continuation.executable_intent,
+            ego_planner::P4ExecutableIntent::FINAL_CHANNEL);
+  EXPECT_EQ(continuation.selected_channel_id, 43u);
+  EXPECT_EQ(continuation.reason, "committed_topology_single_continuation");
+}
+
+TEST(P4CommittedTopology,
      TransientEvidenceCannotReleaseButHardFailureAfterStopCanReroute)
 {
   ego_planner::EGOPlannerManager manager;

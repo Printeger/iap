@@ -11075,6 +11075,7 @@ namespace ego_planner
           // Extending beyond the merge is allowed; returning through the
           // consumed channel to an old junction is not.
           if (projection.distance_m <= corridor_radius_m &&
+              (point - commitment.exit_point).norm() > corridor_radius_m &&
               projection.station_m + corridor_radius_m <
                   commitment.exit_station_m)
             return false;
