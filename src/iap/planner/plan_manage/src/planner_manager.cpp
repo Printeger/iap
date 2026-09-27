@@ -13424,16 +13424,83 @@ namespace ego_planner
           "normal_channel_cached_curve_recertification_pending");
     }
 
-    const auto prepared_records = p4CommonForwardPreparedChannelRecords(
+    auto prepared_records = p4CommonForwardPreparedChannelRecords(
         p4_prepared_channel_bundles_);
-    const auto comparison = compareP4PreparedChannels(
-        prepared_records, bundle.decision.snapshot_identity,
-        expected_channel_ids.size(),
-        p4_execution_commitment_backup_.certificate.successor_channel_id,
+    const uint64_t frozen_route_preference =
         p4_channel_preparation_lifecycle_.diagnostics.decision_event_id ==
                 bundle.decision.decision_event_id
             ? p4_channel_preparation_lifecycle_.route_preference_channel_id
-            : bundle.decision.route_preference_channel_id);
+            : bundle.decision.route_preference_channel_id;
+    std::size_t comparison_expected_channel_count =
+        expected_channel_ids.size();
+    bool preserved_preferred_topology = false;
+    const auto failed_preference = p4_prepared_channel_bundles_.find(
+        frozen_route_preference);
+    const bool strict_global = p4_global_exposure_policy_.task_mode ==
+        iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+    if (frozen_route_preference > 0u &&
+        failed_preference != p4_prepared_channel_bundles_.end() &&
+        failed_preference->second.state ==
+            P4SuccessorPreparationState::FAILED &&
+        !p4CommittedTopologyHardFailureType(
+            failed_preference->second.channel_record.failure,
+            strict_global))
+    {
+      const auto preferred_candidate = std::find_if(
+          bundle.decision.candidates.begin(),
+          bundle.decision.candidates.end(),
+          [frozen_route_preference](const P4ForwardCandidate &candidate) {
+            return candidate.channel_id == frozen_route_preference;
+          });
+      std::vector<P4PreparedChannelRecord> same_topology_records;
+      if (preferred_candidate != bundle.decision.candidates.end())
+      {
+        const auto &preferred_path =
+            preferred_candidate->topology_path.size() >= 2u
+                ? preferred_candidate->topology_path
+                : preferred_candidate->path;
+        P4ChannelSlot preferred_slot;
+        preferred_slot.stable_channel_id = frozen_route_preference;
+        preferred_slot.topology_path = preferred_path;
+        const uint64_t unmatched_channel_id =
+            frozen_route_preference ==
+                    std::numeric_limits<uint64_t>::max()
+                ? frozen_route_preference - 1u
+                : frozen_route_preference + 1u;
+        for (const auto &record : prepared_records)
+        {
+          if (!record.feasible())
+            continue;
+          const auto candidate = std::find_if(
+              bundle.decision.candidates.begin(),
+              bundle.decision.candidates.end(),
+              [&record](const P4ForwardCandidate &entry) {
+                return entry.channel_id == record.channel_id;
+              });
+          if (candidate == bundle.decision.candidates.end())
+            continue;
+          const auto &candidate_path =
+              candidate->topology_path.size() >= 2u
+                  ? candidate->topology_path : candidate->path;
+          const auto rematched = assignP4StableChannelSlots(
+              {candidate_path}, {preferred_slot}, unmatched_channel_id,
+              p4_forward_limits_.topology_resolution_m);
+          if (rematched.size() == 1u &&
+              rematched.front().stable_channel_id ==
+                  frozen_route_preference)
+            same_topology_records.push_back(record);
+        }
+      }
+      prepared_records = std::move(same_topology_records);
+      comparison_expected_channel_count =
+          std::max<std::size_t>(1u, prepared_records.size());
+      preserved_preferred_topology = !prepared_records.empty();
+    }
+    const auto comparison = compareP4PreparedChannels(
+        prepared_records, bundle.decision.snapshot_identity,
+        comparison_expected_channel_count,
+        p4_execution_commitment_backup_.certificate.successor_channel_id,
+        frozen_route_preference);
     if (comparison.state == P4ChannelComparisonState::PARTIAL_COMPARISON)
     {
       P4ForwardDecision observe = bundle.decision;
@@ -13506,8 +13573,9 @@ namespace ego_planner
         selected_bundle.channel_record.actual_endpoint;
     selected_bundle.decision.selected_unevaluated_suffix_m =
         selected_bundle.channel_record.unevaluated_suffix_m;
-    selected_bundle.decision.reason =
-        "normal_actual_final_channel_bundles_compared";
+    selected_bundle.decision.reason = preserved_preferred_topology
+        ? "normal_actual_equivalent_preferred_topology_selected"
+        : "normal_actual_final_channel_bundles_compared";
     for (const auto &candidate : selected_bundle.decision.candidates)
     {
       if (candidate.channel_id == comparison.winner_channel_id)

@@ -12627,6 +12627,175 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
+     PreferredFreshnessFailureKeepsCertifiedEquivalentTopology)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("normal_preferred_topology_freshness.csv").string(),
+      1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  const auto risk = directRiskCallback(0.4);
+  const auto execution = makeP4ExecutionSnapshot(
+      snapshot, risk, 10.0, 803u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  auto bound_execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
+  bound_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 9.75, occupancy, risk, bound_execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  decision.route_preference_channel_id = decision.selected_channel_id;
+  decision.candidates.front().topology_path = {
+      decision.request_position,
+      Eigen::Vector3d(-2.0, 1.5, 0.0),
+      Eigen::Vector3d(0.0, 1.5, 0.0),
+      Eigen::Vector3d(2.0, 1.5, 0.0), decision.common_anchor};
+
+  auto equivalent = decision.candidates.front();
+  equivalent.candidate_id += 1u;
+  equivalent.channel_id += 1u;
+  for (std::size_t index = 1u;
+       index + 1u < equivalent.topology_path.size(); ++index)
+    equivalent.topology_path[index].y() -= 0.2;
+  equivalent.path_hash = "equivalent-topology-continuation";
+  auto other_topology = decision.candidates.front();
+  other_topology.candidate_id += 2u;
+  other_topology.channel_id += 2u;
+  other_topology.path[1].y() *= -1.0;
+  for (auto &point : other_topology.topology_path)
+    point.y() *= -1.0;
+  other_topology.path_hash = "different-topology-shorter-risk-view";
+  decision.candidates.push_back(equivalent);
+  decision.candidates.push_back(other_topology);
+  const uint64_t preferred_channel_id = decision.selected_channel_id;
+  const uint64_t equivalent_channel_id = equivalent.channel_id;
+  const uint64_t other_channel_id = other_topology.channel_id;
+  ASSERT_TRUE(
+      manager.prepareNormalChannelsForActualCertificationForTest(&decision));
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  std::string reason;
+  EXPECT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.0, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+          "preferred_exact_curve_expired_after_retry", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            equivalent_channel_id);
+
+  const auto prepare_current = [&manager](
+      const ego_planner::P4ForwardDecision &work, const int trajectory_id,
+      const double known_peak_ratio) {
+    manager.setP4ForwardDecisionForTest(work);
+    manager.clearP4PendingChannelWorkItemForTest();
+    Eigen::MatrixXd points = p4StoppedControlPoints();
+    if (work.selected_guide[1].y() < 0.0)
+      points.row(1) *= -1.0;
+    auto curve = ego_planner::UniformBspline(points, 3, 0.5);
+    const auto terminal = ego_planner::imposeP4TerminalStop(
+        &curve, terminalStartState(curve), 20.0, 100.0, 0.0);
+    ASSERT_TRUE(terminal.success) << terminal.reason;
+    manager.local_data_.position_traj_ = curve;
+    manager.local_data_.velocity_traj_ = curve.getDerivative();
+    manager.local_data_.acceleration_traj_ =
+        manager.local_data_.velocity_traj_.getDerivative();
+    manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+    manager.local_data_.traj_id_ = trajectory_id;
+    manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+    manager.local_data_.duration_ = curve.getTimeSum();
+    manager.local_data_.curve_hash_ = ego_planner::p4ControlPointHash(
+        curve.getControlPoint());
+    ASSERT_TRUE(manager.certifyP4ActualCurve(
+        "final_bspline_before_p5", 10.0))
+        << manager.lastP4ActualCurveCertification().detail;
+    auto certificate = manager.p4ExecutionCertificate();
+    certificate.global_peak_ratio =
+        std::numeric_limits<double>::quiet_NaN();
+    certificate.global_exposure_integral_ratio_s = 0.0;
+    manager.setP4ExecutionCertificateForTest(std::move(certificate));
+    auto evidence = manager.latestP4DirectRiskEvidence();
+    evidence.trajectory_assurance.global.peak_ratio =
+        std::numeric_limits<double>::quiet_NaN();
+    evidence.trajectory_assurance.global.maximum_continuous_exceedance_s =
+        0.0;
+    evidence.trajectory_assurance.global.exceedance_integral_ratio_s = 0.0;
+    for (auto &point : evidence.points)
+    {
+      point.pl_lower_available = true;
+      point.pl_upper_available = true;
+      point.safety_ratio_lower = known_peak_ratio;
+      point.safety_ratio_upper = known_peak_ratio;
+      point.unknown_support_fraction = 1.0;
+      point.unknown_kappa_upper_bound = 1.0;
+      point.combined_conservative_kappa = 1.0;
+    }
+    manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
+  };
+
+  auto equivalent_work = *manager.pendingP4ChannelWorkItemForTest();
+  prepare_current(equivalent_work, 95, 1.2);
+  EXPECT_EQ(
+      manager.prepareP4NormalChannelComparison(10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            other_channel_id);
+
+  auto other_work = *manager.pendingP4ChannelWorkItemForTest();
+  prepare_current(other_work, 96, 0.4);
+  EXPECT_EQ(
+      manager.prepareP4NormalChannelComparison(10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+      << reason;
+  EXPECT_EQ(reason, "normal_channel_comparison_complete");
+  EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
+            equivalent_channel_id);
+  EXPECT_NE(manager.lastP4ForwardDecision().selected_channel_id,
+            preferred_channel_id);
+  EXPECT_NE(manager.lastP4ForwardDecision().selected_channel_id,
+            other_channel_id);
+  EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 95);
+}
+
+TEST(P4PreparedChannelPreparation,
      HardFailuresFromAnOlderDecisionEventDoNotSuppressFreshChannels)
 {
   const auto snapshot = makeP4SelectionSnapshot();
