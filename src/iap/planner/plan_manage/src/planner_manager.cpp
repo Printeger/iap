@@ -10242,6 +10242,24 @@ namespace ego_planner
     // pending identity and silently unlock a second publication.
     if (p4_candidate_awaiting_activation_)
       return false;
+    // A certified guard remains the execution parent while stopped at its
+    // approved endpoint.  A terminal normal-channel cohort from the preceding
+    // endpoint retry is no longer a live transaction; abandon it before the
+    // next normal decision event is consumed.  Restrict this reset to a
+    // terminal cohort so sibling callbacks in the new cohort cannot repeatedly
+    // clear each other while the stopped guard remains authoritative.
+    if (p4_execution_certificate_.valid &&
+        p4_execution_certificate_.authority ==
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING &&
+        p4_channel_preparation_lifecycle_.diagnostics.terminal &&
+        committedP4TrajectoryReachedEndpoint(plannerNow().seconds()))
+    {
+      P4ChannelPreparationTransition reset;
+      reset.kind = P4ChannelPreparationTransitionKind::RESET;
+      reset.clear_bundles = true;
+      (void)transitionP4ChannelPreparation(
+          reset, plannerNow().seconds(), nullptr);
+    }
     captureP4ExecutionState(&p4_execution_commitment_backup_);
     return true;
   }

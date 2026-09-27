@@ -11198,7 +11198,7 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
-     ExpiredFrozenSupportRecertifiesEveryCachedActualBundle)
+     ExpiredSupportGuardStopRecoveryStartsFreshBoundedCohort)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -11451,13 +11451,35 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
             terminal_winner.selected_channel_id);
 
-  (void)manager.retainP4ActualWinnerForQueueMiss();
+  // The certified guard is now the stopped execution parent.  Starting the
+  // first ordinary candidate transaction from that endpoint must abandon the
+  // terminal pre-guard cohort before a new route event is consumed.
+  auto stopped_guard = manager.p4ExecutionCertificate();
+  stopped_guard.valid = true;
+  stopped_guard.trajectory_id = manager.local_data_.traj_id_;
+  stopped_guard.start_time_ns =
+      manager.local_data_.start_time_.nanoseconds();
+  stopped_guard.duration_s = manager.local_data_.position_traj_.getTimeSum();
+  stopped_guard.control_points_hash = manager.local_data_.curve_hash_;
+  stopped_guard.authority =
+      ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
+  manager.setP4ExecutionCertificateForTest(stopped_guard);
+  const int64_t stopped_guard_endpoint_ns = stopped_guard.start_time_ns +
+      static_cast<int64_t>(std::llround(stopped_guard.duration_s * 1.0e9));
+  manager.setTimeProvider([stopped_guard_endpoint_ns]() {
+    return rclcpp::Time(stopped_guard_endpoint_ns, RCL_ROS_TIME);
+  });
+  ASSERT_TRUE(manager.committedP4TrajectoryReachedEndpoint(
+      static_cast<double>(stopped_guard_endpoint_ns) * 1.0e-9));
+  ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
   EXPECT_FALSE(manager.p4ChannelPreparationLifecycleForTest().terminal);
   EXPECT_EQ(manager.p4ChannelPreparationLifecycleForTest().decision_event_id,
             0u);
   EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
 
   auto all_failed_decision = first_retry_decision;
+  ++all_failed_decision.decision_event_id;
+  ++all_failed_decision.planning_attempt_id;
   all_failed_decision.selected_candidate_id =
       all_failed_decision.candidates.front().candidate_id;
   all_failed_decision.selected_channel_id =
@@ -11496,6 +11518,16 @@ TEST(P4PreparedChannelPreparation,
             failed_lifecycle.transition_limit);
   EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+
+  manager.setP4ForwardDecisionForTest(first_retry_decision);
+  EXPECT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          22.2, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+          "late_pre_guard_callback", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
+  EXPECT_EQ(manager.p4ChannelPreparationLifecycleForTest().lifecycle_failure,
+            "stale_decision_event_consumed");
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
 }
 
 TEST(P4PreparedChannelPreparation,
