@@ -10894,6 +10894,203 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
+     ExpiredFrozenSupportRecertifiesEveryCachedActualBundle)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      100.0, frozen_occupancy->geometry_id, true);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("normal_channel_expired_support_retry.csv")
+          .string(),
+      1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+
+  const auto direct_risk = [](
+      const iap::ForwardRiskBatchRequest &request) {
+    double signed_lateral_sum = 0.0;
+    for (const auto &point : request.points)
+      signed_lateral_sum += point.position_map.y();
+    return directRiskCallback(
+        signed_lateral_sum < 0.0 ? 0.3 : 0.6)(request);
+  };
+  auto old_execution = makeP4ExecutionSnapshot(
+      snapshot, direct_risk, 10.0, 814u);
+  auto old_occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *old_execution->occupancy);
+  old_occupancy->generation = frozen_occupancy->generation;
+  old_occupancy->frame_contract_id = "map:test";
+  old_occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  auto old_support = makeRuntimeTrustedModelSupport(10.5);
+  old_support->min_range_m = 29.0;
+  old_occupancy->trusted_local_map_support = old_support;
+  old_occupancy->current_vehicle_position = Eigen::Vector3d::Zero();
+  old_occupancy->current_vehicle_clearance_radius_m = 30.0;
+  const uint64_t occupancy_generation = old_occupancy->generation;
+  old_occupancy->diagnostic_query = [occupancy_generation](
+      const Eigen::Vector3d &position) {
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = position.allFinite();
+    diagnostic.observed = true;
+    diagnostic.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    diagnostic.voxel_center = position;
+    diagnostic.frame_id = "map";
+    diagnostic.cloud_stamp_s = 10.0;
+    diagnostic.occupancy_generation = occupancy_generation;
+    diagnostic.source = "current_vehicle_footprint";
+    return diagnostic;
+  };
+  old_occupancy->local_evidence_snapshot =
+      makeRuntimeUnknownStrictEvidence(
+          old_occupancy->generation, old_occupancy->frame_contract_id);
+  old_execution->occupancy = old_occupancy;
+  old_execution->source_identity.occupancy_generation =
+      old_occupancy->generation;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, old_occupancy, direct_risk, old_execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path[1].y() *= -1.0;
+  second_channel.path_hash = "expired-support-runner-up";
+  decision.candidates.push_back(second_channel);
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  const auto install_curve = [&manager](
+      Eigen::MatrixXd points, const int trajectory_id,
+      const int64_t start_time_ns) {
+    auto curve = ego_planner::UniformBspline(points, 3, 0.5);
+    const auto terminal = ego_planner::imposeP4TerminalStop(
+        &curve, terminalStartState(curve), 20.0, 100.0, 0.0);
+    EXPECT_TRUE(terminal.success) << terminal.reason;
+    manager.local_data_.position_traj_ = curve;
+    manager.local_data_.velocity_traj_ = curve.getDerivative();
+    manager.local_data_.acceleration_traj_ =
+        manager.local_data_.velocity_traj_.getDerivative();
+    manager.local_data_.traj_id_ = trajectory_id;
+    manager.local_data_.start_time_ =
+        rclcpp::Time(start_time_ns, RCL_ROS_TIME);
+    manager.local_data_.duration_ = curve.getTimeSum();
+  };
+
+  install_curve(p4StoppedControlPoints(), 923, 10'000'000'000LL);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0))
+      << manager.lastP4ActualCurveCertification().detail;
+  std::string reason;
+  ASSERT_EQ(
+      manager.prepareP4NormalChannelComparison(10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+
+  Eigen::MatrixXd mirrored_points = p4StoppedControlPoints();
+  mirrored_points.row(1) *= -1.0;
+  install_curve(std::move(mirrored_points), 924, 10'100'000'000LL);
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 11.1));
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::FRESHNESS);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "final_bspline_corridor_support_stale_or_invalid:EXPIRED");
+  ASSERT_TRUE(manager.p4ActualCurveAwaitingRiskSnapshot());
+  ASSERT_EQ(
+      manager.deferP4NormalChannelCertificationForRiskSnapshot(
+          11.1, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 2u)
+      << "the earlier complete sibling must be reauthorized under the same "
+         "fresh snapshot as the expired later channel";
+
+  auto fresh_execution = makeP4ExecutionSnapshot(
+      snapshot, direct_risk, 11.1, 815u);
+  auto fresh_occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *old_occupancy);
+  fresh_occupancy->cloud_stamp_s = 11.1;
+  auto fresh_support = makeRuntimeTrustedModelSupport(20.0);
+  fresh_support->stamp_s = 11.1;
+  fresh_support->min_range_m = 29.0;
+  fresh_occupancy->trusted_local_map_support = fresh_support;
+  fresh_occupancy->diagnostic_query = [occupancy_generation](
+      const Eigen::Vector3d &position) {
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = position.allFinite();
+    diagnostic.observed = true;
+    diagnostic.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    diagnostic.voxel_center = position;
+    diagnostic.frame_id = "map";
+    diagnostic.cloud_stamp_s = 11.1;
+    diagnostic.occupancy_generation = occupancy_generation;
+    diagnostic.source = "current_vehicle_footprint";
+    return diagnostic;
+  };
+  fresh_execution->occupancy = fresh_occupancy;
+  fresh_execution->source_identity.occupancy_generation =
+      fresh_occupancy->generation;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 11.1, fresh_occupancy, direct_risk, fresh_execution);
+
+  bool waiting = false;
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      11.1, &waiting));
+  EXPECT_FALSE(waiting);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 11.1));
+  ASSERT_EQ(
+      manager.prepareP4NormalChannelComparison(11.1, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      11.1, &waiting));
+  EXPECT_FALSE(waiting);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 11.1));
+  EXPECT_EQ(
+      manager.prepareP4NormalChannelComparison(11.1, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+      << reason;
+  EXPECT_TRUE(
+      manager.lastP4ForwardDecision().selected_actual_endpoint.allFinite());
+  EXPECT_TRUE(
+      manager.lastP4ForwardDecision().runner_up_actual_endpoint.allFinite());
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+}
+
+TEST(P4PreparedChannelPreparation,
      LateOlderGenerationCannotOverrideFrozenNewerComparison)
 {
   ensureRclcpp();

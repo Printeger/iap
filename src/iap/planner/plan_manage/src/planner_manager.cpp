@@ -7615,7 +7615,9 @@ namespace ego_planner
               "final_bspline_corridor_support_stale_or_invalid:" +
                   std::string(iap::localMapSupportStatusName(
                       support.status)),
-              P4PreparedCurveFailure::SUPPORT);
+              support.status == iap::LocalMapSupportStatus::EXPIRED
+                  ? P4PreparedCurveFailure::FRESHNESS
+                  : P4PreparedCurveFailure::SUPPORT);
         }
       }
     }
@@ -11178,13 +11180,18 @@ namespace ego_planner
 
   bool EGOPlannerManager::p4ActualCurveAwaitingRiskSnapshot() const
   {
-    return !p4_last_actual_curve_certification_.complete &&
-        p4_last_actual_curve_certification_.failure ==
-            P4PreparedCurveFailure::INCOMPLETE &&
-        (p4_last_actual_curve_certification_.detail ==
-             "normal_channel_risk_snapshot_not_ready" ||
-         p4_last_actual_curve_certification_.detail ==
-             "normal_channel_risk_snapshot_superseded");
+    if (p4_last_actual_curve_certification_.complete)
+      return false;
+    if (p4_last_actual_curve_certification_.failure ==
+            P4PreparedCurveFailure::INCOMPLETE)
+      return p4_last_actual_curve_certification_.detail ==
+                 "normal_channel_risk_snapshot_not_ready" ||
+          p4_last_actual_curve_certification_.detail ==
+                 "normal_channel_risk_snapshot_superseded";
+    return p4_last_actual_curve_certification_.failure ==
+               P4PreparedCurveFailure::FRESHNESS &&
+        p4_last_actual_curve_certification_.detail ==
+            "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
   }
 
   P4NormalChannelPreparationDisposition
@@ -11241,6 +11248,28 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::REJECTED,
           "normal_channel_pending_candidate_missing");
+
+    const bool frozen_support_expired =
+        p4_last_actual_curve_certification_.failure ==
+            P4PreparedCurveFailure::FRESHNESS &&
+        p4_last_actual_curve_certification_.detail ==
+            "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
+    if (frozen_support_expired)
+    {
+      // The later sibling reached the same mandatory local-support gate
+      // after the comparison snapshot aged out.  This is not evidence that
+      // its topology is unsafe, and the earlier sibling cannot remain a
+      // winner certified against a different snapshot.  Retain both exact
+      // curves but revoke their prepared authority so the existing cached
+      // transaction reauthorizes every feasible sibling under one fresh
+      // context.  No local clearance, collision, braking, identity or
+      // freshness predicate is bypassed.
+      for (auto &entry : p4_prepared_channel_bundles_)
+        if (entry.second.channel_record.feasible() &&
+            entry.second.trajectory.traj_id_ > 0)
+          entry.second.state =
+              P4SuccessorPreparationState::CURVE_PREPARING;
+    }
 
     const std::string control_hash = p4ControlPointHash(
         local_data_.position_traj_.getControlPoint());
