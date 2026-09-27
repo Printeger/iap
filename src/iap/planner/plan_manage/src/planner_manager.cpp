@@ -11369,14 +11369,20 @@ namespace ego_planner
       return failP4ChannelPreparationLifecycle(
           "terminal_cohort_reentered", now_s, reason);
 
-    const auto consume_transition_budget = [&]() {
+    // The bound limits candidate preparation work.  FINISH_COHORT merely
+    // commits the terminal result after winner reauthorization (or a bounded
+    // all-failed result); charging it as another preparation transition can
+    // reject an already-authorized winner when the legitimate retry sequence
+    // used the complete work budget.  Event identity and terminal re-entry
+    // checks above still apply before a cohort may be finished.
+    if (transition.kind != P4ChannelPreparationTransitionKind::FINISH_COHORT)
+    {
       ++lifecycle.diagnostics.transition_count;
-      return lifecycle.diagnostics.transition_count <=
-          lifecycle.diagnostics.transition_limit;
-    };
-    if (!consume_transition_budget())
-      return failP4ChannelPreparationLifecycle(
-          "transition_limit_exceeded", now_s, reason);
+      if (lifecycle.diagnostics.transition_count >
+          lifecycle.diagnostics.transition_limit)
+        return failP4ChannelPreparationLifecycle(
+            "transition_limit_exceeded", now_s, reason);
+    }
 
     switch (transition.kind)
     {

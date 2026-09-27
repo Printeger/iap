@@ -11682,6 +11682,8 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_FALSE(selected_lifecycle.terminal)
       << "winner selection must remain non-terminal until the exact restored "
          "curve succeeds on the latest execution snapshot";
+  const std::size_t preparation_transition_count =
+      selected_lifecycle.transition_count;
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "normal_selected_bundle_latest_reauthorization", 11.1))
       << manager.lastP4ActualCurveCertification().detail;
@@ -11690,6 +11692,11 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_TRUE(completed_lifecycle.terminal);
   EXPECT_EQ(completed_lifecycle.terminal_reason,
             "normal_channel_comparison_complete");
+  EXPECT_EQ(completed_lifecycle.transition_count,
+            preparation_transition_count)
+      << "successful latest-snapshot authorization closes the already "
+         "bounded preparation transaction; FINISH_COHORT is not another "
+         "candidate preparation or retry";
   EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
   EXPECT_TRUE(manager.preparedP4NormalChannelRecordsForTest().empty());
   ASSERT_TRUE(manager.certifyP4ActualCurve(
