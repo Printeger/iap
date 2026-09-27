@@ -556,6 +556,14 @@ namespace ego_planner
   double summarizeP4ActualKnownGlobalPeakEvidence(
       const P4DirectTrajectoryRiskEvidence &evidence);
 
+  // Return only nominal actual-curve samples in the common mission-forward
+  // range. The optional output reports the farthest available forward sample
+  // before cropping so callers can establish one range shared by siblings.
+  P4DirectTrajectoryRiskEvidence p4ActualRiskEvidenceWithinForwardRange(
+      const P4DirectTrajectoryRiskEvidence &evidence,
+      const Eigen::Vector3d &origin, const Eigen::Vector3d &forward_target,
+      double maximum_forward_m, double *available_forward_m = nullptr);
+
   // Business identity for one actual-curve preparation conclusion. Planning
   // attempt ids are deliberately absent: callbacks may acquire a newer
   // attempt while the same frozen cohort and exact curve remain in flight.
@@ -1133,6 +1141,10 @@ namespace ego_planner
         P4PreparedCurveFailure *failure = nullptr,
         std::string *reason = nullptr) const;
     bool commitP4CertifiedPublication(double stamp_s);
+    void updateP4CommittedTopologyFromOdometry(
+        const Eigen::Vector3d &position, const Eigen::Vector3d &velocity,
+        const Eigen::Vector3d &acceleration);
+    void recordP4CommittedTopologyCertifiedCurveFailure();
     bool p4LineageTelemetryFault() const {
       return p4_lineage_telemetry_fault_;
     }
@@ -1471,6 +1483,41 @@ namespace ego_planner
     {
       return p4_channel_slots_;
     }
+    bool stageP4CommittedTopologyForTest(const P4ForwardDecision &decision)
+    {
+      return stageP4CommittedTopology(decision);
+    }
+    void updateP4CommittedTopologyForTest(
+        const Eigen::Vector3d &position, const Eigen::Vector3d &velocity,
+        const Eigen::Vector3d &acceleration)
+    {
+      updateP4CommittedTopology(position, velocity, acceleration);
+    }
+    bool constrainP4DecisionToCommittedTopologyForTest(
+        P4ForwardDecision *decision)
+    {
+      return constrainP4DecisionToCommittedTopology(decision);
+    }
+    bool p4CommittedTopologyPendingForTest() const
+    {
+      return p4_committed_topology_.has_value() &&
+          p4_committed_topology_->pending_entry;
+    }
+    bool p4CommittedTopologyActiveForTest() const
+    {
+      return p4_committed_topology_.has_value() &&
+          p4_committed_topology_->active;
+    }
+    bool p4CommittedTopologyHardFailureForTest() const
+    {
+      return p4_committed_topology_.has_value() &&
+          p4_committed_topology_->hard_failure_proven;
+    }
+    void recordP4CommittedTopologyHardFailureForTest(
+        P4PreparedCurveFailure failure, const std::string &detail)
+    {
+      recordP4CommittedTopologyHardFailure(failure, detail);
+    }
     void setP4ForwardDecisionForNextReplanForTest(P4ForwardDecision decision)
     {
       p4_forward_decision_override_for_test_ = std::move(decision);
@@ -1632,6 +1679,28 @@ namespace ego_planner
         uint32_t retry_generation) const;
     void resetP4ChannelPreparationLifecycle(bool clear_bundles);
 
+    struct P4CommittedTopology
+    {
+      std::vector<Eigen::Vector3d> path;
+      Eigen::Vector3d exit_point = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      double divergence_station_m =
+          std::numeric_limits<double>::quiet_NaN();
+      double exit_station_m = std::numeric_limits<double>::quiet_NaN();
+      bool pending_entry = false;
+      bool active = false;
+      bool hard_failure_proven = false;
+      std::string hard_failure_reason;
+    };
+    bool stageP4CommittedTopology(const P4ForwardDecision &decision);
+    void updateP4CommittedTopology(
+        const Eigen::Vector3d &position, const Eigen::Vector3d &velocity,
+        const Eigen::Vector3d &acceleration);
+    bool constrainP4DecisionToCommittedTopology(
+        P4ForwardDecision *decision);
+    void recordP4CommittedTopologyHardFailure(
+        P4PreparedCurveFailure failure, const std::string &detail);
+
     int64_t steadyNowNs() const;
     bool executionFeedbackFresh(
         int64_t receive_steady_ns, double maximum_age_s) const;
@@ -1655,6 +1724,7 @@ namespace ego_planner
     std::atomic<uint64_t> next_p4_channel_id_{1};
     std::atomic<std::size_t> p4_channel_round_robin_cursor_{0};
     std::vector<P4ChannelSlot> p4_channel_slots_;
+    std::optional<P4CommittedTopology> p4_committed_topology_;
     P4GeometryCommitValidator p4_geometry_commit_validator_;
     double maximum_trajectory_pipeline_latency_s_ = 0.0;
     double maximum_guard_dispatch_latency_s_ = 0.0;

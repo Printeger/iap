@@ -9948,6 +9948,38 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
+     CommonForwardRangeExcludesBacktrackAndUnsharedFutureRisk)
+{
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.positions = {
+      Eigen::Vector3d(-1.0, 0.0, 1.0),
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(2.0, 0.0, 1.0),
+      Eigen::Vector3d(5.0, 0.0, 1.0)};
+  evidence.relative_times = {0.0, 1.0, 2.0, 3.0};
+  evidence.nominal_sample_rows = {true, true, true, true};
+  evidence.points.resize(evidence.positions.size());
+  const std::array<double, 4> ratios{{0.4, 0.7, 0.9, 1.4}};
+  for (std::size_t index = 0u; index < ratios.size(); ++index)
+  {
+    evidence.points[index].pl_upper_available = true;
+    evidence.points[index].safety_ratio_upper = ratios[index];
+  }
+
+  double available_forward_m = 0.0;
+  const auto common = ego_planner::p4ActualRiskEvidenceWithinForwardRange(
+      evidence, Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(10.0, 0.0, 1.0), 2.0,
+      &available_forward_m);
+  EXPECT_DOUBLE_EQ(available_forward_m, 5.0);
+  ASSERT_EQ(common.positions.size(), 2u);
+  EXPECT_DOUBLE_EQ(common.positions.front().x(), 0.0);
+  EXPECT_DOUBLE_EQ(common.positions.back().x(), 2.0);
+  EXPECT_DOUBLE_EQ(
+      ego_planner::summarizeP4ActualKnownGlobalPeakEvidence(common), 0.9);
+}
+
+TEST(P4PreparedChannelComparison,
      AlternatingFourForkPartialActualPlIgnoresOneSidedFormalAvailability)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
@@ -12573,6 +12605,203 @@ TEST(P4PreparedChannelPreparation,
         return slot.stable_channel_id == 22u &&
             slot.preferred_by_last_actual_comparison;
       }) != manager.p4ChannelSlotsForTest().end());
+}
+
+TEST(P4CommittedTopology,
+     GuardRecoveryKeepsEnteredChannelAndRejectsJunctionReroute)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision selected;
+  selected.result_status = ego_planner::P4ForwardResultStatus::READY;
+  selected.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  selected.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  selected.decision_event_id = 700u;
+  selected.request_position = Eigen::Vector3d(0.0, 0.0, 1.0);
+  selected.local_target = Eigen::Vector3d(8.0, 0.0, 1.0);
+  selected.geometry_common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.0, 1.0)};
+  selected.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
+  const auto candidate = [](const uint64_t candidate_id,
+                            const uint64_t channel_id,
+                            std::vector<Eigen::Vector3d> path) {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = candidate_id;
+    value.channel_id = channel_id;
+    value.path = path;
+    value.topology_path = std::move(path);
+    value.path_hash = "topology-" + std::to_string(channel_id);
+    value.occupancy_supported = true;
+    value.geometry_state = ego_planner::P4ForwardGeometryState::CLEAR;
+    value.mission_degraded_candidate = true;
+    return value;
+  };
+  selected.candidates = {
+      candidate(1u, 41u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(2.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0)}),
+      candidate(2u, 99u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(2.0, 2.0, 1.0),
+           Eigen::Vector3d(5.0, 2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0)})};
+  selected.selected_candidate_id = 1u;
+  selected.selected_channel_id = 41u;
+  selected.selected_guide = selected.candidates.front().path;
+
+  ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
+  EXPECT_TRUE(manager.p4CommittedTopologyPendingForTest());
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.5, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  auto rebuilt_event = selected;
+  rebuilt_event.decision_event_id = 701u;
+  rebuilt_event.selected_candidate_id = 2u;
+  rebuilt_event.selected_channel_id = 99u;
+  rebuilt_event.selected_guide = rebuilt_event.candidates.back().path;
+  EXPECT_FALSE(manager.stageP4CommittedTopologyForTest(rebuilt_event));
+  EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  ego_planner::P4ForwardDecision recovery = selected;
+  recovery.decision_event_id = 725u;
+  recovery.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  recovery.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+  recovery.request_position = Eigen::Vector3d(3.0, -2.0, 1.0);
+  recovery.candidates = {
+      candidate(11u, 501u,
+          {Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0),
+           Eigen::Vector3d(8.0, 0.0, 1.0)}),
+      candidate(12u, 502u,
+          {Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(2.0, 2.0, 1.0),
+           Eigen::Vector3d(5.0, 2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0)})};
+  // The junction reroute deliberately advertises the lower partial GNSS
+  // number. It still cannot enter the ordinary sibling comparison.
+  recovery.candidates[0].global_peak_ratio = 1.23;
+  recovery.candidates[1].global_peak_ratio = 1.04;
+  ASSERT_TRUE(
+      manager.constrainP4DecisionToCommittedTopologyForTest(&recovery));
+  ASSERT_EQ(recovery.candidates.size(), 1u);
+  EXPECT_EQ(recovery.selected_candidate_id, 11u);
+  EXPECT_EQ(recovery.selected_channel_id, 501u);
+  EXPECT_EQ(recovery.reason, "committed_topology_single_continuation");
+  EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+}
+
+TEST(P4CommittedTopology,
+     TransientEvidenceCannotReleaseButHardFailureAfterStopCanReroute)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision selected;
+  selected.result_status = ego_planner::P4ForwardResultStatus::READY;
+  selected.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  selected.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  selected.decision_event_id = 800u;
+  selected.geometry_common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.0, 1.0)};
+  selected.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
+  for (const double side : {-2.0, 2.0})
+  {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = selected.candidates.size() + 1u;
+    value.channel_id = 10u + value.candidate_id;
+    value.path = {Eigen::Vector3d(0.0, 0.0, 1.0),
+                  Eigen::Vector3d(1.0, 0.0, 1.0),
+                  Eigen::Vector3d(3.0, side, 1.0),
+                  Eigen::Vector3d(5.0, side, 1.0),
+                  Eigen::Vector3d(6.0, 0.0, 1.0)};
+    value.topology_path = value.path;
+    value.path_hash = "branch-" + std::to_string(value.channel_id);
+    value.occupancy_supported = true;
+    selected.candidates.push_back(std::move(value));
+  }
+  selected.selected_candidate_id = selected.candidates.front().candidate_id;
+  selected.selected_channel_id = selected.candidates.front().channel_id;
+  ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.4, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  manager.recordP4CommittedTopologyHardFailureForTest(
+      ego_planner::P4PreparedCurveFailure::FRESHNESS, "expired");
+  manager.recordP4CommittedTopologyHardFailureForTest(
+      ego_planner::P4PreparedCurveFailure::INCOMPLETE, "not_ready");
+  manager.recordP4CommittedTopologyHardFailureForTest(
+      ego_planner::P4PreparedCurveFailure::SNAPSHOT_MISMATCH,
+      "snapshot_superseded");
+  manager.recordP4CommittedTopologyHardFailureForTest(
+      ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
+      "optimizer_timeout");
+  EXPECT_FALSE(manager.p4CommittedTopologyHardFailureForTest());
+  manager.recordP4CommittedTopologyHardFailureForTest(
+      ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+      "all_committed_continuations_clearance_failed");
+  ASSERT_TRUE(manager.p4CommittedTopologyHardFailureForTest());
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.1, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d::Zero());
+  EXPECT_FALSE(manager.p4CommittedTopologyActiveForTest());
+}
+
+TEST(P4CommittedTopology, ActualExitCompletesCommitmentWithoutHardFailure)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision selected;
+  selected.result_status = ego_planner::P4ForwardResultStatus::READY;
+  selected.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  selected.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  selected.decision_event_id = 900u;
+  selected.geometry_common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.0, 1.0)};
+  selected.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
+  for (const double side : {-2.0, 2.0})
+  {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = selected.candidates.size() + 1u;
+    value.channel_id = 20u + value.candidate_id;
+    value.path = {Eigen::Vector3d(0.0, 0.0, 1.0),
+                  Eigen::Vector3d(1.0, 0.0, 1.0),
+                  Eigen::Vector3d(3.0, side, 1.0),
+                  Eigen::Vector3d(5.0, side, 1.0),
+                  Eigen::Vector3d(6.0, 0.0, 1.0)};
+    value.topology_path = value.path;
+    value.path_hash = "exit-" + std::to_string(value.channel_id);
+    value.occupancy_supported = true;
+    selected.candidates.push_back(std::move(value));
+  }
+  selected.selected_candidate_id = selected.candidates.front().candidate_id;
+  selected.selected_channel_id = selected.candidates.front().channel_id;
+  ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.4, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+  manager.updateP4CommittedTopologyForTest(
+      selected.common_anchor, Eigen::Vector3d(0.4, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  EXPECT_FALSE(manager.p4CommittedTopologyActiveForTest());
+  EXPECT_FALSE(manager.p4CommittedTopologyPendingForTest());
 }
 
 TEST(P4PreparedChannelPreparation,

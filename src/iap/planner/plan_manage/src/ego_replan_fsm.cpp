@@ -464,6 +464,12 @@ namespace ego_planner
     odom_vel_(1) = msg->twist.twist.linear.y;
     odom_vel_(2) = msg->twist.twist.linear.z;
 
+    // Topology commitment is a physical-flight fact. Planning start states
+    // may be projected along an executing curve, so only actual odometry may
+    // enter or complete the committed branch.
+    planner_manager_->updateP4CommittedTopologyFromOdometry(
+        odom_pos_, odom_vel_, odom_acc_);
+
     odom_orient_.w() = msg->pose.pose.orientation.w;
     odom_orient_.x() = msg->pose.pose.orientation.x;
     odom_orient_.y() = msg->pose.pose.orientation.y;
@@ -1901,6 +1907,10 @@ namespace ego_planner
               planner_manager_->recordP4NormalChannelCurveFailure(
                   plannerNow().seconds(), failure,
                   "normal_final_curve_lineage_rejected", nullptr);
+        }
+        else if (!preparing_successor_curve && !preparing_limited_prefix)
+        {
+          planner_manager_->recordP4CommittedTopologyCertifiedCurveFailure();
         }
         if (normal_failure_disposition ==
             P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)

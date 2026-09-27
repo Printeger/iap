@@ -39,6 +39,62 @@ namespace ego_planner
     // optimizer guide constraints one chord inside the hard corridor so a
     // between-sample spline extremum cannot cross the committed boundary.
     constexpr double kP4GeometryCommitMaximumChordLengthM = 0.05;
+
+    struct P4PolylineProjection
+    {
+      double station_m = 0.0;
+      double distance_m = std::numeric_limits<double>::infinity();
+      double length_m = 0.0;
+    };
+
+    P4PolylineProjection projectP4Polyline(
+        const std::vector<Eigen::Vector3d> &path,
+        const Eigen::Vector3d &point)
+    {
+      P4PolylineProjection best;
+      if (path.size() < 2u || !point.allFinite())
+        return best;
+      double station_m = 0.0;
+      for (std::size_t index = 1u; index < path.size(); ++index)
+      {
+        const Eigen::Vector3d segment = path[index] - path[index - 1u];
+        const double length_m = segment.norm();
+        if (!std::isfinite(length_m) || length_m <= 1.0e-9)
+          continue;
+        const double alpha = std::clamp(
+            (point - path[index - 1u]).dot(segment) /
+                (length_m * length_m),
+            0.0, 1.0);
+        const double distance_m =
+            (point - (path[index - 1u] + alpha * segment)).norm();
+        if (distance_m < best.distance_m)
+        {
+          best.distance_m = distance_m;
+          best.station_m = station_m + alpha * length_m;
+        }
+        station_m += length_m;
+      }
+      best.length_m = station_m;
+      return best;
+    }
+
+    bool p4CommittedTopologyHardFailureType(
+        const P4PreparedCurveFailure failure, const bool strict_global)
+    {
+      const bool local_hard_failure =
+          failure == P4PreparedCurveFailure::IDENTITY ||
+          failure == P4PreparedCurveFailure::TERMINAL_CONTRACT ||
+          failure == P4PreparedCurveFailure::DYNAMICS ||
+          failure == P4PreparedCurveFailure::TRACKING_CAPABILITY ||
+          failure == P4PreparedCurveFailure::COLLISION ||
+          failure == P4PreparedCurveFailure::LOCAL_GEOMETRY ||
+          failure == P4PreparedCurveFailure::LOCAL_CLEARANCE ||
+          failure == P4PreparedCurveFailure::BRAKING;
+      return local_hard_failure ||
+          (strict_global &&
+           (failure == P4PreparedCurveFailure::GNSS_RISK ||
+            failure == P4PreparedCurveFailure::EXPOSURE_BUDGET));
+    }
   }
 
   std::shared_ptr<const P0ExecutionRiskSnapshot>
@@ -1521,6 +1577,45 @@ namespace ego_planner
       maximum_available ? maximum : std::numeric_limits<double>::infinity(),
       integral_available ? integral : std::numeric_limits<double>::infinity()
     };
+  }
+
+  P4DirectTrajectoryRiskEvidence p4ActualRiskEvidenceWithinForwardRange(
+      const P4DirectTrajectoryRiskEvidence &evidence,
+      const Eigen::Vector3d &origin, const Eigen::Vector3d &forward_target,
+      const double maximum_forward_m, double *available_forward_m)
+  {
+    if (available_forward_m)
+      *available_forward_m = 0.0;
+    P4DirectTrajectoryRiskEvidence cropped;
+    const Eigen::Vector3d delta = forward_target - origin;
+    if (!origin.allFinite() || !forward_target.allFinite() ||
+        delta.norm() <= 1.0e-9 ||
+        !std::isfinite(maximum_forward_m) || maximum_forward_m < 0.0)
+      return cropped;
+    const Eigen::Vector3d axis = delta.normalized();
+    for (std::size_t index = 0u;
+         index < evidence.positions.size() &&
+         index < evidence.points.size(); ++index)
+    {
+      if (index < evidence.nominal_sample_rows.size() &&
+          !evidence.nominal_sample_rows[index])
+        continue;
+      const double forward_m =
+          (evidence.positions[index] - origin).dot(axis);
+      if (!std::isfinite(forward_m) || forward_m < -1.0e-6)
+        continue;
+      if (available_forward_m)
+        *available_forward_m = std::max(*available_forward_m, forward_m);
+      if (forward_m > maximum_forward_m + 1.0e-6)
+        continue;
+      cropped.positions.push_back(evidence.positions[index]);
+      cropped.points.push_back(evidence.points[index]);
+      if (index < evidence.relative_times.size())
+        cropped.relative_times.push_back(evidence.relative_times[index]);
+      if (index < evidence.nominal_sample_rows.size())
+        cropped.nominal_sample_rows.push_back(true);
+    }
+    return cropped;
   }
 
   P4PreparedChannelComparison compareP4PreparedChannels(
@@ -5927,6 +6022,8 @@ namespace ego_planner
             successor.action == P4ForwardAction::DEFER_RISK_SELECTION &&
             successor.executable_intent ==
                 P4ExecutableIntent::LIMITED_PREFIX;
+        if (!successor.successor_fast_path)
+          constrainP4DecisionToCommittedTopology(&successor);
         if (((!completed.ready && route_risk_is_diagnostic) ||
              generic_limited_prefix) &&
             !successor.successor_fast_path &&
@@ -6172,6 +6269,7 @@ namespace ego_planner
       // below retain sole publication authority.
       configureP4RefinementClearanceRecovery(
           start_pt, start_vel, p4_planning_clearance_buffer_m_, &*completed);
+      constrainP4DecisionToCommittedTopology(&*completed);
       prepareNormalChannelsForActualCertification(&*completed);
       completed->planning_attempt_id = request.planning_attempt_id;
       if (!completed->channel_slots.empty())
@@ -6204,6 +6302,7 @@ namespace ego_planner
       cached.result_status = P4ForwardResultStatus::READY;
       cached.planning_attempt_id = request.planning_attempt_id;
       cached.reason = "cached_same_snapshot_target";
+      constrainP4DecisionToCommittedTopology(&cached);
       prepareNormalChannelsForActualCertification(&cached);
       return cached;
     }
@@ -9297,6 +9396,11 @@ namespace ego_planner
             local_data_.start_time_.nanoseconds())
       return false;
 
+    if (last_p4_forward_decision_.action == P4ForwardAction::RISK_SELECTED &&
+        last_p4_forward_decision_.channel_comparison_state ==
+            P4ChannelComparisonState::COMPLETE)
+      (void)stageP4CommittedTopology(last_p4_forward_decision_);
+
     last_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::NEW_TRAJECTORY_READY;
     p4_planning_disposition_ = P4PlanningDisposition::NEW_TRAJECTORY_READY;
@@ -10355,6 +10459,292 @@ namespace ego_planner
     p4_pending_channel_context_.reset();
     if (clear_bundles)
       p4_prepared_channel_bundles_.clear();
+  }
+
+  bool EGOPlannerManager::stageP4CommittedTopology(
+      const P4ForwardDecision &decision)
+  {
+    if (p4_committed_topology_ && p4_committed_topology_->active)
+      return false;
+    std::set<uint64_t> channel_ids;
+    for (const auto &candidate : decision.candidates)
+      if (candidate.channel_id > 0u && candidate.occupancy_supported)
+        channel_ids.insert(candidate.channel_id);
+    if (decision.channel_comparison_state !=
+            P4ChannelComparisonState::COMPLETE ||
+        decision.selected_channel_id == 0u || channel_ids.size() < 2u)
+      return false;
+    const auto selected = std::find_if(
+        decision.candidates.begin(), decision.candidates.end(),
+        [&decision](const P4ForwardCandidate &candidate) {
+          return candidate.channel_id == decision.selected_channel_id;
+        });
+    if (selected == decision.candidates.end())
+      return false;
+    const auto &path = selected->topology_path.size() >= 2u
+        ? selected->topology_path : selected->path;
+    if (path.size() < 2u)
+      return false;
+    const Eigen::Vector3d divergence =
+        decision.geometry_common_corridor.size() >= 2u
+        ? decision.geometry_common_corridor.back() : path.front();
+    const Eigen::Vector3d exit = decision.common_anchor.allFinite()
+        ? decision.common_anchor : path.back();
+    const auto divergence_projection = projectP4Polyline(path, divergence);
+    const auto exit_projection = projectP4Polyline(path, exit);
+    if (!std::isfinite(divergence_projection.distance_m) ||
+        !std::isfinite(exit_projection.distance_m) ||
+        exit_projection.station_m <=
+            divergence_projection.station_m + 1.0e-6)
+      return false;
+
+    P4CommittedTopology commitment;
+    commitment.path = path;
+    commitment.exit_point = exit;
+    commitment.divergence_station_m = divergence_projection.station_m;
+    commitment.exit_station_m = exit_projection.station_m;
+    commitment.pending_entry = true;
+    p4_committed_topology_ = std::move(commitment);
+    P4ExecutionCheckDiagnostics staged;
+    staged.applicable = true;
+    staged.allowed = true;
+    staged.identity_match = true;
+    staged.reason = "actual_winner_topology_staged_until_odom_entry";
+    appendP4ExecutionEvent(
+        "COMMITTED_TOPOLOGY_STAGED", plannerNow().seconds(), staged);
+    return true;
+  }
+
+  void EGOPlannerManager::updateP4CommittedTopology(
+      const Eigen::Vector3d &position, const Eigen::Vector3d &velocity,
+      const Eigen::Vector3d &acceleration)
+  {
+    if (!p4_committed_topology_ || !position.allFinite())
+      return;
+    auto &commitment = *p4_committed_topology_;
+    const double corridor_radius_m =
+        p4RefinementCorridorRadius(p4_forward_limits_);
+    const auto projection = projectP4Polyline(commitment.path, position);
+    if (!std::isfinite(projection.distance_m))
+      return;
+    const bool at_exit =
+        (position - commitment.exit_point).norm() <= corridor_radius_m ||
+        (projection.distance_m <= corridor_radius_m &&
+         projection.station_m + corridor_radius_m >=
+             commitment.exit_station_m);
+    if (at_exit)
+    {
+      P4ExecutionCheckDiagnostics completed;
+      completed.applicable = true;
+      completed.allowed = true;
+      completed.identity_match = true;
+      completed.reason = "actual_odom_reached_topology_exit";
+      appendP4ExecutionEvent(
+          "COMMITTED_TOPOLOGY_COMPLETED", plannerNow().seconds(), completed);
+      p4_committed_topology_.reset();
+      return;
+    }
+    if (commitment.pending_entry &&
+        projection.distance_m <= corridor_radius_m &&
+        projection.station_m >=
+            commitment.divergence_station_m + corridor_radius_m)
+    {
+      commitment.pending_entry = false;
+      commitment.active = true;
+      P4ExecutionCheckDiagnostics entered;
+      entered.applicable = true;
+      entered.allowed = true;
+      entered.identity_match = true;
+      entered.reason = "actual_odom_entered_selected_topology";
+      appendP4ExecutionEvent(
+          "COMMITTED_TOPOLOGY_ENTERED", plannerNow().seconds(), entered);
+    }
+    if (commitment.active && commitment.hard_failure_proven &&
+        velocity.allFinite() && acceleration.allFinite() &&
+        velocity.norm() <= 1.0e-3 && acceleration.norm() <= 1.0e-2)
+    {
+      P4ExecutionCheckDiagnostics released;
+      released.applicable = true;
+      released.allowed = true;
+      released.identity_match = true;
+      released.reason =
+          "committed_topology_hard_failure_stopped_reroute_enabled:" +
+          commitment.hard_failure_reason;
+      appendP4ExecutionEvent(
+          "COMMITTED_TOPOLOGY_HARD_FAILURE_RELEASED",
+          plannerNow().seconds(), released);
+      p4_committed_topology_.reset();
+    }
+  }
+
+  void EGOPlannerManager::updateP4CommittedTopologyFromOdometry(
+      const Eigen::Vector3d &position, const Eigen::Vector3d &velocity,
+      const Eigen::Vector3d &acceleration)
+  {
+    updateP4CommittedTopology(position, velocity, acceleration);
+  }
+
+  bool EGOPlannerManager::constrainP4DecisionToCommittedTopology(
+      P4ForwardDecision *decision)
+  {
+    if (!decision || !p4_committed_topology_ ||
+        !p4_committed_topology_->active)
+      return false;
+    const auto &commitment = *p4_committed_topology_;
+    const double corridor_radius_m =
+        p4RefinementCorridorRadius(p4_forward_limits_);
+    const auto compatible = [&commitment, corridor_radius_m](
+        const P4ForwardCandidate &candidate) {
+      const auto &path = candidate.topology_path.size() >= 2u
+          ? candidate.topology_path : candidate.path;
+      if (path.size() < 2u)
+        return false;
+      const auto start = projectP4Polyline(
+          commitment.path, path.front());
+      if (!std::isfinite(start.distance_m) ||
+          start.distance_m > corridor_radius_m)
+        return false;
+      double maximum_station_m = start.station_m;
+      bool reached_exit = false;
+      for (const auto &point : path)
+      {
+        const auto projection = projectP4Polyline(commitment.path, point);
+        if (!std::isfinite(projection.distance_m))
+          return false;
+        if (projection.distance_m <= corridor_radius_m &&
+            (projection.station_m + corridor_radius_m >=
+                 commitment.exit_station_m ||
+             (point - commitment.exit_point).norm() <= corridor_radius_m))
+        {
+          reached_exit = true;
+          maximum_station_m = std::max(
+              maximum_station_m, projection.station_m);
+          break;
+        }
+        if (projection.distance_m > corridor_radius_m)
+          return false;
+        maximum_station_m = std::max(
+            maximum_station_m, projection.station_m);
+      }
+      const double required_station_m = std::min(
+          commitment.exit_station_m,
+          start.station_m + corridor_radius_m);
+      return reached_exit ||
+          maximum_station_m + 1.0e-6 >= required_station_m;
+    };
+
+    std::vector<P4ForwardCandidate> continuations;
+    continuations.reserve(decision->candidates.size());
+    for (const auto &candidate : decision->candidates)
+      if (candidate.channel_id > 0u && candidate.occupancy_supported &&
+          candidate.geometry_state == P4ForwardGeometryState::CLEAR &&
+          compatible(candidate))
+        continuations.push_back(candidate);
+
+    const bool route_result_can_prepare_actual =
+        decision->result_status == P4ForwardResultStatus::READY &&
+        decision->unevaluated_channel_count == 0u &&
+        (decision->action == P4ForwardAction::CANDIDATE_READY ||
+         decision->action == P4ForwardAction::RISK_SELECTED ||
+         decision->action == P4ForwardAction::DEFER_RISK_SELECTION);
+    if (continuations.empty() || !route_result_can_prepare_actual)
+    {
+      decision->action = P4ForwardAction::DEFER_RISK_SELECTION;
+      decision->executable_intent = P4ExecutableIntent::HOLD;
+      decision->trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
+      decision->selection_authority = P4ForwardSelectionAuthority::NONE;
+      decision->formal_support = false;
+      decision->selected_candidate_id = 0u;
+      decision->selected_channel_id = 0u;
+      decision->runner_up_candidate_id = 0u;
+      decision->runner_up_channel_id = 0u;
+      decision->selected_guide.clear();
+      decision->deferred_trajectory.clear();
+      decision->speed_cap_mps = 0.0;
+      decision->planning_disposition =
+          P4PlanningDisposition::HOLD_REQUIRED;
+      decision->reason =
+          "committed_topology_continuation_not_yet_proven";
+      return true;
+    }
+
+    decision->candidates = std::move(continuations);
+    const auto &first = decision->candidates.front();
+    decision->selected_candidate_id = first.candidate_id;
+    decision->selected_channel_id = first.channel_id;
+    decision->route_preference_channel_id = first.channel_id;
+    decision->runner_up_candidate_id = 0u;
+    decision->runner_up_channel_id = 0u;
+    decision->selected_guide = first.path;
+    decision->selection_authority = P4ForwardSelectionAuthority::NONE;
+    decision->formal_support = false;
+    decision->executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+    decision->planning_disposition =
+        P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+    if (decision->candidates.size() == 1u)
+    {
+      decision->action = P4ForwardAction::CANDIDATE_READY;
+      decision->channel_comparison_state =
+          P4ChannelComparisonState::COMPLETE;
+      decision->reason = "committed_topology_single_continuation";
+    }
+    else
+    {
+      decision->action = P4ForwardAction::DEFER_RISK_SELECTION;
+      decision->channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      decision->reason =
+          "committed_topology_actual_continuations_required";
+    }
+    return true;
+  }
+
+  void EGOPlannerManager::recordP4CommittedTopologyHardFailure(
+      const P4PreparedCurveFailure failure, const std::string &detail)
+  {
+    if (!p4_committed_topology_ || !p4_committed_topology_->active ||
+        detail.empty())
+      return;
+    const bool strict_global = p4_global_exposure_policy_.task_mode ==
+        iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+    if (!p4CommittedTopologyHardFailureType(failure, strict_global))
+      return;
+    p4_committed_topology_->hard_failure_proven = true;
+    p4_committed_topology_->hard_failure_reason = detail;
+    P4ExecutionCheckDiagnostics failed;
+    failed.applicable = true;
+    failed.allowed = false;
+    failed.identity_match = true;
+    failed.reason = "committed_topology_terminal_hard_failure:" + detail;
+    appendP4ExecutionEvent(
+        "COMMITTED_TOPOLOGY_HARD_FAILURE_PROVEN",
+        plannerNow().seconds(), failed);
+  }
+
+  void EGOPlannerManager::recordP4CommittedTopologyCertifiedCurveFailure()
+  {
+    if (!p4_committed_topology_ || !p4_committed_topology_->active ||
+        p4_last_actual_curve_certification_.complete ||
+        last_p4_forward_decision_.executable_intent !=
+            P4ExecutableIntent::FINAL_CHANNEL)
+      return;
+    const std::size_t candidate_count = static_cast<std::size_t>(
+        std::count_if(
+            last_p4_forward_decision_.candidates.begin(),
+            last_p4_forward_decision_.candidates.end(),
+            [](const P4ForwardCandidate &candidate) {
+              return candidate.channel_id > 0u &&
+                  candidate.occupancy_supported;
+            }));
+    // This seam is reached only after the sole topology-compatible actual
+    // curve completed final certification. A rebound/optimizer failure never
+    // calls it, and multi-sibling cohorts must finish their own bounded
+    // comparison before they can prove the entire topology unavailable.
+    if (candidate_count != 1u)
+      return;
+    recordP4CommittedTopologyHardFailure(
+        p4_last_actual_curve_certification_.failure,
+        p4_last_actual_curve_certification_.detail);
   }
 
   P4ChannelPreparationIdentity
@@ -11419,8 +11809,78 @@ namespace ego_planner
       p4_prepared_channel_bundles_.erase(
           p4_prepared_channel_bundles_.begin());
     std::vector<P4PreparedChannelRecord> prepared_records;
+    double common_forward_coverage_m =
+        std::numeric_limits<double>::infinity();
+    std::size_t forward_coverage_count = 0u;
+    std::size_t feasible_bundle_count = 0u;
     for (const auto &entry : p4_prepared_channel_bundles_)
-      prepared_records.push_back(entry.second.channel_record);
+    {
+      if (!entry.second.channel_record.feasible())
+        continue;
+      ++feasible_bundle_count;
+      double coverage_m = 0.0;
+      (void)p4ActualRiskEvidenceWithinForwardRange(
+          entry.second.direct_risk_evidence,
+          entry.second.decision.request_position,
+          entry.second.decision.local_target,
+          std::numeric_limits<double>::max(), &coverage_m);
+      if (std::isfinite(coverage_m) && coverage_m > 0.0)
+      {
+        common_forward_coverage_m = std::min(
+            common_forward_coverage_m, coverage_m);
+        ++forward_coverage_count;
+      }
+    }
+    const bool use_common_forward_evidence =
+        feasible_bundle_count >= 2u &&
+        forward_coverage_count == feasible_bundle_count &&
+        std::isfinite(common_forward_coverage_m) &&
+        common_forward_coverage_m > 0.0;
+    const auto clear_whole_curve_risk_order = [](
+        P4PreparedChannelRecord *record) {
+      record->risk_interval_complete = false;
+      record->global_peak_ratio = std::numeric_limits<double>::infinity();
+      record->global_rolling_worst_ratio =
+          std::numeric_limits<double>::infinity();
+      record->global_continuous_exceedance_s =
+          std::numeric_limits<double>::infinity();
+      record->global_exposure_integral_ratio_s =
+          std::numeric_limits<double>::infinity();
+      record->global_recovery_time_s =
+          std::numeric_limits<double>::infinity();
+      record->known_global_peak_ratio =
+          std::numeric_limits<double>::infinity();
+      record->fim_max_ratio = std::numeric_limits<double>::infinity();
+      record->fim_integral = std::numeric_limits<double>::infinity();
+    };
+    for (const auto &entry : p4_prepared_channel_bundles_)
+    {
+      P4PreparedChannelRecord comparison_record =
+          entry.second.channel_record;
+      if (feasible_bundle_count >= 2u && comparison_record.feasible())
+      {
+        clear_whole_curve_risk_order(&comparison_record);
+        if (use_common_forward_evidence)
+        {
+          const auto common_evidence =
+              p4ActualRiskEvidenceWithinForwardRange(
+                  entry.second.direct_risk_evidence,
+                  entry.second.decision.request_position,
+                  entry.second.decision.local_target,
+                  common_forward_coverage_m);
+          // Partial upper-PL/FIM values are preference evidence only. Crop
+          // every sibling to the same mission-forward extent before ranking
+          // so backtracking or stopping short cannot hide future risk.
+          p4ApplyRiskIntervalSummary(
+              common_evidence, &comparison_record);
+          const auto common_fim = summarizeP4ActualFimEvidence(
+              common_evidence);
+          comparison_record.fim_max_ratio = common_fim.first;
+          comparison_record.fim_integral = common_fim.second;
+        }
+      }
+      prepared_records.push_back(std::move(comparison_record));
+    }
     std::set<uint64_t> feasible_channel_ids;
     for (const auto &candidate : bundle.decision.candidates)
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
@@ -11721,9 +12181,11 @@ namespace ego_planner
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
         expected_channel_ids.insert(candidate.channel_id);
     if (expected_channel_ids.size() < 2u)
+    {
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_multi_channel_comparison_not_required");
+    }
 
     const auto selected = std::find_if(
         last_p4_forward_decision_.candidates.begin(),
@@ -11979,9 +12441,11 @@ namespace ego_planner
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
         expected_channel_ids.insert(candidate.channel_id);
     if (expected_channel_ids.size() < 2u)
+    {
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_multi_channel_comparison_not_required");
+    }
 
     const auto selected = std::find_if(
         last_p4_forward_decision_.candidates.begin(),
@@ -17213,7 +17677,10 @@ namespace ego_planner
             start_pt, start_vel, start_acc, local_target_pt);
       }
       if (!preparingP4SuccessorCurve())
+      {
+        constrainP4DecisionToCommittedTopology(&evaluated);
         prepareNormalChannelsForActualCertification(&evaluated);
+      }
       const bool transient_wait =
           evaluated.result_status == P4ForwardResultStatus::PENDING ||
           evaluated.result_status == P4ForwardResultStatus::RATE_LIMITED;
