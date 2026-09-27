@@ -1422,6 +1422,58 @@ namespace ego_planner
         epoch, evidence, braking_anchors, clearance_radius_m, record);
   }
 
+  std::pair<double, double> summarizeP4ActualFimEvidence(
+      const P4DirectTrajectoryRiskEvidence &evidence)
+  {
+    double maximum = 0.0;
+    double integral = 0.0;
+    bool maximum_available = false;
+    bool integral_available = false;
+    double previous_time_s = std::numeric_limits<double>::quiet_NaN();
+    double previous_ratio = std::numeric_limits<double>::quiet_NaN();
+    for (std::size_t index = 0u; index < evidence.points.size(); ++index)
+    {
+      const double ratio = evidence.points[index].fim_ratio;
+      if (!std::isfinite(ratio) ||
+          index >= evidence.relative_times.size() ||
+          !std::isfinite(evidence.relative_times[index]))
+      {
+        previous_time_s = std::numeric_limits<double>::quiet_NaN();
+        previous_ratio = std::numeric_limits<double>::quiet_NaN();
+        if (std::isfinite(ratio))
+        {
+          maximum = std::max(maximum, ratio);
+          maximum_available = true;
+        }
+        continue;
+      }
+
+      maximum = std::max(maximum, ratio);
+      maximum_available = true;
+      const double time_s = evidence.relative_times[index];
+      if (std::isfinite(previous_time_s))
+      {
+        if (time_s <= previous_time_s)
+        {
+          // Duplicate responsibility rows and time regressions do not provide
+          // positive-duration actual-curve evidence and break continuity.
+          previous_time_s = std::numeric_limits<double>::quiet_NaN();
+          previous_ratio = std::numeric_limits<double>::quiet_NaN();
+          continue;
+        }
+        integral += 0.5 * (previous_ratio + ratio) *
+            (time_s - previous_time_s);
+        integral_available = true;
+      }
+      previous_time_s = time_s;
+      previous_ratio = ratio;
+    }
+    return {
+      maximum_available ? maximum : std::numeric_limits<double>::infinity(),
+      integral_available ? integral : std::numeric_limits<double>::infinity()
+    };
+  }
+
   P4PreparedChannelComparison compareP4PreparedChannels(
       const std::vector<P4PreparedChannelRecord> &records,
       const P4ForwardSnapshotIdentity &latest_snapshot,
@@ -1476,7 +1528,6 @@ namespace ego_planner
     enum class Ordering {LEFT, RIGHT, EQUAL};
     const auto compare = [&](const P4PreparedChannelRecord *left,
                              const P4PreparedChannelRecord *right) {
-        constexpr double epsilon = 1.0e-9;
         if (left->authorization_group != right->authorization_group)
           return left->authorization_group < right->authorization_group
               ? Ordering::LEFT : Ordering::RIGHT;
@@ -1486,13 +1537,13 @@ namespace ego_planner
             return interval_complete && std::isfinite(upper)
                 ? upper : fallback;
           };
-        const auto lower = [epsilon](double lhs, double rhs) {
+        const auto lower = [](double lhs, double rhs) {
             if (!std::isfinite(lhs)) lhs =
                 std::numeric_limits<double>::infinity();
             if (!std::isfinite(rhs)) rhs =
                 std::numeric_limits<double>::infinity();
-            if (lhs < rhs - epsilon) return -1;
-            if (rhs < lhs - epsilon) return 1;
+            if (lhs < rhs) return -1;
+            if (rhs < lhs) return 1;
             return 0;
           };
         const auto unknown_exposure = [](const P4PreparedChannelRecord *record) {
@@ -1505,7 +1556,7 @@ namespace ego_planner
                   1.0 - record->braking_tube_support_fraction});
             return value;
           };
-        const std::array<std::pair<double, double>, 4> lower_metrics{{
+        const std::array<std::pair<double, double>, 6> lower_metrics{{
           {conservative(left->risk_interval_complete,
                         left->global_peak_ratio_upper,
                         left->global_peak_ratio),
@@ -1524,7 +1575,13 @@ namespace ego_planner
            conservative(right->risk_interval_complete,
                         right->global_exposure_integral_upper_ratio_s,
                         right->global_exposure_integral_ratio_s)},
-          {unknown_exposure(left), unknown_exposure(right)}}};
+          {unknown_exposure(left), unknown_exposure(right)},
+          // In MISSION, missing global intervals do not make the remaining
+          // actual-curve risk evidence disappear.  Keep the established FIM
+          // risk order ahead of geometric progress so an arbitrary longer
+          // curve cannot win merely because both intervals are incomplete.
+          {left->fim_max_ratio, right->fim_max_ratio},
+          {left->fim_integral, right->fim_integral}}};
         for (const auto &metric : lower_metrics)
         {
           const int order = lower(metric.first, metric.second);
@@ -10705,8 +10762,6 @@ namespace ego_planner
           selected_candidate->global_continuous_exceedance_s;
       bundle.channel_record.global_recovery_time_s =
           selected_candidate->global_recovery_time_s;
-      bundle.channel_record.fim_max_ratio = selected_candidate->fim_max_ratio;
-      bundle.channel_record.fim_integral = selected_candidate->fim_integral;
       bundle.channel_record.minimum_local_clearance_margin_m =
           selected_candidate->minimum_local_clearance_margin_m;
       bundle.channel_record.actual_progress_m =
@@ -10721,6 +10776,10 @@ namespace ego_planner
         suffix_m += (remainder[index] - remainder[index - 1u]).norm();
       bundle.channel_record.unevaluated_suffix_m = suffix_m;
     }
+    const auto actual_fim = summarizeP4ActualFimEvidence(
+        bundle.direct_risk_evidence);
+    bundle.channel_record.fim_max_ratio = actual_fim.first;
+    bundle.channel_record.fim_integral = actual_fim.second;
     if (!bundle.complete())
       return finish(false, "successor_prepared_bundle_incomplete");
     const bool certified_limited_prefix =
@@ -11625,32 +11684,14 @@ namespace ego_planner
       record.minimum_local_clearance_margin_m =
           selected_candidate->minimum_local_clearance_margin_m;
 
-    record.fim_max_ratio = 0.0;
-    record.fim_integral = 0.0;
-    double previous_time_s = std::numeric_limits<double>::quiet_NaN();
-    double previous_fim_ratio = std::numeric_limits<double>::quiet_NaN();
+    const auto actual_fim = summarizeP4ActualFimEvidence(
+        bundle.direct_risk_evidence);
+    record.fim_max_ratio = actual_fim.first;
+    record.fim_integral = actual_fim.second;
     for (std::size_t index = 0u;
          index < bundle.direct_risk_evidence.points.size(); ++index)
     {
       const auto &point = bundle.direct_risk_evidence.points[index];
-      if (std::isfinite(point.fim_ratio))
-      {
-        record.fim_max_ratio = std::max(record.fim_max_ratio,
-                                        point.fim_ratio);
-        if (index < bundle.direct_risk_evidence.relative_times.size())
-        {
-          const double time_s =
-              bundle.direct_risk_evidence.relative_times[index];
-          if (std::isfinite(previous_time_s) &&
-              std::isfinite(previous_fim_ratio) &&
-              std::isfinite(time_s) && time_s >= previous_time_s)
-            record.fim_integral += 0.5 *
-                (previous_fim_ratio + point.fim_ratio) *
-                (time_s - previous_time_s);
-          previous_time_s = time_s;
-          previous_fim_ratio = point.fim_ratio;
-        }
-      }
       record.known_occupancy_kappa = std::max(
           record.known_occupancy_kappa,
           std::clamp(point.known_occupancy_kappa, 0.0, 1.0));
@@ -11663,11 +11704,6 @@ namespace ego_planner
       record.combined_conservative_kappa = std::max(
           record.combined_conservative_kappa,
           std::clamp(point.combined_conservative_kappa, 0.0, 1.0));
-    }
-    if (bundle.direct_risk_evidence.points.empty())
-    {
-      record.fim_max_ratio = selected_candidate->fim_max_ratio;
-      record.fim_integral = selected_candidate->fim_integral;
     }
     const auto remainder = p4RemainingPath(
         selected_candidate->path, record.actual_endpoint);

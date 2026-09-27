@@ -1183,6 +1183,62 @@ def _forest_actual_bundle_events(rows: list[dict]) -> list[dict]:
     return events
 
 
+def _forest_actual_risk_comparisons(
+        events: list[dict], actual_arms: dict[int, str]) -> dict[str, dict]:
+    """Require two evaluated actual arms and a winner matching actual odom."""
+    evaluated_statuses = {
+        "SAFE", "UNSAFE_SPATIAL_DOMINANT", "UNSAFE_TEMPORAL_DOMINANT"}
+    groups: dict[tuple[str, str, str], list[dict]] = {}
+    for event in events:
+        if event["stage"] not in (
+                "normal_channel_comparison_complete",
+                "successor_prepared_certified"):
+            continue
+        key = (event["stage"], event["decision_event_id"],
+               event["planning_attempt_id"])
+        groups.setdefault(key, []).append(event)
+
+    comparisons = {}
+    for fork_index in range(len(forest_scene_contract()["forks"])):
+        fork_key = str(fork_index)
+        match = None
+        for key, group in groups.items():
+            # Repeated terminal rows for the same stable channel do not create
+            # an additional compared arm.
+            by_channel = {event["channel_id"]: event for event in group}
+            relevant = [
+                event for event in by_channel.values()
+                if event["selected_arms"].get(fork_key) in ("low", "high")]
+            arms = {event["selected_arms"][fork_key] for event in relevant}
+            selected_events = [event for event in relevant
+                               if event["selected"]]
+            if (arms != {"low", "high"} or len(selected_events) != 1 or
+                    any(event["final_curve_status"] not in evaluated_statuses
+                        for event in relevant)):
+                continue
+            selected_arm = selected_events[0]["selected_arms"][fork_key]
+            if selected_arm != actual_arms.get(fork_index):
+                continue
+            match = {
+                "complete": True,
+                "stage": key[0],
+                "decision_event_id": key[1],
+                "planning_attempt_id": key[2],
+                "selected_arm": selected_arm,
+                "compared_channel_ids": sorted(by_channel),
+            }
+            break
+        comparisons[fork_key] = match or {
+            "complete": False,
+            "stage": None,
+            "decision_event_id": None,
+            "planning_attempt_id": None,
+            "selected_arm": None,
+            "compared_channel_ids": [],
+        }
+    return comparisons
+
+
 def analyze_forest_path(
         records: list[dict], variant: str,
         forward_candidates: list[dict] | None = None,
@@ -1203,10 +1259,22 @@ def analyze_forest_path(
         odometry_points)
     low_count = sum(arm == "low" for arm in selected.values())
     high_count = sum(arm == "high" for arm in selected.values())
-    passed = ((low_count == 4) if variant == "risk" else high_count >= 3)
-    passed = passed and forks_ordered
+    bundle_events = _forest_actual_bundle_events(
+        forward_channel_decisions or [])
+    actual_risk_comparisons = _forest_actual_risk_comparisons(
+        bundle_events, selected)
+    actual_risk_complete = all(
+        comparison["complete"]
+        for comparison in actual_risk_comparisons.values())
+    branch_passed = ((low_count == 4)
+                     if variant == "risk" else high_count >= 3)
+    branch_passed = branch_passed and forks_ordered
+    failures = [] if branch_passed else [
+        f"forest_{variant}_branch_selection_failed"]
+    if variant == "risk" and not actual_risk_complete:
+        failures.append("forest_risk_actual_bundle_comparison_incomplete")
     return _result(
-        [] if passed else [f"forest_{variant}_branch_selection_failed"],
+        failures,
         forest_variant=variant,
         evidence_source="actual_odom",
         selected_arms={str(key): value for key, value in selected.items()},
@@ -1224,8 +1292,10 @@ def analyze_forest_path(
             "events": _forest_candidate_plan_events(
                 forward_candidates or [])},
         actual_certified_bundle_selection={
-            "events": _forest_actual_bundle_events(
-                forward_channel_decisions or [])},
+            "events": bundle_events,
+            "fork_comparisons": actual_risk_comparisons,
+            "all_forks_complete": actual_risk_complete,
+        },
     )
 
 

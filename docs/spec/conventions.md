@@ -397,10 +397,12 @@
   derived solely from the actual trajectory's `TrajectoryExecutionMode`.
   Formal bundles precede degraded bundles; degraded bundles are ordered by
   conservative peak ratio, continuous exceedance, positive exposure integral,
-  actual/braking-tube unknown exposure, actual progress and stable bundle
-  hash. Overlapping GNSS intervals do not cause HOLD once both locally safe
-  bundles are complete. The old stable channel is only a tie-break after the
-  complete ordering key is equal. Winner/runner-up, actual endpoints,
+  actual/braking-tube unknown exposure, actual-curve FIM maximum and integral,
+  actual progress and stable bundle hash. A missing or non-finite actual-curve
+  FIM value is unavailable, never zero risk. Overlapping GNSS intervals do not
+  cause HOLD once both locally safe bundles are complete. The old stable
+  channel is only a tie-break after the complete ordering key is equal.
+  Winner/runner-up, actual endpoints,
   unevaluated suffixes and the full decomposition remain recorded. If the
   bounded preparation deadline expires, the state is `PARTIAL_COMPARISON` and
   only already certified finite progress is eligible. RiskGrid is a search

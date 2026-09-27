@@ -9529,6 +9529,114 @@ TEST(P4PreparedChannelComparison,
   ASSERT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id, negative_y.channel_id);
+
+  // Reproduce the live fork-1 seam: both locally safe actual bundles have
+  // incomplete global intervals and identical unknown exposure, while the
+  // actual-curve FIM evidence still distinguishes their predicted risk.  A
+  // little more geometric progress must not outrank that risk evidence.
+  negative_y.risk_interval_complete = false;
+  positive_y.risk_interval_complete = false;
+  negative_y.global_peak_ratio =
+      std::numeric_limits<double>::quiet_NaN();
+  positive_y.global_peak_ratio =
+      std::numeric_limits<double>::quiet_NaN();
+  negative_y.global_continuous_exceedance_s = 0.0;
+  positive_y.global_continuous_exceedance_s = 0.0;
+  negative_y.global_exposure_integral_ratio_s = 0.0;
+  positive_y.global_exposure_integral_ratio_s = 0.0;
+  negative_y.unknown_support_fraction = 1.0;
+  negative_y.combined_conservative_kappa = 1.0;
+  positive_y.unknown_support_fraction = 1.0;
+  positive_y.combined_conservative_kappa = 1.0;
+  negative_y.fim_max_ratio = 0.013576;
+  negative_y.fim_integral = 2.33443;
+  negative_y.actual_progress_m = 4.0;
+  positive_y.fim_max_ratio = 0.0133805;
+  positive_y.fim_integral = 2.18904;
+  positive_y.actual_progress_m = 3.0;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {negative_y, positive_y}, snapshot, 2u);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, positive_y.channel_id);
+
+  // Missing actual-curve FIM is unavailable, never zero risk.
+  auto missing_fim = positive_y;
+  missing_fim.channel_id = 83u;
+  missing_fim.guide_identity = "guide-missing-fim";
+  missing_fim.refined_path_identity = "refined-missing-fim";
+  missing_fim.curve_identity = "curve-missing-fim";
+  missing_fim.fim_max_ratio = std::numeric_limits<double>::infinity();
+  missing_fim.fim_integral = std::numeric_limits<double>::infinity();
+  missing_fim.actual_progress_m = 5.0;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {missing_fim, positive_y}, snapshot, 2u);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, positive_y.channel_id);
+
+  // The comparator is a strict total order even for values closer than the
+  // former fuzzy epsilon. Every input permutation must keep the same winner.
+  auto smallest = positive_y;
+  smallest.channel_id = 84u;
+  smallest.guide_identity = "guide-z";
+  smallest.refined_path_identity = "refined-z";
+  smallest.curve_identity = "curve-z";
+  smallest.fim_max_ratio = 0.0;
+  smallest.fim_integral = 1.0;
+  smallest.actual_progress_m = 1.0;
+  auto middle = smallest;
+  middle.channel_id = 85u;
+  middle.guide_identity = "guide-y";
+  middle.refined_path_identity = "refined-y";
+  middle.curve_identity = "curve-y";
+  middle.fim_max_ratio = 0.75e-9;
+  auto largest = smallest;
+  largest.channel_id = 86u;
+  largest.guide_identity = "guide-a";
+  largest.refined_path_identity = "refined-a";
+  largest.curve_identity = "curve-a";
+  largest.fim_max_ratio = 1.5e-9;
+  const std::array<std::array<std::size_t, 3>, 6> permutations{{
+      {{0u, 1u, 2u}}, {{0u, 2u, 1u}}, {{1u, 0u, 2u}},
+      {{1u, 2u, 0u}}, {{2u, 0u, 1u}}, {{2u, 1u, 0u}}}};
+  const std::array<ego_planner::P4PreparedChannelRecord, 3> near_equal{{
+      smallest, middle, largest}};
+  for (const auto &order : permutations)
+  {
+    comparison = ego_planner::compareP4PreparedChannels(
+        {near_equal[order[0]], near_equal[order[1]], near_equal[order[2]]},
+        snapshot, 3u);
+    ASSERT_EQ(comparison.state,
+              ego_planner::P4ChannelComparisonState::COMPLETE);
+    EXPECT_EQ(comparison.winner_channel_id, smallest.channel_id);
+  }
+}
+
+TEST(P4PreparedChannelComparison,
+     ActualFimSummaryRejectsNonPositiveTimeAndMissingActualEvidence)
+{
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.points.resize(3u);
+  evidence.relative_times = {0.2, 0.1, 0.3};
+  evidence.points[0].fim_ratio = 0.4;
+  evidence.points[1].fim_ratio = 0.3;
+  evidence.points[2].fim_ratio = 0.2;
+  auto summary = ego_planner::summarizeP4ActualFimEvidence(evidence);
+  EXPECT_DOUBLE_EQ(summary.first, 0.4);
+  EXPECT_TRUE(std::isinf(summary.second));
+
+  evidence.relative_times = {0.2, 0.2, 0.3};
+  evidence.points[2].fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  summary = ego_planner::summarizeP4ActualFimEvidence(evidence);
+  EXPECT_DOUBLE_EQ(summary.first, 0.4);
+  EXPECT_TRUE(std::isinf(summary.second));
+
+  evidence.points.clear();
+  evidence.relative_times.clear();
+  summary = ego_planner::summarizeP4ActualFimEvidence(evidence);
+  EXPECT_TRUE(std::isinf(summary.first));
+  EXPECT_TRUE(std::isinf(summary.second));
 }
 
 TEST(P4PreparedSuccessorPolicy,
@@ -11203,6 +11311,13 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.duration_ = first_curve.getTimeSum();
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
+  auto first_evidence = manager.latestP4DirectRiskEvidence();
+  ASSERT_GE(first_evidence.points.size(), 3u);
+  for (auto &point : first_evidence.points)
+    point.fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  first_evidence.points.front().fim_ratio = 0.4;
+  first_evidence.points.back().fim_ratio = 0.3;
+  manager.setP4DirectRiskEvidenceForTest(std::move(first_evidence));
 
   std::string reason;
   ASSERT_EQ(
@@ -11211,6 +11326,11 @@ TEST(P4PreparedChannelPreparation,
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
+  const auto first_records =
+      manager.preparedP4NormalChannelRecordsForTest();
+  ASSERT_EQ(first_records.size(), 1u);
+  EXPECT_DOUBLE_EQ(first_records.front().fim_max_ratio, 0.4);
+  EXPECT_TRUE(std::isinf(first_records.front().fim_integral));
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   const auto pending_second =
       *manager.pendingP4ChannelWorkItemForTest();

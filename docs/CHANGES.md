@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-degraded-actual-risk-order): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — when two locally safe actual bundles have incomplete global
+  intervals and equal unknown exposure, retain their already-computed
+  actual-curve FIM maximum and integral ahead of geometric progress in the
+  deterministic final comparison. Missing/non-finite FIM remains unavailable
+  rather than becoming zero risk. This affects ordering only: collision,
+  clearance, dynamics, braking, identity and freshness feasibility gates are
+  unchanged. Forest risk acceptance now also requires a complete evaluated
+  low/high actual-bundle comparison for every odometry-traversed fork; MISSION
+  may continue locally safe degraded flight, but incomplete evidence cannot be
+  counted as correct branch selection or a healthy run.
 - fix(p4-incomplete-route-preference): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — retain the winner of a complete actual-curve channel comparison
   as a one-route-transaction recovery/replanning hint only when that winner

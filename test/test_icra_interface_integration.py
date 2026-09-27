@@ -1961,7 +1961,10 @@ class TestStageAnalyzer(unittest.TestCase):
         high = MODULE.analyze_forest_path([
             {"kind": "iap_odom", "payload": {"position_m": point}}
             for point in high_points], "baseline")
-        self.assertEqual(low["result"], "PASS")
+        self.assertEqual(low["result"], "FAIL")
+        self.assertIn(
+            "forest_risk_actual_bundle_comparison_incomplete",
+            low["failures"])
         self.assertEqual(high["result"], "PASS")
         self.assertTrue(low["actual_odom_forks_ordered"])
         self.assertTrue(high["actual_odom_forks_ordered"])
@@ -2042,8 +2045,44 @@ class TestStageAnalyzer(unittest.TestCase):
                 "actual_endpoint_z": str(point[2]),
             })
 
-        result = MODULE.analyze_forest_path(
+        incomplete = MODULE.analyze_forest_path(
             records, "risk", candidates, bundles)
+
+        self.assertEqual(incomplete["result"], "FAIL")
+        self.assertIn(
+            "forest_risk_actual_bundle_comparison_incomplete",
+            incomplete["failures"])
+        self.assertFalse(
+            incomplete["actual_certified_bundle_selection"]
+                      ["all_forks_complete"])
+
+        complete_bundles = []
+        for index, (low_point, high_point) in enumerate(
+                zip(low_midpoints, high_points[1::3])):
+            event_id = str(index + 1)
+            attempt_id = str(100 + index)
+            complete_bundles.extend(({
+                "stage": "normal_channel_comparison_complete",
+                "decision_event_id": event_id,
+                "planning_attempt_id": attempt_id,
+                "candidate_id": "1", "channel_id": str(10 + index),
+                "selected": "1", "final_curve_status": "SAFE",
+                "actual_endpoint_x": str(low_point[0]),
+                "actual_endpoint_y": str(low_point[1]),
+                "actual_endpoint_z": str(low_point[2]),
+            }, {
+                "stage": "normal_channel_comparison_complete",
+                "decision_event_id": event_id,
+                "planning_attempt_id": attempt_id,
+                "candidate_id": "2", "channel_id": str(20 + index),
+                "selected": "0",
+                "final_curve_status": "UNSAFE_SPATIAL_DOMINANT",
+                "actual_endpoint_x": str(high_point[0]),
+                "actual_endpoint_y": str(high_point[1]),
+                "actual_endpoint_z": str(high_point[2]),
+            }))
+        result = MODULE.analyze_forest_path(
+            records, "risk", candidates, complete_bundles)
 
         self.assertEqual(result["result"], "PASS")
         self.assertEqual(result["evidence_source"], "actual_odom")
@@ -2052,7 +2091,20 @@ class TestStageAnalyzer(unittest.TestCase):
             ["low", "low", "low", "low"])
         self.assertEqual(len(result["candidate_plan_selection"]["events"]), 4)
         self.assertEqual(
-            len(result["actual_certified_bundle_selection"]["events"]), 4)
+            len(result["actual_certified_bundle_selection"]["events"]), 8)
+        self.assertTrue(
+            result["actual_certified_bundle_selection"]
+                  ["all_forks_complete"])
+
+        incomplete_competitor = [dict(bundle)
+                                 for bundle in complete_bundles]
+        incomplete_competitor[1]["final_curve_status"] = "INCOMPLETE"
+        incomplete_result = MODULE.analyze_forest_path(
+            records, "risk", candidates, incomplete_competitor)
+        self.assertEqual(incomplete_result["result"], "FAIL")
+        self.assertIn(
+            "forest_risk_actual_bundle_comparison_incomplete",
+            incomplete_result["failures"])
 
         wrong_actual = list(records)
         for index in range(3, 6):
@@ -2061,7 +2113,7 @@ class TestStageAnalyzer(unittest.TestCase):
                 "payload": {"position_m": high_points[index]},
             }
         failed = MODULE.analyze_forest_path(
-            wrong_actual, "risk", candidates, bundles)
+            wrong_actual, "risk", candidates, complete_bundles)
         self.assertEqual(failed["result"], "FAIL")
         self.assertEqual(failed["actual_odom_selected_arms"]["1"], "high")
         self.assertEqual(

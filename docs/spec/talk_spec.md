@@ -325,9 +325,11 @@ For each candidate trajectory τ:
   diagnostic and cannot independently cause braking. Ordering is formal
   before degraded, then conservative peak ratio, continuous exceedance,
   positive exposure integral, actual/braking-tube unknown exposure, actual
-  progress and a stable bundle hash, with the old stable channel used only as
-  a true-key tie-break. Complete locally safe bundles are therefore still
-  orderable when their GNSS intervals overlap.
+  curve FIM maximum and integral, actual progress and a stable bundle hash,
+  with the old stable channel used only as a true-key tie-break. Missing or
+  non-finite actual-curve FIM is unavailable rather than zero risk. Complete
+  locally safe bundles are therefore still orderable when their GNSS
+  intervals overlap.
   The generator bounds the endpoint only by visible local support, required
   progress, terminal stopping and dynamics. It does not crop or regenerate a
   curve to fit an exposure duration. STRICT remains unchanged.

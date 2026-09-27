@@ -545,6 +545,9 @@ namespace ego_planner
       const std::vector<P4BrakingAnchor> &braking_anchors,
       double clearance_radius_m, P4PreparedChannelRecord *record);
 
+  std::pair<double, double> summarizeP4ActualFimEvidence(
+      const P4DirectTrajectoryRiskEvidence &evidence);
+
   struct P4PreparedSuccessorBundle
   {
     P4SuccessorPreparationState state =
@@ -1304,6 +1307,16 @@ namespace ego_planner
             P4SuccessorPreparationState::CURVE_PREPARING)
           counts.push_back(entry.second.braking_anchors.size());
       return counts;
+    }
+    std::vector<P4PreparedChannelRecord>
+    preparedP4NormalChannelRecordsForTest() const
+    {
+      std::vector<P4PreparedChannelRecord> records;
+      for (const auto &entry : p4_prepared_channel_bundles_)
+        if (entry.second.state ==
+            P4SuccessorPreparationState::PREPARED_CERTIFIED)
+          records.push_back(entry.second.channel_record);
+      return records;
     }
     void setP4PendingChannelWorkItemForTest(P4ForwardDecision decision)
     {
