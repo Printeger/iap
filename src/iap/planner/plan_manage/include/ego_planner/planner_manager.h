@@ -541,7 +541,8 @@ namespace ego_planner
   P4PreparedChannelComparison compareP4PreparedChannels(
       const std::vector<P4PreparedChannelRecord> &records,
       const P4ForwardSnapshotIdentity &latest_snapshot,
-      std::size_t expected_channel_count, uint64_t incumbent_channel_id = 0u);
+      std::size_t expected_channel_count, uint64_t incumbent_channel_id = 0u,
+      uint64_t route_preference_channel_id = 0u);
 
   void summarizeP4RouteEvidence(
       const std::shared_ptr<const FrozenOccupancyEpoch> &epoch,

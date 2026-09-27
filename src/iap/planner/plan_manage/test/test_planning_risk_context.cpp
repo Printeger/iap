@@ -9697,7 +9697,8 @@ TEST(P4PreparedChannelComparison,
   high_actual.fim_integral = 1.8;
 
   const auto comparison = ego_planner::compareP4PreparedChannels(
-      {low_actual, high_actual}, snapshot, 2u);
+      {low_actual, high_actual}, snapshot, 2u, 0u,
+      high_actual.channel_id);
   ASSERT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id, low_actual.channel_id);
@@ -9734,6 +9735,81 @@ TEST(P4PreparedChannelComparison,
   EXPECT_DOUBLE_EQ(summary.second, 0.3);
   EXPECT_FALSE(evidence.complete);
   EXPECT_FALSE(evidence.certified_safe);
+}
+
+TEST(P4PreparedChannelComparison,
+     AlternatingFourForkMissingActualPlKeepsFrozenRoutePreference)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  const auto record = [&snapshot](const uint64_t channel_id,
+                                  const double lateral_sign) {
+    ego_planner::P4PreparedChannelRecord value;
+    value.channel_id = channel_id;
+    value.snapshot_identity = snapshot;
+    value.guide_identity = "guide-" + std::to_string(channel_id);
+    value.refined_path_identity =
+        "refined-" + std::to_string(channel_id);
+    value.curve_identity = "curve-" + std::to_string(channel_id);
+    value.actual_endpoint = Eigen::Vector3d(4.0, lateral_sign, 1.0);
+    value.duration_s = 2.0;
+    value.authorization_group = 1;
+    value.global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    value.global_rolling_worst_ratio = 0.0;
+    value.global_continuous_exceedance_s = 0.0;
+    value.global_exposure_integral_ratio_s = 0.0;
+    value.known_global_peak_ratio =
+        std::numeric_limits<double>::infinity();
+    value.unknown_support_fraction = 1.0;
+    value.combined_conservative_kappa = 1.0;
+    value.minimum_local_clearance_margin_m = 0.2;
+    value.final_curve_evaluated = true;
+    value.local_geometry_passed = true;
+    value.dynamics_passed = true;
+    value.collision_passed = true;
+    value.clearance_passed = true;
+    value.braking_passed = true;
+    value.gnss_exposure_complete = true;
+    value.failure = ego_planner::P4PreparedCurveFailure::NONE;
+    return value;
+  };
+
+  const std::array<double, 4> low_risk_signs{{-1.0, 1.0, -1.0, 1.0}};
+  for (std::size_t fork = 0u; fork < low_risk_signs.size(); ++fork)
+  {
+    const uint64_t negative_channel = 100u + 2u * fork;
+    const uint64_t positive_channel = negative_channel + 1u;
+    auto negative = record(negative_channel, -1.0);
+    auto positive = record(positive_channel, 1.0);
+    const uint64_t preferred = low_risk_signs[fork] < 0.0
+        ? negative_channel : positive_channel;
+    // Reproduce the live seam: without actual upper-PL support, the
+    // non-preferred side has a slightly smaller advisory FIM value.
+    negative.fim_max_ratio = preferred == negative_channel ? 0.0130 : 0.0125;
+    positive.fim_max_ratio = preferred == positive_channel ? 0.0130 : 0.0125;
+    negative.fim_integral = 1.6;
+    positive.fim_integral = 1.4;
+
+    const auto comparison = ego_planner::compareP4PreparedChannels(
+        {negative, positive}, snapshot, 2u, 0u, preferred);
+    ASSERT_EQ(comparison.state,
+              ego_planner::P4ChannelComparisonState::COMPLETE);
+    EXPECT_EQ(comparison.winner_channel_id, preferred) << "fork=" << fork;
+  }
 }
 
 TEST(P4PreparedSuccessorPolicy,

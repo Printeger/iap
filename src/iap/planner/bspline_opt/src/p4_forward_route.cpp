@@ -5052,6 +5052,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   P4ForwardCandidate * selected = eligible.front();
   decision.selected_candidate_id = selected->candidate_id;
   decision.selected_channel_id = selected->channel_id;
+  decision.route_preference_channel_id = selected->channel_id;
   decision.selected_guide = selected->path;
   if (eligible.size() > 1u)
   {

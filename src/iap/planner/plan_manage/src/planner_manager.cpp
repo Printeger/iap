@@ -1502,7 +1502,8 @@ namespace ego_planner
       const std::vector<P4PreparedChannelRecord> &records,
       const P4ForwardSnapshotIdentity &latest_snapshot,
       const std::size_t expected_channel_count,
-      const uint64_t incumbent_channel_id)
+      const uint64_t incumbent_channel_id,
+      const uint64_t route_preference_channel_id)
   {
     P4PreparedChannelComparison result;
     std::vector<const P4PreparedChannelRecord *> feasible;
@@ -1580,7 +1581,7 @@ namespace ego_planner
                   1.0 - record->braking_tube_support_fraction});
             return value;
           };
-        const std::array<std::pair<double, double>, 7> lower_metrics{{
+        const std::array<std::pair<double, double>, 5> lower_metrics{{
           {conservative(left->risk_interval_complete,
                         left->global_peak_ratio_upper,
                         left->global_peak_ratio),
@@ -1605,14 +1606,38 @@ namespace ego_planner
           // support cannot masquerade as a safer curve, and never use it as
           // execution authority.
           {left->known_global_peak_ratio,
-           right->known_global_peak_ratio},
+           right->known_global_peak_ratio}}};
+        for (const auto &metric : lower_metrics)
+        {
+          const int order = lower(metric.first, metric.second);
+          if (order != 0)
+            return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
+        }
+        // When neither actual curve has any upper-PL evidence, retain the
+        // frozen route comparison's preference.  Sibling curve preparation
+        // overwrites selected_channel_id transactionally, so the immutable
+        // route preference is the only non-arbitrary topology signal here.
+        // This is ordering only: every hard local/dynamics/collision/braking
+        // predicate above remains mandatory and no execution authority is
+        // granted by this preference.
+        if (!std::isfinite(left->known_global_peak_ratio) &&
+            !std::isfinite(right->known_global_peak_ratio))
+        {
+          const bool left_preferred =
+              left->channel_id == route_preference_channel_id;
+          const bool right_preferred =
+              right->channel_id == route_preference_channel_id;
+          if (left_preferred != right_preferred)
+            return left_preferred ? Ordering::LEFT : Ordering::RIGHT;
+        }
+        const std::array<std::pair<double, double>, 2> fim_metrics{{
           // In MISSION, missing global intervals do not make the remaining
           // actual-curve risk evidence disappear.  Keep the established FIM
           // risk order ahead of geometric progress so an arbitrary longer
           // curve cannot win merely because both intervals are incomplete.
           {left->fim_max_ratio, right->fim_max_ratio},
           {left->fim_integral, right->fim_integral}}};
-        for (const auto &metric : lower_metrics)
+        for (const auto &metric : fim_metrics)
         {
           const int order = lower(metric.first, metric.second);
           if (order != 0)
@@ -11896,7 +11921,8 @@ namespace ego_planner
     const auto comparison = compareP4PreparedChannels(
         prepared_records, bundle.decision.snapshot_identity,
         expected_channel_ids.size(),
-        p4_execution_commitment_backup_.certificate.successor_channel_id);
+        p4_execution_commitment_backup_.certificate.successor_channel_id,
+        bundle.decision.route_preference_channel_id);
     if (comparison.state == P4ChannelComparisonState::PARTIAL_COMPARISON)
     {
       P4ForwardDecision observe = bundle.decision;

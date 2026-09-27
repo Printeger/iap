@@ -400,8 +400,9 @@
   checks and direct GNSS/exposure assurance. Before ranking, cached curves
   are re-certified against the same latest immutable snapshot. The comparison
   removes any candidate that fails local collision, clearance,
-  dynamics, tracking, support freshness or braking proof. Refined channel
-  preferences determine preparation order only. Bundle authorization group is
+  dynamics, tracking, support freshness or braking proof. The frozen route
+  preference determines preparation order and is retained while sibling
+  actual curves are prepared. Bundle authorization group is
   derived solely from the actual trajectory's `TrajectoryExecutionMode`.
   Formal bundles precede degraded bundles; degraded bundles are ordered by
   conservative peak ratio, continuous exceedance, positive exposure integral,
@@ -409,10 +410,14 @@
   on the actual curve when the formal interval is incomplete, actual-curve FIM
   maximum and integral, actual progress and stable bundle hash. The partial
   upper-PL peak is preference evidence only: it does not complete support or
-  grant authority. A missing or non-finite actual-curve risk value is
-  unavailable, never zero risk. Overlapping GNSS intervals do not cause HOLD
-  once both locally safe bundles are complete. The old stable
-  channel is only a tie-break after the complete ordering key is equal.
+  grant authority. If neither actual curve contains finite upper-PL evidence,
+  the frozen route preference remains ahead of advisory FIM instead of being
+  erased by sibling preparation. A finite actual upper-PL value or any hard
+  feasibility failure still overrides that preference. A missing or
+  non-finite actual-curve risk value is unavailable, never zero risk.
+  Overlapping GNSS intervals do not cause HOLD once both locally safe bundles
+  are complete. The old activated stable channel is only a tie-break after
+  the complete ordering key is equal.
   Winner/runner-up, actual endpoints,
   unevaluated suffixes and the full decomposition remain recorded. If the
   bounded preparation deadline expires, the state is `PARTIAL_COMPARISON` and

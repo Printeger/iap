@@ -847,6 +847,10 @@ namespace ego_planner
     uint64_t selected_channel_id = 0;
     uint64_t runner_up_candidate_id = 0;
     uint64_t runner_up_channel_id = 0;
+    // Immutable winner of the frozen candidate/route comparison. Preparing
+    // sibling actual curves may change selected_channel_id, but must not
+    // erase this preference before the all-channel actual comparison.
+    uint64_t route_preference_channel_id = 0;
     Eigen::Vector3d selected_actual_endpoint = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
     Eigen::Vector3d runner_up_actual_endpoint = Eigen::Vector3d::Constant(

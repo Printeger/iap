@@ -2739,6 +2739,8 @@ TEST(P4ForwardRoute, BestEffortChoosesLeastBadWhenEveryChannelExceedsBudget)
         return candidate.candidate_id == decision.selected_candidate_id;
       });
   ASSERT_NE(selected, decision.candidates.end());
+  EXPECT_EQ(decision.route_preference_channel_id,
+            decision.selected_channel_id);
   EXPECT_TRUE(selected->mission_degraded_candidate);
   EXPECT_GT(selected->global_budget_utilization, 1.0);
   EXPECT_NEAR(selected->global_peak_ratio, 1.10, 1.0e-9);

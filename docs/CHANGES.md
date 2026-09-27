@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-frozen-route-preference): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — retain the immutable route-comparison winner while sibling
+  actual curves from the same frozen decision are prepared. If neither
+  locally feasible actual bundle contains finite upper-PL evidence, preserve
+  that preference ahead of advisory FIM instead of letting the transactional
+  selected-channel field erase it. Finite actual upper-PL evidence and all
+  local collision, clearance, dynamics, braking, identity and freshness
+  failures still override the preference; it grants no execution authority.
 - fix(p4-route-preference-disposition): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — mark a normal `CANDIDATE_READY` route preference as retained
   work awaiting actual-curve certification instead of leaving the structural

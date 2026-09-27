@@ -327,7 +327,11 @@ For each candidate trajectory τ:
   positive exposure integral, actual/braking-tube unknown exposure, finite
   upper-PL peak observed directly on the actual curve when its formal interval
   is incomplete, actual curve FIM maximum and integral, actual progress and a
-  stable bundle hash, with the old stable channel used only as a true-key
+  stable bundle hash. The route comparison winner is frozen while sibling
+  actual curves are prepared; only when neither curve has any finite actual
+  upper-PL evidence is that frozen preference kept ahead of advisory FIM.
+  Finite actual upper-PL evidence and every hard feasibility failure still
+  override it. The old activated stable channel is used only as a true-key
   tie-break. Partial upper-PL evidence remains non-certified and cannot change
   support or authority. Missing or non-finite actual-curve risk is unavailable
   rather than zero risk. Complete
