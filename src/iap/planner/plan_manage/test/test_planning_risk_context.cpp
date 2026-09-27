@@ -11869,7 +11869,17 @@ TEST(P4PreparedChannelPreparation,
   });
   ASSERT_TRUE(manager.committedP4TrajectoryReachedEndpoint(
       static_cast<double>(stopped_guard_endpoint_ns) * 1.0e-9));
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      9, 9'000'000'000LL,
+      static_cast<double>(stopped_guard_endpoint_ns) * 1.0e-9 + 1.0,
+      "stale_pre_guard_successor_curve_pending", "pre_guard_parent");
+  ASSERT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::CURVE_PREPARING);
   ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::ROUTE_PENDING)
+      << "normal recovery from a stopped guard must not inherit the old "
+         "successor parent boundary";
   EXPECT_FALSE(manager.p4ChannelPreparationLifecycleForTest().terminal);
   EXPECT_EQ(manager.p4ChannelPreparationLifecycleForTest().decision_event_id,
             0u);
@@ -11893,6 +11903,13 @@ TEST(P4PreparedChannelPreparation,
           NEXT_CHANNEL_PENDING)
       << reason;
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  const uint64_t recovery_sibling_id =
+      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id;
+  ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            recovery_sibling_id)
+      << "later callbacks in the new recovery cohort must not be cleared";
   manager.setP4ForwardDecisionForTest(
       *manager.pendingP4ChannelWorkItemForTest());
   manager.clearP4PendingChannelWorkItemForTest();

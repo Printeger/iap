@@ -10732,17 +10732,35 @@ namespace ego_planner
     if (p4_candidate_awaiting_activation_)
       return false;
     // A certified guard remains the execution parent while stopped at its
-    // approved endpoint.  A terminal normal-channel cohort from the preceding
-    // endpoint retry is no longer a live transaction; abandon it before the
-    // next normal decision event is consumed.  Restrict this reset to a
-    // terminal cohort so sibling callbacks in the new cohort cannot repeatedly
-    // clear each other while the stopped guard remains authoritative.
-    if (p4_execution_certificate_.valid &&
+    // approved endpoint.  Any successor/channel preparation still names the
+    // pre-guard parent and cannot authorize a normal recovery curve. Abandon
+    // that preparation transaction before the next normal decision event;
+    // the independently owned committed topology remains intact.
+    const bool stopped_guard = p4_execution_certificate_.valid &&
         p4_execution_certificate_.authority ==
             P4ExecutionAuthority::LIMITED_PREFIX_BRAKING &&
-        p4_channel_preparation_lifecycle_.diagnostics.terminal &&
-        committedP4TrajectoryReachedEndpoint(plannerNow().seconds()))
+        committedP4TrajectoryReachedEndpoint(plannerNow().seconds());
+    const bool stale_pre_guard_successor =
+        p4_successor_schedule_.parent_trajectory_id > 0 &&
+        (p4_successor_schedule_.parent_trajectory_id !=
+             p4_execution_certificate_.trajectory_id ||
+         p4_successor_schedule_.parent_start_time_ns !=
+             p4_execution_certificate_.start_time_ns ||
+         p4_successor_schedule_.parent_control_points_hash !=
+             p4_execution_certificate_.control_points_hash);
+    if (stopped_guard &&
+        (stale_pre_guard_successor ||
+         p4_channel_preparation_lifecycle_.diagnostics.terminal))
     {
+      if (p4_successor_schedule_.parent_trajectory_id > 0)
+        p4_successor_worker_.cancelParent(
+            p4_successor_schedule_.parent_trajectory_id);
+      p4_successor_schedule_ = P4SuccessorScheduleState{};
+      p4_successor_preparation_state_ =
+          P4SuccessorPreparationState::ROUTE_PENDING;
+      p4_prepared_successor_.reset();
+      p4_cached_successor_bundle_.reset();
+      p4_cached_successor_activation_in_progress_ = false;
       P4ChannelPreparationTransition reset;
       reset.kind = P4ChannelPreparationTransitionKind::RESET;
       reset.clear_bundles = true;
