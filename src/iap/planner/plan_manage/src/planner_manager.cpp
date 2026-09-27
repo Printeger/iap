@@ -8665,22 +8665,13 @@ namespace ego_planner
                 P4GeometryCommitVerdict::INVALID_PATH,
                 "optimized_bspline_left_committed_guide_corridor");
         }
-        std::set<uint64_t> normal_channel_ids;
-        if (!preparingP4SuccessorCurve())
-          for (const auto &candidate : last_p4_forward_decision_.candidates)
-            if (candidate.channel_id != 0u &&
-                candidate.occupancy_supported)
-              normal_channel_ids.insert(candidate.channel_id);
-        const bool normal_multi_channel_preparation =
-            normal_channel_ids.size() >= 2u;
-        // In the normal multi-channel transaction the guide is lookahead
-        // geometry, not execution authority. Its terminal-stop fit may end
-        // before the coarse guide, while every actual sample must still stay
-        // inside the committed corridor above. The prepared bundle records
-        // the unexecuted suffix. Preserve the exact guide-end contract for
-        // single-channel and successor paths, which are outside this seam.
+        // A normal guide is lookahead geometry, not execution authority. Its
+        // terminal-stop fit may end before the coarse guide, while every
+        // actual sample must still stay inside the committed corridor above.
+        // The certificate records that unexecuted suffix. A successor is
+        // different: its immutable bounded guide is the exact child contract.
         if (!limited_prefix_intent &&
-            !normal_multi_channel_preparation &&
+            preparingP4SuccessorCurve() &&
             (executable_trajectory.back() - reference_path.back()).norm() >
                 maximum_deviation)
           return reject_final_commit(

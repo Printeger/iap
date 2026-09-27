@@ -2626,6 +2626,75 @@ ego_planner::P4ForwardDecision makeForwardDecision(
   return decision;
 }
 
+TEST(P4ActualCurveGeometryCommit,
+     SingleNormalTerminalStopMayLeaveLookaheadSuffix)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      10.0, frozen_occupancy->geometry_id, true);
+  const auto direct_risk = directRiskCallback(0.4);
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, direct_risk, 10.0, 9201u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  execution->occupancy = occupancy;
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("single_normal_lookahead_suffix.csv").string(), 1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, direct_risk, execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  const Eigen::Vector3d lookahead_endpoint(5.0, 0.0, 0.0);
+  decision.selected_guide.push_back(lookahead_endpoint);
+  decision.candidates.front().path = decision.selected_guide;
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.velocity_traj_ = stopped.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 9201;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0))
+      << manager.lastP4ActualCurveCertification().detail;
+  EXPECT_GT(manager.lastP4ForwardDecision().selected_unevaluated_suffix_m,
+            0.5);
+}
+
 TEST(P4ReboundFailureEvidence,
      HoldDecisionPreservesGenerationFailure) {
   auto map = std::make_shared<GridMap>();
