@@ -2773,8 +2773,9 @@ TEST(P4ForwardRoute,
     observed_direct_budget_ms = budget_ms;
     return production_batch(queries, budget_ms, samples);
   };
-  request.refine = [](
-      const std::vector<Eigen::Vector3d> &path, double, double) {
+  request.refine_with_warm_start = [](
+      const std::vector<Eigen::Vector3d> &path,
+      const std::vector<Eigen::Vector3d> &, double, double) {
     ego_planner::P4ForwardRefinementResult result;
     result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
     result.path = path;
@@ -4529,4 +4530,42 @@ TEST(P4ForwardRoute,
   EXPECT_GE(decision.deferred_trajectory.size(), 2u);
   EXPECT_GT(decision.speed_cap_mps, 0.0);
   EXPECT_DOUBLE_EQ(decision.observation_predicted_information_gain, 0.0);
+}
+
+TEST(P4ForwardRoute,
+     BestEffortFallsThroughToActualCandidatesWhenObservationPrefixCannotStop) {
+  auto request = incompleteObservationRequest(3.6);
+  request.limits.vehicle_radius_m = 0.35;
+  request.limits.safety_margin_m = 0.5;
+  request.limits.min_creep_progress_m = 2.0;
+  request.limits.route_compute_budget_ms = 3000.0;
+  request.limits.channel_enumeration_budget_ms = 2000.0;
+  request.limits.compute_budget_ms = 1000.0;
+  request.refine_with_warm_start = [](
+      const std::vector<Eigen::Vector3d> &path,
+      const std::vector<Eigen::Vector3d> &, double, double) {
+    ego_planner::P4ForwardRefinementResult result;
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    return result;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::FINAL_CHANNEL);
+  EXPECT_EQ(decision.selection_authority,
+            P4ForwardSelectionAuthority::NONE);
+  EXPECT_EQ(decision.planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+  EXPECT_EQ(decision.reason,
+            "route_preference_mission_degraded_candidate_ready");
+  ASSERT_GE(decision.candidates.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate &candidate) {
+        return candidate.mission_degraded_candidate;
+      }));
 }

@@ -4510,7 +4510,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   const bool certify_after_refinement =
     request.limits.task_mode ==
       iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-    static_cast<bool>(request.refine);
+    (static_cast<bool>(request.refine) ||
+     static_cast<bool>(request.refine_with_warm_start));
   evaluateCandidateRiskSet(request, &budget, &decision.candidates);
   if (canceled()) {
     decision.reason = "successor_canceled_superseded";
@@ -4543,18 +4544,29 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     if (configureSafeLimitedCommonPrefix(
         request, graph, &budget, &decision))
       return finalize(std::move(decision));
-    decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
-    decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
-    decision.selection_authority = P4ForwardSelectionAuthority::NONE;
-    decision.formal_support = false;
-    decision.selected_candidate_id = 0u;
-    decision.selected_channel_id = 0u;
-    decision.runner_up_candidate_id = 0u;
-    decision.runner_up_channel_id = 0u;
-    decision.selected_guide.clear();
-    decision.deferred_trajectory.clear();
-    decision.speed_cap_mps = 0.0;
-    return finalize(std::move(decision));
+    // Observation-only motion is optional in MISSION mode.  If its inputs
+    // are authoritative but the shared prefix cannot fit the existing
+    // stopping contract, hand the already enumerated channels to the actual
+    // curve pipeline.  That pipeline still owns every local-motion, braking,
+    // identity and freshness gate; an unexecutable common prefix is not proof
+    // that the individual channels are unsafe.
+    if (!currentRiskAnchorSafe(request) ||
+      decision.reason == "compute_budget_exceeded" ||
+      decision.reason == "safe_common_prefix_risk_query_failed")
+    {
+      decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+      decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+      decision.formal_support = false;
+      decision.selected_candidate_id = 0u;
+      decision.selected_channel_id = 0u;
+      decision.runner_up_candidate_id = 0u;
+      decision.runner_up_channel_id = 0u;
+      decision.selected_guide.clear();
+      decision.deferred_trajectory.clear();
+      decision.speed_cap_mps = 0.0;
+      return finalize(std::move(decision));
+    }
   }
   if (eligible.empty()) {
     if (incomplete && request.limits.task_mode ==
@@ -4975,18 +4987,23 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       if (configureSafeLimitedCommonPrefix(
           request, graph, &budget, &decision))
         return finalize(std::move(decision));
-      decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
-      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
-      decision.selection_authority = P4ForwardSelectionAuthority::NONE;
-      decision.formal_support = false;
-      decision.selected_candidate_id = 0u;
-      decision.selected_channel_id = 0u;
-      decision.runner_up_candidate_id = 0u;
-      decision.runner_up_channel_id = 0u;
-      decision.selected_guide.clear();
-      decision.deferred_trajectory.clear();
-      decision.speed_cap_mps = 0.0;
-      return finalize(std::move(decision));
+      if (!currentRiskAnchorSafe(request) ||
+        decision.reason == "compute_budget_exceeded" ||
+        decision.reason == "safe_common_prefix_risk_query_failed")
+      {
+        decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+        decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+        decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+        decision.formal_support = false;
+        decision.selected_candidate_id = 0u;
+        decision.selected_channel_id = 0u;
+        decision.runner_up_candidate_id = 0u;
+        decision.runner_up_channel_id = 0u;
+        decision.selected_guide.clear();
+        decision.deferred_trajectory.clear();
+        decision.speed_cap_mps = 0.0;
+        return finalize(std::move(decision));
+      }
     }
     std::sort(eligible.begin(), eligible.end(), risk_order);
   }
