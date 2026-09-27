@@ -11305,7 +11305,6 @@ namespace ego_planner
   {
     p4_execution_commitment_backup_ = P4ExecutionCommitmentBackup{};
     p4_pending_activation_state_.reset();
-    p4_candidate_awaiting_activation_ = false;
     p4_pending_activation_is_prepared_successor_ = false;
     {
       std::lock_guard<std::mutex> lock(trajectory_controller_trace_mutex_);
@@ -11325,6 +11324,12 @@ namespace ego_planner
     p4_successor_preparation_state_ =
         P4SuccessorPreparationState::ROUTE_PENDING;
     resetP4ChannelPreparationLifecycle(true);
+    // This latch is also the admission barrier in
+    // preserveP4ExecutionCommitmentForCandidate(). Release it only after the
+    // predecessor's preparation state has been fully retired. Releasing it
+    // above the reset lets a reentrant normal callback create a new cohort
+    // which this activation ACK then mistakes for predecessor state.
+    p4_candidate_awaiting_activation_ = false;
   }
 
   bool EGOPlannerManager::preparedP4SuccessorCandidateEarly(

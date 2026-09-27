@@ -7794,6 +7794,12 @@ TEST(TrajectoryActivationTest,
       instance, 71, child_start_ns, "child-71"));
   EXPECT_EQ(manager.local_data_.traj_id_, 71);
   EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 71);
+  EXPECT_FALSE(manager.trajectoryCommandAwaitingActivation());
+
+  // The admission barrier is released only by the completed ACK commit.  A
+  // following normal event may now begin a fresh transaction; before the ACK
+  // the same admission was rejected above.
+  EXPECT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
 }
 
 TEST(P4DirectEvidenceSelectionTest, RuntimeReauthenticationSupersedesAuditCopy) {
