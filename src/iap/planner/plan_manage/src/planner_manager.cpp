@@ -2532,6 +2532,9 @@ namespace ego_planner
         P4ForwardDecision *decision)
     {
       if (!decision || decision->successor_fast_path ||
+          (decision->planning_disposition ==
+               P4PlanningDisposition::HOLD_REQUIRED &&
+           decision->executable_intent == P4ExecutableIntent::HOLD) ||
           decision->action != P4ForwardAction::DEFER_RISK_SELECTION ||
           decision->selection_authority !=
               P4ForwardSelectionAuthority::NONE ||

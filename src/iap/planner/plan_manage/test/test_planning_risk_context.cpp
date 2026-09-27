@@ -12744,11 +12744,49 @@ TEST(P4CommittedTopology,
   EXPECT_EQ(recovery.reason, "committed_topology_single_continuation");
   EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
 
+  // When the current graph snapshot has no continuation inside the committed
+  // branch, the topology constraint owns the HOLD.  The following generic
+  // actual-channel preparation pass must not reopen the rejected raw siblings
+  // as a new cohort.
+  ego_planner::P4ForwardDecision unavailable = selected;
+  unavailable.decision_event_id = 726u;
+  unavailable.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  unavailable.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  unavailable.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+  unavailable.request_position = Eigen::Vector3d(3.0, -2.0, 1.0);
+  unavailable.candidates = {
+      candidate(31u, 701u,
+          {Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, 2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0)}),
+      candidate(32u, 702u,
+          {Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(2.0, 2.0, 1.0),
+           Eigen::Vector3d(5.0, 2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0)})};
+  ASSERT_TRUE(
+      manager.constrainP4DecisionToCommittedTopologyForTest(&unavailable));
+  ASSERT_EQ(unavailable.planning_disposition,
+            ego_planner::P4PlanningDisposition::HOLD_REQUIRED);
+  ASSERT_EQ(unavailable.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_FALSE(
+      manager.prepareNormalChannelsForActualCertificationForTest(
+          &unavailable));
+  EXPECT_EQ(unavailable.planning_disposition,
+            ego_planner::P4PlanningDisposition::HOLD_REQUIRED);
+  EXPECT_EQ(unavailable.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(unavailable.selected_channel_id, 0u);
+
   // Multiple siblings can share the remainder of the committed branch and
   // diverge only after its exit.  Filtering must not replace the lifecycle's
   // frozen current sibling with the first compatible candidate.
   ego_planner::P4ForwardDecision next_fork = selected;
-  next_fork.decision_event_id = 726u;
+  next_fork.decision_event_id = 727u;
   next_fork.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
   next_fork.channel_comparison_state =
       ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
