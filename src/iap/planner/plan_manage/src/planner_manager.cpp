@@ -10506,6 +10506,47 @@ namespace ego_planner
             divergence_projection.station_m + 1.0e-6)
       return false;
 
+    if (p4_committed_topology_ &&
+        p4_committed_topology_->pending_entry)
+    {
+      // Rolling publication may carry a newly clipped/extended route for the
+      // same selected branch.  Keep the original graph divergence so a new
+      // event cannot move the physical entry boundary ahead of the vehicle.
+      // A genuinely different branch may still replace a merely staged
+      // choice before odometry has crossed that boundary.
+      const auto &staged = *p4_committed_topology_;
+      const double corridor_radius_m =
+          p4RefinementCorridorRadius(p4_forward_limits_);
+      bool follows_staged_branch = false;
+      bool departed_before_exit = false;
+      bool reached_staged_exit = false;
+      for (const auto &point : path)
+      {
+        const auto projection = projectP4Polyline(staged.path, point);
+        if (!std::isfinite(projection.distance_m))
+        {
+          departed_before_exit = true;
+          break;
+        }
+        if (projection.distance_m <= corridor_radius_m)
+        {
+          if (projection.station_m >
+              staged.divergence_station_m + 1.0e-6)
+            follows_staged_branch = true;
+          if (projection.station_m + corridor_radius_m >=
+              staged.exit_station_m)
+            reached_staged_exit = true;
+        }
+        else if (!reached_staged_exit)
+        {
+          departed_before_exit = true;
+          break;
+        }
+      }
+      if (follows_staged_branch && !departed_before_exit)
+        return false;
+    }
+
     P4CommittedTopology commitment;
     commitment.path = path;
     commitment.exit_point = exit;
@@ -10555,7 +10596,7 @@ namespace ego_planner
     if (commitment.pending_entry &&
         projection.distance_m <= corridor_radius_m &&
         projection.station_m >=
-            commitment.divergence_station_m + corridor_radius_m)
+            commitment.divergence_station_m + 1.0e-6)
     {
       commitment.pending_entry = false;
       commitment.active = true;

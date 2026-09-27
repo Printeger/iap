@@ -12656,13 +12656,42 @@ TEST(P4CommittedTopology,
 
   ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
   EXPECT_TRUE(manager.p4CommittedTopologyPendingForTest());
+
+  // A successor publication may arrive while odometry is still crossing the
+  // common corridor.  Its clipped route still follows the selected branch,
+  // so it must not move the original physical entry boundary downstream.
+  auto premature_rebind = selected;
+  premature_rebind.decision_event_id = 701u;
+  premature_rebind.geometry_common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(2.0, -2.0, 1.0)};
+  EXPECT_FALSE(manager.stageP4CommittedTopologyForTest(premature_rebind));
+  EXPECT_TRUE(manager.p4CommittedTopologyPendingForTest());
+
+  // Before physical entry, a genuinely different certified branch may still
+  // replace the staged choice.  Restore the original branch to exercise the
+  // guard-recovery case below without turning staging into an early lock.
+  auto pre_entry_alternate = selected;
+  pre_entry_alternate.decision_event_id = 702u;
+  pre_entry_alternate.selected_candidate_id = 2u;
+  pre_entry_alternate.selected_channel_id = 99u;
+  pre_entry_alternate.selected_guide =
+      pre_entry_alternate.candidates.back().path;
+  EXPECT_TRUE(manager.stageP4CommittedTopologyForTest(pre_entry_alternate));
+  auto pre_entry_restore = selected;
+  pre_entry_restore.decision_event_id = 703u;
+  EXPECT_TRUE(manager.stageP4CommittedTopologyForTest(pre_entry_restore));
+
+  // This point is just beyond the graph-derived divergence, but less than a
+  // full refinement-corridor radius beyond it.  Entry is a topological
+  // crossing, not a request to travel another braking corridor first.
   manager.updateP4CommittedTopologyForTest(
-      Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.5, 0.0, 0.0),
+      Eigen::Vector3d(1.1, -0.2, 1.0), Eigen::Vector3d(0.5, 0.0, 0.0),
       Eigen::Vector3d::Zero());
   ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
 
   auto rebuilt_event = selected;
-  rebuilt_event.decision_event_id = 701u;
+  rebuilt_event.decision_event_id = 704u;
   rebuilt_event.selected_candidate_id = 2u;
   rebuilt_event.selected_channel_id = 99u;
   rebuilt_event.selected_guide = rebuilt_event.candidates.back().path;
@@ -12674,17 +12703,16 @@ TEST(P4CommittedTopology,
   recovery.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
   recovery.channel_comparison_state =
       ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
-  recovery.request_position = Eigen::Vector3d(3.0, -2.0, 1.0);
+  recovery.request_position = Eigen::Vector3d(1.1, -0.2, 1.0);
   recovery.candidates = {
       candidate(11u, 501u,
-          {Eigen::Vector3d(3.0, -2.0, 1.0),
+          {Eigen::Vector3d(1.1, -0.2, 1.0),
+           Eigen::Vector3d(2.0, -2.0, 1.0),
            Eigen::Vector3d(5.0, -2.0, 1.0),
            Eigen::Vector3d(6.0, 0.0, 1.0),
            Eigen::Vector3d(8.0, 0.0, 1.0)}),
       candidate(12u, 502u,
-          {Eigen::Vector3d(3.0, -2.0, 1.0),
-           Eigen::Vector3d(5.0, -2.0, 1.0),
-           Eigen::Vector3d(6.0, 0.0, 1.0),
+          {Eigen::Vector3d(1.1, -0.2, 1.0),
            Eigen::Vector3d(1.0, 0.0, 1.0),
            Eigen::Vector3d(2.0, 2.0, 1.0),
            Eigen::Vector3d(5.0, 2.0, 1.0),
