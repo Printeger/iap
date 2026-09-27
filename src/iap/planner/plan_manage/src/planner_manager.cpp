@@ -1900,29 +1900,25 @@ namespace ego_planner
         if (left_exposure_rank != right_exposure_rank)
           return left_exposure_rank < right_exposure_rank
               ? Ordering::LEFT : Ordering::RIGHT;
-        const bool wholly_unknown = left_exposure_rank >=
-                static_cast<int64_t>(kExposureRankScale) &&
-            right_exposure_rank >=
-                static_cast<int64_t>(kExposureRankScale);
-        // A partially observed upper PL remains direct actual-curve risk
-        // evidence only when the common forward range has some LOS support.
-        // When that whole range is unknown, neither its partial upper PL nor
-        // advisory FIM ordering may replace the route preference frozen
-        // before sibling curve preparation. This changes preference only.
-        if (!wholly_unknown)
-        {
-          const int known_peak_order = lower(
-              left->known_global_peak_ratio,
-              right->known_global_peak_ratio);
-          if (known_peak_order != 0)
-            return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
-        }
+        const bool any_known_peak =
+            std::isfinite(left->known_global_peak_ratio) ||
+            std::isfinite(right->known_global_peak_ratio);
+        // This peak is recomputed from each actual curve over the cohort's
+        // common forward range. It therefore cannot reward a shorter or
+        // backtracking curve for omitting farther risk, even when the full
+        // support interval remains incomplete.
+        const int known_peak_order = lower(
+            left->known_global_peak_ratio,
+            right->known_global_peak_ratio);
+        if (known_peak_order != 0)
+          return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         // Sibling curve preparation overwrites selected_channel_id
         // transactionally, so the immutable route preference is the only
-        // supported topology signal when the common actual range is wholly
-        // unknown. Every hard local/dynamics/collision/braking predicate
-        // above remains mandatory and this preference grants no authority.
-        if (wholly_unknown)
+        // supported topology signal when the common actual range has no
+        // finite upper-PL observation. Every hard local/dynamics/collision/
+        // braking predicate above remains mandatory and this preference
+        // grants no authority.
+        if (!any_known_peak)
         {
           const bool left_preferred =
               left->channel_id == route_preference_channel_id;

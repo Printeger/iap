@@ -9936,7 +9936,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     FullyUnknownActualSupportKeepsFrozenRoutePreference)
+     FullyUnknownSupportUsesCommonActualPeakBeforeRoutePreference)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -9983,22 +9983,23 @@ TEST(P4PreparedChannelComparison,
     return value;
   };
 
-  // Exact values from the latest clean fork-0 failure. Both actual curves
-  // have wholly unknown LOS support. The route comparison froze the low
-  // channel, and its partial upper peak and integrated FIM are also lower;
-  // a sub-percent advisory FIM-peak reversal must not switch topology.
+  // Exact common-forward-range values from the latest clean fork-0 failure.
+  // Both actual curves have wholly unknown support, but both have a finite
+  // upper-PL observation over that same range.  The low channel has the
+  // smaller actual peak while the frozen route preference and advisory FIM
+  // favor high; the common actual peak must win.
   auto low_actual = record(2u);
-  low_actual.known_global_peak_ratio = 0.651845;
-  low_actual.fim_max_ratio = 0.0128469;
-  low_actual.fim_integral = 1.78702;
+  low_actual.known_global_peak_ratio = 0.938453;
+  low_actual.fim_max_ratio = 0.0129491;
+  low_actual.fim_integral = 1.76136;
   auto high_actual = record(1u);
-  high_actual.known_global_peak_ratio = 0.997274;
-  high_actual.fim_max_ratio = 0.0127607;
-  high_actual.fim_integral = 1.80237;
+  high_actual.known_global_peak_ratio = 0.980921;
+  high_actual.fim_max_ratio = 0.0127418;
+  high_actual.fim_integral = 1.7152;
 
   auto comparison = ego_planner::compareP4PreparedChannels(
       {high_actual, low_actual}, snapshot, 2u, 0u,
-      low_actual.channel_id);
+      high_actual.channel_id);
   ASSERT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id, low_actual.channel_id);
