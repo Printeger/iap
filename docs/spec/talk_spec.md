@@ -324,10 +324,13 @@ For each candidate trajectory τ:
   its local-motion and braking certificate is valid. Exposure exhaustion is
   diagnostic and cannot independently cause braking. Ordering is formal
   before degraded, then conservative peak ratio, continuous exceedance,
-  positive exposure integral, actual/braking-tube unknown exposure, actual
-  curve FIM maximum and integral, actual progress and a stable bundle hash,
-  with the old stable channel used only as a true-key tie-break. Missing or
-  non-finite actual-curve FIM is unavailable rather than zero risk. Complete
+  positive exposure integral, actual/braking-tube unknown exposure, finite
+  upper-PL peak observed directly on the actual curve when its formal interval
+  is incomplete, actual curve FIM maximum and integral, actual progress and a
+  stable bundle hash, with the old stable channel used only as a true-key
+  tie-break. Partial upper-PL evidence remains non-certified and cannot change
+  support or authority. Missing or non-finite actual-curve risk is unavailable
+  rather than zero risk. Complete
   locally safe bundles are therefore still orderable when their GNSS
   intervals overlap.
   The generator bounds the endpoint only by visible local support, required

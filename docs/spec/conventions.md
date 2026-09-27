@@ -405,10 +405,13 @@
   derived solely from the actual trajectory's `TrajectoryExecutionMode`.
   Formal bundles precede degraded bundles; degraded bundles are ordered by
   conservative peak ratio, continuous exceedance, positive exposure integral,
-  actual/braking-tube unknown exposure, actual-curve FIM maximum and integral,
-  actual progress and stable bundle hash. A missing or non-finite actual-curve
-  FIM value is unavailable, never zero risk. Overlapping GNSS intervals do not
-  cause HOLD once both locally safe bundles are complete. The old stable
+  actual/braking-tube unknown exposure, finite upper-PL peak observed directly
+  on the actual curve when the formal interval is incomplete, actual-curve FIM
+  maximum and integral, actual progress and stable bundle hash. The partial
+  upper-PL peak is preference evidence only: it does not complete support or
+  grant authority. A missing or non-finite actual-curve risk value is
+  unavailable, never zero risk. Overlapping GNSS intervals do not cause HOLD
+  once both locally safe bundles are complete. The old stable
   channel is only a tie-break after the complete ordering key is equal.
   Winner/runner-up, actual endpoints,
   unevaluated suffixes and the full decomposition remain recorded. If the

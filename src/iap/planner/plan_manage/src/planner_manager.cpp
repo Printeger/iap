@@ -1280,6 +1280,8 @@ namespace ego_planner
           summary.exposure_upper_ratio_s;
       record->global_recovery_time_lower_s = summary.recovery_lower_s;
       record->global_recovery_time_upper_s = summary.recovery_upper_s;
+      record->known_global_peak_ratio =
+          summarizeP4ActualKnownGlobalPeakEvidence(evidence);
     }
 
     void p4ApplyRouteEvidenceSummary(
@@ -1422,6 +1424,22 @@ namespace ego_planner
         epoch, evidence, braking_anchors, clearance_radius_m, record);
   }
 
+  double summarizeP4ActualKnownGlobalPeakEvidence(
+      const P4DirectTrajectoryRiskEvidence &evidence)
+  {
+    double maximum = 0.0;
+    bool available = false;
+    for (const auto &point : evidence.points)
+    {
+      if (!point.pl_upper_available ||
+          !std::isfinite(point.safety_ratio_upper))
+        continue;
+      maximum = std::max(maximum, point.safety_ratio_upper);
+      available = true;
+    }
+    return available ? maximum : std::numeric_limits<double>::infinity();
+  }
+
   std::pair<double, double> summarizeP4ActualFimEvidence(
       const P4DirectTrajectoryRiskEvidence &evidence)
   {
@@ -1562,7 +1580,7 @@ namespace ego_planner
                   1.0 - record->braking_tube_support_fraction});
             return value;
           };
-        const std::array<std::pair<double, double>, 6> lower_metrics{{
+        const std::array<std::pair<double, double>, 7> lower_metrics{{
           {conservative(left->risk_interval_complete,
                         left->global_peak_ratio_upper,
                         left->global_peak_ratio),
@@ -1582,6 +1600,12 @@ namespace ego_planner
                         right->global_exposure_integral_upper_ratio_s,
                         right->global_exposure_integral_ratio_s)},
           {unknown_exposure(left), unknown_exposure(right)},
+          // A partially observed upper PL remains direct actual-curve risk
+          // evidence. Compare it only after unknown exposure so sparse
+          // support cannot masquerade as a safer curve, and never use it as
+          // execution authority.
+          {left->known_global_peak_ratio,
+           right->known_global_peak_ratio},
           // In MISSION, missing global intervals do not make the remaining
           // actual-curve risk evidence disappear.  Keep the established FIM
           // risk order ahead of geometric progress so an arbitrary longer
@@ -6679,6 +6703,7 @@ namespace ego_planner
                       << record->global_rolling_worst_ratio << '|'
                       << record->global_continuous_exceedance_s << '|'
                       << record->global_exposure_integral_ratio_s << '|'
+                      << record->known_global_peak_ratio << '|'
                       << record->fim_max_ratio << '|'
                       << record->fim_integral << '|'
                       << record->duration_s << '|'

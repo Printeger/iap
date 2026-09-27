@@ -468,6 +468,10 @@ namespace ego_planner
     bool risk_interval_complete = false;
     // 0=formal, 1=mission degraded. Derived only from actual assurance mode.
     int authorization_group = 0;
+    // Non-certified upper-PL evidence from the actual curve. Missing support
+    // remains represented separately and this value never grants authority.
+    double known_global_peak_ratio =
+        std::numeric_limits<double>::infinity();
     double fim_max_ratio = std::numeric_limits<double>::infinity();
     double fim_integral = std::numeric_limits<double>::infinity();
     double known_occupancy_kappa = 0.0;
@@ -546,6 +550,9 @@ namespace ego_planner
       double clearance_radius_m, P4PreparedChannelRecord *record);
 
   std::pair<double, double> summarizeP4ActualFimEvidence(
+      const P4DirectTrajectoryRiskEvidence &evidence);
+
+  double summarizeP4ActualKnownGlobalPeakEvidence(
       const P4DirectTrajectoryRiskEvidence &evidence);
 
   struct P4PreparedSuccessorBundle

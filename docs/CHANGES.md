@@ -24,9 +24,13 @@
 - fix(p4-degraded-actual-risk-order): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — when two locally safe actual bundles have incomplete global
   intervals and equal unknown exposure, retain their already-computed
-  actual-curve FIM maximum and integral ahead of geometric progress in the
-  deterministic final comparison. Missing/non-finite FIM remains unavailable
-  rather than becoming zero risk. This affects ordering only: collision,
+  finite upper-PL peak and actual-curve FIM maximum/integral ahead of geometric
+  progress in the deterministic final comparison. Formal FIM is preferred;
+  the known FIM component from the same direct actual query is used only when
+  formal FIM is unavailable. Partial upper-PL evidence is compared after
+  unknown exposure and cannot complete support or grant authority. Missing or
+  non-finite actual risk remains unavailable rather than becoming zero risk.
+  This affects ordering only: collision,
   clearance, dynamics, braking, identity and freshness feasibility gates are
   unchanged. Forest risk acceptance now also requires a complete evaluated
   low/high actual-bundle comparison for every odometry-traversed fork; MISSION

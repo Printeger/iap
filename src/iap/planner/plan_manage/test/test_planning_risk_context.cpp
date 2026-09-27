@@ -9640,6 +9640,85 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
+     KnownActualUpperPeakPrecedesConflictingIncompleteFimPreference)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  const auto record = [&snapshot](const uint64_t channel_id) {
+      ego_planner::P4PreparedChannelRecord value;
+      value.channel_id = channel_id;
+      value.snapshot_identity = snapshot;
+      value.guide_identity = "guide-" + std::to_string(channel_id);
+      value.refined_path_identity =
+          "refined-" + std::to_string(channel_id);
+      value.curve_identity = "curve-" + std::to_string(channel_id);
+      value.actual_endpoint = Eigen::Vector3d(4.0, 1.0, 1.0);
+      value.duration_s = 2.0;
+      value.authorization_group = 1;
+      value.global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+      value.global_rolling_worst_ratio = 0.0;
+      value.global_continuous_exceedance_s = 0.0;
+      value.global_exposure_integral_ratio_s = 0.0;
+      value.unknown_support_fraction = 1.0;
+      value.combined_conservative_kappa = 1.0;
+      value.minimum_local_clearance_margin_m = 0.2;
+      value.final_curve_evaluated = true;
+      value.local_geometry_passed = true;
+      value.dynamics_passed = true;
+      value.collision_passed = true;
+      value.clearance_passed = true;
+      value.braking_passed = true;
+      value.gnss_exposure_complete = true;
+      value.failure = ego_planner::P4PreparedCurveFailure::NONE;
+      return value;
+    };
+
+  auto low_actual = record(91u);
+  low_actual.known_global_peak_ratio = 0.8;
+  low_actual.fim_max_ratio = 0.0130;
+  low_actual.fim_integral = 1.6;
+  auto high_actual = record(92u);
+  high_actual.known_global_peak_ratio = 1.1;
+  high_actual.fim_max_ratio = 0.0125;
+  high_actual.fim_integral = 1.8;
+
+  const auto comparison = ego_planner::compareP4PreparedChannels(
+      {low_actual, high_actual}, snapshot, 2u);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, low_actual.channel_id);
+
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.points.resize(3u);
+  evidence.points[0].pl_upper_available = true;
+  evidence.points[0].safety_ratio_upper = 0.8;
+  evidence.points[1].pl_upper_available = false;
+  evidence.points[1].safety_ratio_upper = 0.2;
+  evidence.points[2].pl_upper_available = true;
+  evidence.points[2].safety_ratio_upper = 1.1;
+  EXPECT_DOUBLE_EQ(
+      ego_planner::summarizeP4ActualKnownGlobalPeakEvidence(evidence), 1.1);
+
+  evidence.points.clear();
+  EXPECT_TRUE(std::isinf(
+      ego_planner::summarizeP4ActualKnownGlobalPeakEvidence(evidence)));
+}
+
+TEST(P4PreparedChannelComparison,
      ActualFimSummaryUsesDirectKnownFimWhenFormalSupportIsIncomplete)
 {
   ego_planner::P4DirectTrajectoryRiskEvidence evidence;
