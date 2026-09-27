@@ -624,6 +624,22 @@ namespace ego_planner
     }
   };
 
+  // Build the exact records consumed by sibling comparison. Incomplete
+  // actual GNSS evidence is retained only when every sibling covers an
+  // equivalent forward space-time schedule; otherwise route preference is
+  // the last comparable signal and all hard feasibility gates remain intact.
+  std::vector<P4PreparedChannelRecord>
+  p4CommonForwardPreparedChannelRecords(
+      const std::map<uint64_t, P4PreparedSuccessorBundle> &bundles);
+
+  // Keep a queue-missed actual winner available across intervening route
+  // results that do not enumerate its corridor. It remains a dormant prior
+  // slot and can influence selection only if stable topology matching finds
+  // the same corridor again.
+  std::vector<P4ChannelSlot> p4RetainMissingActualWinnerSlots(
+      std::vector<P4ChannelSlot> current,
+      const std::vector<P4ChannelSlot> &previous);
+
   enum class P4NormalChannelPreparationDisposition
   {
     NOT_APPLICABLE = 0,

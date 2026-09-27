@@ -603,6 +603,25 @@ namespace ego_planner
     }
   }  // namespace
 
+  std::vector<P4ChannelSlot> p4RetainMissingActualWinnerSlots(
+      std::vector<P4ChannelSlot> current,
+      const std::vector<P4ChannelSlot> &previous)
+  {
+    for (const auto &slot : previous)
+    {
+      if (!slot.preferred_by_last_actual_comparison ||
+          slot.stable_channel_id == 0u || slot.topology_path.size() < 2u)
+        continue;
+      const bool already_present = std::any_of(
+          current.begin(), current.end(), [&slot](const auto &candidate) {
+            return candidate.stable_channel_id == slot.stable_channel_id;
+          });
+      if (!already_present)
+        current.push_back(slot);
+    }
+    return current;
+  }
+
   const char *p4RuntimeRiskConfirmationStateName(
       const P4RuntimeRiskConfirmationState state)
   {
@@ -1670,22 +1689,24 @@ namespace ego_planner
     return cropped;
   }
 
-  namespace
+  std::vector<P4PreparedChannelRecord>
+  p4CommonForwardPreparedChannelRecords(
+      const std::map<uint64_t, P4PreparedSuccessorBundle> &bundles)
   {
-    std::vector<P4PreparedChannelRecord>
-    p4CommonForwardPreparedChannelRecords(
-        const std::map<uint64_t, P4PreparedSuccessorBundle> &bundles)
-    {
       std::vector<P4PreparedChannelRecord> records;
       double common_forward_coverage_m =
           std::numeric_limits<double>::infinity();
       std::size_t forward_coverage_count = 0u;
       std::size_t feasible_bundle_count = 0u;
+      bool all_feasible_evidence_complete = true;
       for (const auto &entry : bundles)
       {
         if (!entry.second.channel_record.feasible())
           continue;
         ++feasible_bundle_count;
+        all_feasible_evidence_complete =
+            all_feasible_evidence_complete &&
+            entry.second.direct_risk_evidence.complete;
         double coverage_m = 0.0;
         (void)p4ActualRiskEvidenceWithinForwardRange(
             entry.second.direct_risk_evidence,
@@ -1704,6 +1725,136 @@ namespace ego_planner
           forward_coverage_count == feasible_bundle_count &&
           std::isfinite(common_forward_coverage_m) &&
           common_forward_coverage_m > 0.0;
+      const auto forward_timing_profile = [common_forward_coverage_m](
+          const P4PreparedSuccessorBundle &bundle) {
+        struct Profile
+        {
+          std::vector<std::pair<double, double>> crossings;
+          double sample_period_s =
+              std::numeric_limits<double>::infinity();
+        } profile;
+        const auto &evidence = bundle.direct_risk_evidence;
+        const Eigen::Vector3d delta = bundle.decision.local_target -
+            bundle.decision.request_position;
+        if (delta.norm() <= 1.0e-9 ||
+            evidence.trajectory_start_ns <= 0 ||
+            evidence.positions.size() != evidence.points.size() ||
+            evidence.positions.size() != evidence.relative_times.size())
+          return profile;
+        const Eigen::Vector3d axis = delta.normalized();
+        double last_forward_m = -std::numeric_limits<double>::infinity();
+        double previous_time_s = std::numeric_limits<double>::quiet_NaN();
+        std::vector<double> sample_periods;
+        for (std::size_t index = 0u;
+             index < evidence.positions.size(); ++index)
+        {
+          if (index < evidence.nominal_sample_rows.size() &&
+              !evidence.nominal_sample_rows[index])
+            continue;
+          const double relative_time_s = evidence.relative_times[index];
+          const double forward_m =
+              (evidence.positions[index] - bundle.decision.request_position)
+                  .dot(axis);
+          if (!std::isfinite(relative_time_s) ||
+              !std::isfinite(forward_m))
+            continue;
+          if (std::isfinite(previous_time_s) &&
+              relative_time_s > previous_time_s)
+            sample_periods.push_back(relative_time_s - previous_time_s);
+          previous_time_s = relative_time_s;
+          if (forward_m < -1.0e-6 ||
+              forward_m > common_forward_coverage_m + 1.0e-6 ||
+              forward_m <= last_forward_m + 1.0e-6)
+            continue;
+          profile.crossings.emplace_back(
+              std::max(0.0, forward_m),
+              static_cast<double>(evidence.trajectory_start_ns) * 1.0e-9 +
+                  relative_time_s);
+          last_forward_m = forward_m;
+        }
+        if (!sample_periods.empty())
+        {
+          const auto middle = sample_periods.begin() +
+              static_cast<std::ptrdiff_t>(sample_periods.size() / 2u);
+          std::nth_element(
+              sample_periods.begin(), middle, sample_periods.end());
+          profile.sample_period_s = *middle;
+        }
+        return profile;
+      };
+      const auto time_at_forward = [](const auto &profile,
+                                      const double station_m) {
+        if (profile.crossings.empty() ||
+            station_m < profile.crossings.front().first - 1.0e-6 ||
+            station_m > profile.crossings.back().first + 1.0e-6)
+          return std::numeric_limits<double>::quiet_NaN();
+        const auto upper = std::lower_bound(
+            profile.crossings.begin(), profile.crossings.end(), station_m,
+            [](const auto &sample, const double station) {
+              return sample.first < station;
+            });
+        if (upper == profile.crossings.begin())
+          return upper->second;
+        if (upper == profile.crossings.end())
+          return profile.crossings.back().second;
+        const auto lower = std::prev(upper);
+        const double span_m = upper->first - lower->first;
+        if (span_m <= 1.0e-9)
+          return upper->second;
+        const double alpha = std::clamp(
+            (station_m - lower->first) / span_m, 0.0, 1.0);
+        return lower->second + alpha * (upper->second - lower->second);
+      };
+      bool incomplete_timing_comparable = use_common_forward_evidence;
+      std::optional<decltype(forward_timing_profile(
+          std::declval<const P4PreparedSuccessorBundle &>()))>
+          reference_profile;
+      if (use_common_forward_evidence && !all_feasible_evidence_complete)
+      {
+        for (const auto &entry : bundles)
+        {
+          if (!entry.second.channel_record.feasible())
+            continue;
+          const auto profile = forward_timing_profile(entry.second);
+          if (profile.crossings.size() < 2u ||
+              !std::isfinite(profile.sample_period_s) ||
+              profile.crossings.front().first > 1.0e-3 ||
+              profile.crossings.back().first + 1.0e-3 <
+                  common_forward_coverage_m)
+          {
+            incomplete_timing_comparable = false;
+            break;
+          }
+          if (!reference_profile)
+          {
+            reference_profile = profile;
+            continue;
+          }
+          const double time_tolerance_s = std::max(
+              reference_profile->sample_period_s,
+              profile.sample_period_s) + 1.0e-6;
+          for (const double fraction :
+               std::array<double, 5>{{0.0, 0.25, 0.5, 0.75, 1.0}})
+          {
+            const double station_m =
+                fraction * common_forward_coverage_m;
+            const double reference_time_s =
+                time_at_forward(*reference_profile, station_m);
+            const double candidate_time_s =
+                time_at_forward(profile, station_m);
+            if (!std::isfinite(reference_time_s) ||
+                !std::isfinite(candidate_time_s) ||
+                std::abs(reference_time_s - candidate_time_s) >
+                    time_tolerance_s)
+            {
+              incomplete_timing_comparable = false;
+              break;
+            }
+          }
+          if (!incomplete_timing_comparable)
+            break;
+        }
+      }
       const auto clear_whole_curve_risk_order = [](
           P4PreparedChannelRecord *record) {
         record->risk_interval_complete = false;
@@ -1728,7 +1879,9 @@ namespace ego_planner
         if (feasible_bundle_count >= 2u && record.feasible())
         {
           clear_whole_curve_risk_order(&record);
-          if (use_common_forward_evidence)
+          if (use_common_forward_evidence &&
+              (all_feasible_evidence_complete ||
+               incomplete_timing_comparable))
           {
             const auto common_evidence =
                 p4ActualRiskEvidenceWithinForwardRange(
@@ -1746,7 +1899,6 @@ namespace ego_planner
         records.push_back(std::move(record));
       }
       return records;
-    }
   }
 
   P4PreparedChannelComparison compareP4PreparedChannels(
@@ -6417,7 +6569,8 @@ namespace ego_planner
               completed->snapshot_identity, request.snapshot_identity);
       if (same_channel_context)
       {
-        p4_channel_slots_ = completed->channel_slots;
+        p4_channel_slots_ = p4RetainMissingActualWinnerSlots(
+            completed->channel_slots, p4_channel_slots_);
         request.prior_channel_slots = p4_channel_slots_;
       }
       if (!p4ForwardDecisionMatchesSearchRequest(*completed, request, 0.5))
@@ -6459,7 +6612,8 @@ namespace ego_planner
       prepareNormalChannelsForActualCertification(&*completed);
       completed->planning_attempt_id = request.planning_attempt_id;
       if (!completed->channel_slots.empty())
-        p4_channel_slots_ = completed->channel_slots;
+        p4_channel_slots_ = p4RetainMissingActualWinnerSlots(
+            completed->channel_slots, p4_channel_slots_);
       if (p4_latched_anchor_.allFinite() &&
           (start_pt - p4_latched_anchor_).norm() <=
               p4_forward_limits_.topology_resolution_m)
@@ -9586,7 +9740,11 @@ namespace ego_planner
     if (last_p4_forward_decision_.action == P4ForwardAction::RISK_SELECTED &&
         last_p4_forward_decision_.channel_comparison_state ==
             P4ChannelComparisonState::COMPLETE)
+    {
       (void)stageP4CommittedTopology(last_p4_forward_decision_);
+      for (auto &slot : p4_channel_slots_)
+        slot.preferred_by_last_actual_comparison = false;
+    }
 
     last_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::NEW_TRAJECTORY_READY;

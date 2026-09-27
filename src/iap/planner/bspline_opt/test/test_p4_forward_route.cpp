@@ -1810,7 +1810,7 @@ TEST(P4ForwardRoute, BestEffortAcceptsLocallyValidSnapshotWithoutGnssEpoch)
 }
 
 TEST(P4ForwardRoute,
-     BestEffortKeepsLastActualWinnerAheadOfVolatileIncompleteRiskProxies)
+     BestEffortKeepsLastActualWinnerThroughRelatedIncompleteRebuilds)
 {
   auto initial_request = straightRequest();
   initial_request.limits.task_mode =
@@ -1873,22 +1873,27 @@ TEST(P4ForwardRoute,
   EXPECT_GT(incomplete.selected_guide[
                 incomplete.selected_guide.size() / 2u].y(),
             0.0);
-  EXPECT_TRUE(std::none_of(
+  EXPECT_EQ(std::count_if(
       incomplete.channel_slots.begin(), incomplete.channel_slots.end(),
       [](const ego_planner::P4ChannelSlot &slot) {
         return slot.preferred_by_last_actual_comparison;
-      }));
+      }), 1);
 
   auto following_request = incomplete_request;
   following_request.prior_channel_slots = incomplete.channel_slots;
   const auto following = P4ForwardRoutePlanner().decide(following_request);
   ASSERT_EQ(following.action, P4ForwardAction::CANDIDATE_READY)
       << following.reason;
-  EXPECT_NE(following.selected_channel_id, preferred_channel_id);
+  EXPECT_EQ(following.selected_channel_id, preferred_channel_id);
   ASSERT_FALSE(following.selected_guide.empty());
-  EXPECT_LT(following.selected_guide[
+  EXPECT_GT(following.selected_guide[
                 following.selected_guide.size() / 2u].y(),
             0.0);
+  EXPECT_EQ(std::count_if(
+      following.channel_slots.begin(), following.channel_slots.end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.preferred_by_last_actual_comparison;
+      }), 1);
 }
 
 TEST(P4ForwardRoute,

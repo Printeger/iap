@@ -4100,11 +4100,11 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         output.deferred_trajectory.clear();
         output.speed_cap_mps = 0.0;
       }
-      // A saved actual-comparison winner stabilizes only the immediately
-      // following route transaction. A completed comparison may refresh it;
-      // otherwise it must not leak through a later topology split/fork.
-      for (auto &slot : output.channel_slots)
-        slot.preferred_by_last_actual_comparison = false;
+      // A queue-missed actual winner is a topology hint, not a one-callback
+      // token. Refinement/motion can consume several related route results
+      // before another complete actual comparison is publishable. Stable-slot
+      // matching carries the hint only while that physical corridor remains;
+      // the manager clears it when a replacement comparison is committed.
       return output;
     };
 

@@ -10103,6 +10103,115 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
+     IncompleteActualPeaksRequireEquivalentForwardTiming)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  const auto bundle = [&snapshot](const uint64_t channel_id,
+                                  const double peak,
+                                  std::vector<double> relative_times) {
+    ego_planner::P4PreparedSuccessorBundle value;
+    auto &record = value.channel_record;
+    record.channel_id = channel_id;
+    record.snapshot_identity = snapshot;
+    record.guide_identity = "guide-" + std::to_string(channel_id);
+    record.refined_path_identity =
+        "refined-" + std::to_string(channel_id);
+    record.curve_identity = "curve-" + std::to_string(channel_id);
+    record.actual_endpoint = Eigen::Vector3d(4.0, 1.0, 1.0);
+    record.duration_s = relative_times.back();
+    record.authorization_group = 1;
+    record.unknown_support_fraction = 1.0;
+    record.combined_conservative_kappa = 1.0;
+    record.minimum_local_clearance_margin_m = 0.2;
+    record.final_curve_evaluated = true;
+    record.local_geometry_passed = true;
+    record.dynamics_passed = true;
+    record.collision_passed = true;
+    record.clearance_passed = true;
+    record.braking_passed = true;
+    record.gnss_exposure_complete = true;
+    record.failure = ego_planner::P4PreparedCurveFailure::NONE;
+    value.decision.request_position = Eigen::Vector3d::Zero();
+    value.decision.local_target = Eigen::Vector3d(10.0, 0.0, 0.0);
+    auto &evidence = value.direct_risk_evidence;
+    evidence.trajectory_start_ns = 10000000000LL;
+    evidence.positions = {
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(1.0, 0.0, 0.0),
+        Eigen::Vector3d(2.0, 0.0, 0.0)};
+    evidence.relative_times = std::move(relative_times);
+    evidence.nominal_sample_rows = {true, true, true};
+    evidence.points.resize(3u);
+    for (auto &point : evidence.points)
+    {
+      point.pl_upper_available = true;
+      point.safety_ratio_upper = peak;
+      point.known_fim_ratio = peak;
+    }
+    return value;
+  };
+
+  auto preferred = bundle(71u, 1.2, {0.0, 1.0, 2.0});
+  auto equivalent = bundle(72u, 0.8, {0.0, 1.0, 2.0});
+  const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle>
+      equivalent_bundles{
+          {preferred.channel_record.channel_id, preferred},
+          {equivalent.channel_record.channel_id, equivalent}};
+  const auto equivalent_records =
+      ego_planner::p4CommonForwardPreparedChannelRecords(
+          equivalent_bundles);
+  ASSERT_EQ(equivalent_records.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      equivalent_records.begin(), equivalent_records.end(),
+      [](const auto &record) {
+        return std::isfinite(record.known_global_peak_ratio);
+      }));
+  auto comparison = ego_planner::compareP4PreparedChannels(
+      equivalent_records, snapshot, 2u, 0u,
+      preferred.channel_record.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id,
+            equivalent.channel_record.channel_id);
+
+  auto shorter_time = bundle(72u, 0.8, {0.0, 0.2, 0.4});
+  const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle> bundles{
+      {preferred.channel_record.channel_id, preferred},
+      {shorter_time.channel_record.channel_id, shorter_time}};
+
+  const auto records =
+      ego_planner::p4CommonForwardPreparedChannelRecords(bundles);
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      records.begin(), records.end(), [](const auto &record) {
+        return std::isinf(record.known_global_peak_ratio) &&
+            std::isinf(record.fim_max_ratio) &&
+            std::isinf(record.fim_integral);
+      }));
+  comparison = ego_planner::compareP4PreparedChannels(
+      records, snapshot, 2u, 0u, preferred.channel_record.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id,
+            preferred.channel_record.channel_id);
+}
+
+TEST(P4PreparedChannelComparison,
      AlternatingFourForkPartialActualPlIgnoresOneSidedFormalAvailability)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
@@ -12713,8 +12822,16 @@ TEST(P4PreparedChannelPreparation,
   ego_planner::EGOPlannerManager manager;
   ego_planner::P4ChannelSlot first;
   first.stable_channel_id = 11u;
+  first.topology_path = {
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(1.0, -1.0, 0.0),
+      Eigen::Vector3d(2.0, -1.0, 0.0)};
   ego_planner::P4ChannelSlot second;
   second.stable_channel_id = 22u;
+  second.topology_path = {
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(1.0, 1.0, 0.0),
+      Eigen::Vector3d(2.0, 1.0, 0.0)};
   manager.setP4ChannelSlotsForTest({first, second});
 
   ego_planner::P4ForwardDecision compared;
@@ -12746,6 +12863,32 @@ TEST(P4PreparedChannelPreparation,
         return slot.stable_channel_id == 22u &&
             slot.preferred_by_last_actual_comparison;
       }) != manager.p4ChannelSlotsForTest().end());
+
+  // Guard/current-topology recovery may produce route results that do not
+  // enumerate the queued next-fork winner. Keep that slot dormant, then let
+  // ordinary topology matching recover the same identity when its corridor
+  // becomes visible again. No coordinate, side or fixed ID is special.
+  ego_planner::P4ChannelSlot current_only;
+  current_only.stable_channel_id = 33u;
+  current_only.topology_path = {
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(1.0, 0.0, 0.0)};
+  auto previous = manager.p4ChannelSlotsForTest();
+  auto retained = ego_planner::p4RetainMissingActualWinnerSlots(
+      {current_only}, previous);
+  ASSERT_EQ(retained.size(), 2u);
+  const auto dormant = std::find_if(
+      retained.begin(), retained.end(), [](const auto &slot) {
+        return slot.preferred_by_last_actual_comparison;
+      });
+  ASSERT_NE(dormant, retained.end());
+  EXPECT_EQ(dormant->stable_channel_id, 22u);
+
+  const auto rematched = ego_planner::assignP4StableChannelSlots(
+      {dormant->topology_path}, retained, 100u, 0.25);
+  ASSERT_EQ(rematched.size(), 1u);
+  EXPECT_EQ(rematched.front().stable_channel_id, 22u);
+  EXPECT_TRUE(rematched.front().preferred_by_last_actual_comparison);
 }
 
 TEST(P4CommittedTopology,
