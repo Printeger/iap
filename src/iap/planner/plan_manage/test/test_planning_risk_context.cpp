@@ -12621,7 +12621,8 @@ TEST(P4CommittedTopology,
   selected.local_target = Eigen::Vector3d(8.0, 0.0, 1.0);
   selected.geometry_common_corridor = {
       Eigen::Vector3d(0.0, 0.0, 1.0),
-      Eigen::Vector3d(1.0, 0.0, 1.0)};
+      Eigen::Vector3d(1.0, 0.0, 1.0),
+      Eigen::Vector3d(4.0, 0.0, 1.0)};
   selected.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
   const auto candidate = [](const uint64_t candidate_id,
                             const uint64_t channel_id,
@@ -12654,6 +12655,14 @@ TEST(P4CommittedTopology,
   selected.selected_channel_id = 41u;
   selected.selected_guide = selected.candidates.front().path;
 
+  ego_planner::EGOPlannerManager pending_manager;
+  ASSERT_TRUE(pending_manager.stageP4CommittedTopologyForTest(selected));
+  pending_manager.updateP4CommittedTopologyForTest(
+      selected.common_anchor, Eigen::Vector3d(0.5, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  EXPECT_TRUE(pending_manager.p4CommittedTopologyPendingForTest());
+  EXPECT_FALSE(pending_manager.p4CommittedTopologyActiveForTest());
+
   ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
   EXPECT_TRUE(manager.p4CommittedTopologyPendingForTest());
 
@@ -12682,11 +12691,11 @@ TEST(P4CommittedTopology,
   pre_entry_restore.decision_event_id = 703u;
   EXPECT_TRUE(manager.stageP4CommittedTopologyForTest(pre_entry_restore));
 
-  // This point is just beyond the graph-derived divergence, but less than a
-  // full refinement-corridor radius beyond it.  Entry is a topological
-  // crossing, not a request to travel another braking corridor first.
+  // The executable common-corridor estimate deliberately extends deep into
+  // the junction. Topology entry is instead the graph-derived point where
+  // the selected branch's corridor separates from every sibling.
   manager.updateP4CommittedTopologyForTest(
-      Eigen::Vector3d(1.1, -0.2, 1.0), Eigen::Vector3d(0.5, 0.0, 0.0),
+      Eigen::Vector3d(2.0, -2.0, 1.0), Eigen::Vector3d(0.5, 0.0, 0.0),
       Eigen::Vector3d::Zero());
   ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
 

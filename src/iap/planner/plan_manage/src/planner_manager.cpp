@@ -78,6 +78,58 @@ namespace ego_planner
       return best;
     }
 
+    double p4TopologyEntryStation(
+        const std::vector<Eigen::Vector3d> &selected_path,
+        const std::vector<P4ForwardCandidate> &candidates,
+        const uint64_t selected_candidate_id,
+        const uint64_t selected_channel_id,
+        const double corridor_radius_m)
+    {
+      if (selected_path.size() < 2u || !(corridor_radius_m > 0.0))
+        return std::numeric_limits<double>::quiet_NaN();
+      const double sample_step_m = std::max(
+          0.05, std::min(0.25, 0.25 * corridor_radius_m));
+      double station_m = 0.0;
+      for (std::size_t index = 1u; index < selected_path.size(); ++index)
+      {
+        const Eigen::Vector3d segment =
+            selected_path[index] - selected_path[index - 1u];
+        const double length_m = segment.norm();
+        if (!std::isfinite(length_m) || length_m <= 1.0e-9)
+          continue;
+        const std::size_t sample_count = std::max<std::size_t>(
+            1u, static_cast<std::size_t>(std::ceil(
+                    length_m / sample_step_m)));
+        for (std::size_t sample = 1u; sample <= sample_count; ++sample)
+        {
+          const double alpha = static_cast<double>(sample) /
+              static_cast<double>(sample_count);
+          const Eigen::Vector3d point =
+              selected_path[index - 1u] + alpha * segment;
+          const bool separated_from_every_sibling = std::all_of(
+              candidates.begin(), candidates.end(),
+              [&](const P4ForwardCandidate &candidate) {
+                const bool selected =
+                    (selected_candidate_id > 0u &&
+                     candidate.candidate_id == selected_candidate_id) ||
+                    (selected_candidate_id == 0u &&
+                     candidate.channel_id == selected_channel_id);
+                if (selected || candidate.channel_id == 0u ||
+                    !candidate.occupancy_supported)
+                  return true;
+                const auto &sibling_path = candidate.topology_path.size() >= 2u
+                    ? candidate.topology_path : candidate.path;
+                return projectP4Polyline(sibling_path, point).distance_m >
+                    corridor_radius_m;
+              });
+          if (separated_from_every_sibling)
+            return station_m + alpha * length_m;
+        }
+        station_m += length_m;
+      }
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
     bool p4CommittedTopologyHardFailureType(
         const P4PreparedCurveFailure failure, const bool strict_global)
     {
@@ -10508,17 +10560,17 @@ namespace ego_planner
         ? selected->topology_path : selected->path;
     if (path.size() < 2u)
       return false;
-    const Eigen::Vector3d divergence =
-        decision.geometry_common_corridor.size() >= 2u
-        ? decision.geometry_common_corridor.back() : path.front();
     const Eigen::Vector3d exit = decision.common_anchor.allFinite()
         ? decision.common_anchor : path.back();
-    const auto divergence_projection = projectP4Polyline(path, divergence);
     const auto exit_projection = projectP4Polyline(path, exit);
-    if (!std::isfinite(divergence_projection.distance_m) ||
+    const double corridor_radius_m =
+        p4RefinementCorridorRadius(p4_forward_limits_);
+    const double entry_station_m = p4TopologyEntryStation(
+        path, decision.candidates, decision.selected_candidate_id,
+        decision.selected_channel_id, corridor_radius_m);
+    if (!std::isfinite(entry_station_m) ||
         !std::isfinite(exit_projection.distance_m) ||
-        exit_projection.station_m <=
-            divergence_projection.station_m + 1.0e-6)
+        exit_projection.station_m <= entry_station_m + 1.0e-6)
       return false;
 
     if (p4_committed_topology_ &&
@@ -10530,8 +10582,6 @@ namespace ego_planner
       // A genuinely different branch may still replace a merely staged
       // choice before odometry has crossed that boundary.
       const auto &staged = *p4_committed_topology_;
-      const double corridor_radius_m =
-          p4RefinementCorridorRadius(p4_forward_limits_);
       bool follows_staged_branch = false;
       bool departed_before_exit = false;
       bool reached_staged_exit = false;
@@ -10565,7 +10615,7 @@ namespace ego_planner
     P4CommittedTopology commitment;
     commitment.path = path;
     commitment.exit_point = exit;
-    commitment.divergence_station_m = divergence_projection.station_m;
+    commitment.divergence_station_m = entry_station_m;
     commitment.exit_station_m = exit_projection.station_m;
     commitment.pending_entry = true;
     p4_committed_topology_ = std::move(commitment);
@@ -10596,18 +10646,10 @@ namespace ego_planner
         (projection.distance_m <= corridor_radius_m &&
          projection.station_m + corridor_radius_m >=
              commitment.exit_station_m);
-    if (at_exit)
-    {
-      P4ExecutionCheckDiagnostics completed;
-      completed.applicable = true;
-      completed.allowed = true;
-      completed.identity_match = true;
-      completed.reason = "actual_odom_reached_topology_exit";
-      appendP4ExecutionEvent(
-          "COMMITTED_TOPOLOGY_COMPLETED", plannerNow().seconds(), completed);
-      p4_committed_topology_.reset();
+    // Reaching the shared merge without first observing the selected branch
+    // is not evidence that the selected topology was entered or completed.
+    if (commitment.pending_entry && at_exit)
       return;
-    }
     if (commitment.pending_entry &&
         projection.distance_m <= corridor_radius_m &&
         projection.station_m >=
@@ -10622,6 +10664,20 @@ namespace ego_planner
       entered.reason = "actual_odom_entered_selected_topology";
       appendP4ExecutionEvent(
           "COMMITTED_TOPOLOGY_ENTERED", plannerNow().seconds(), entered);
+    }
+    if (commitment.pending_entry)
+      return;
+    if (at_exit)
+    {
+      P4ExecutionCheckDiagnostics completed;
+      completed.applicable = true;
+      completed.allowed = true;
+      completed.identity_match = true;
+      completed.reason = "actual_odom_reached_topology_exit";
+      appendP4ExecutionEvent(
+          "COMMITTED_TOPOLOGY_COMPLETED", plannerNow().seconds(), completed);
+      p4_committed_topology_.reset();
+      return;
     }
     if (commitment.active && commitment.hard_failure_proven &&
         velocity.allFinite() && acceleration.allFinite() &&
