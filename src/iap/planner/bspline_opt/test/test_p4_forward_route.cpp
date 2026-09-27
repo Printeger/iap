@@ -2754,6 +2754,109 @@ TEST(P4ForwardRoute, BestEffortChoosesLeastBadWhenEveryChannelExceedsBudget)
 }
 
 TEST(P4ForwardRoute,
+     IncompleteMissionPreferenceUsesKnownGnssHazardBeforeFim)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.vehicle_radius_m = 0.35;
+  request.limits.safety_margin_m = 0.5;
+  request.limits.min_creep_progress_m = 2.0;
+  request.limits.route_compute_budget_ms = 3000.0;
+  request.limits.channel_enumeration_budget_ms = 2000.0;
+  request.limits.compute_budget_ms = 1000.0;
+  request.geometry = [](const Eigen::Vector3d &point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+          std::abs(point.y()) <= 0.6)
+        return P4ForwardGeometryState::OCCUPIED;
+      return std::abs(point.y()) > 2.5
+          ? P4ForwardGeometryState::OCCUPIED
+          : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk_batch = [](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    if (!samples || queries.empty())
+      return false;
+    const uint64_t first_candidate_id = std::min_element(
+        queries.begin(), queries.end(),
+        [](const P4ForwardRiskQuery &lhs, const P4ForwardRiskQuery &rhs) {
+          return lhs.candidate_group_id < rhs.candidate_group_id;
+        })->candidate_group_id;
+    samples->clear();
+    samples->reserve(queries.size());
+    for (const auto &query : queries)
+    {
+      P4ForwardRiskSample sample;
+      sample.stale = false;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      const bool branch_region = query.position.x() >= 2.0 &&
+          query.position.x() <= 4.5;
+      const bool first_topology =
+          query.candidate_group_id == first_candidate_id;
+      // Match the clean-live conflict without encoding a preferred side:
+      // one topology has lower known GNSS degradation while the other has
+      // the lower advisory FIM value.
+      sample.known_gnss_degradation_ratio =
+          !branch_region ? 0.70 : first_topology ? 0.82024 : 0.79624;
+      sample.known_hazard_evidence = true;
+      sample.fim_ratio = !branch_region
+          ? 0.010 : first_topology ? 0.01315 : 0.01445;
+      sample.known_fim_ratio = sample.fim_ratio;
+      sample.gnss_eligible_los_sample_count = 10u;
+      sample.gnss_unknown_los_sample_count = 10u;
+      if (branch_region)
+      {
+        sample.valid = true;
+        sample.gnss_supported = true;
+        sample.safety_state = P4ForwardSafetyState::UNSAFE;
+        sample.ranking_state = P4ForwardRankingState::COMPARABLE;
+        sample.safety_ratio = 1.1;
+        sample.reason = "SAFETY_LIMIT_EXCEEDED";
+      }
+      else
+      {
+        sample.valid = false;
+        sample.gnss_supported = false;
+        sample.safety_state = P4ForwardSafetyState::UNKNOWN;
+        sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
+        sample.safety_ratio = std::numeric_limits<double>::infinity();
+        sample.reason = "GNSS_GEOMETRY_DEGENERATE";
+      }
+      samples->push_back(sample);
+    }
+    return true;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  ASSERT_GE(decision.candidates.size(), 2u);
+  const auto selected = std::find_if(
+      decision.candidates.begin(), decision.candidates.end(),
+      [&decision](const P4ForwardCandidate &candidate) {
+        return candidate.channel_id == decision.selected_channel_id;
+      });
+  ASSERT_NE(selected, decision.candidates.end());
+  const auto minimum_known_hazard = std::min_element(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate &lhs, const P4ForwardCandidate &rhs) {
+        return lhs.known_hazard_max < rhs.known_hazard_max;
+      });
+  ASSERT_NE(minimum_known_hazard, decision.candidates.end());
+  EXPECT_EQ(selected->channel_id, minimum_known_hazard->channel_id);
+  EXPECT_GT(selected->fim_max_ratio,
+            std::min_element(
+                decision.candidates.begin(), decision.candidates.end(),
+                [](const P4ForwardCandidate &lhs,
+                   const P4ForwardCandidate &rhs) {
+                  return lhs.fim_max_ratio < rhs.fim_max_ratio;
+                })->fim_max_ratio);
+}
+
+TEST(P4ForwardRoute,
      BestEffortRefinementCertifiesOnlyTheRefinedCandidateSet)
 {
   auto request = straightRequest();

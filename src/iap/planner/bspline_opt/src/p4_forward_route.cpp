@@ -4651,6 +4651,18 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
           return lhs->support_recovery_time_s <
                  rhs->support_recovery_time_s;
         }
+        // These incomplete candidates cover the same mission-forward guide
+        // horizon. When both retain observed GNSS degradation, compare its
+        // peak before the FIM fallback. Otherwise a curve can freeze the
+        // worse topology solely because its partial geometry metric is
+        // smaller, and later short actual curves have no comparable future
+        // evidence with which to undo that choice. Requiring evidence on
+        // both sides prevents missing support from looking like zero risk.
+        if (lhs->known_hazard_evidence && rhs->known_hazard_evidence &&
+            std::abs(lhs->known_hazard_max - rhs->known_hazard_max) >
+                kEpsilon) {
+          return lhs->known_hazard_max < rhs->known_hazard_max;
+        }
         if (std::abs(lhs->fim_max_ratio - rhs->fim_max_ratio) > kEpsilon) {
           return lhs->fim_max_ratio < rhs->fim_max_ratio;
         }
