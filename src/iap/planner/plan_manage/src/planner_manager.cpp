@@ -5978,9 +5978,16 @@ namespace ego_planner
         fast_result.compute_duration_ms =
             std::chrono::duration<double, std::milli>(
                 finished - started).count();
+        const bool committed_fast_path_rejected =
+            fast_result.ready && fast_result.decision.successor_fast_path &&
+            constrainP4DecisionToCommittedTopology(
+                &fast_result.decision) &&
+            fast_result.decision.executable_intent ==
+                P4ExecutableIntent::HOLD;
         const bool fast_path_needs_full_search =
-            !fast_result.ready &&
-            p4SuccessorGeometryFallbackAllowed(fast_result.decision) &&
+            (committed_fast_path_rejected ||
+             (!fast_result.ready &&
+              p4SuccessorGeometryFallbackAllowed(fast_result.decision))) &&
             !(request.cancel_requested && request.cancel_requested());
         if (fast_path_needs_full_search)
         {
@@ -6022,8 +6029,8 @@ namespace ego_planner
             successor.action == P4ForwardAction::DEFER_RISK_SELECTION &&
             successor.executable_intent ==
                 P4ExecutableIntent::LIMITED_PREFIX;
-        if (!successor.successor_fast_path)
-          constrainP4DecisionToCommittedTopology(&successor);
+        constrainP4DecisionToCommittedTopology(&successor);
+        completed.decision = successor;
         if (((!completed.ready && route_risk_is_diagnostic) ||
              generic_limited_prefix) &&
             !successor.successor_fast_path &&
@@ -9278,7 +9285,8 @@ namespace ego_planner
                 candidate_successor_route,
                 p4_execution_commitment_backup_.certificate.
                     successor_topology_path,
-                p4PreparingSuccessorCandidate());
+                p4PreparingSuccessorCandidate() &&
+                    last_p4_forward_decision_.successor_fast_path);
         const auto composed_successor = composeP4RollingSuccessorPath(
             risk_points, selected_successor_route, committed_endpoint);
         p4_execution_certificate_.successor_topology_path =
@@ -10605,12 +10613,24 @@ namespace ego_planner
           start.distance_m > corridor_radius_m)
         return false;
       double maximum_station_m = start.station_m;
+      double last_in_corridor_station_m = start.station_m;
       bool reached_exit = false;
       for (const auto &point : path)
       {
         const auto projection = projectP4Polyline(commitment.path, point);
         if (!std::isfinite(projection.distance_m))
           return false;
+        if (reached_exit)
+        {
+          // Actual odometry, not a planned point, completes the commitment.
+          // Extending beyond the merge is allowed; returning through the
+          // consumed channel to an old junction is not.
+          if (projection.distance_m <= corridor_radius_m &&
+              projection.station_m + corridor_radius_m <
+                  commitment.exit_station_m)
+            return false;
+          continue;
+        }
         if (projection.distance_m <= corridor_radius_m &&
             (projection.station_m + corridor_radius_m >=
                  commitment.exit_station_m ||
@@ -10619,16 +10639,22 @@ namespace ego_planner
           reached_exit = true;
           maximum_station_m = std::max(
               maximum_station_m, projection.station_m);
-          break;
+          last_in_corridor_station_m = projection.station_m;
+          continue;
         }
         if (projection.distance_m > corridor_radius_m)
           return false;
         maximum_station_m = std::max(
             maximum_station_m, projection.station_m);
+        last_in_corridor_station_m = projection.station_m;
       }
       const double required_station_m = std::min(
           commitment.exit_station_m,
           start.station_m + corridor_radius_m);
+      if (!reached_exit &&
+          last_in_corridor_station_m + corridor_radius_m + 1.0e-6 <
+              maximum_station_m)
+        return false;
       return reached_exit ||
           maximum_station_m + 1.0e-6 >= required_station_m;
     };
