@@ -10266,6 +10266,22 @@ namespace ego_planner
     if (p4_successor_preparation_state_ !=
             P4SuccessorPreparationState::CURVE_PREPARING)
       return;
+    // A freshness rejection has already consumed the failed actual curve and
+    // left only a frozen channel work item waiting for a newer execution
+    // snapshot.  reboundReplan() intentionally returns false in that state;
+    // its FSM wrapper must not reinterpret the absence of a newly evaluated
+    // curve as another typed curve failure and advance sibling channels.
+    // The structured retry state, rather than diagnostic reason text, proves
+    // that there is no new actual-curve result to record.
+    if (p4_successor_schedule_.awaiting_new_snapshot &&
+        p4_pending_channel_work_item_.has_value() &&
+        last_p4_forward_decision_.result_status ==
+            P4ForwardResultStatus::PENDING &&
+        last_p4_forward_decision_.planning_disposition ==
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY &&
+        last_p4_forward_decision_.successor_failure ==
+            P4SuccessorFailure::NONE)
+      return;
     // reboundReplan can already have rejected the exact child through a
     // lower-level GNSS/exposure/local gate before the FSM observes its false
     // return.  Preserve that first typed result: the FSM's generic

@@ -10011,6 +10011,22 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
             failed_attempt_id);
 
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.051, ego_planner::P4PreparedCurveFailure::INCOMPLETE,
+      "rebound_replan_started");
+  EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest())
+      << "the FSM wrapper must not reclassify an intentional pending retry";
+  EXPECT_TRUE(manager.preparingP4SuccessorCurve());
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.lastP4ForwardDecision().result_status,
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(manager.lastP4ForwardDecision().planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+  EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
+            ego_planner::P4SuccessorFailure::NONE);
+  EXPECT_EQ(manager.lastP4ForwardDecision().reason,
+            "successor_curve_waiting_for_new_snapshot");
+
   auto advanced_execution =
       std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
   advanced_execution->execution_snapshot_id = 183u;
