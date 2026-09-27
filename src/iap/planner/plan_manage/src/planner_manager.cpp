@@ -2065,12 +2065,18 @@ namespace ego_planner
         if (known_peak_order != 0)
           return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         // Sibling curve preparation overwrites selected_channel_id
-        // transactionally, so the immutable route preference is the only
-        // supported topology signal when the common actual range has no
-        // finite upper-PL observation. Every hard local/dynamics/collision/
-        // braking predicate above remains mandatory and this preference
-        // grants no authority.
-        if (!any_known_peak)
+        // transactionally. When incomplete actual prefixes have equal
+        // common upper-PL evidence, keep the immutable preference from the
+        // complete route guide instead of letting a tiny prefix-only FIM
+        // difference change topology before either curve reaches the
+        // discriminating future region. A different common actual peak has
+        // already won above. Every hard local/dynamics/collision/braking
+        // predicate remains mandatory and this preference grants no
+        // authority.
+        const bool incomplete_actual_order =
+            !left->risk_interval_complete ||
+            !right->risk_interval_complete;
+        if (!any_known_peak || incomplete_actual_order)
         {
           const bool left_preferred =
               left->channel_id == route_preference_channel_id;

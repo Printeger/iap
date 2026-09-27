@@ -9964,6 +9964,74 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
+     EqualKnownActualPeakKeepsIncompleteRoutePreferenceBeforeFimNoise)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  const auto record = [&snapshot](const uint64_t channel_id) {
+    ego_planner::P4PreparedChannelRecord value;
+    value.channel_id = channel_id;
+    value.snapshot_identity = snapshot;
+    value.guide_identity = "guide-" + std::to_string(channel_id);
+    value.refined_path_identity =
+        "refined-" + std::to_string(channel_id);
+    value.curve_identity = "curve-" + std::to_string(channel_id);
+    value.actual_endpoint = Eigen::Vector3d(4.0, 1.0, 1.0);
+    value.duration_s = 24.0;
+    value.authorization_group = 1;
+    value.risk_interval_complete = false;
+    value.global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    value.global_rolling_worst_ratio = 0.0;
+    value.global_continuous_exceedance_s = 0.0;
+    value.global_exposure_integral_ratio_s = 0.0;
+    value.known_global_peak_ratio = 0.01243278200208924;
+    value.unknown_support_fraction = 1.0;
+    value.combined_conservative_kappa = 1.0;
+    value.minimum_local_clearance_margin_m = 0.2;
+    value.final_curve_evaluated = true;
+    value.local_geometry_passed = true;
+    value.dynamics_passed = true;
+    value.collision_passed = true;
+    value.clearance_passed = true;
+    value.braking_passed = true;
+    value.gnss_exposure_complete = true;
+    value.failure = ego_planner::P4PreparedCurveFailure::NONE;
+    return value;
+  };
+
+  // Reproduce the clean-live fork-0 seam. The complete guide selected the
+  // preferred channel, while the two short actual curves observed the same
+  // upper PL before reaching the discriminating future region. A tiny FIM
+  // reversal on those incomplete prefixes must not silently change topology.
+  auto preferred = record(2u);
+  preferred.fim_max_ratio = 0.0129997;
+  preferred.fim_integral = 1.79939;
+  auto sibling = record(1u);
+  sibling.fim_max_ratio = 0.0129718;
+  sibling.fim_integral = 1.80999;
+
+  const auto comparison = ego_planner::compareP4PreparedChannels(
+      {sibling, preferred}, snapshot, 2u, 0u, preferred.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, preferred.channel_id);
+}
+
+TEST(P4PreparedChannelComparison,
      FullyUnknownSupportUsesCommonActualPeakBeforeRoutePreference)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
