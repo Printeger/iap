@@ -11303,6 +11303,16 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
       11.1, &waiting));
   EXPECT_FALSE(waiting);
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 21.1));
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::FRESHNESS);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "final_bspline_corridor_support_stale_or_invalid:EXPIRED");
+  EXPECT_FALSE(manager.p4ActualCurveAwaitingRiskSnapshot())
+      << "the same exact curve already received its one fresh-snapshot "
+         "retry; another expiry must become a typed non-feasible bundle "
+         "instead of restarting the whole sibling cohort forever";
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 11.1));
   ASSERT_EQ(

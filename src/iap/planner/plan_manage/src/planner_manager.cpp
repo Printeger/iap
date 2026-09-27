@@ -11237,10 +11237,50 @@ namespace ego_planner
                  "normal_channel_risk_snapshot_not_ready" ||
           p4_last_actual_curve_certification_.detail ==
                  "normal_channel_risk_snapshot_superseded";
-    return p4_last_actual_curve_certification_.failure ==
-               P4PreparedCurveFailure::FRESHNESS &&
-        p4_last_actual_curve_certification_.detail ==
-            "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
+    const bool frozen_support_expired =
+        p4_last_actual_curve_certification_.failure ==
+            P4PreparedCurveFailure::FRESHNESS &&
+            p4_last_actual_curve_certification_.detail ==
+                "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
+    if (!frozen_support_expired)
+      return false;
+
+    const auto selected = std::find_if(
+        last_p4_forward_decision_.candidates.begin(),
+        last_p4_forward_decision_.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          return candidate.channel_id > 0u &&
+              candidate.channel_id ==
+                  last_p4_forward_decision_.selected_channel_id;
+        });
+    if (selected == last_p4_forward_decision_.candidates.end())
+      return true;
+    const auto prior = p4_prepared_channel_bundles_.find(
+        selected->channel_id);
+    if (prior == p4_prepared_channel_bundles_.end() ||
+        prior->second.state !=
+            P4SuccessorPreparationState::CURVE_PREPARING)
+      return true;
+
+    // The first expiry keeps the exact curve and reauthorizes the complete
+    // sibling cohort on a newer snapshot. If that same immutable curve
+    // expires again after being activated from the retained bundle, another
+    // cohort restart cannot add evidence and can livelock under load. Let the
+    // ordinary typed-failure path mark only this curve non-feasible; every
+    // selectable sibling still needs its fresh certificate and all hard
+    // freshness gates remain unchanged.
+    const LocalTrajData &retained = prior->second.trajectory;
+    UniformBspline retained_curve = retained.position_traj_;
+    UniformBspline current_curve = local_data_.position_traj_;
+    const bool same_exact_curve =
+        retained.traj_id_ == local_data_.traj_id_ &&
+        retained.start_time_.nanoseconds() ==
+            local_data_.start_time_.nanoseconds() &&
+        p4ControlPointHash(retained_curve.getControlPoint()) ==
+            p4ControlPointHash(current_curve.getControlPoint()) &&
+        p4KnotVectorHash(retained_curve.getKnot()) ==
+            p4KnotVectorHash(current_curve.getKnot());
+    return !same_exact_curve;
   }
 
   P4NormalChannelPreparationDisposition
