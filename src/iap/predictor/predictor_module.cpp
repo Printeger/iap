@@ -1033,6 +1033,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       return out;
     }
     auto& result = out.points[point_index];
+    result.gnss_satellites.reserve(sat_count);
     std::vector<bool> local_mask(sat_count, false);
     std::vector<bool> lower_bound_mask(sat_count, false);
     int eligible_satellites = 0;
@@ -1293,12 +1294,6 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     std::vector<bool> satellite_mask;
     GnssAdvisoryResult advisory;
   };
-  std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
-      receiver_cache;
-  receiver_cache.reserve(request.points.size());
-  std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
-      lower_receiver_cache;
-  lower_receiver_cache.reserve(request.points.size());
   const auto satellite_mask_hash = [](
       const std::vector<bool>& satellite_mask) {
     std::uint64_t hash = 1469598103934665603ULL;
@@ -1325,6 +1320,52 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   std::vector<std::size_t> unique_advisory_rows;
   unique_advisory_rows.reserve(request.points.size());
   for (std::size_t index = 0; index < request.points.size(); ++index) {
+    const auto& result = out.points[index];
+    const auto& local_mask = local_satellite_masks[index];
+    const auto& query = request.points[index];
+    advisory_source_rows[index] = index;
+    if (query.evidence_point_id == 0) {
+      unique_advisory_rows.push_back(index);
+      continue;
+    }
+    const std::uint64_t cache_key = result.local_satellite_set_hash ^
+        (query.evidence_point_id + 0x9e3779b97f4a7c15ULL +
+         (result.local_satellite_set_hash << 6U) +
+         (result.local_satellite_set_hash >> 2U));
+    bool reused_candidate = false;
+    const auto range = candidate_cache.equal_range(cache_key);
+    for (auto candidate = range.first; candidate != range.second;
+         ++candidate) {
+      if (candidate->second.evidence_point_id == query.evidence_point_id &&
+          candidate->second.satellite_mask == local_mask) {
+        advisory_source_rows[index] = candidate->second.source_index;
+        reused_candidate = true;
+        ++out.timing.candidate_cache_hit_count;
+        // The duplicate consumes the source row's upper and lower receiver
+        // advisories without another lookup, copy, or GNSS solve.
+        out.timing.receiver_cache_hit_count += 2u;
+        break;
+      }
+    }
+    if (!reused_candidate) {
+      candidate_cache.emplace(
+          cache_key, CandidateAdvisoryCacheEntry{
+              query.evidence_point_id, local_mask, index});
+      unique_advisory_rows.push_back(index);
+    }
+  }
+
+  // Prepare receiver advisories only for physical evidence rows that will be
+  // evaluated. Transition-overlap rows point at their source above; filling
+  // two advisory objects for every duplicate used measurable budget without
+  // changing any authorization result.
+  std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
+      receiver_cache;
+  receiver_cache.reserve(unique_advisory_rows.size());
+  std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
+      lower_receiver_cache;
+  lower_receiver_cache.reserve(unique_advisory_rows.size());
+  for (const std::size_t index : unique_advisory_rows) {
     const auto& result = out.points[index];
     const auto& local_mask = local_satellite_masks[index];
     const auto& lower_mask = lower_bound_satellite_masks[index];
@@ -1362,35 +1403,6 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
             ReceiverAdvisoryCacheEntry{
                 lower_mask, std::move(lower_receiver)});
       }
-    }
-
-    const auto& query = request.points[index];
-    advisory_source_rows[index] = index;
-    if (query.evidence_point_id == 0) {
-      unique_advisory_rows.push_back(index);
-      continue;
-    }
-    const std::uint64_t cache_key = result.local_satellite_set_hash ^
-        (query.evidence_point_id + 0x9e3779b97f4a7c15ULL +
-         (result.local_satellite_set_hash << 6U) +
-         (result.local_satellite_set_hash >> 2U));
-    bool reused_candidate = false;
-    const auto range = candidate_cache.equal_range(cache_key);
-    for (auto candidate = range.first; candidate != range.second;
-         ++candidate) {
-      if (candidate->second.evidence_point_id == query.evidence_point_id &&
-          candidate->second.satellite_mask == local_mask) {
-        advisory_source_rows[index] = candidate->second.source_index;
-        reused_candidate = true;
-        ++out.timing.candidate_cache_hit_count;
-        break;
-      }
-    }
-    if (!reused_candidate) {
-      candidate_cache.emplace(
-          cache_key, CandidateAdvisoryCacheEntry{
-              query.evidence_point_id, local_mask, index});
-      unique_advisory_rows.push_back(index);
     }
   }
 
