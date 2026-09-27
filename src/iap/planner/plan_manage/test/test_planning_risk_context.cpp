@@ -14523,9 +14523,9 @@ TEST(P4PreparedSuccessorPolicy,
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
   EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
 
-  // A multi-channel route is not complete after the first actual curve.  The
-  // next planning callback must receive the already-selected next channel,
-  // rather than falling back to an unrelated route worker or ordinary replan.
+  // Candidate enumeration retained from a formally resolved parent does not
+  // reopen its actual-curve comparison.  A certified fast-path child remains
+  // executable even when the route decision still describes both siblings.
   const auto single_channel_decision = manager.lastP4ForwardDecision();
   auto deadline_limited_decision = single_channel_decision;
   auto deadline_limited_peer = deadline_limited_decision.candidates.front();
@@ -14540,6 +14540,19 @@ TEST(P4PreparedSuccessorPolicy,
       "successor_full_search_fallback_ready",
       ego_planner::p4ControlPointHash(
           incumbent.position_traj_.getControlPoint()));
+  manager.setPreparedP4SuccessorForTest(prepared);
+  ASSERT_FALSE(manager.p4SuccessorFullSearchFallbackPendingForTest());
+  EXPECT_TRUE(manager.cachePreparedP4SuccessorBundle(
+      9.9, &cache_reason)) << cache_reason;
+  EXPECT_EQ(cache_reason, "successor_prepared_bundle_cached");
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
+
+  // An unresolved limited parent explicitly requires the bounded sibling
+  // cohort.  Under that frozen requirement, reaching the deadline before a
+  // peer can be prepared remains a safe HOLD rather than enumeration-order
+  // publication.
+  manager.setP4SuccessorFullSearchFallbackForTest(true);
   manager.setPreparedP4SuccessorForTest(prepared);
   EXPECT_FALSE(manager.cachePreparedP4SuccessorBundle(
       9.9, &cache_reason));
@@ -14556,6 +14569,7 @@ TEST(P4PreparedSuccessorPolicy,
       "successor_full_search_fallback_ready",
       ego_planner::p4ControlPointHash(
           incumbent.position_traj_.getControlPoint()));
+  manager.setP4SuccessorFullSearchFallbackForTest(true);
   auto multi_channel_decision = single_channel_decision;
   auto second_channel = multi_channel_decision.candidates.front();
   second_channel.candidate_id += 1u;

@@ -1281,6 +1281,10 @@ namespace ego_planner
     {
       return p4_successor_schedule_.force_full_search;
     }
+    void setP4SuccessorFullSearchFallbackForTest(const bool required)
+    {
+      p4_successor_schedule_.force_full_search = required;
+    }
     P4SuccessorPreparationState p4SuccessorPreparationStateForTest() const
     {
       return p4_successor_preparation_state_;

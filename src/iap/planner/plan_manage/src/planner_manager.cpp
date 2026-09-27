@@ -12259,6 +12259,15 @@ namespace ego_planner
       else
         ++entry;
     }
+    // The activated parent freezes whether this successor requires a new
+    // actual multi-channel comparison.  A formally resolved parent may keep
+    // sibling route candidates for topology/diagnostic continuity, but its
+    // certified incumbent-topology fast path is one work item; candidate
+    // count must not silently reopen the parent's completed cohort.
+    const bool requires_full_channel_search =
+        p4_successor_schedule_.force_full_search;
+    if (!requires_full_channel_search)
+      p4_prepared_channel_bundles_.clear();
     if (bundle.channel_record.feasible())
       p4_prepared_channel_bundles_[bundle.channel_record.channel_id] = bundle;
     while (p4_prepared_channel_bundles_.size() > 4u)
@@ -12267,9 +12276,14 @@ namespace ego_planner
     const auto prepared_records = p4CommonForwardPreparedChannelRecords(
         p4_prepared_channel_bundles_);
     std::set<uint64_t> feasible_channel_ids;
-    for (const auto &candidate : bundle.decision.candidates)
-      if (candidate.channel_id > 0u && candidate.occupancy_supported)
-        feasible_channel_ids.insert(candidate.channel_id);
+    if (requires_full_channel_search)
+    {
+      for (const auto &candidate : bundle.decision.candidates)
+        if (candidate.channel_id > 0u && candidate.occupancy_supported)
+          feasible_channel_ids.insert(candidate.channel_id);
+    }
+    else if (bundle.channel_record.channel_id > 0u)
+      feasible_channel_ids.insert(bundle.channel_record.channel_id);
 
     // Prepare every locally feasible channel's actual terminal curve while
     // the parent still owns execution. The normal rebound/P5 path is reused
@@ -12277,8 +12291,10 @@ namespace ego_planner
     // Each completed channel remains immutable in the bounded bundle map.
     const auto next_unprepared = std::find_if(
         bundle.decision.candidates.begin(), bundle.decision.candidates.end(),
-        [this](const P4ForwardCandidate &candidate) {
-          return candidate.channel_id > 0u && candidate.occupancy_supported &&
+        [this, requires_full_channel_search](
+            const P4ForwardCandidate &candidate) {
+          return requires_full_channel_search &&
+              candidate.channel_id > 0u && candidate.occupancy_supported &&
               p4_prepared_channel_bundles_.count(candidate.channel_id) == 0u;
         });
     if (next_unprepared != bundle.decision.candidates.end())
