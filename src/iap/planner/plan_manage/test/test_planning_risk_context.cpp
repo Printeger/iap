@@ -10171,7 +10171,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     IncompleteActualPeaksRequireCommonForwardSpaceTimeCoverage)
+     IncompleteActualPeaksRequireCommonForwardSpaceCoverage)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -10258,10 +10258,9 @@ TEST(P4PreparedChannelComparison,
             equivalent.channel_record.channel_id);
 
   // Both actual curves start from the same frozen execution epoch and have
-  // dense evidence over a shared eight-second/eight-metre forward window.
-  // Different certified traversal rates are not missing evidence: compare
-  // the common space-time window instead of demanding identical crossing
-  // times at every station and falling back to the guide preference.
+  // dense evidence over the same forward stations. Different certified
+  // traversal rates are not missing spatial evidence: compare the common
+  // forward range instead of demanding identical crossing times.
   std::vector<double> slower_times;
   std::vector<double> faster_times;
   for (std::size_t index = 0u; index <= 10u; ++index)
@@ -10292,6 +10291,39 @@ TEST(P4PreparedChannelComparison,
   EXPECT_EQ(comparison.winner_channel_id,
             faster_lower_risk.channel_record.channel_id);
 
+  // A slower sibling still covers the same forward stations.  Its later
+  // upper-PL observation cannot be discarded merely because the faster
+  // sibling reaches the common spatial horizon sooner; otherwise traversal
+  // rate, rather than risk over common forward space, chooses the topology.
+  std::vector<double> fast_times;
+  std::vector<double> slow_times;
+  for (std::size_t index = 0u; index <= 10u; ++index)
+  {
+    fast_times.push_back(static_cast<double>(index));
+    slow_times.push_back(2.0 * static_cast<double>(index));
+  }
+  auto faster_lower_peak = bundle(81u, 1.0, fast_times);
+  auto slower_hidden_peak = bundle(82u, 0.8, slow_times);
+  ASSERT_FALSE(slower_hidden_peak.direct_risk_evidence.points.empty());
+  slower_hidden_peak.direct_risk_evidence.points.back().safety_ratio_upper =
+      1.2;
+  const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle>
+      equal_forward_coverage_bundles{
+          {faster_lower_peak.channel_record.channel_id, faster_lower_peak},
+          {slower_hidden_peak.channel_record.channel_id,
+           slower_hidden_peak}};
+  const auto equal_forward_coverage_records =
+      ego_planner::p4CommonForwardPreparedChannelRecords(
+          equal_forward_coverage_bundles);
+  ASSERT_EQ(equal_forward_coverage_records.size(), 2u);
+  comparison = ego_planner::compareP4PreparedChannels(
+      equal_forward_coverage_records, snapshot, 2u, 0u,
+      slower_hidden_peak.channel_record.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id,
+            faster_lower_peak.channel_record.channel_id);
+
   auto shorter_time = bundle(72u, 0.8, {0.0, 0.2, 0.4});
   const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle> bundles{
       {preferred.channel_record.channel_id, preferred},
@@ -10302,16 +10334,16 @@ TEST(P4PreparedChannelComparison,
   ASSERT_EQ(records.size(), 2u);
   EXPECT_TRUE(std::all_of(
       records.begin(), records.end(), [](const auto &record) {
-        return std::isinf(record.known_global_peak_ratio) &&
-            std::isinf(record.fim_max_ratio) &&
-            std::isinf(record.fim_integral);
+        return std::isfinite(record.known_global_peak_ratio) &&
+            std::isfinite(record.fim_max_ratio) &&
+            std::isfinite(record.fim_integral);
       }));
   comparison = ego_planner::compareP4PreparedChannels(
       records, snapshot, 2u, 0u, preferred.channel_record.channel_id);
   ASSERT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id,
-            preferred.channel_record.channel_id);
+            shorter_time.channel_record.channel_id);
 }
 
 TEST(P4PreparedChannelComparison,

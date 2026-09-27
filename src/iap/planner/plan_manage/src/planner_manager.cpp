@@ -1724,71 +1724,19 @@ namespace ego_planner
           std::numeric_limits<double>::infinity();
       std::size_t forward_coverage_count = 0u;
       std::size_t feasible_bundle_count = 0u;
-      bool all_feasible_evidence_complete = true;
-      double common_query_begin_s =
-          -std::numeric_limits<double>::infinity();
-      double common_query_end_s =
-          std::numeric_limits<double>::infinity();
-      std::size_t temporal_coverage_count = 0u;
       for (const auto &entry : bundles)
       {
         if (!entry.second.channel_record.feasible())
           continue;
         ++feasible_bundle_count;
-        all_feasible_evidence_complete =
-            all_feasible_evidence_complete &&
-            entry.second.direct_risk_evidence.complete;
-        const auto &evidence = entry.second.direct_risk_evidence;
-        double first_relative_s = std::numeric_limits<double>::infinity();
-        double last_relative_s =
-            -std::numeric_limits<double>::infinity();
-        for (std::size_t index = 0u;
-             index < evidence.relative_times.size(); ++index)
-        {
-          if (index < evidence.nominal_sample_rows.size() &&
-              !evidence.nominal_sample_rows[index])
-            continue;
-          const double relative_s = evidence.relative_times[index];
-          if (!std::isfinite(relative_s))
-            continue;
-          first_relative_s = std::min(first_relative_s, relative_s);
-          last_relative_s = std::max(last_relative_s, relative_s);
-        }
-        if (evidence.trajectory_start_ns > 0 &&
-            std::isfinite(first_relative_s) &&
-            std::isfinite(last_relative_s) &&
-            last_relative_s >= first_relative_s)
-        {
-          const double start_s =
-              static_cast<double>(evidence.trajectory_start_ns) * 1.0e-9;
-          common_query_begin_s = std::max(
-              common_query_begin_s, start_s + first_relative_s);
-          common_query_end_s = std::min(
-              common_query_end_s, start_s + last_relative_s);
-          ++temporal_coverage_count;
-        }
-      }
-      const bool use_common_time_window = feasible_bundle_count >= 2u &&
-          temporal_coverage_count == feasible_bundle_count &&
-          std::isfinite(common_query_begin_s) &&
-          std::isfinite(common_query_end_s) &&
-          common_query_end_s > common_query_begin_s + 1.0e-6;
-      for (const auto &entry : bundles)
-      {
-        if (!entry.second.channel_record.feasible())
-          continue;
         double coverage_m = 0.0;
         (void)p4ActualRiskEvidenceWithinForwardSpaceTime(
             entry.second.direct_risk_evidence,
             entry.second.decision.request_position,
             entry.second.decision.local_target,
             std::numeric_limits<double>::max(),
-            all_feasible_evidence_complete
-                ? -std::numeric_limits<double>::infinity()
-                : common_query_begin_s,
-            all_feasible_evidence_complete
-                ? std::numeric_limits<double>::infinity()
-                : common_query_end_s,
+            -std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity(),
             &coverage_m);
         if (std::isfinite(coverage_m) && coverage_m > 0.0)
         {
@@ -1801,8 +1749,7 @@ namespace ego_planner
           feasible_bundle_count >= 2u &&
           forward_coverage_count == feasible_bundle_count &&
           std::isfinite(common_forward_coverage_m) &&
-          common_forward_coverage_m > 0.0 &&
-          (all_feasible_evidence_complete || use_common_time_window);
+          common_forward_coverage_m > 0.0;
       const auto clear_whole_curve_risk_order = [](
           P4PreparedChannelRecord *record) {
         record->risk_interval_complete = false;
@@ -1835,12 +1782,8 @@ namespace ego_planner
                     entry.second.decision.request_position,
                     entry.second.decision.local_target,
                     common_forward_coverage_m,
-                    all_feasible_evidence_complete
-                        ? -std::numeric_limits<double>::infinity()
-                        : common_query_begin_s,
-                    all_feasible_evidence_complete
-                        ? std::numeric_limits<double>::infinity()
-                        : common_query_end_s, nullptr);
+                    -std::numeric_limits<double>::infinity(),
+                    std::numeric_limits<double>::infinity(), nullptr);
             p4ApplyRiskIntervalSummary(common_evidence, &record);
             const auto common_fim =
                 summarizeP4ActualFimEvidence(common_evidence);
