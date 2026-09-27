@@ -13341,32 +13341,43 @@ TEST(P4PreparedSuccessorPolicy,
 
   ego_planner::P4SuccessorPreparationResult completed_route;
   // Reproduce the live failure: a full successor search found multiple
-  // occupancy-clear channels, but guide-level GNSS diagnostics deferred the
-  // route.  Those diagnostics must hand the still-parent-bound route to the
-  // exact actual-curve preparation transaction instead of being retried as a
-  // failed worker result until the rolling deadline expires.
+  // occupancy-clear channels, but incomplete guide-level evidence returned a
+  // generic executable common prefix.  Publishing that channel-zero prefix
+  // would replace the parent's completed actual-curve choice before the fork.
+  // Hand the still-parent-bound candidates to the existing exact actual-curve
+  // transaction instead; the generic prefix is not a selected topology.
   auto second_channel = decision.candidates.front();
   second_channel.candidate_id += 1u;
   second_channel.channel_id += 1u;
   second_channel.path[1].y() += 0.25;
   second_channel.path_hash = "successor-full-search-second-channel";
-  completed_route.ready = false;
+  completed_route.ready = true;
   completed_route.parent_trajectory_id = parent.trajectory_id;
-  completed_route.failure =
-      ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+  completed_route.failure = ego_planner::P4SuccessorFailure::NONE;
   completed_route.decision = decision;
   completed_route.decision.action =
       ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  completed_route.decision.executable_intent =
+      ego_planner::P4ExecutableIntent::LIMITED_PREFIX;
   completed_route.decision.selection_authority =
       ego_planner::P4ForwardSelectionAuthority::NONE;
   completed_route.decision.unevaluated_channel_count = 0u;
   completed_route.decision.candidates.push_back(second_channel);
   completed_route.decision.successor_fast_path = false;
+  completed_route.decision.deferred_trajectory = {
+      decision.request_position,
+      0.5 * (decision.candidates.front().path.back() +
+             second_channel.path.back())};
+  const Eigen::Vector3d generic_prefix_endpoint =
+      completed_route.decision.deferred_trajectory.back();
+  completed_route.decision.selected_candidate_id = 0u;
+  completed_route.decision.selected_channel_id = 0u;
+  completed_route.decision.selected_guide.clear();
   // Reproduce the production worker result: route decisions default to HOLD
   // until the manager binds them to the still-authoritative parent.
   completed_route.decision.planning_disposition =
       ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
-  completed_route.reason = "route_level_gnss_diagnostic";
+  completed_route.reason = "safe_limited_common_prefix";
   manager.setP4PreparedSuccessorRouteForTest(std::move(completed_route));
 
   const auto awaiting_execution_sample =
@@ -13410,6 +13421,12 @@ TEST(P4PreparedSuccessorPolicy,
       Eigen::Vector3d(1.75, 0.0, 1.0));
   EXPECT_EQ(worker_result.action,
             ego_planner::P4ForwardAction::CANDIDATE_READY);
+  EXPECT_EQ(worker_result.executable_intent,
+            ego_planner::P4ExecutableIntent::FINAL_CHANNEL);
+  EXPECT_NE(worker_result.selected_channel_id, 0u);
+  ASSERT_FALSE(worker_result.selected_guide.empty());
+  EXPECT_FALSE(worker_result.selected_guide.back().isApprox(
+      generic_prefix_endpoint, 1.0e-12));
   EXPECT_EQ(worker_result.reason, "successor_full_search_fallback_ready");
   EXPECT_EQ(worker_result.successor_failure,
             ego_planner::P4SuccessorFailure::NONE);

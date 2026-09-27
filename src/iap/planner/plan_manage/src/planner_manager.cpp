@@ -5918,7 +5918,13 @@ namespace ego_planner
         const bool route_risk_is_diagnostic =
             completed.failure == P4SuccessorFailure::GNSS_LIMIT_EXCEEDED ||
             completed.failure == P4SuccessorFailure::SUPPORT_INCOMPLETE;
-        if (!completed.ready && route_risk_is_diagnostic &&
+        const bool generic_limited_prefix =
+            completed.ready &&
+            successor.action == P4ForwardAction::DEFER_RISK_SELECTION &&
+            successor.executable_intent ==
+                P4ExecutableIntent::LIMITED_PREFIX;
+        if (((!completed.ready && route_risk_is_diagnostic) ||
+             generic_limited_prefix) &&
             !successor.successor_fast_path &&
             prepareNormalChannelsForActualCertification(&successor))
         {
