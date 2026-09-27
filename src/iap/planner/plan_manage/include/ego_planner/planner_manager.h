@@ -556,6 +556,29 @@ namespace ego_planner
   double summarizeP4ActualKnownGlobalPeakEvidence(
       const P4DirectTrajectoryRiskEvidence &evidence);
 
+  // Business identity for one actual-curve preparation conclusion. Planning
+  // attempt ids are deliberately absent: callbacks may acquire a newer
+  // attempt while the same frozen cohort and exact curve remain in flight.
+  struct P4ChannelPreparationIdentity
+  {
+    uint64_t decision_event_id = 0;
+    int parent_trajectory_id = 0;
+    int64_t parent_start_time_ns = 0;
+    std::string parent_curve_hash;
+    uint64_t channel_id = 0;
+    std::string curve_identity;
+    uint64_t source_execution_snapshot_id = 0;
+    uint32_t retry_generation = 0;
+
+    bool complete() const
+    {
+      return decision_event_id > 0u && channel_id > 0u &&
+          !curve_identity.empty() && source_execution_snapshot_id > 0u;
+    }
+
+    std::string canonical() const;
+  };
+
   struct P4PreparedSuccessorBundle
   {
     P4SuccessorPreparationState state =
@@ -571,6 +594,8 @@ namespace ego_planner
     std::shared_ptr<const FrozenOccupancyEpoch> bound_occupancy;
     uint64_t checked_generation = 0;
     std::string curve_identity;
+    P4ChannelPreparationIdentity preparation_identity;
+    uint32_t certification_conclusion_count = 0;
     P4PreparedChannelRecord channel_record;
 
     // A prepared child can reserve its ID before a safety guard is published.
@@ -598,6 +623,21 @@ namespace ego_planner
     READY_TO_PUBLISH,
     COMMON_PREFIX_PENDING,
     REJECTED,
+  };
+
+  struct P4ChannelPreparationLifecycleDiagnostics
+  {
+    uint64_t decision_event_id = 0;
+    std::size_t expected_channel_count = 0;
+    std::size_t transition_count = 0;
+    std::size_t transition_limit = 0;
+    std::size_t pending_schedule_count = 0;
+    std::size_t pending_consume_count = 0;
+    std::size_t certification_conclusion_count = 0;
+    std::size_t freshness_retry_count = 0;
+    bool terminal = false;
+    std::string terminal_reason;
+    std::string lifecycle_failure;
   };
 
   struct P4GuardBrakingCommand
@@ -1283,6 +1323,11 @@ namespace ego_planner
     {
       return p4_pending_channel_work_item_;
     }
+    const P4ChannelPreparationLifecycleDiagnostics &
+    p4ChannelPreparationLifecycleForTest() const
+    {
+      return p4_channel_preparation_lifecycle_.diagnostics;
+    }
     bool p4SuccessorAwaitingNewSnapshotForTest() const
     {
       return p4_successor_schedule_.awaiting_new_snapshot;
@@ -1335,8 +1380,23 @@ namespace ego_planner
     }
     void clearP4PendingChannelWorkItemForTest()
     {
-      p4_pending_channel_work_item_.reset();
-      p4_pending_channel_context_.reset();
+      if (p4_pending_channel_work_item_ &&
+          p4_channel_preparation_lifecycle_.pending_identity)
+      {
+        P4ForwardDecision consumed;
+        P4ChannelPreparationTransition transition;
+        transition.kind = P4ChannelPreparationTransitionKind::CONSUME;
+        transition.decision = &*p4_pending_channel_work_item_;
+        transition.context = &planning_risk_context_;
+        transition.consumed_decision = &consumed;
+        (void)transitionP4ChannelPreparation(
+            transition, planning_risk_context_.query_base_time_s, nullptr);
+      }
+      else
+      {
+        p4_pending_channel_work_item_.reset();
+        p4_pending_channel_context_.reset();
+      }
     }
     void setP4PreparedSuccessorRouteForTest(
         P4SuccessorPreparationResult result)
@@ -1507,6 +1567,70 @@ namespace ego_planner
     P3ReferenceBiasConfig p3_config_;
 
   private:
+    enum class P4ChannelPreparationTransitionKind
+    {
+      RESET = 0,
+      REGISTER_PENDING_BUNDLE,
+      SCHEDULE,
+      CONSUME,
+      BEGIN_FRESHNESS_RETRY,
+      RECORD_TERMINAL_BUNDLE,
+      FINISH_COHORT,
+    };
+
+    struct P4ChannelPreparationTransition
+    {
+      P4ChannelPreparationTransitionKind kind =
+          P4ChannelPreparationTransitionKind::RESET;
+      const P4ForwardDecision *decision = nullptr;
+      const PlanningRiskContext *context = nullptr;
+      P4PreparedSuccessorBundle *bundle = nullptr;
+      P4SuccessorPreparationState terminal_bundle_state =
+          P4SuccessorPreparationState::FAILED;
+      uint32_t retry_generation = 0;
+      bool freeze_context = false;
+      bool clear_bundles = false;
+      std::string detail;
+      P4ForwardDecision *consumed_decision = nullptr;
+    };
+
+    struct P4ChannelPreparationLifecycle
+    {
+      P4ChannelPreparationLifecycleDiagnostics diagnostics;
+      int parent_trajectory_id = 0;
+      int64_t parent_start_time_ns = 0;
+      std::string parent_curve_hash;
+      std::set<uint64_t> expected_channel_ids;
+      std::optional<P4ChannelPreparationIdentity> pending_identity;
+      std::optional<P4ChannelPreparationIdentity> active_identity;
+      std::optional<P4ForwardDecision> terminal_decision;
+      std::set<std::string> consumed_identities;
+      std::set<std::string> concluded_identities;
+    };
+
+    // This is the only writer for the multi-channel preparation transaction:
+    //
+    // CANDIDATE_READY -> CURVE_PREPARING -> certification
+    //   -> one optional fresh-snapshot retry -> terminal bundle
+    //   -> next sibling/comparison -> winner or cohort failed.
+    //
+    // Timers and snapshot callbacks may make a transition schedulable, but
+    // only the planning callback consumes it through this seam. Existing
+    // bundle states remain the authority; this guard binds their business
+    // identity and proves monotonic, finite progression.
+    bool transitionP4ChannelPreparation(
+        const P4ChannelPreparationTransition &transition, double now_s,
+        std::string *reason = nullptr);
+    bool failP4ChannelPreparationLifecycle(
+        const std::string &detail, double now_s,
+        std::string *reason = nullptr);
+    P4ChannelPreparationIdentity p4ChannelPreparationIdentity(
+        const P4ForwardDecision &decision,
+        const P4PreparedSuccessorBundle *bundle,
+        const PlanningRiskContext *context,
+        uint32_t retry_generation) const;
+    void resetP4ChannelPreparationLifecycle(bool clear_bundles);
+
     int64_t steadyNowNs() const;
     bool executionFeedbackFresh(
         int64_t receive_steady_ns, double maximum_age_s) const;
@@ -1714,6 +1838,7 @@ namespace ego_planner
         p4_cached_successor_bundle_;
     std::map<uint64_t, P4PreparedSuccessorBundle>
         p4_prepared_channel_bundles_;
+    P4ChannelPreparationLifecycle p4_channel_preparation_lifecycle_;
     bool p4_cached_successor_activation_in_progress_ = false;
     // Immutable kind of the command currently owned by traj_server.  The
     // background successor worker may update its cache while a future command

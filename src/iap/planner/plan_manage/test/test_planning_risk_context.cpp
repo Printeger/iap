@@ -10395,12 +10395,12 @@ TEST(P4PreparedSuccessorPolicy,
       manager.planningRiskContext().planning_attempt_id;
   ASSERT_NE(retry_attempt_id, failed_attempt_id);
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u, 10.96));
-  EXPECT_FALSE(manager.p4SuccessorAwaitingNewSnapshotForTest());
-  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 183u);
+  EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 182u);
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(
       manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
-      retry_attempt_id);
+      failed_attempt_id);
   EXPECT_EQ(
       manager.pendingP4ChannelWorkItemForTest()->snapshot_identity.
           execution_snapshot_id,
@@ -10412,13 +10412,12 @@ TEST(P4PreparedSuccessorPolicy,
       10.97, ego_planner::P4PreparedCurveFailure::FRESHNESS,
       "successor_exposure_ledger_anchor_invalid");
   EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
-  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 183u)
-      << "a repeated freshness rejection must retain the snapshot actually "
-         "used by the retry, not regress to the frozen guide snapshot";
-  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.97, 183u));
-  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.98, 184u, 10.97));
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 182u)
+      << "schedulability checks must not consume or rebind retained work";
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.97, 183u));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.98, 184u, 10.97));
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.98, 184u, 10.98));
-  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 184u);
+  EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 182u);
 }
 
 TEST(P4PreparedSuccessorPolicy,
@@ -11303,6 +11302,8 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
       11.1, &waiting));
   EXPECT_FALSE(waiting);
+  const auto first_retry_decision = manager.lastP4ForwardDecision();
+  const auto first_retry_trajectory = manager.local_data_;
   ASSERT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 21.1));
   EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
@@ -11313,13 +11314,18 @@ TEST(P4PreparedChannelPreparation,
       << "the same exact curve already received its one fresh-snapshot "
          "retry; another expiry must become a typed non-feasible bundle "
          "instead of restarting the whole sibling cohort forever";
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "final_bspline_before_p5", 11.1));
   ASSERT_EQ(
-      manager.prepareP4NormalChannelComparison(11.1, &reason),
+      manager.recordP4NormalChannelCurveFailure(
+          21.1, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+          "fresh_snapshot_retry_expired", &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_NE(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            first_retry_decision.selected_channel_id);
+  const uint64_t second_retry_channel_id =
+      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id;
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
       11.1, &waiting));
   EXPECT_FALSE(waiting);
@@ -11331,8 +11337,90 @@ TEST(P4PreparedChannelPreparation,
       << reason;
   EXPECT_TRUE(
       manager.lastP4ForwardDecision().selected_actual_endpoint.allFinite());
-  EXPECT_TRUE(
+  EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
+            second_retry_channel_id);
+  EXPECT_FALSE(
       manager.lastP4ForwardDecision().runner_up_actual_endpoint.allFinite());
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+  const auto completed_lifecycle =
+      manager.p4ChannelPreparationLifecycleForTest();
+  EXPECT_TRUE(completed_lifecycle.terminal);
+  EXPECT_EQ(completed_lifecycle.expected_channel_count, 2u);
+  EXPECT_EQ(completed_lifecycle.freshness_retry_count, 1u);
+  EXPECT_EQ(completed_lifecycle.pending_schedule_count, 3u);
+  EXPECT_EQ(completed_lifecycle.pending_consume_count, 3u);
+  EXPECT_EQ(completed_lifecycle.certification_conclusion_count, 3u);
+  EXPECT_LE(completed_lifecycle.transition_count,
+            completed_lifecycle.transition_limit);
+
+  const auto terminal_winner = manager.lastP4ForwardDecision();
+  EXPECT_EQ(
+      manager.prepareP4NormalChannelComparison(11.1, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::REJECTED)
+      << "a duplicate success callback for terminal sibling B must not "
+         "repeat its certification or restart comparison: "
+      << reason;
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  manager.local_data_ = first_retry_trajectory;
+  manager.setP4ForwardDecisionForTest(first_retry_decision);
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 21.1));
+  EXPECT_EQ(
+      manager.deferP4NormalChannelCertificationForRiskSnapshot(
+          21.1, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::REJECTED)
+      << "a late callback for terminal sibling A must not revive its cohort: "
+      << reason;
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::LIFECYCLE);
+  EXPECT_EQ(manager.p4ChannelPreparationLifecycleForTest().lifecycle_failure,
+            "terminal_cohort_reentered");
+  EXPECT_EQ(manager.lastP4ForwardDecision().decision_event_id,
+            terminal_winner.decision_event_id);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
+            terminal_winner.selected_channel_id);
+
+  auto all_failed_decision = first_retry_decision;
+  all_failed_decision.decision_event_id += 100u;
+  all_failed_decision.selected_candidate_id =
+      all_failed_decision.candidates.front().candidate_id;
+  all_failed_decision.selected_channel_id =
+      all_failed_decision.candidates.front().channel_id;
+  all_failed_decision.selected_guide =
+      all_failed_decision.candidates.front().path;
+  manager.setP4ForwardDecisionForTest(all_failed_decision);
+  ASSERT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          22.0, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "first_sibling_hard_failure", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+  EXPECT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          22.1, ego_planner::P4PreparedCurveFailure::COLLISION,
+          "second_sibling_hard_failure", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::REJECTED)
+      << reason;
+  const auto failed_lifecycle =
+      manager.p4ChannelPreparationLifecycleForTest();
+  EXPECT_TRUE(failed_lifecycle.terminal);
+  EXPECT_EQ(failed_lifecycle.terminal_reason,
+            "normal_channel_all_preparations_failed");
+  EXPECT_TRUE(failed_lifecycle.lifecycle_failure.empty());
+  EXPECT_EQ(failed_lifecycle.freshness_retry_count, 0u);
+  EXPECT_EQ(failed_lifecycle.pending_schedule_count, 1u);
+  EXPECT_EQ(failed_lifecycle.pending_consume_count, 1u);
+  EXPECT_EQ(failed_lifecycle.certification_conclusion_count, 2u);
+  EXPECT_LE(failed_lifecycle.transition_count,
+            failed_lifecycle.transition_limit);
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
 }
 
@@ -11851,6 +11939,7 @@ TEST(P4PreparedChannelPreparation,
   decision.selection_authority =
       ego_planner::P4ForwardSelectionAuthority::NONE;
   decision.formal_support = false;
+  decision.snapshot_identity.execution_snapshot_id = 41u;
   decision.selected_channel_id = decision.candidates.front().channel_id;
   auto second_channel = decision.candidates.front();
   second_channel.candidate_id += 1u;

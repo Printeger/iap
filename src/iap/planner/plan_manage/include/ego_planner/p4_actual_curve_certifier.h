@@ -25,6 +25,7 @@ enum class P4PreparedCurveFailure {
   EXPOSURE_BUDGET,
   COMPUTE_BUDGET,
   SNAPSHOT_MISMATCH,
+  LIFECYCLE,
   INCOMPLETE,
 };
 

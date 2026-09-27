@@ -80,6 +80,16 @@ namespace ego_planner
     return true;
   }
 
+  std::string P4ChannelPreparationIdentity::canonical() const
+  {
+    std::ostringstream stream;
+    stream << decision_event_id << '|' << parent_trajectory_id << '|'
+           << parent_start_time_ns << '|' << parent_curve_hash << '|'
+           << channel_id << '|' << curve_identity << '|'
+           << source_execution_snapshot_id << '|' << retry_generation;
+    return stream.str();
+  }
+
   namespace
   {
     std::vector<P4ActualCurveClearanceConstraintSample>
@@ -185,6 +195,7 @@ namespace ego_planner
         case P4PreparedCurveFailure::NONE:
           return P4SuccessorFailure::NONE;
         case P4PreparedCurveFailure::IDENTITY:
+        case P4PreparedCurveFailure::LIFECYCLE:
           return P4SuccessorFailure::PARENT_IDENTITY_CHANGED;
         case P4PreparedCurveFailure::TERMINAL_CONTRACT:
         case P4PreparedCurveFailure::DYNAMICS:
@@ -3719,8 +3730,7 @@ namespace ego_planner
       p4_cached_successor_bundle_.reset();
       p4_cached_successor_activation_in_progress_ = false;
       p4_pending_activation_is_prepared_successor_ = false;
-      p4_pending_channel_work_item_.reset();
-      p4_pending_channel_context_.reset();
+      resetP4ChannelPreparationLifecycle(true);
       p4_planning_disposition_ = P4PlanningDisposition::HOLD_REQUIRED;
       last_p4_forward_decision_.planning_disposition =
           P4PlanningDisposition::HOLD_REQUIRED;
@@ -4007,33 +4017,10 @@ namespace ego_planner
               p4_successor_schedule_.last_attempt_planning_state_stamp_s +
                   1.0e-9)
         return false;
-      // A safety callback can observe the advancing execution snapshot while
-      // no planning transaction is active.  Report the work as schedulable so
-      // the existing FSM lane can enter ordinary planning and install a real
-      // attempt id, but do not consume or rebind the frozen work item here.
-      // Returning false creates a circular wait: the FSM is the producer of
-      // the PlanningRiskContext, yet it is only driven when this function
-      // reports the retry due.
-      if (planning_risk_context_.planning_attempt_id == 0u)
-        return true;
-      if (p4_pending_channel_work_item_)
-      {
-        // The frozen guide remains search lineage from the failed snapshot,
-        // but its replacement actual curve belongs to this new planning
-        // attempt.  Normal cached-curve recertification performs the same
-        // explicit rebind before running the ordinary latest-snapshot,
-        // geometry, local-assurance and P5 gates.  Without it every freshness
-        // retry is rejected solely because the attempt sequence advanced.
-        p4_pending_channel_work_item_->planning_attempt_id =
-            planning_risk_context_.planning_attempt_id;
-      }
-      // The retry just consumed this execution snapshot.  If its exact child
-      // is rejected for freshness again, another retry must wait for a newer
-      // snapshot instead of repeatedly reusing the original route snapshot.
-      p4_successor_schedule_.last_attempt_execution_snapshot_id =
-          effective_execution_snapshot_id;
-      p4_successor_schedule_.awaiting_new_snapshot = false;
-      p4_successor_schedule_.result_delivered = false;
+      // Timer/safety callbacks only report that the work is schedulable. The
+      // planning callback is the sole consumer and performs the attempt
+      // rebind plus snapshot/retry transition atomically.
+      return true;
     }
     if (!deadline.valid || p4_successor_schedule_.result_delivered ||
         now_s > p4_execution_certificate_.execution_deadline_s + 1.0e-9)
@@ -5611,16 +5598,34 @@ namespace ego_planner
         successor_now_s, execution ? execution->execution_snapshot_id : 0u,
         planning_risk_context_.planning_start_s);
     const auto consume_pending_channel_work_item =
-        [this](
+        [this, successor_now_s](
             const bool successor_retry)
             -> std::optional<P4ForwardDecision>
         {
           if (!p4_pending_channel_work_item_)
             return std::nullopt;
-          P4ForwardDecision retry =
-              std::move(*p4_pending_channel_work_item_);
-          p4_pending_channel_work_item_.reset();
-          p4_pending_channel_context_.reset();
+          P4ForwardDecision retry;
+          if (p4_channel_preparation_lifecycle_.pending_identity)
+          {
+            P4ChannelPreparationTransition consume;
+            consume.kind = P4ChannelPreparationTransitionKind::CONSUME;
+            consume.decision = &*p4_pending_channel_work_item_;
+            consume.context = &planning_risk_context_;
+            consume.consumed_decision = &retry;
+            if (!transitionP4ChannelPreparation(
+                    consume, successor_now_s, nullptr))
+              return std::nullopt;
+          }
+          else
+          {
+            // Legacy single-channel/limited-prefix work is outside a
+            // multi-channel cohort and carries no sibling lifecycle.
+            retry = std::move(*p4_pending_channel_work_item_);
+            p4_pending_channel_work_item_.reset();
+            p4_pending_channel_context_.reset();
+          }
+          retry.planning_attempt_id =
+              planning_risk_context_.planning_attempt_id;
           retry.result_status = P4ForwardResultStatus::READY;
           if (successor_retry)
           {
@@ -5633,6 +5638,16 @@ namespace ego_planner
                 p4_successor_schedule_.deadline.candidate_ready_deadline_s;
             p4_successor_preparation_state_ =
                 P4SuccessorPreparationState::CURVE_PREPARING;
+            if (p4_successor_schedule_.awaiting_new_snapshot)
+            {
+              p4_successor_schedule_.last_attempt_execution_snapshot_id =
+                  planning_risk_context_.execution_snapshot
+                  ? planning_risk_context_.execution_snapshot->
+                        execution_snapshot_id
+                  : 0u;
+              p4_successor_schedule_.awaiting_new_snapshot = false;
+              p4_successor_schedule_.result_delivered = false;
+            }
           }
           return retry;
         };
@@ -10283,6 +10298,376 @@ namespace ego_planner
     }
   }
 
+  void EGOPlannerManager::resetP4ChannelPreparationLifecycle(
+      const bool clear_bundles)
+  {
+    p4_channel_preparation_lifecycle_ = P4ChannelPreparationLifecycle{};
+    p4_pending_channel_work_item_.reset();
+    p4_pending_channel_context_.reset();
+    if (clear_bundles)
+      p4_prepared_channel_bundles_.clear();
+  }
+
+  P4ChannelPreparationIdentity
+  EGOPlannerManager::p4ChannelPreparationIdentity(
+      const P4ForwardDecision &decision,
+      const P4PreparedSuccessorBundle *bundle,
+      const PlanningRiskContext *context,
+      const uint32_t retry_generation) const
+  {
+    P4ChannelPreparationIdentity identity;
+    identity.decision_event_id = decision.decision_event_id;
+    identity.channel_id = bundle && bundle->channel_record.channel_id > 0u
+        ? bundle->channel_record.channel_id
+        : decision.selected_channel_id;
+    identity.retry_generation = retry_generation;
+
+    const auto &cohort = p4_channel_preparation_lifecycle_;
+    if (cohort.diagnostics.decision_event_id == decision.decision_event_id)
+    {
+      identity.parent_trajectory_id = cohort.parent_trajectory_id;
+      identity.parent_start_time_ns = cohort.parent_start_time_ns;
+      identity.parent_curve_hash = cohort.parent_curve_hash;
+    }
+    else if (p4_execution_commitment_backup_.active &&
+             p4_execution_commitment_backup_.certificate.valid)
+    {
+      const auto &parent = p4_execution_commitment_backup_.certificate;
+      identity.parent_trajectory_id = parent.trajectory_id;
+      identity.parent_start_time_ns = parent.start_time_ns;
+      identity.parent_curve_hash = parent.control_points_hash;
+    }
+    else if (p4_successor_schedule_.parent_trajectory_id > 0)
+    {
+      identity.parent_trajectory_id =
+          p4_successor_schedule_.parent_trajectory_id;
+      identity.parent_start_time_ns =
+          p4_successor_schedule_.parent_start_time_ns;
+      identity.parent_curve_hash =
+          p4_successor_schedule_.parent_control_points_hash;
+    }
+
+    if (bundle && !bundle->curve_identity.empty())
+      identity.curve_identity = bundle->curve_identity;
+    else
+      identity.curve_identity =
+          "unmaterialized:" + p4PreparedGuideIdentity(decision.selected_guide);
+
+    if (context && context->execution_snapshot)
+      identity.source_execution_snapshot_id =
+          context->execution_snapshot->execution_snapshot_id;
+    else if (bundle &&
+             bundle->preparation_identity.source_execution_snapshot_id > 0u)
+      identity.source_execution_snapshot_id =
+          bundle->preparation_identity.source_execution_snapshot_id;
+    else
+      identity.source_execution_snapshot_id =
+          decision.snapshot_identity.execution_snapshot_id;
+    return identity;
+  }
+
+  bool EGOPlannerManager::failP4ChannelPreparationLifecycle(
+      const std::string &detail, const double now_s, std::string *reason)
+  {
+    auto &lifecycle = p4_channel_preparation_lifecycle_;
+    lifecycle.diagnostics.lifecycle_failure = detail;
+    lifecycle.diagnostics.terminal = true;
+    lifecycle.diagnostics.terminal_reason =
+        "channel_lifecycle_failure:" + detail;
+    lifecycle.pending_identity.reset();
+    lifecycle.active_identity.reset();
+    p4_pending_channel_work_item_.reset();
+    p4_pending_channel_context_.reset();
+    p4_last_actual_curve_certification_.complete = false;
+    p4_last_actual_curve_certification_.failure =
+        P4PreparedCurveFailure::LIFECYCLE;
+    p4_last_actual_curve_certification_.detail =
+        lifecycle.diagnostics.terminal_reason;
+    if (lifecycle.terminal_decision)
+      last_p4_forward_decision_ = *lifecycle.terminal_decision;
+    else
+      last_p4_forward_decision_.reason =
+          lifecycle.diagnostics.terminal_reason;
+    if (reason)
+      *reason = lifecycle.diagnostics.terminal_reason;
+    if (std::isfinite(now_s))
+    {
+      P4ExecutionCheckDiagnostics failed;
+      failed.applicable = true;
+      failed.allowed = false;
+      failed.identity_match = false;
+      failed.execution_snapshot_id = planning_risk_context_.execution_snapshot
+          ? planning_risk_context_.execution_snapshot->execution_snapshot_id
+          : 0u;
+      failed.reason = lifecycle.diagnostics.terminal_reason;
+      appendP4ExecutionEvent(
+          "CHANNEL_PREPARATION_LIFECYCLE_FAILED", now_s, failed);
+    }
+    return false;
+  }
+
+  bool EGOPlannerManager::transitionP4ChannelPreparation(
+      const P4ChannelPreparationTransition &transition, const double now_s,
+      std::string *reason)
+  {
+    if (transition.kind == P4ChannelPreparationTransitionKind::RESET)
+    {
+      resetP4ChannelPreparationLifecycle(transition.clear_bundles);
+      if (reason) *reason = "channel_lifecycle_reset";
+      return true;
+    }
+    if (!transition.decision || transition.decision->decision_event_id == 0u)
+      return failP4ChannelPreparationLifecycle(
+          "missing_decision_event_identity", now_s, reason);
+
+    auto &lifecycle = p4_channel_preparation_lifecycle_;
+    const uint64_t event_id = transition.decision->decision_event_id;
+    if (lifecycle.diagnostics.decision_event_id == 0u ||
+        event_id > lifecycle.diagnostics.decision_event_id)
+    {
+      resetP4ChannelPreparationLifecycle(true);
+      lifecycle.diagnostics.decision_event_id = event_id;
+      for (const auto &candidate : transition.decision->candidates)
+        if (candidate.channel_id > 0u && candidate.occupancy_supported)
+          lifecycle.expected_channel_ids.insert(candidate.channel_id);
+      lifecycle.diagnostics.expected_channel_count =
+          lifecycle.expected_channel_ids.size();
+      lifecycle.diagnostics.transition_limit =
+          std::max<std::size_t>(8u,
+              lifecycle.expected_channel_ids.size() * 6u + 2u);
+      const auto identity = p4ChannelPreparationIdentity(
+          *transition.decision, transition.bundle, transition.context,
+          transition.retry_generation);
+      lifecycle.parent_trajectory_id = identity.parent_trajectory_id;
+      lifecycle.parent_start_time_ns = identity.parent_start_time_ns;
+      lifecycle.parent_curve_hash = identity.parent_curve_hash;
+    }
+    else if (event_id < lifecycle.diagnostics.decision_event_id)
+      return failP4ChannelPreparationLifecycle(
+          "stale_decision_event_consumed", now_s, reason);
+    else if (lifecycle.diagnostics.terminal)
+      return failP4ChannelPreparationLifecycle(
+          "terminal_cohort_reentered", now_s, reason);
+
+    const auto consume_transition_budget = [&]() {
+      ++lifecycle.diagnostics.transition_count;
+      return lifecycle.diagnostics.transition_count <=
+          lifecycle.diagnostics.transition_limit;
+    };
+    if (!consume_transition_budget())
+      return failP4ChannelPreparationLifecycle(
+          "transition_limit_exceeded", now_s, reason);
+
+    switch (transition.kind)
+    {
+      case P4ChannelPreparationTransitionKind::RESET:
+        break;
+      case P4ChannelPreparationTransitionKind::REGISTER_PENDING_BUNDLE:
+      {
+        if (!transition.bundle)
+          return failP4ChannelPreparationLifecycle(
+              "pending_bundle_missing", now_s, reason);
+        auto identity = p4ChannelPreparationIdentity(
+            *transition.decision, transition.bundle, transition.context,
+            transition.retry_generation);
+        const auto existing = p4_prepared_channel_bundles_.find(
+            identity.channel_id);
+        if (existing != p4_prepared_channel_bundles_.end() &&
+            (existing->second.state ==
+                 P4SuccessorPreparationState::PREPARED_CERTIFIED ||
+             existing->second.state == P4SuccessorPreparationState::FAILED) &&
+            existing->second.preparation_identity.retry_generation >=
+                identity.retry_generation)
+          return failP4ChannelPreparationLifecycle(
+              "terminal_bundle_became_pending", now_s, reason);
+        transition.bundle->state =
+            P4SuccessorPreparationState::CURVE_PREPARING;
+        transition.bundle->preparation_identity = identity;
+        transition.bundle->certification_conclusion_count = 0u;
+        p4_prepared_channel_bundles_[identity.channel_id] =
+            *transition.bundle;
+        if (lifecycle.active_identity &&
+            lifecycle.active_identity->channel_id == identity.channel_id)
+          lifecycle.active_identity.reset();
+        if (reason) *reason = "pending_bundle_registered";
+        return true;
+      }
+      case P4ChannelPreparationTransitionKind::SCHEDULE:
+      {
+        const uint64_t channel_id = transition.decision->selected_channel_id;
+        if (lifecycle.expected_channel_ids.count(channel_id) == 0u)
+          return failP4ChannelPreparationLifecycle(
+              "scheduled_channel_not_in_cohort", now_s, reason);
+        const auto existing = p4_prepared_channel_bundles_.find(channel_id);
+        if (existing != p4_prepared_channel_bundles_.end() &&
+            (existing->second.state ==
+                 P4SuccessorPreparationState::PREPARED_CERTIFIED ||
+             existing->second.state == P4SuccessorPreparationState::FAILED))
+          return failP4ChannelPreparationLifecycle(
+              "terminal_bundle_rescheduled", now_s, reason);
+        auto identity = p4ChannelPreparationIdentity(
+            *transition.decision, transition.bundle, transition.context,
+            transition.retry_generation);
+        if (!transition.freeze_context && transition.retry_generation > 0u)
+          identity.source_execution_snapshot_id = 0u;
+        if (lifecycle.pending_identity)
+        {
+          if (lifecycle.pending_identity->canonical() == identity.canonical())
+          {
+            --lifecycle.diagnostics.transition_count;
+            if (reason) *reason = "channel_work_already_scheduled";
+            return true;
+          }
+          return failP4ChannelPreparationLifecycle(
+              "pending_work_replaced_before_consumption", now_s, reason);
+        }
+        lifecycle.pending_identity = identity;
+        p4_pending_channel_work_item_ = *transition.decision;
+        if (transition.freeze_context && transition.context)
+          p4_pending_channel_context_ = *transition.context;
+        else
+          p4_pending_channel_context_.reset();
+        ++lifecycle.diagnostics.pending_schedule_count;
+        if (reason) *reason = "channel_work_scheduled";
+        return true;
+      }
+      case P4ChannelPreparationTransitionKind::CONSUME:
+      {
+        if (!lifecycle.pending_identity ||
+            !p4_pending_channel_work_item_ ||
+            !transition.consumed_decision)
+          return failP4ChannelPreparationLifecycle(
+              "pending_work_missing_at_consumption", now_s, reason);
+        if (lifecycle.active_identity)
+          return failP4ChannelPreparationLifecycle(
+              "prior_work_still_active", now_s, reason);
+        auto identity = *lifecycle.pending_identity;
+        if (transition.context && transition.context->execution_snapshot)
+          identity.source_execution_snapshot_id =
+              transition.context->execution_snapshot->execution_snapshot_id;
+        if (!identity.complete())
+          return failP4ChannelPreparationLifecycle(
+              "consumed_work_identity_incomplete", now_s, reason);
+        if (!lifecycle.consumed_identities.insert(identity.canonical()).second)
+          return failP4ChannelPreparationLifecycle(
+              "work_identity_consumed_twice", now_s, reason);
+        *transition.consumed_decision = *p4_pending_channel_work_item_;
+        if (transition.context)
+          transition.consumed_decision->planning_attempt_id =
+              transition.context->planning_attempt_id;
+        lifecycle.active_identity = identity;
+        lifecycle.pending_identity.reset();
+        p4_pending_channel_work_item_.reset();
+        p4_pending_channel_context_.reset();
+        ++lifecycle.diagnostics.pending_consume_count;
+        if (reason) *reason = "channel_work_consumed";
+        return true;
+      }
+      case P4ChannelPreparationTransitionKind::BEGIN_FRESHNESS_RETRY:
+      {
+        if (lifecycle.diagnostics.freshness_retry_count >= 1u)
+          return failP4ChannelPreparationLifecycle(
+              "freshness_retry_limit_exceeded", now_s, reason);
+        ++lifecycle.diagnostics.freshness_retry_count;
+        for (auto &entry : p4_prepared_channel_bundles_)
+          if (entry.second.channel_record.feasible() &&
+              entry.second.trajectory.traj_id_ > 0)
+          {
+            entry.second.state =
+                P4SuccessorPreparationState::CURVE_PREPARING;
+            entry.second.preparation_identity.retry_generation = 1u;
+            entry.second.certification_conclusion_count = 0u;
+          }
+        if (transition.bundle)
+        {
+          auto identity = p4ChannelPreparationIdentity(
+              *transition.decision, transition.bundle, transition.context,
+              1u);
+          transition.bundle->state =
+              P4SuccessorPreparationState::CURVE_PREPARING;
+          transition.bundle->preparation_identity = identity;
+          transition.bundle->certification_conclusion_count = 0u;
+          p4_prepared_channel_bundles_[identity.channel_id] =
+              *transition.bundle;
+        }
+        lifecycle.active_identity.reset();
+        if (reason) *reason = "channel_freshness_retry_started";
+        return true;
+      }
+      case P4ChannelPreparationTransitionKind::RECORD_TERMINAL_BUNDLE:
+      {
+        if (!transition.bundle)
+          return failP4ChannelPreparationLifecycle(
+              "terminal_bundle_missing", now_s, reason);
+        auto identity = p4ChannelPreparationIdentity(
+            *transition.decision, transition.bundle, transition.context,
+            transition.retry_generation);
+        if (lifecycle.active_identity &&
+            lifecycle.active_identity->channel_id == identity.channel_id)
+        {
+          const std::string exact_curve_identity = identity.curve_identity;
+          identity = *lifecycle.active_identity;
+          if (identity.curve_identity.rfind("unmaterialized:", 0u) == 0u)
+            identity.curve_identity = exact_curve_identity;
+          if (transition.context && transition.context->execution_snapshot)
+            identity.source_execution_snapshot_id =
+                transition.context->execution_snapshot->execution_snapshot_id;
+        }
+        if (!identity.complete())
+          return failP4ChannelPreparationLifecycle(
+              "terminal_bundle_identity_incomplete", now_s, reason);
+        const auto existing = p4_prepared_channel_bundles_.find(
+            identity.channel_id);
+        if (existing != p4_prepared_channel_bundles_.end() &&
+            (existing->second.state ==
+                 P4SuccessorPreparationState::PREPARED_CERTIFIED ||
+             existing->second.state == P4SuccessorPreparationState::FAILED) &&
+            existing->second.preparation_identity.retry_generation >=
+                identity.retry_generation)
+        {
+          if (existing->second.state == transition.terminal_bundle_state &&
+              existing->second.preparation_identity.canonical() ==
+                  identity.canonical())
+          {
+            --lifecycle.diagnostics.transition_count;
+            lifecycle.active_identity.reset();
+            if (reason) *reason = "terminal_bundle_already_recorded";
+            return true;
+          }
+          return failP4ChannelPreparationLifecycle(
+              "terminal_bundle_rewritten", now_s, reason);
+        }
+        if (!lifecycle.concluded_identities.insert(
+                identity.canonical()).second)
+          return failP4ChannelPreparationLifecycle(
+              "certification_conclusion_repeated", now_s, reason);
+        transition.bundle->state = transition.terminal_bundle_state;
+        transition.bundle->preparation_identity = identity;
+        transition.bundle->certification_conclusion_count = 1u;
+        p4_prepared_channel_bundles_[identity.channel_id] =
+            *transition.bundle;
+        lifecycle.active_identity.reset();
+        ++lifecycle.diagnostics.certification_conclusion_count;
+        if (reason) *reason = "terminal_bundle_recorded";
+        return true;
+      }
+      case P4ChannelPreparationTransitionKind::FINISH_COHORT:
+        lifecycle.diagnostics.terminal = true;
+        lifecycle.diagnostics.terminal_reason = transition.detail;
+        lifecycle.terminal_decision = *transition.decision;
+        lifecycle.pending_identity.reset();
+        lifecycle.active_identity.reset();
+        p4_pending_channel_work_item_.reset();
+        p4_pending_channel_context_.reset();
+        if (transition.clear_bundles)
+          p4_prepared_channel_bundles_.clear();
+        if (reason) *reason = "channel_cohort_terminal";
+        return true;
+    }
+    return failP4ChannelPreparationLifecycle(
+        "unknown_transition", now_s, reason);
+  }
+
   void EGOPlannerManager::restoreP4ExecutionCommitmentAfterCandidateRejection()
   {
     const bool had_incumbent = p4_execution_commitment_backup_.active;
@@ -10334,8 +10719,7 @@ namespace ego_planner
     // spuriously trigger the full-channel fallback.
     p4_successor_preparation_state_ =
         P4SuccessorPreparationState::ROUTE_PENDING;
-    p4_pending_channel_work_item_.reset();
-    p4_pending_channel_context_.reset();
+    resetP4ChannelPreparationLifecycle(true);
   }
 
   bool EGOPlannerManager::preparedP4SuccessorCandidateEarly(
@@ -11244,43 +11628,11 @@ namespace ego_planner
                 "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
     if (!frozen_support_expired)
       return false;
-
-    const auto selected = std::find_if(
-        last_p4_forward_decision_.candidates.begin(),
-        last_p4_forward_decision_.candidates.end(),
-        [this](const P4ForwardCandidate &candidate) {
-          return candidate.channel_id > 0u &&
-              candidate.channel_id ==
-                  last_p4_forward_decision_.selected_channel_id;
-        });
-    if (selected == last_p4_forward_decision_.candidates.end())
+    const auto &lifecycle = p4_channel_preparation_lifecycle_.diagnostics;
+    if (lifecycle.decision_event_id !=
+        last_p4_forward_decision_.decision_event_id)
       return true;
-    const auto prior = p4_prepared_channel_bundles_.find(
-        selected->channel_id);
-    if (prior == p4_prepared_channel_bundles_.end() ||
-        prior->second.state !=
-            P4SuccessorPreparationState::CURVE_PREPARING)
-      return true;
-
-    // The first expiry keeps the exact curve and reauthorizes the complete
-    // sibling cohort on a newer snapshot. If that same immutable curve
-    // expires again after being activated from the retained bundle, another
-    // cohort restart cannot add evidence and can livelock under load. Let the
-    // ordinary typed-failure path mark only this curve non-feasible; every
-    // selectable sibling still needs its fresh certificate and all hard
-    // freshness gates remain unchanged.
-    const LocalTrajData &retained = prior->second.trajectory;
-    UniformBspline retained_curve = retained.position_traj_;
-    UniformBspline current_curve = local_data_.position_traj_;
-    const bool same_exact_curve =
-        retained.traj_id_ == local_data_.traj_id_ &&
-        retained.start_time_.nanoseconds() ==
-            local_data_.start_time_.nanoseconds() &&
-        p4ControlPointHash(retained_curve.getControlPoint()) ==
-            p4ControlPointHash(current_curve.getControlPoint()) &&
-        p4KnotVectorHash(retained_curve.getKnot()) ==
-            p4KnotVectorHash(current_curve.getKnot());
-    return !same_exact_curve;
+    return !lifecycle.terminal && lifecycle.freshness_retry_count == 0u;
   }
 
   P4NormalChannelPreparationDisposition
@@ -11293,24 +11645,20 @@ namespace ego_planner
       if (reason) *reason = why;
       return disposition;
     };
+    const auto &lifecycle =
+        p4_channel_preparation_lifecycle_.diagnostics;
+    if (lifecycle.decision_event_id ==
+            last_p4_forward_decision_.decision_event_id &&
+        lifecycle.terminal)
+    {
+      (void)failP4ChannelPreparationLifecycle(
+          "terminal_cohort_reentered", now_s, reason);
+      return P4NormalChannelPreparationDisposition::REJECTED;
+    }
     if (!p4ActualCurveAwaitingRiskSnapshot())
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_channel_risk_snapshot_is_not_pending");
-
-    // Prepared normal-channel artifacts are a transaction scoped to one
-    // route decision event. Stable channel ids and an unchanged risk
-    // snapshot do not make a hard failure from an older event evidence about
-    // a freshly optimized curve.
-    for (auto entry = p4_prepared_channel_bundles_.begin();
-         entry != p4_prepared_channel_bundles_.end();)
-    {
-      if (entry->second.decision.decision_event_id !=
-          last_p4_forward_decision_.decision_event_id)
-        entry = p4_prepared_channel_bundles_.erase(entry);
-      else
-        ++entry;
-    }
 
     std::set<uint64_t> expected_channel_ids;
     for (const auto &candidate : last_p4_forward_decision_.candidates)
@@ -11343,23 +11691,6 @@ namespace ego_planner
             P4PreparedCurveFailure::FRESHNESS &&
         p4_last_actual_curve_certification_.detail ==
             "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
-    if (frozen_support_expired)
-    {
-      // The later sibling reached the same mandatory local-support gate
-      // after the comparison snapshot aged out.  This is not evidence that
-      // its topology is unsafe, and the earlier sibling cannot remain a
-      // winner certified against a different snapshot.  Retain both exact
-      // curves but revoke their prepared authority so the existing cached
-      // transaction reauthorizes every feasible sibling under one fresh
-      // context.  No local clearance, collision, braking, identity or
-      // freshness predicate is bypassed.
-      for (auto &entry : p4_prepared_channel_bundles_)
-        if (entry.second.channel_record.feasible() &&
-            entry.second.trajectory.traj_id_ > 0)
-          entry.second.state =
-              P4SuccessorPreparationState::CURVE_PREPARING;
-    }
-
     const std::string control_hash = p4ControlPointHash(
         local_data_.position_traj_.getControlPoint());
     const std::string knot_hash = p4KnotVectorHash(
@@ -11391,10 +11722,21 @@ namespace ego_planner
     pending.channel_record.duration_s =
         local_data_.position_traj_.getTimeSum();
     pending.channel_record.failure = P4PreparedCurveFailure::INCOMPLETE;
-    p4_prepared_channel_bundles_[selected->channel_id] = std::move(pending);
+    P4ChannelPreparationTransition register_pending;
+    register_pending.kind = frozen_support_expired
+        ? P4ChannelPreparationTransitionKind::BEGIN_FRESHNESS_RETRY
+        : P4ChannelPreparationTransitionKind::REGISTER_PENDING_BUNDLE;
+    register_pending.decision = &last_p4_forward_decision_;
+    register_pending.context = &planning_risk_context_;
+    register_pending.bundle = &pending;
+    register_pending.retry_generation = frozen_support_expired ? 1u : 0u;
+    if (!transitionP4ChannelPreparation(
+            register_pending, now_s, reason))
+      return P4NormalChannelPreparationDisposition::REJECTED;
 
-    const auto schedule = [this](const P4ForwardCandidate &candidate,
-                                 const bool freeze_context) {
+    const auto schedule = [this, now_s, reason](
+        const P4ForwardCandidate &candidate,
+        const bool freeze_context) {
       P4ForwardDecision next = last_p4_forward_decision_;
       next.result_status = freeze_context ? P4ForwardResultStatus::READY
                                           : P4ForwardResultStatus::PENDING;
@@ -11416,12 +11758,25 @@ namespace ego_planner
       next.reason = freeze_context
           ? "normal_next_channel_curve_pending"
           : "normal_channel_risk_snapshot_not_ready";
+      P4ChannelPreparationTransition schedule_transition;
+      schedule_transition.kind =
+          P4ChannelPreparationTransitionKind::SCHEDULE;
+      schedule_transition.decision = &next;
+      schedule_transition.context = &planning_risk_context_;
+      const auto cached = p4_prepared_channel_bundles_.find(
+          candidate.channel_id);
+      if (cached != p4_prepared_channel_bundles_.end())
+      {
+        schedule_transition.bundle = &cached->second;
+        schedule_transition.retry_generation =
+            cached->second.preparation_identity.retry_generation;
+      }
+      schedule_transition.freeze_context = freeze_context;
+      if (!transitionP4ChannelPreparation(
+              schedule_transition, now_s, reason))
+        return false;
       last_p4_forward_decision_ = next;
-      p4_pending_channel_work_item_ = std::move(next);
-      if (freeze_context)
-        p4_pending_channel_context_ = planning_risk_context_;
-      else
-        p4_pending_channel_context_.reset();
+      return true;
     };
 
     const auto missing = std::find_if(
@@ -11433,7 +11788,8 @@ namespace ego_planner
         });
     if (missing != last_p4_forward_decision_.candidates.end())
     {
-      schedule(*missing, true);
+      if (!schedule(*missing, true))
+        return P4NormalChannelPreparationDisposition::REJECTED;
       return finish(
           P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
           "normal_next_channel_curve_pending");
@@ -11453,7 +11809,8 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::REJECTED,
           "normal_channel_pending_curve_missing");
-    schedule(*retry, false);
+    if (!schedule(*retry, false))
+      return P4NormalChannelPreparationDisposition::REJECTED;
     appendP4ForwardDecision(
         last_p4_forward_decision_,
         "normal_channel_risk_snapshot_pending", now_s);
@@ -11492,10 +11849,16 @@ namespace ego_planner
     }
 
     const PlanningRiskContext frozen_context = *context;
+    P4ForwardDecision consumed_decision;
+    P4ChannelPreparationTransition consume;
+    consume.kind = P4ChannelPreparationTransitionKind::CONSUME;
+    consume.decision = &*p4_pending_channel_work_item_;
+    consume.context = &frozen_context;
+    consume.consumed_decision = &consumed_decision;
+    if (!transitionP4ChannelPreparation(consume, now_s, nullptr))
+      return false;
     local_data_ = pending->second.trajectory;
-    last_p4_forward_decision_ = pending->second.decision;
-    last_p4_forward_decision_.planning_attempt_id =
-        frozen_context.planning_attempt_id;
+    last_p4_forward_decision_ = std::move(consumed_decision);
     last_p4_forward_decision_.result_status = P4ForwardResultStatus::READY;
     last_p4_forward_decision_.action = P4ForwardAction::CANDIDATE_READY;
     last_p4_forward_decision_.selection_authority =
@@ -11504,8 +11867,6 @@ namespace ego_planner
     p4_braking_anchors_ = pending->second.braking_anchors;
     p4_committed_risk_window_plan_ = pending->second.risk_window_plan;
     planning_risk_context_ = frozen_context;
-    p4_pending_channel_work_item_.reset();
-    p4_pending_channel_context_.reset();
     return true;
   }
 
@@ -11525,19 +11886,15 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_channel_failure_not_typed");
-
-    // A channel id names a topology slot, not a permanent curve. Do not let
-    // a completed hard failure from an older planning event satisfy the
-    // all-channel comparison for this event, even when both events reuse the
-    // same snapshot and stable channel ids.
-    for (auto entry = p4_prepared_channel_bundles_.begin();
-         entry != p4_prepared_channel_bundles_.end();)
+    const auto &lifecycle =
+        p4_channel_preparation_lifecycle_.diagnostics;
+    if (lifecycle.decision_event_id ==
+            last_p4_forward_decision_.decision_event_id &&
+        lifecycle.terminal)
     {
-      if (entry->second.decision.decision_event_id !=
-          last_p4_forward_decision_.decision_event_id)
-        entry = p4_prepared_channel_bundles_.erase(entry);
-      else
-        ++entry;
+      (void)failP4ChannelPreparationLifecycle(
+          "terminal_cohort_reentered", now_s, reason);
+      return P4NormalChannelPreparationDisposition::REJECTED;
     }
 
     std::set<uint64_t> expected_channel_ids;
@@ -11567,6 +11924,7 @@ namespace ego_planner
           "normal_channel_failed_candidate_missing");
 
     P4PreparedSuccessorBundle failed_bundle;
+    failed_bundle.state = P4SuccessorPreparationState::FAILED;
     failed_bundle.decision = last_p4_forward_decision_;
     auto &record = failed_bundle.channel_record;
     record.channel_id = selected->channel_id;
@@ -11613,11 +11971,11 @@ namespace ego_planner
               frozen_grid_map_epoch->frame_contract_id;
       }
     }
-    // If this failure completes an in-flight frozen comparison, use the
-    // exact identity already carried by its prepared sibling. Reconstructing
-    // the identity from live context can differ in harmless timestamp fields
-    // and must not evict a complete earlier bundle.
-    if (!p4_prepared_channel_bundles_.empty())
+    // Before a freshness retry all siblings share the original frozen
+    // snapshot. During the one permitted retry, the current context is the
+    // new common source and must replace the old snapshot identity.
+    if (lifecycle.freshness_retry_count == 0u &&
+        !p4_prepared_channel_bundles_.empty())
       record.snapshot_identity = p4_prepared_channel_bundles_.begin()->second.
           channel_record.snapshot_identity;
     record.guide_identity = selected->path_hash;
@@ -11625,20 +11983,19 @@ namespace ego_planner
         last_p4_forward_decision_.selected_guide);
     record.failure = failure;
 
-    for (auto entry = p4_prepared_channel_bundles_.begin();
-         entry != p4_prepared_channel_bundles_.end();)
-    {
-      if (entry->second.channel_record.snapshot_identity.canonical() !=
-              record.snapshot_identity.canonical() &&
-          entry->second.state !=
-              P4SuccessorPreparationState::CURVE_PREPARING)
-        entry = p4_prepared_channel_bundles_.erase(entry);
-      else
-        ++entry;
-    }
-    const uint64_t failed_channel_id = record.channel_id;
-    p4_prepared_channel_bundles_[failed_channel_id] =
-        std::move(failed_bundle);
+    P4ChannelPreparationTransition record_terminal;
+    record_terminal.kind =
+        P4ChannelPreparationTransitionKind::RECORD_TERMINAL_BUNDLE;
+    record_terminal.decision = &failed_bundle.decision;
+    record_terminal.context = &planning_risk_context_;
+    record_terminal.bundle = &failed_bundle;
+    record_terminal.terminal_bundle_state =
+        P4SuccessorPreparationState::FAILED;
+    record_terminal.retry_generation = static_cast<uint32_t>(
+        lifecycle.freshness_retry_count);
+    if (!transitionP4ChannelPreparation(
+            record_terminal, now_s, reason))
+      return P4NormalChannelPreparationDisposition::REJECTED;
 
     const auto next_unprepared = std::find_if(
         last_p4_forward_decision_.candidates.begin(),
@@ -11684,9 +12041,16 @@ namespace ego_planner
         appendP4ForwardDecision(
             last_p4_forward_decision_,
             "normal_channel_typed_failure_pending_recertification", now_s);
+        P4ChannelPreparationTransition schedule;
+        schedule.kind = P4ChannelPreparationTransitionKind::SCHEDULE;
+        schedule.decision = &pending;
+        schedule.bundle = &cached->second;
+        schedule.retry_generation = cached->second.preparation_identity.
+            retry_generation;
+        schedule.freeze_context = false;
+        if (!transitionP4ChannelPreparation(schedule, now_s, reason))
+          return P4NormalChannelPreparationDisposition::REJECTED;
         last_p4_forward_decision_ = pending;
-        p4_pending_channel_work_item_ = std::move(pending);
-        p4_pending_channel_context_.reset();
         return finish(
             P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
             "normal_channel_risk_snapshot_pending");
@@ -11704,9 +12068,19 @@ namespace ego_planner
             return entry.second.channel_record.feasible();
           });
       if (feasible == p4_prepared_channel_bundles_.end())
+      {
+        P4ChannelPreparationTransition finish_cohort;
+        finish_cohort.kind =
+            P4ChannelPreparationTransitionKind::FINISH_COHORT;
+        finish_cohort.decision = &last_p4_forward_decision_;
+        finish_cohort.clear_bundles = true;
+        finish_cohort.detail = "normal_channel_all_preparations_failed";
+        (void)transitionP4ChannelPreparation(
+            finish_cohort, now_s, nullptr);
         return finish(
             P4NormalChannelPreparationDisposition::REJECTED,
             "normal_channel_all_preparations_failed");
+      }
 
       // The last callback failed, but an earlier frozen channel already owns
       // a complete bundle. Restore that prepare-only state and run the normal
@@ -11752,9 +12126,16 @@ namespace ego_planner
     next.reason = "normal_next_channel_after_typed_failure:" + detail;
     appendP4ForwardDecision(
         last_p4_forward_decision_, "normal_channel_typed_failure", now_s);
+    P4ChannelPreparationTransition schedule;
+    schedule.kind = P4ChannelPreparationTransitionKind::SCHEDULE;
+    schedule.decision = &next;
+    schedule.context = &planning_risk_context_;
+    schedule.retry_generation = static_cast<uint32_t>(
+        lifecycle.freshness_retry_count);
+    schedule.freeze_context = true;
+    if (!transitionP4ChannelPreparation(schedule, now_s, reason))
+      return P4NormalChannelPreparationDisposition::REJECTED;
     last_p4_forward_decision_ = next;
-    p4_pending_channel_work_item_ = std::move(next);
-    p4_pending_channel_context_ = planning_risk_context_;
     return finish(
         P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
         "normal_next_channel_after_typed_failure");
@@ -11783,15 +12164,6 @@ namespace ego_planner
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_multi_channel_comparison_not_required");
 
-    for (auto entry = p4_prepared_channel_bundles_.begin();
-         entry != p4_prepared_channel_bundles_.end();)
-    {
-      if (entry->second.decision.decision_event_id !=
-          last_p4_forward_decision_.decision_event_id)
-        entry = p4_prepared_channel_bundles_.erase(entry);
-      else
-        ++entry;
-    }
     if (!p4_execution_certificate_.valid ||
         p4_execution_certificate_.trajectory_id != local_data_.traj_id_ ||
         p4_execution_certificate_.start_time_ns !=
@@ -11966,10 +12338,23 @@ namespace ego_planner
       else
         ++entry;
     }
-    p4_prepared_channel_bundles_[record.channel_id] = bundle;
-    while (p4_prepared_channel_bundles_.size() > 4u)
-      p4_prepared_channel_bundles_.erase(
-          p4_prepared_channel_bundles_.begin());
+
+    P4ChannelPreparationTransition record_terminal;
+    record_terminal.kind =
+        P4ChannelPreparationTransitionKind::RECORD_TERMINAL_BUNDLE;
+    record_terminal.decision = &bundle.decision;
+    record_terminal.context = &planning_risk_context_;
+    record_terminal.bundle = &bundle;
+    record_terminal.terminal_bundle_state =
+        P4SuccessorPreparationState::PREPARED_CERTIFIED;
+    record_terminal.retry_generation = static_cast<uint32_t>(
+        p4_channel_preparation_lifecycle_.diagnostics.
+            freshness_retry_count);
+    if (!transitionP4ChannelPreparation(
+            record_terminal, now_s, reason))
+      return finish(
+          P4NormalChannelPreparationDisposition::REJECTED,
+          p4_channel_preparation_lifecycle_.diagnostics.terminal_reason);
 
     const auto next_unprepared = std::find_if(
         bundle.decision.candidates.begin(), bundle.decision.candidates.end(),
@@ -12000,9 +12385,19 @@ namespace ego_planner
       next.channel_comparison_state =
           P4ChannelComparisonState::PARTIAL_COMPARISON;
       next.reason = "normal_next_channel_curve_pending";
+      P4ChannelPreparationTransition schedule;
+      schedule.kind = P4ChannelPreparationTransitionKind::SCHEDULE;
+      schedule.decision = &next;
+      schedule.context = &planning_risk_context_;
+      schedule.retry_generation = static_cast<uint32_t>(
+          p4_channel_preparation_lifecycle_.diagnostics.
+              freshness_retry_count);
+      schedule.freeze_context = true;
+      if (!transitionP4ChannelPreparation(schedule, now_s, reason))
+        return finish(
+            P4NormalChannelPreparationDisposition::REJECTED,
+            p4_channel_preparation_lifecycle_.diagnostics.terminal_reason);
       last_p4_forward_decision_ = next;
-      p4_pending_channel_work_item_ = std::move(next);
-      p4_pending_channel_context_ = planning_risk_context_;
       appendP4ForwardDecision(
           bundle.decision, "normal_channel_curve_prepared", now_s);
       return finish(
@@ -12036,9 +12431,19 @@ namespace ego_planner
       next.channel_comparison_state =
           P4ChannelComparisonState::PARTIAL_COMPARISON;
       next.reason = "normal_channel_cached_curve_recertification_pending";
+      P4ChannelPreparationTransition schedule;
+      schedule.kind = P4ChannelPreparationTransitionKind::SCHEDULE;
+      schedule.decision = &next;
+      schedule.context = &planning_risk_context_;
+      schedule.bundle = &cached->second;
+      schedule.retry_generation = cached->second.preparation_identity.
+          retry_generation;
+      schedule.freeze_context = true;
+      if (!transitionP4ChannelPreparation(schedule, now_s, reason))
+        return finish(
+            P4NormalChannelPreparationDisposition::REJECTED,
+            p4_channel_preparation_lifecycle_.diagnostics.terminal_reason);
       last_p4_forward_decision_ = next;
-      p4_pending_channel_work_item_ = std::move(next);
-      p4_pending_channel_context_ = planning_risk_context_;
       appendP4ForwardDecision(
           bundle.decision,
           "normal_channel_cached_curve_recertification_pending", now_s);
@@ -12077,12 +12482,18 @@ namespace ego_planner
       observe.speed_cap_mps = 0.0;
       observe.reason = "normal_channel_comparison_incomparable_hold";
       last_p4_forward_decision_ = std::move(observe);
-      p4_pending_channel_work_item_.reset();
-      p4_pending_channel_context_.reset();
       appendP4ForwardDecision(
           last_p4_forward_decision_,
           "normal_channel_comparison_incomparable", now_s);
-      p4_prepared_channel_bundles_.clear();
+      P4ChannelPreparationTransition finish_cohort;
+      finish_cohort.kind =
+          P4ChannelPreparationTransitionKind::FINISH_COHORT;
+      finish_cohort.decision = &last_p4_forward_decision_;
+      finish_cohort.clear_bundles = true;
+      finish_cohort.detail =
+          "normal_channel_comparison_incomparable_hold";
+      (void)transitionP4ChannelPreparation(
+          finish_cohort, now_s, nullptr);
       return finish(
           P4NormalChannelPreparationDisposition::REJECTED,
           "normal_channel_comparison_incomparable_hold");
@@ -12177,7 +12588,17 @@ namespace ego_planner
     appendP4ForwardDecision(
         last_p4_forward_decision_,
         "normal_channel_comparison_complete", now_s);
-    p4_prepared_channel_bundles_.clear();
+    P4ChannelPreparationTransition finish_cohort;
+    finish_cohort.kind =
+        P4ChannelPreparationTransitionKind::FINISH_COHORT;
+    finish_cohort.decision = &last_p4_forward_decision_;
+    finish_cohort.clear_bundles = true;
+    finish_cohort.detail = "normal_channel_comparison_complete";
+    if (!transitionP4ChannelPreparation(
+            finish_cohort, now_s, reason))
+      return finish(
+          P4NormalChannelPreparationDisposition::REJECTED,
+          p4_channel_preparation_lifecycle_.diagnostics.terminal_reason);
     return finish(
         P4NormalChannelPreparationDisposition::READY_TO_PUBLISH,
         "normal_channel_comparison_complete");

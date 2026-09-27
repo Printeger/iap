@@ -116,6 +116,8 @@ const char *p4PreparedCurveFailureName(
       return "compute_budget";
     case P4PreparedCurveFailure::SNAPSHOT_MISMATCH:
       return "snapshot_mismatch";
+    case P4PreparedCurveFailure::LIFECYCLE:
+      return "lifecycle";
     case P4PreparedCurveFailure::INCOMPLETE:
       return "incomplete";
   }
