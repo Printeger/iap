@@ -2283,6 +2283,34 @@ TEST(P4ActualCurveClearanceOptimization,
 }
 
 TEST(P4ActualCurveClearanceOptimization,
+     GuideTubePostconditionCoversBetweenQuarterSpanSamples) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_curve_guide_dense_postcondition.csv").string());
+
+  // The old four-samples-per-span postcondition observes at most 0.928 m at
+  // its quarter-span lattice, while the same cubic reaches 1.003 m between
+  // those samples. Production reserves 50 mm between the optimizer's 0.95 m
+  // tube and the final commit's 1.00 m tube, so this curve must be rejected
+  // before final commit rather than silently consuming that reserve.
+  Eigen::MatrixXd points(3, 4);
+  points.row(0).setConstant(0.5);
+  points.row(1) << 3.0534593711537212, -1.958881743064917,
+      3.054983624890763, -4.72460214999967;
+  points.row(2).setZero();
+  const std::vector<Eigen::Vector3d> guide{
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(1.0, 0.0, 0.0)};
+  optimizer->setP4ActualCurveGuideCorridor(points, 1.0, guide, 0.95);
+
+  EXPECT_FALSE(
+      optimizer->p4ActualCurveGuideCorridorSatisfiedForTest(points));
+}
+
+TEST(P4ActualCurveClearanceOptimization,
      PreservesTheMeasuredCurrentFrameClearanceChange) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureTwoForkNoCollision(map.get());

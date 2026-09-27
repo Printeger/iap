@@ -704,9 +704,33 @@ namespace ego_planner
     p4_actual_curve_guide_maximum_deviation_m_ = maximum_deviation_m;
     setBsplineInterval(interval_s);
     const int span_count = seed_control_points.cols() - order_;
-    constexpr int kSamplesPerSpan = 4;
-    const int sample_count = std::max(1, span_count * kSamplesPerSpan);
     const double duration_s = interval_s * span_count;
+    const auto maximum_control_point_norm = [](const Eigen::MatrixXd &points) {
+      double maximum = 0.0;
+      for (Eigen::Index column = 0; column < points.cols(); ++column)
+        maximum = std::max(maximum, points.col(column).norm());
+      return maximum;
+    };
+    UniformBspline seed_curve(seed_control_points, order_, interval_s);
+    UniformBspline seed_velocity = seed_curve.getDerivative();
+    UniformBspline seed_acceleration = seed_velocity.getDerivative();
+    constexpr double kMaximumChordLengthM = 0.05;
+    constexpr double kCurveApproximationErrorM = 0.002;
+    constexpr int kMaximumSamples = 4096;
+    double step_s = 0.05;
+    const double maximum_speed = maximum_control_point_norm(
+        seed_velocity.getControlPoint());
+    const double maximum_acceleration = maximum_control_point_norm(
+        seed_acceleration.getControlPoint());
+    if (maximum_speed > 1.0e-9)
+      step_s = std::min(step_s, kMaximumChordLengthM / maximum_speed);
+    if (maximum_acceleration > 1.0e-9)
+      step_s = std::min(step_s, std::sqrt(
+          8.0 * kCurveApproximationErrorM / maximum_acceleration));
+    const int sample_count = std::min(
+        kMaximumSamples,
+        std::max(span_count * 4,
+                 static_cast<int>(std::ceil(duration_s / step_s))));
     p4_actual_curve_guide_corridor_constraints_.reserve(
         static_cast<std::size_t>(sample_count + 1));
     for (int sample_index = 0; sample_index <= sample_count; ++sample_index)
@@ -3048,6 +3072,77 @@ namespace ego_planner
       for (int basis = 0; basis < 4; ++basis)
         point += constraint.weights[static_cast<std::size_t>(basis)] *
             q.col(constraint.first_control_point + basis);
+      if (!point.allFinite())
+        return false;
+      double nearest_squared = std::numeric_limits<double>::infinity();
+      for (std::size_t segment = 0u;
+           segment + 1u < p4_actual_curve_guide_corridor_.size(); ++segment)
+      {
+        const Eigen::Vector3d delta =
+            p4_actual_curve_guide_corridor_[segment + 1u] -
+            p4_actual_curve_guide_corridor_[segment];
+        const double squared_length = delta.squaredNorm();
+        const double alpha = squared_length > 1.0e-12
+            ? std::clamp(
+                  (point - p4_actual_curve_guide_corridor_[segment]).dot(
+                      delta) / squared_length,
+                  0.0, 1.0)
+            : 0.0;
+        const Eigen::Vector3d projection =
+            p4_actual_curve_guide_corridor_[segment] + alpha * delta;
+        nearest_squared = std::min(
+            nearest_squared, (point - projection).squaredNorm());
+      }
+      if (!std::isfinite(nearest_squared) ||
+          std::sqrt(nearest_squared) >
+              p4_actual_curve_guide_maximum_deviation_m_ + 1.0e-9)
+        return false;
+    }
+
+    // Final geometry commit samples the exact B-spline from velocity and
+    // acceleration bounds rather than trusting a fixed quarter-span lattice.
+    // Apply the same bounded sampling here so an optimizer success cannot
+    // hide a tube excursion between its cost samples and leave final commit
+    // to discard an otherwise safe channel.
+    if (order_ != 3 || q.rows() != 3 || q.cols() < order_ + 1 ||
+        !q.allFinite() || !std::isfinite(bspline_interval_) ||
+        bspline_interval_ <= 0.0)
+      return false;
+    const auto maximum_control_point_norm = [](const Eigen::MatrixXd &points) {
+      double maximum = 0.0;
+      for (Eigen::Index column = 0; column < points.cols(); ++column)
+        maximum = std::max(maximum, points.col(column).norm());
+      return maximum;
+    };
+    UniformBspline curve(q, order_, bspline_interval_);
+    UniformBspline velocity = curve.getDerivative();
+    UniformBspline acceleration = velocity.getDerivative();
+    constexpr double kMaximumChordLengthM = 0.05;
+    constexpr double kCurveApproximationErrorM = 0.002;
+    constexpr int kMaximumSamples = 4096;
+    double step_s = 0.05;
+    const double maximum_speed = maximum_control_point_norm(
+        velocity.getControlPoint());
+    const double maximum_acceleration = maximum_control_point_norm(
+        acceleration.getControlPoint());
+    if (maximum_speed > 1.0e-9)
+      step_s = std::min(step_s, kMaximumChordLengthM / maximum_speed);
+    if (maximum_acceleration > 1.0e-9)
+      step_s = std::min(step_s, std::sqrt(
+          8.0 * kCurveApproximationErrorM / maximum_acceleration));
+    const double duration_s = curve.getTimeSum();
+    if (!std::isfinite(duration_s) || duration_s <= 0.0 ||
+        !std::isfinite(step_s) || step_s <= 0.0)
+      return false;
+    const int sample_count = std::max(
+        2, static_cast<int>(std::ceil(duration_s / step_s)));
+    if (sample_count > kMaximumSamples)
+      return false;
+    for (int sample = 0; sample <= sample_count; ++sample)
+    {
+      const Eigen::Vector3d point = curve.evaluateDeBoorT(
+          duration_s * static_cast<double>(sample) /
+          static_cast<double>(sample_count));
       if (!point.allFinite())
         return false;
       double nearest_squared = std::numeric_limits<double>::infinity();
