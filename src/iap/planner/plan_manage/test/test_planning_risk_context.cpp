@@ -11041,7 +11041,21 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(advanced_snapshot.reason,
             "successor_curve_waiting_for_new_snapshot");
   EXPECT_EQ(advanced_snapshot.planning_attempt_id, retry_attempt_id);
+  EXPECT_EQ(advanced_snapshot.snapshot_identity.execution_snapshot_id, 183u)
+      << "the one permitted retry must bind the fresh authorization input";
   EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.07, ego_planner::P4PreparedCurveFailure::FRESHNESS,
+      "final_bspline_corridor_support_stale_or_invalid:EXPIRED");
+  EXPECT_FALSE(manager.p4SuccessorAwaitingNewSnapshotForTest())
+      << "a second freshness failure is terminal for the exact child";
+  EXPECT_FALSE(manager.preparingP4SuccessorCurve());
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::FAILED);
+  EXPECT_EQ(manager.lastP4ForwardDecision().successor_failure,
+            ego_planner::P4SuccessorFailure::LOCAL_MAP_STALE);
 }
 
 TEST(P4PreparedSuccessorPolicy,

@@ -5912,7 +5912,7 @@ namespace ego_planner
         successor_now_s, execution ? execution->execution_snapshot_id : 0u,
         planning_risk_context_.planning_start_s);
     const auto consume_pending_channel_work_item =
-        [this, successor_now_s](
+        [this, successor_now_s, &request](
             const bool successor_retry)
             -> std::optional<P4ForwardDecision>
         {
@@ -5950,6 +5950,7 @@ namespace ego_planner
                 p4_successor_schedule_.deadline.latest_prepare_start_s;
             retry.successor_candidate_ready_deadline_s =
                 p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+            retry.snapshot_identity = request.snapshot_identity;
             p4_successor_preparation_state_ =
                 P4SuccessorPreparationState::CURVE_PREPARING;
             if (p4_successor_schedule_.awaiting_new_snapshot)
@@ -11784,8 +11785,14 @@ namespace ego_planner
               entry.second.complete() &&
               entry.second.channel_record.feasible();
         });
+    const bool freshness_retry_exhausted =
+        failure == P4SuccessorFailure::LOCAL_MAP_STALE &&
+        p4_successor_schedule_.last_failure ==
+            P4SuccessorFailure::LOCAL_MAP_STALE &&
+        !p4_successor_schedule_.awaiting_new_snapshot;
     if (failure == P4SuccessorFailure::LOCAL_MAP_STALE &&
-        failed_snapshot_id != 0u && !has_complete_current_event_sibling)
+        failed_snapshot_id != 0u && !has_complete_current_event_sibling &&
+        !freshness_retry_exhausted)
     {
       P4ForwardDecision failed_decision = last_p4_forward_decision_;
       failed_decision.successor_failure = failure;
@@ -11836,7 +11843,8 @@ namespace ego_planner
     // never retried or granted authority, and every full-search candidate
     // still passes the ordinary actual-curve, braking, P5 and publication
     // gates below.
-    if (last_p4_forward_decision_.successor_fast_path)
+    if (last_p4_forward_decision_.successor_fast_path &&
+        !freshness_retry_exhausted)
     {
       P4ForwardDecision failed_decision = last_p4_forward_decision_;
       failed_decision.successor_failure = failure;
@@ -12045,7 +12053,10 @@ namespace ego_planner
     // the rejected curve.
     p4_successor_preparation_state_ = P4SuccessorPreparationState::FAILED;
     p4_successor_schedule_.result_delivered = true;
+    p4_successor_schedule_.awaiting_new_snapshot = false;
     p4_prepared_successor_.reset();
+    p4_pending_channel_work_item_.reset();
+    p4_pending_channel_context_.reset();
     p4_prepared_channel_bundles_.clear();
     p4_cached_successor_bundle_.reset();
     p4_successor_schedule_.last_failure = failure;
