@@ -371,6 +371,27 @@ TEST(P4RollingExposureSeam,
   EXPECT_NEAR(ledger_anchored_bridge.execution_time_origin_s +
                   ledger_anchored_bridge.begin_parent_elapsed_s,
               kLedgerObservationStampS, 1.0e-9);
+  // The first identity-bound controller sample for a newly activated
+  // successor can still be at elapsed zero while the exposure ledger's last
+  // observation belongs to the preceding trajectory.  That observation
+  // cannot anchor a negative interval on the new parent.  The conservative
+  // bridge starts at the new parent's controller-clock origin instead.
+  constexpr double kNewParentSampleRosStampS = 1657065625.7527885;
+  constexpr double kNewParentElapsedS = 0.0;
+  constexpr double kPriorTrajectoryLedgerStampS = 1657065625.6570559;
+  const auto prior_trajectory_ledger_bridge =
+      ego_planner::p4RollingSuccessorExposureBridge(
+          kNewParentSampleRosStampS, kNewParentElapsedS,
+          kSwitchParentElapsedS, parent.getTimeSum(),
+          kPriorTrajectoryLedgerStampS);
+  ASSERT_TRUE(prior_trajectory_ledger_bridge.valid)
+      << prior_trajectory_ledger_bridge.reason;
+  EXPECT_NEAR(prior_trajectory_ledger_bridge.begin_parent_elapsed_s,
+              0.0, 1.0e-12);
+  EXPECT_NEAR(prior_trajectory_ledger_bridge.execution_time_origin_s,
+              kNewParentSampleRosStampS, 1.0e-9);
+  EXPECT_NEAR(prior_trajectory_ledger_bridge.duration_s,
+              kSwitchParentElapsedS, 1.0e-12);
   const auto invalid_ledger_bridge =
       ego_planner::p4RollingSuccessorExposureBridge(
           kSampleRosStampS, kCurrentParentElapsedS,

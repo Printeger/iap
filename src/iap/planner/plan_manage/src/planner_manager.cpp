@@ -818,6 +818,8 @@ namespace ego_planner
     if (switch_parent_elapsed_s < 0.0 ||
         switch_parent_elapsed_s > parent_duration_s + 1.0e-9)
       return reject("rolling_successor_switch_outside_parent");
+    const double execution_time_origin_s =
+        receive_ros_stamp_s - current_parent_elapsed_s;
     double bridge_begin_ros_s = receive_ros_stamp_s;
     double bridge_begin_parent_elapsed_s = current_parent_elapsed_s;
     if (std::isfinite(exposure_ledger_observation_stamp_s))
@@ -826,9 +828,21 @@ namespace ego_planner
           (exposure_ledger_observation_stamp_s - receive_ros_stamp_s);
       bridge_begin_ros_s = exposure_ledger_observation_stamp_s;
       if (!std::isfinite(bridge_begin_parent_elapsed_s) ||
-          bridge_begin_parent_elapsed_s < -1.0e-9 ||
           bridge_begin_parent_elapsed_s > switch_parent_elapsed_s + 1.0e-9)
         return reject("successor_exposure_ledger_anchor_invalid");
+      // The global episode deliberately survives trajectory replacement, so
+      // its latest observation can belong to the preceding trajectory.  A
+      // newly activated parent's first controller sample can still report
+      // elapsed zero after that older observation.  Start at the new
+      // parent's controller-clock origin in that case: this includes the
+      // whole parent interval conservatively instead of treating an older
+      // identity-bound observation as a negative parent-time freshness
+      // failure.
+      if (bridge_begin_parent_elapsed_s < 0.0)
+      {
+        bridge_begin_parent_elapsed_s = 0.0;
+        bridge_begin_ros_s = execution_time_origin_s;
+      }
     }
     bridge.begin_parent_elapsed_s = std::clamp(
         bridge_begin_parent_elapsed_s, 0.0, parent_duration_s);
