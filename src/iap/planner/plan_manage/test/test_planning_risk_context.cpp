@@ -9889,8 +9889,8 @@ TEST(P4PreparedChannelComparison,
       value.global_rolling_worst_ratio = 0.0;
       value.global_continuous_exceedance_s = 0.0;
       value.global_exposure_integral_ratio_s = 0.0;
-      value.unknown_support_fraction = 1.0;
-      value.combined_conservative_kappa = 1.0;
+      value.unknown_support_fraction = 0.8;
+      value.combined_conservative_kappa = 0.8;
       value.minimum_local_clearance_margin_m = 0.2;
       value.final_curve_evaluated = true;
       value.local_geometry_passed = true;
@@ -9933,6 +9933,87 @@ TEST(P4PreparedChannelComparison,
   evidence.points.clear();
   EXPECT_TRUE(std::isinf(
       ego_planner::summarizeP4ActualKnownGlobalPeakEvidence(evidence)));
+}
+
+TEST(P4PreparedChannelComparison,
+     FullyUnknownActualSupportUsesFimBeforePartialUpperPeak)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  const auto record = [&snapshot](const uint64_t channel_id) {
+    ego_planner::P4PreparedChannelRecord value;
+    value.channel_id = channel_id;
+    value.snapshot_identity = snapshot;
+    value.guide_identity = "guide-" + std::to_string(channel_id);
+    value.refined_path_identity =
+        "refined-" + std::to_string(channel_id);
+    value.curve_identity = "curve-" + std::to_string(channel_id);
+    value.actual_endpoint = Eigen::Vector3d(4.0, 1.0, 1.0);
+    value.duration_s = 2.0;
+    value.authorization_group = 1;
+    value.global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    value.global_rolling_worst_ratio = 0.0;
+    value.global_continuous_exceedance_s = 0.0;
+    value.global_exposure_integral_ratio_s = 0.0;
+    value.unknown_support_fraction = 1.0;
+    value.combined_conservative_kappa = 1.0;
+    value.minimum_local_clearance_margin_m = 0.2;
+    value.final_curve_evaluated = true;
+    value.local_geometry_passed = true;
+    value.dynamics_passed = true;
+    value.collision_passed = true;
+    value.clearance_passed = true;
+    value.braking_passed = true;
+    value.gnss_exposure_complete = true;
+    value.failure = ego_planner::P4PreparedCurveFailure::NONE;
+    return value;
+  };
+
+  // Exact values from the clean fork-0 failure. Both actual curves have
+  // wholly unknown LOS support. The smaller partial upper peak therefore
+  // cannot turn the worse pre-conservative actual curve into the winner.
+  auto low_actual = record(2u);
+  low_actual.known_global_peak_ratio = 1.18961;
+  low_actual.fim_max_ratio = 0.012788;
+  low_actual.fim_integral = 2.29235;
+  auto high_actual = record(1u);
+  high_actual.known_global_peak_ratio = 1.08525;
+  high_actual.fim_max_ratio = 0.0128016;
+  high_actual.fim_integral = 2.05623;
+
+  auto comparison = ego_planner::compareP4PreparedChannels(
+      {high_actual, low_actual}, snapshot, 2u, 0u,
+      high_actual.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, low_actual.channel_id);
+
+  // Once both candidates have some supported LOS evidence, retain the
+  // established partial-upper-PL-before-FIM ordering.
+  low_actual.unknown_support_fraction = 0.8;
+  low_actual.combined_conservative_kappa = 0.8;
+  high_actual.unknown_support_fraction = 0.8;
+  high_actual.combined_conservative_kappa = 0.8;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {high_actual, low_actual}, snapshot, 2u, 0u,
+      low_actual.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, high_actual.channel_id);
 }
 
 TEST(P4PreparedChannelComparison,
@@ -11827,7 +11908,7 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
-     FrozenRoutePreferenceSurvivesSiblingCallbackAndMissingActualPl)
+     NormalComparisonUsesCommonForwardActualEvidence)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -11918,7 +11999,12 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
-  const auto make_missing_actual_pl = [&manager](const double fim_ratio) {
+  const auto set_actual_risk = [&manager](
+      const std::vector<double> &forward_stations,
+      const std::vector<double> &upper_ratios,
+      const double fim_ratio) {
+    ASSERT_EQ(forward_stations.size(), upper_ratios.size());
+    ASSERT_FALSE(forward_stations.empty());
     auto certificate = manager.p4ExecutionCertificate();
     certificate.global_peak_ratio =
         std::numeric_limits<double>::quiet_NaN();
@@ -11930,26 +12016,39 @@ TEST(P4PreparedChannelPreparation,
     evidence.trajectory_assurance.global.maximum_continuous_exceedance_s =
         0.0;
     evidence.trajectory_assurance.global.exceedance_integral_ratio_s = 0.0;
-    for (auto &point : evidence.points)
+    evidence.positions.clear();
+    evidence.relative_times.clear();
+    evidence.nominal_sample_rows.clear();
+    evidence.evidence_point_ids.clear();
+    evidence.points.resize(forward_stations.size());
+    const auto &decision = manager.lastP4ForwardDecision();
+    const Eigen::Vector3d axis =
+        (decision.local_target - decision.request_position).normalized();
+    for (std::size_t index = 0u; index < forward_stations.size(); ++index)
     {
-      point.pl_lower_available = false;
-      point.pl_upper_available = false;
-      point.safety_ratio_lower =
-          std::numeric_limits<double>::quiet_NaN();
-      point.safety_ratio_upper =
-          std::numeric_limits<double>::quiet_NaN();
+      auto &point = evidence.points[index];
+      evidence.positions.push_back(
+          decision.request_position + forward_stations[index] * axis);
+      evidence.relative_times.push_back(static_cast<double>(index));
+      evidence.nominal_sample_rows.push_back(true);
+      evidence.evidence_point_ids.push_back(index + 1u);
+      point.pl_lower_available = true;
+      point.pl_upper_available = true;
+      point.safety_ratio_lower = upper_ratios[index];
+      point.safety_ratio_upper = upper_ratios[index];
       point.fim_ratio = fim_ratio;
       point.known_fim_ratio = fim_ratio;
       point.known_occupancy_kappa = 0.0;
-      point.unknown_support_fraction = 0.0;
-      point.unknown_kappa_upper_bound = 0.0;
-      point.combined_conservative_kappa = 0.0;
+      point.unknown_support_fraction = 0.5;
+      point.unknown_kappa_upper_bound = 0.5;
+      point.combined_conservative_kappa = 0.5;
     }
     manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
   };
-  // Match the clean-live shape: the route-preferred side has no actual
-  // upper-PL evidence and a microscopically worse advisory FIM value.
-  make_missing_actual_pl(0.0130);
+  // The preferred curve sees farther and contains a high-risk point outside
+  // the sibling's forward coverage. Whole-curve ranking would reject it even
+  // though it is safer everywhere in the range both curves actually cover.
+  set_actual_risk({0.0, 1.0, 4.0}, {0.2, 0.3, 1.4}, 0.4);
 
   std::string reason;
   EXPECT_EQ(
@@ -11988,7 +12087,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.duration_ = mirrored.getTimeSum();
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  make_missing_actual_pl(0.0125);
+  set_actual_risk({0.0, 1.0}, {0.7, 0.8}, 0.2);
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
           10.0, &reason),

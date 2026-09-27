@@ -1670,6 +1670,85 @@ namespace ego_planner
     return cropped;
   }
 
+  namespace
+  {
+    std::vector<P4PreparedChannelRecord>
+    p4CommonForwardPreparedChannelRecords(
+        const std::map<uint64_t, P4PreparedSuccessorBundle> &bundles)
+    {
+      std::vector<P4PreparedChannelRecord> records;
+      double common_forward_coverage_m =
+          std::numeric_limits<double>::infinity();
+      std::size_t forward_coverage_count = 0u;
+      std::size_t feasible_bundle_count = 0u;
+      for (const auto &entry : bundles)
+      {
+        if (!entry.second.channel_record.feasible())
+          continue;
+        ++feasible_bundle_count;
+        double coverage_m = 0.0;
+        (void)p4ActualRiskEvidenceWithinForwardRange(
+            entry.second.direct_risk_evidence,
+            entry.second.decision.request_position,
+            entry.second.decision.local_target,
+            std::numeric_limits<double>::max(), &coverage_m);
+        if (std::isfinite(coverage_m) && coverage_m > 0.0)
+        {
+          common_forward_coverage_m = std::min(
+              common_forward_coverage_m, coverage_m);
+          ++forward_coverage_count;
+        }
+      }
+      const bool use_common_forward_evidence =
+          feasible_bundle_count >= 2u &&
+          forward_coverage_count == feasible_bundle_count &&
+          std::isfinite(common_forward_coverage_m) &&
+          common_forward_coverage_m > 0.0;
+      const auto clear_whole_curve_risk_order = [](
+          P4PreparedChannelRecord *record) {
+        record->risk_interval_complete = false;
+        record->global_peak_ratio = std::numeric_limits<double>::infinity();
+        record->global_rolling_worst_ratio =
+            std::numeric_limits<double>::infinity();
+        record->global_continuous_exceedance_s =
+            std::numeric_limits<double>::infinity();
+        record->global_exposure_integral_ratio_s =
+            std::numeric_limits<double>::infinity();
+        record->global_recovery_time_s =
+            std::numeric_limits<double>::infinity();
+        record->known_global_peak_ratio =
+            std::numeric_limits<double>::infinity();
+        record->fim_max_ratio = std::numeric_limits<double>::infinity();
+        record->fim_integral = std::numeric_limits<double>::infinity();
+      };
+      records.reserve(bundles.size());
+      for (const auto &entry : bundles)
+      {
+        P4PreparedChannelRecord record = entry.second.channel_record;
+        if (feasible_bundle_count >= 2u && record.feasible())
+        {
+          clear_whole_curve_risk_order(&record);
+          if (use_common_forward_evidence)
+          {
+            const auto common_evidence =
+                p4ActualRiskEvidenceWithinForwardRange(
+                    entry.second.direct_risk_evidence,
+                    entry.second.decision.request_position,
+                    entry.second.decision.local_target,
+                    common_forward_coverage_m);
+            p4ApplyRiskIntervalSummary(common_evidence, &record);
+            const auto common_fim =
+                summarizeP4ActualFimEvidence(common_evidence);
+            record.fim_max_ratio = common_fim.first;
+            record.fim_integral = common_fim.second;
+          }
+        }
+        records.push_back(std::move(record));
+      }
+      return records;
+    }
+  }
+
   P4PreparedChannelComparison compareP4PreparedChannels(
       const std::vector<P4PreparedChannelRecord> &records,
       const P4ForwardSnapshotIdentity &latest_snapshot,
@@ -1726,6 +1805,26 @@ namespace ego_planner
       result.winner_channel_id = feasible.front()->channel_id;
       return result;
     }
+    constexpr double kExposureRankScale = 1.0e12;
+    const auto unknown_exposure = [](const P4PreparedChannelRecord *record) {
+        double value = std::max(
+            record->unknown_support_fraction,
+            record->combined_conservative_kappa);
+        if (record->route_evidence_evaluated)
+          value = std::max({
+              value, 1.0 - record->route_support_fraction,
+              1.0 - record->braking_tube_support_fraction});
+        return value;
+      };
+    const auto exposure_rank = [](const double value) {
+        if (!std::isfinite(value))
+          return std::numeric_limits<int64_t>::max();
+        // Exposure fractions are aggregates of the same bounded support
+        // counts. Canonicalize sub-picounit arithmetic noise before the
+        // strict total-order tie breakers.
+        return static_cast<int64_t>(std::llround(
+            std::clamp(value, 0.0, 1.0) * kExposureRankScale));
+      };
     const auto primary_risk_metrics = [](const P4PreparedChannelRecord *record) {
         const auto metric = [record](const double upper,
                                      const double fallback) {
@@ -1750,6 +1849,13 @@ namespace ego_planner
     std::array<bool, 3> primary_risk_metric_common{{true, true, true}};
     for (const auto *record : feasible)
     {
+      // A finite upper bound assembled while every LOS support sample is
+      // unknown remains useful diagnostics, but it is not common route
+      // evidence. It must not outrank the actual pre-conservative FIM of
+      // another wholly-unknown sibling.
+      if (exposure_rank(unknown_exposure(record)) >=
+          static_cast<int64_t>(kExposureRankScale))
+        primary_risk_metric_common.fill(false);
       const auto metrics = primary_risk_metrics(record);
       for (std::size_t index = 0u; index < metrics.size(); ++index)
         primary_risk_metric_common[index] =
@@ -1776,27 +1882,6 @@ namespace ego_planner
             if (rhs < lhs) return 1;
             return 0;
           };
-        const auto unknown_exposure = [](const P4PreparedChannelRecord *record) {
-            double value = std::max(
-                record->unknown_support_fraction,
-                record->combined_conservative_kappa);
-            if (record->route_evidence_evaluated)
-              value = std::max({
-                  value, 1.0 - record->route_support_fraction,
-                  1.0 - record->braking_tube_support_fraction});
-            return value;
-          };
-        const auto exposure_rank = [](const double value) {
-            if (!std::isfinite(value))
-              return std::numeric_limits<int64_t>::max();
-            // Exposure fractions are aggregates of the same bounded support
-            // counts. Canonicalize sub-picounit arithmetic noise before the
-            // strict total-order tie breakers so a one-ulp reconstruction
-            // difference cannot outrank direct actual upper-PL evidence.
-            constexpr double kExposureRankScale = 1.0e12;
-            return static_cast<int64_t>(std::llround(
-                std::clamp(value, 0.0, 1.0) * kExposureRankScale));
-          };
         const auto left_metrics = primary_risk_metrics(left);
         const auto right_metrics = primary_risk_metrics(right);
         for (std::size_t index = 0u; index < left_metrics.size(); ++index)
@@ -1815,16 +1900,25 @@ namespace ego_planner
         if (left_exposure_rank != right_exposure_rank)
           return left_exposure_rank < right_exposure_rank
               ? Ordering::LEFT : Ordering::RIGHT;
+        const bool wholly_unknown = left_exposure_rank >=
+                static_cast<int64_t>(kExposureRankScale) &&
+            right_exposure_rank >=
+                static_cast<int64_t>(kExposureRankScale);
+        const bool any_known_peak =
+            std::isfinite(left->known_global_peak_ratio) ||
+            std::isfinite(right->known_global_peak_ratio);
         // A partially observed upper PL remains direct actual-curve risk
-        // evidence. Compare it only after unknown exposure so sparse support
-        // cannot masquerade as a safer curve, and never use it as execution
-        // authority.
-        const int known_peak_order = lower(
-            left->known_global_peak_ratio,
-            right->known_global_peak_ratio);
-        if (known_peak_order != 0)
+        // evidence only when the common forward range has some LOS support.
+        // With wholly unknown support, compare the actual pre-conservative
+        // FIM first; otherwise a shorter/closer unsupported curve can win by
+        // seeing less of the environment. This changes preference only.
+        if (!wholly_unknown)
         {
-          return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
+          const int known_peak_order = lower(
+              left->known_global_peak_ratio,
+              right->known_global_peak_ratio);
+          if (known_peak_order != 0)
+            return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         }
         // When neither actual curve has any upper-PL evidence, retain the
         // frozen route comparison's preference.  Sibling curve preparation
@@ -1833,8 +1927,7 @@ namespace ego_planner
         // This is ordering only: every hard local/dynamics/collision/braking
         // predicate above remains mandatory and no execution authority is
         // granted by this preference.
-        if (!std::isfinite(left->known_global_peak_ratio) &&
-            !std::isfinite(right->known_global_peak_ratio))
+        if (!any_known_peak)
         {
           const bool left_preferred =
               left->channel_id == route_preference_channel_id;
@@ -1855,6 +1948,15 @@ namespace ego_planner
           const int order = lower(metric.first, metric.second);
           if (order != 0)
             return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
+        }
+        if (wholly_unknown && any_known_peak)
+        {
+          const bool left_preferred =
+              left->channel_id == route_preference_channel_id;
+          const bool right_preferred =
+              right->channel_id == route_preference_channel_id;
+          if (left_preferred != right_preferred)
+            return left_preferred ? Ordering::LEFT : Ordering::RIGHT;
         }
         const int progress = lower(
             right->actual_progress_m, left->actual_progress_m);
@@ -11978,79 +12080,8 @@ namespace ego_planner
     while (p4_prepared_channel_bundles_.size() > 4u)
       p4_prepared_channel_bundles_.erase(
           p4_prepared_channel_bundles_.begin());
-    std::vector<P4PreparedChannelRecord> prepared_records;
-    double common_forward_coverage_m =
-        std::numeric_limits<double>::infinity();
-    std::size_t forward_coverage_count = 0u;
-    std::size_t feasible_bundle_count = 0u;
-    for (const auto &entry : p4_prepared_channel_bundles_)
-    {
-      if (!entry.second.channel_record.feasible())
-        continue;
-      ++feasible_bundle_count;
-      double coverage_m = 0.0;
-      (void)p4ActualRiskEvidenceWithinForwardRange(
-          entry.second.direct_risk_evidence,
-          entry.second.decision.request_position,
-          entry.second.decision.local_target,
-          std::numeric_limits<double>::max(), &coverage_m);
-      if (std::isfinite(coverage_m) && coverage_m > 0.0)
-      {
-        common_forward_coverage_m = std::min(
-            common_forward_coverage_m, coverage_m);
-        ++forward_coverage_count;
-      }
-    }
-    const bool use_common_forward_evidence =
-        feasible_bundle_count >= 2u &&
-        forward_coverage_count == feasible_bundle_count &&
-        std::isfinite(common_forward_coverage_m) &&
-        common_forward_coverage_m > 0.0;
-    const auto clear_whole_curve_risk_order = [](
-        P4PreparedChannelRecord *record) {
-      record->risk_interval_complete = false;
-      record->global_peak_ratio = std::numeric_limits<double>::infinity();
-      record->global_rolling_worst_ratio =
-          std::numeric_limits<double>::infinity();
-      record->global_continuous_exceedance_s =
-          std::numeric_limits<double>::infinity();
-      record->global_exposure_integral_ratio_s =
-          std::numeric_limits<double>::infinity();
-      record->global_recovery_time_s =
-          std::numeric_limits<double>::infinity();
-      record->known_global_peak_ratio =
-          std::numeric_limits<double>::infinity();
-      record->fim_max_ratio = std::numeric_limits<double>::infinity();
-      record->fim_integral = std::numeric_limits<double>::infinity();
-    };
-    for (const auto &entry : p4_prepared_channel_bundles_)
-    {
-      P4PreparedChannelRecord comparison_record =
-          entry.second.channel_record;
-      if (feasible_bundle_count >= 2u && comparison_record.feasible())
-      {
-        clear_whole_curve_risk_order(&comparison_record);
-        if (use_common_forward_evidence)
-        {
-          const auto common_evidence =
-              p4ActualRiskEvidenceWithinForwardRange(
-                  entry.second.direct_risk_evidence,
-                  entry.second.decision.request_position,
-                  entry.second.decision.local_target,
-                  common_forward_coverage_m);
-          // Partial upper-PL/FIM values are preference evidence only. Crop
-          // every sibling to the same mission-forward extent before ranking
-          // so backtracking or stopping short cannot hide future risk.
-          p4ApplyRiskIntervalSummary(
-              common_evidence, &comparison_record);
-          const auto common_fim = summarizeP4ActualFimEvidence(
-              common_evidence);
-          comparison_record.fim_max_ratio = common_fim.first;
-          comparison_record.fim_integral = common_fim.second;
-        }
-      }
-      prepared_records.push_back(std::move(comparison_record));
-    }
+    const auto prepared_records = p4CommonForwardPreparedChannelRecords(
+        p4_prepared_channel_bundles_);
     std::set<uint64_t> feasible_channel_ids;
     for (const auto &candidate : bundle.decision.candidates)
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
@@ -13205,9 +13236,8 @@ namespace ego_planner
           "normal_channel_cached_curve_recertification_pending");
     }
 
-    std::vector<P4PreparedChannelRecord> prepared_records;
-    for (const auto &entry : p4_prepared_channel_bundles_)
-      prepared_records.push_back(entry.second.channel_record);
+    const auto prepared_records = p4CommonForwardPreparedChannelRecords(
+        p4_prepared_channel_bundles_);
     const auto comparison = compareP4PreparedChannels(
         prepared_records, bundle.decision.snapshot_identity,
         expected_channel_ids.size(),
