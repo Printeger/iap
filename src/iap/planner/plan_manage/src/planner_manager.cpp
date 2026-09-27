@@ -10257,9 +10257,15 @@ namespace ego_planner
 
   bool EGOPlannerManager::retainP4ActualWinnerForQueueMiss()
   {
-    return p4SetStableChannelPreference(
+    const bool retained = p4SetStableChannelPreference(
         &p4_channel_slots_,
         p4AnnotatedActualComparisonWinner(last_p4_forward_decision_));
+    // The complete cohort produced a winner, but no command was queued.
+    // Explicitly abandon that terminal publication transaction so a rebuild
+    // of the cached route starts a fresh bounded cohort instead of looking
+    // like a late callback that revived the terminal one.
+    resetP4ChannelPreparationLifecycle(true);
+    return retained;
   }
 
   void EGOPlannerManager::stageP4ExecutionCandidateForActivation()

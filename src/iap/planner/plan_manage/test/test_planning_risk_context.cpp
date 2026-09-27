@@ -11382,8 +11382,13 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
             terminal_winner.selected_channel_id);
 
+  (void)manager.retainP4ActualWinnerForQueueMiss();
+  EXPECT_FALSE(manager.p4ChannelPreparationLifecycleForTest().terminal);
+  EXPECT_EQ(manager.p4ChannelPreparationLifecycleForTest().decision_event_id,
+            0u);
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+
   auto all_failed_decision = first_retry_decision;
-  all_failed_decision.decision_event_id += 100u;
   all_failed_decision.selected_candidate_id =
       all_failed_decision.candidates.front().candidate_id;
   all_failed_decision.selected_channel_id =
