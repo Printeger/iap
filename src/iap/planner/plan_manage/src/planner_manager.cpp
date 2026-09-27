@@ -1624,6 +1624,17 @@ namespace ego_planner
                   1.0 - record->braking_tube_support_fraction});
             return value;
           };
+        const auto exposure_rank = [](const double value) {
+            if (!std::isfinite(value))
+              return std::numeric_limits<int64_t>::max();
+            // Exposure fractions are aggregates of the same bounded support
+            // counts. Canonicalize sub-picounit arithmetic noise before the
+            // strict total-order tie breakers so a one-ulp reconstruction
+            // difference cannot outrank direct actual upper-PL evidence.
+            constexpr double kExposureRankScale = 1.0e12;
+            return static_cast<int64_t>(std::llround(
+                std::clamp(value, 0.0, 1.0) * kExposureRankScale));
+          };
         const auto left_metrics = primary_risk_metrics(left);
         const auto right_metrics = primary_risk_metrics(right);
         for (std::size_t index = 0u; index < left_metrics.size(); ++index)
@@ -1635,19 +1646,23 @@ namespace ego_planner
           if (order != 0)
             return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         }
-        const std::array<std::pair<double, double>, 2> lower_metrics{{
-          {unknown_exposure(left), unknown_exposure(right)},
-          // A partially observed upper PL remains direct actual-curve risk
-          // evidence. Compare it only after unknown exposure so sparse
-          // support cannot masquerade as a safer curve, and never use it as
-          // execution authority.
-          {left->known_global_peak_ratio,
-           right->known_global_peak_ratio}}};
-        for (const auto &metric : lower_metrics)
+        const int64_t left_exposure_rank = exposure_rank(
+            unknown_exposure(left));
+        const int64_t right_exposure_rank = exposure_rank(
+            unknown_exposure(right));
+        if (left_exposure_rank != right_exposure_rank)
+          return left_exposure_rank < right_exposure_rank
+              ? Ordering::LEFT : Ordering::RIGHT;
+        // A partially observed upper PL remains direct actual-curve risk
+        // evidence. Compare it only after unknown exposure so sparse support
+        // cannot masquerade as a safer curve, and never use it as execution
+        // authority.
+        const int known_peak_order = lower(
+            left->known_global_peak_ratio,
+            right->known_global_peak_ratio);
+        if (known_peak_order != 0)
         {
-          const int order = lower(metric.first, metric.second);
-          if (order != 0)
-            return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
+          return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         }
         // When neither actual curve has any upper-PL evidence, retain the
         // frozen route comparison's preference.  Sibling curve preparation

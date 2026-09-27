@@ -9943,12 +9943,16 @@ TEST(P4PreparedChannelComparison,
     // finite diagnostic aggregate only because its first failure is an
     // observed exceedance. Metric availability is not a risk preference.
     low->global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    low->unknown_support_fraction = 0.81818181818181812;
+    low->combined_conservative_kappa = 0.85155393469686513;
     low->known_global_peak_ratio = 0.874712;
     low->fim_max_ratio = 0.012824;
     low->fim_integral = 1.85131;
     high->global_peak_ratio = 1.05810;
     high->global_continuous_exceedance_s = 0.880068;
     high->global_exposure_integral_ratio_s = 0.0133818;
+    high->unknown_support_fraction = 0.81818181818181812;
+    high->combined_conservative_kappa = 0.85155393469686502;
     high->known_global_peak_ratio = 1.06553;
     high->fim_max_ratio = 0.0128377;
     high->fim_integral = 1.82415;
