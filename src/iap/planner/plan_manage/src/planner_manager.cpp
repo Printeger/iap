@@ -10972,8 +10972,74 @@ namespace ego_planner
   bool EGOPlannerManager::constrainP4DecisionToCommittedTopology(
       P4ForwardDecision *decision)
   {
-    if (!decision || !p4_committed_topology_ ||
-        !p4_committed_topology_->active)
+    if (!decision)
+      return false;
+    if (!p4_committed_topology_ &&
+        p4_execution_certificate_.valid && !p4_execution_revoked_ &&
+        p4_execution_certificate_.trajectory_id > 0 &&
+        p4_execution_certificate_.start_time_ns > 0 &&
+        !p4_execution_certificate_.control_points_hash.empty() &&
+        p4_execution_certificate_.successor_channel_id > 0u &&
+        p4_execution_certificate_.authority !=
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING &&
+        p4_execution_certificate_.successor_topology_path.size() >= 2u &&
+        decision->request_position.allFinite())
+    {
+      std::set<uint64_t> visible_channels;
+      for (const auto &candidate : decision->candidates)
+        if (candidate.channel_id > 0u && candidate.occupancy_supported)
+          visible_channels.insert(candidate.channel_id);
+      const auto executing_channel = std::find_if(
+          decision->candidates.begin(), decision->candidates.end(),
+          [this](const P4ForwardCandidate &candidate) {
+            return candidate.channel_id ==
+                       p4_execution_certificate_.successor_channel_id &&
+                candidate.occupancy_supported &&
+                candidate.geometry_state == P4ForwardGeometryState::CLEAR;
+          });
+      const auto &executing_path =
+          p4_execution_certificate_.successor_topology_path;
+      const auto actual_projection = projectP4Polyline(
+          executing_path, decision->request_position);
+      const double corridor_radius_m =
+          p4RefinementCorridorRadius(p4_forward_limits_);
+      // A channel may first be the sole visible local route and acquire a
+      // sibling only after the certified trajectory has physically entered
+      // it.  At that point an ordinary comparison would be a topology
+      // reversal, not a fresh choice. Recover the commitment from the stable
+      // executing channel identity and its published graph path. The actual
+      // planning origin supplies the odometry proof; a merely queued or
+      // pre-entry route cannot satisfy the positive station and remaining
+      // exit bounds.
+      if (visible_channels.size() >= 2u &&
+          executing_channel != decision->candidates.end() &&
+          std::isfinite(actual_projection.distance_m) &&
+          std::isfinite(actual_projection.length_m) &&
+          actual_projection.distance_m <= corridor_radius_m &&
+          actual_projection.station_m > corridor_radius_m &&
+          actual_projection.length_m - actual_projection.station_m >
+              corridor_radius_m)
+      {
+        P4CommittedTopology commitment;
+        commitment.decision_event_id = decision->decision_event_id;
+        commitment.path = executing_path;
+        commitment.exit_point = executing_path.back();
+        commitment.divergence_station_m = std::max(
+            0.0, actual_projection.station_m - corridor_radius_m);
+        commitment.exit_station_m = actual_projection.length_m;
+        commitment.active = true;
+        p4_committed_topology_ = std::move(commitment);
+        P4ExecutionCheckDiagnostics entered;
+        entered.applicable = true;
+        entered.allowed = true;
+        entered.identity_match = true;
+        entered.reason =
+            "actual_odom_entered_executing_topology_before_sibling_recovery";
+        appendP4ExecutionEvent(
+            "COMMITTED_TOPOLOGY_ENTERED", plannerNow().seconds(), entered);
+      }
+    }
+    if (!p4_committed_topology_ || !p4_committed_topology_->active)
       return false;
     const auto &commitment = *p4_committed_topology_;
     const double corridor_radius_m =

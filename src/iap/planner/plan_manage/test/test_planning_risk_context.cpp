@@ -13836,6 +13836,75 @@ TEST(P4CommittedTopology,
 }
 
 TEST(P4CommittedTopology,
+     ExecutingSingleRouteBecomesCommittedWhenSiblingAppearsAfterEntry)
+{
+  ego_planner::EGOPlannerManager manager;
+  const auto candidate = [](const uint64_t candidate_id,
+                            const uint64_t channel_id,
+                            std::vector<Eigen::Vector3d> path) {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = candidate_id;
+    value.channel_id = channel_id;
+    value.path = path;
+    value.topology_path = std::move(path);
+    value.path_hash = "late-sibling-" + std::to_string(channel_id);
+    value.occupancy_supported = true;
+    value.geometry_state = ego_planner::P4ForwardGeometryState::CLEAR;
+    value.mission_degraded_candidate = true;
+    return value;
+  };
+
+  constexpr uint64_t kExecutingChannel = 731u;
+  ego_planner::P4ExecutionCertificate execution;
+  execution.valid = true;
+  execution.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  execution.trajectory_id = 91;
+  execution.start_time_ns = 12'000'000'000LL;
+  execution.control_points_hash = "executing-curve";
+  execution.successor_channel_id = kExecutingChannel;
+  execution.successor_topology_path = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.0, 1.0),
+      Eigen::Vector3d(3.0, 2.0, 1.0),
+      Eigen::Vector3d(6.0, 2.0, 1.0),
+      Eigen::Vector3d(8.0, 0.0, 1.0)};
+  manager.setP4ExecutionCertificateForTest(execution);
+
+  ego_planner::P4ForwardDecision recovery;
+  recovery.result_status = ego_planner::P4ForwardResultStatus::READY;
+  recovery.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  recovery.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+  recovery.decision_event_id = 732u;
+  recovery.request_position = Eigen::Vector3d(4.0, 2.0, 1.0);
+  recovery.local_target = Eigen::Vector3d(9.0, 0.0, 1.0);
+  recovery.common_anchor = Eigen::Vector3d(8.0, 0.0, 1.0);
+  recovery.candidates = {
+      candidate(1u, kExecutingChannel,
+          {recovery.request_position,
+           Eigen::Vector3d(6.0, 2.0, 1.0), recovery.common_anchor,
+           Eigen::Vector3d(9.0, 0.0, 1.0)}),
+      candidate(2u, 947u,
+          {recovery.request_position,
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, -2.0, 1.0), recovery.common_anchor})};
+  recovery.selected_candidate_id = 2u;
+  recovery.selected_channel_id = 947u;
+  recovery.route_preference_channel_id = 947u;
+  recovery.selected_guide = recovery.candidates.back().path;
+
+  ASSERT_TRUE(manager.constrainP4DecisionToCommittedTopologyForTest(
+      &recovery));
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+  ASSERT_EQ(recovery.candidates.size(), 1u);
+  EXPECT_EQ(recovery.selected_candidate_id, 1u);
+  EXPECT_EQ(recovery.selected_channel_id, kExecutingChannel);
+  EXPECT_EQ(recovery.reason, "committed_topology_single_continuation");
+}
+
+TEST(P4CommittedTopology,
      TransientEvidenceCannotReleaseButHardFailureAfterStopCanReroute)
 {
   ego_planner::EGOPlannerManager manager;
