@@ -12343,7 +12343,9 @@ TEST(P4PreparedChannelPreparation,
   decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
       decision.vehicle_radius_m, decision.map_inflation_m,
       map->getResolution(), map->getVirtualCeilingHeight());
-  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
   decision.selection_authority =
       ego_planner::P4ForwardSelectionAuthority::NONE;
   decision.formal_support = false;
@@ -12357,8 +12359,14 @@ TEST(P4PreparedChannelPreparation,
   const uint64_t first_channel_id = second_channel.channel_id;
   decision.selected_candidate_id = first_candidate_id;
   decision.selected_channel_id = first_channel_id;
-  decision.route_preference_channel_id = first_channel_id;
+  // The route result has already selected this guide, but an intermediate
+  // normal-preparation handoff may omit the redundant preference field. The
+  // cohort must freeze the selected route rather than allowing later
+  // sibling FIM noise to become the topology decision.
+  decision.route_preference_channel_id = 0u;
   decision.selected_guide = second_channel.path;
+  ASSERT_TRUE(
+      manager.prepareNormalChannelsForActualCertificationForTest(&decision));
   manager.setP4ForwardDecisionForTest(std::move(decision));
 
   Eigen::MatrixXd preferred_points = p4StoppedControlPoints();
