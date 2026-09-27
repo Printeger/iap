@@ -1540,6 +1540,17 @@ namespace ego_planner
       if (record.channel_id == 0u ||
           !seen_channels.insert(record.channel_id).second)
         continue;
+      // A terminal typed failure completes this sibling; it is not risk
+      // evidence and can never win, so it need not share the certified
+      // winner's evidence snapshot.  Snapshot equality remains mandatory
+      // below for every feasible bundle admitted to the comparison.
+      if (record.failure != P4PreparedCurveFailure::NONE &&
+          record.failure != P4PreparedCurveFailure::INCOMPLETE)
+      {
+        evaluated_channels.insert(record.channel_id);
+        ++result.hard_failure_count;
+        continue;
+      }
       if (!latest_snapshot.valid() || !record.snapshot_identity.valid() ||
           record.snapshot_identity.canonical() != latest_identity)
       {
@@ -1547,14 +1558,7 @@ namespace ego_planner
         continue;
       }
       if (record.failure != P4PreparedCurveFailure::NONE)
-      {
-        if (record.failure != P4PreparedCurveFailure::INCOMPLETE)
-        {
-          evaluated_channels.insert(record.channel_id);
-          ++result.hard_failure_count;
-        }
         continue;
-      }
       if (!record.feasible())
         continue;
       evaluated_channels.insert(record.channel_id);
@@ -12400,13 +12404,54 @@ namespace ego_planner
               (failed_predicate ? failed_predicate : "unknown"));
     }
 
+    const auto existing_terminal = p4_prepared_channel_bundles_.find(
+        record.channel_id);
+    const bool all_siblings_terminal = std::all_of(
+        expected_channel_ids.begin(), expected_channel_ids.end(),
+        [this](const uint64_t channel_id) {
+          const auto entry = p4_prepared_channel_bundles_.find(channel_id);
+          return entry != p4_prepared_channel_bundles_.end() &&
+              (entry->second.state ==
+                   P4SuccessorPreparationState::PREPARED_CERTIFIED ||
+               entry->second.state == P4SuccessorPreparationState::FAILED);
+        });
+    // The final typed-failure callback restores an already certified sibling
+    // solely to run the comparison. Its current planning snapshot may have
+    // advanced, but the restored curve has not been recertified there. Keep
+    // the original terminal identity instead of rewriting it or consuming a
+    // second certification conclusion.
+    const bool reuse_terminal_for_comparison =
+        !p4_channel_preparation_lifecycle_.diagnostics.terminal &&
+        all_siblings_terminal &&
+        existing_terminal != p4_prepared_channel_bundles_.end() &&
+        existing_terminal->second.state ==
+            P4SuccessorPreparationState::PREPARED_CERTIFIED &&
+        existing_terminal->second.curve_identity == bundle.curve_identity &&
+        existing_terminal->second.decision.decision_event_id ==
+            bundle.decision.decision_event_id &&
+        existing_terminal->second.preparation_identity.retry_generation ==
+            p4_channel_preparation_lifecycle_.diagnostics.
+                freshness_retry_count;
+
     for (auto entry = p4_prepared_channel_bundles_.begin();
          entry != p4_prepared_channel_bundles_.end();)
     {
-      if (entry->second.channel_record.snapshot_identity.canonical() !=
+      const bool stale_retry_failure =
+          entry->second.state == P4SuccessorPreparationState::FAILED &&
+          entry->second.preparation_identity.retry_generation <
+              p4_channel_preparation_lifecycle_.diagnostics.
+                  freshness_retry_count;
+      const bool stale_terminal_snapshot =
+          entry->second.channel_record.snapshot_identity.canonical() !=
               record.snapshot_identity.canonical() &&
           entry->second.state !=
-              P4SuccessorPreparationState::CURVE_PREPARING)
+              P4SuccessorPreparationState::CURVE_PREPARING &&
+          !(entry->second.state == P4SuccessorPreparationState::FAILED &&
+            all_siblings_terminal &&
+            entry->second.preparation_identity.retry_generation ==
+                p4_channel_preparation_lifecycle_.diagnostics.
+                    freshness_retry_count);
+      if (stale_retry_failure || stale_terminal_snapshot)
         entry = p4_prepared_channel_bundles_.erase(entry);
       else
         ++entry;
@@ -12423,7 +12468,8 @@ namespace ego_planner
     record_terminal.retry_generation = static_cast<uint32_t>(
         p4_channel_preparation_lifecycle_.diagnostics.
             freshness_retry_count);
-    if (!transitionP4ChannelPreparation(
+    if (!reuse_terminal_for_comparison &&
+        !transitionP4ChannelPreparation(
             record_terminal, now_s, reason))
       return finish(
           P4NormalChannelPreparationDisposition::REJECTED,

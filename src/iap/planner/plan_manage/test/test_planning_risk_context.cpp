@@ -12347,13 +12347,22 @@ TEST(P4PreparedChannelPreparation,
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
+
+  const auto later_snapshot = makeP4SelectionSnapshot(
+      20.0, frozen_occupancy->geometry_id, true, 2);
+  auto later_execution = makeP4ExecutionSnapshot(
+      later_snapshot, risk, 20.0, 805u);
+  later_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      later_snapshot, 20.0, occupancy, risk, later_execution);
+  manager.setLatestRiskSnapshotForTest(later_snapshot);
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
-      10.0, &waiting));
+      20.0, &waiting));
   EXPECT_FALSE(waiting);
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
-      manager.prepareP4NormalChannelComparison(10.0, &reason),
+      manager.recordP4NormalChannelCurveFailure(
+          20.0, ego_planner::P4PreparedCurveFailure::IDENTITY,
+          "planning_attempt_identity_changed_before_final_commit", &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
   EXPECT_EQ(reason, "normal_channel_comparison_complete");
