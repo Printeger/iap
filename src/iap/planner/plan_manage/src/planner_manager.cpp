@@ -1564,18 +1564,47 @@ namespace ego_planner
       result.winner_channel_id = feasible.front()->channel_id;
       return result;
     }
+    const auto primary_risk_metrics = [](const P4PreparedChannelRecord *record) {
+        const auto metric = [record](const double upper,
+                                     const double fallback) {
+            return record->risk_interval_complete ? upper : fallback;
+          };
+        return std::array<double, 3>{
+          metric(record->global_peak_ratio_upper,
+                 record->global_peak_ratio),
+          metric(record->global_continuous_exceedance_upper_s,
+                 record->global_continuous_exceedance_s),
+          metric(record->global_exposure_integral_upper_ratio_s,
+                 record->global_exposure_integral_ratio_s)};
+      };
+    // These aggregates are one evidence family, anchored by peak risk. If
+    // any channel lacks the peak, comparing another channel's finite
+    // diagnostic values with defaults from the missing family would rank
+    // evidence availability rather than risk. Each secondary aggregate must
+    // likewise be available across the cohort. The comparison otherwise
+    // falls through to the existing common unknown-exposure and observed-
+    // upper-PL evidence. This changes preference only; every authorization
+    // and hard feasibility predicate above is unchanged.
+    std::array<bool, 3> primary_risk_metric_common{{true, true, true}};
+    for (const auto *record : feasible)
+    {
+      const auto metrics = primary_risk_metrics(record);
+      for (std::size_t index = 0u; index < metrics.size(); ++index)
+        primary_risk_metric_common[index] =
+            primary_risk_metric_common[index] &&
+            std::isfinite(metrics[index]);
+    }
+    for (std::size_t index = 1u;
+         index < primary_risk_metric_common.size(); ++index)
+      primary_risk_metric_common[index] =
+          primary_risk_metric_common[0] &&
+          primary_risk_metric_common[index];
     enum class Ordering {LEFT, RIGHT, EQUAL};
     const auto compare = [&](const P4PreparedChannelRecord *left,
                              const P4PreparedChannelRecord *right) {
         if (left->authorization_group != right->authorization_group)
           return left->authorization_group < right->authorization_group
               ? Ordering::LEFT : Ordering::RIGHT;
-        const auto conservative = [](const bool interval_complete,
-                                     const double upper,
-                                     const double fallback) {
-            return interval_complete && std::isfinite(upper)
-                ? upper : fallback;
-          };
         const auto lower = [](double lhs, double rhs) {
             if (!std::isfinite(lhs)) lhs =
                 std::numeric_limits<double>::infinity();
@@ -1595,25 +1624,18 @@ namespace ego_planner
                   1.0 - record->braking_tube_support_fraction});
             return value;
           };
-        const std::array<std::pair<double, double>, 5> lower_metrics{{
-          {conservative(left->risk_interval_complete,
-                        left->global_peak_ratio_upper,
-                        left->global_peak_ratio),
-           conservative(right->risk_interval_complete,
-                        right->global_peak_ratio_upper,
-                        right->global_peak_ratio)},
-          {conservative(left->risk_interval_complete,
-                        left->global_continuous_exceedance_upper_s,
-                        left->global_continuous_exceedance_s),
-           conservative(right->risk_interval_complete,
-                        right->global_continuous_exceedance_upper_s,
-                        right->global_continuous_exceedance_s)},
-          {conservative(left->risk_interval_complete,
-                        left->global_exposure_integral_upper_ratio_s,
-                        left->global_exposure_integral_ratio_s),
-           conservative(right->risk_interval_complete,
-                        right->global_exposure_integral_upper_ratio_s,
-                        right->global_exposure_integral_ratio_s)},
+        const auto left_metrics = primary_risk_metrics(left);
+        const auto right_metrics = primary_risk_metrics(right);
+        for (std::size_t index = 0u; index < left_metrics.size(); ++index)
+        {
+          if (!primary_risk_metric_common[index])
+            continue;
+          const int order = lower(
+              left_metrics[index], right_metrics[index]);
+          if (order != 0)
+            return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
+        }
+        const std::array<std::pair<double, double>, 2> lower_metrics{{
           {unknown_exposure(left), unknown_exposure(right)},
           // A partially observed upper PL remains direct actual-curve risk
           // evidence. Compare it only after unknown exposure so sparse
