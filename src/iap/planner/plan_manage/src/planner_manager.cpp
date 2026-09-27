@@ -12718,6 +12718,9 @@ namespace ego_planner
           P4ChannelPreparationTransitionKind::SCHEDULE;
       schedule_transition.decision = &next;
       schedule_transition.context = &planning_risk_context_;
+      schedule_transition.retry_generation = static_cast<uint32_t>(
+          p4_channel_preparation_lifecycle_.diagnostics.
+              freshness_retry_count);
       const auto cached = p4_prepared_channel_bundles_.find(
           candidate.channel_id);
       if (cached != p4_prepared_channel_bundles_.end())
@@ -13321,13 +13324,17 @@ namespace ego_planner
           entry->second.preparation_identity.retry_generation <
               p4_channel_preparation_lifecycle_.diagnostics.
                   freshness_retry_count;
+      // A failure concluded in the active retry generation is terminal for
+      // that sibling. A later sibling's snapshot advance cannot erase it and
+      // silently turn the failed channel back into unprepared work.
       const bool stale_terminal_snapshot =
           entry->second.channel_record.snapshot_identity.canonical() !=
               record.snapshot_identity.canonical() &&
           entry->second.state !=
               P4SuccessorPreparationState::CURVE_PREPARING &&
           !(entry->second.state == P4SuccessorPreparationState::FAILED &&
-            all_siblings_terminal &&
+            p4_channel_preparation_lifecycle_.diagnostics.
+                    freshness_retry_count > 0u &&
             entry->second.preparation_identity.retry_generation ==
                 p4_channel_preparation_lifecycle_.diagnostics.
                     freshness_retry_count);

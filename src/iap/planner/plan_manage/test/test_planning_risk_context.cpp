@@ -11635,6 +11635,43 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
       11.1, &waiting));
   EXPECT_FALSE(waiting);
+
+  // A loaded planning callback may replace this cached sibling with a new
+  // exact curve while the one common fresh generation is already active.
+  // Its initial snapshot-not-ready result must stay pending in generation 1
+  // instead of being mistaken for a second cohort-wide freshness retry.
+  Eigen::MatrixXd replacement_points =
+      manager.local_data_.position_traj_.getControlPoint();
+  replacement_points(1, replacement_points.cols() / 2) += 0.01;
+  install_curve(std::move(replacement_points), 925, 10'200'000'000LL);
+  manager.setPlanningRiskContextForTest(
+      nullptr, 11.1, fresh_occupancy, direct_risk, fresh_execution);
+  auto replacement_decision = manager.lastP4ForwardDecision();
+  replacement_decision.planning_attempt_id =
+      manager.planningRiskContext().planning_attempt_id;
+  manager.setP4ForwardDecisionForTest(std::move(replacement_decision));
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 11.1));
+  ASSERT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "normal_channel_risk_snapshot_not_ready");
+  ASSERT_EQ(
+      manager.deferP4NormalChannelCertificationForRiskSnapshot(
+          11.1, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  EXPECT_EQ(
+      manager.p4ChannelPreparationLifecycleForTest().freshness_retry_count,
+      1u);
+  EXPECT_TRUE(
+      manager.p4ChannelPreparationLifecycleForTest().lifecycle_failure.empty());
+
+  manager.setPlanningRiskContextForTest(
+      snapshot, 11.1, fresh_occupancy, direct_risk, fresh_execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      11.1, &waiting));
+  EXPECT_FALSE(waiting);
   const auto first_retry_decision = manager.lastP4ForwardDecision();
   const auto first_retry_trajectory = manager.local_data_;
   ASSERT_FALSE(manager.certifyP4ActualCurve(
@@ -11709,8 +11746,8 @@ TEST(P4PreparedChannelPreparation,
       completed_lifecycle.transition_count);
   EXPECT_EQ(completed_lifecycle.expected_channel_count, 2u);
   EXPECT_EQ(completed_lifecycle.freshness_retry_count, 1u);
-  EXPECT_EQ(completed_lifecycle.pending_schedule_count, 3u);
-  EXPECT_EQ(completed_lifecycle.pending_consume_count, 3u);
+  EXPECT_EQ(completed_lifecycle.pending_schedule_count, 4u);
+  EXPECT_EQ(completed_lifecycle.pending_consume_count, 4u);
   EXPECT_EQ(completed_lifecycle.certification_conclusion_count, 3u);
   EXPECT_LE(completed_lifecycle.transition_count,
             completed_lifecycle.transition_limit);
@@ -12636,37 +12673,152 @@ TEST(P4PreparedChannelPreparation,
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
+  const auto later_snapshot = makeP4SelectionSnapshot(
+      20.0, frozen_occupancy->geometry_id, true, 2);
+  auto later_execution = makeP4ExecutionSnapshot(
+      later_snapshot, risk, 20.0, 805u);
+  later_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      later_snapshot, 20.0, occupancy, risk, later_execution);
+  manager.setLatestRiskSnapshotForTest(later_snapshot);
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
-      10.0, &waiting));
+      20.0, &waiting));
   EXPECT_FALSE(waiting);
+  EXPECT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          20.0, ego_planner::P4PreparedCurveFailure::IDENTITY,
+          "planning_attempt_identity_changed_before_final_commit", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+      << reason;
+  EXPECT_EQ(reason, "normal_channel_comparison_complete");
+  EXPECT_EQ(manager.lastP4ForwardDecision().candidates.size(), 2u);
+  EXPECT_EQ(manager.lastP4ForwardDecision().channel_comparison_state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::FORMAL);
+  EXPECT_NE(manager.lastP4ForwardDecision().selected_channel_id, 0u);
+  EXPECT_EQ(
+      manager.p4ChannelPreparationLifecycleForTest().freshness_retry_count,
+      1u);
+  EXPECT_LE(
+      manager.p4ChannelPreparationLifecycleForTest().transition_count,
+      manager.p4ChannelPreparationLifecycleForTest().transition_limit);
+}
 
-  // A loaded planning callback can replace the cached sibling with a new
-  // exact curve while the cohort is already using its one common fresh
-  // snapshot generation. Snapshot-not-ready is the new curve's initial
-  // pending state, not a request to begin a second cohort-wide retry.
-  Eigen::MatrixXd replacement_points = p4StoppedControlPoints();
-  replacement_points.row(1) *= -1.0;
-  replacement_points(1, replacement_points.cols() / 2) += 0.01;
-  auto replacement_curve = ego_planner::UniformBspline(
-      replacement_points, 3, 0.5);
-  const auto replacement_terminal = ego_planner::imposeP4TerminalStop(
-      &replacement_curve, terminalStartState(replacement_curve),
+TEST(P4PreparedChannelPreparation,
+     TerminalSiblingSurvivesSnapshotAdvanceBeforeCohortCompletes)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot_one = makeP4SelectionSnapshot(
+      10.0, frozen_occupancy->geometry_id, true, 1);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot_one,
+      p4LineageTestPath("terminal_sibling_snapshot_advance.csv").string(),
+      1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  const auto risk = directRiskCallback(0.4);
+  auto execution_one = makeP4ExecutionSnapshot(
+      snapshot_one, risk, 10.0, 901u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution_one->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  execution_one->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      snapshot_one, 10.0, occupancy, risk, execution_one);
+  manager.setLatestRiskSnapshotForTest(snapshot_one);
+
+  auto decision = makeForwardDecision(
+      snapshot_one, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto failed_sibling = decision.candidates.front();
+  failed_sibling.candidate_id += 1u;
+  failed_sibling.channel_id += 1u;
+  failed_sibling.path[1].y() *= -1.0;
+  failed_sibling.path_hash = "snapshot-pending-sibling";
+  decision.candidates.push_back(failed_sibling);
+  auto later_sibling = decision.candidates.front();
+  later_sibling.candidate_id += 2u;
+  later_sibling.channel_id += 2u;
+  later_sibling.path_hash = "terminal-sibling";
+  const uint64_t failed_channel_id = later_sibling.channel_id;
+  decision.candidates.push_back(later_sibling);
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  const auto install_curve = [&manager](const int trajectory_id,
+                                         const int64_t start_time_ns) {
+    auto curve = ego_planner::UniformBspline(
+        p4StoppedControlPoints(), 3, 0.5);
+    const auto terminal = ego_planner::imposeP4TerminalStop(
+        &curve, terminalStartState(curve), 20.0, 100.0, 0.0);
+    EXPECT_TRUE(terminal.success) << terminal.reason;
+    manager.local_data_.position_traj_ = curve;
+    manager.local_data_.velocity_traj_ = curve.getDerivative();
+    manager.local_data_.acceleration_traj_ =
+        manager.local_data_.velocity_traj_.getDerivative();
+    manager.local_data_.traj_id_ = trajectory_id;
+    manager.local_data_.start_time_ =
+        rclcpp::Time(start_time_ns, RCL_ROS_TIME);
+    manager.local_data_.duration_ = curve.getTimeSum();
+  };
+
+  install_curve(951, 10'000'000'000LL);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  std::string reason;
+  ASSERT_EQ(
+      manager.prepareP4NormalChannelComparison(10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            failed_sibling.channel_id);
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
+  Eigen::MatrixXd mirrored_points = p4StoppedControlPoints();
+  mirrored_points.row(1) *= -1.0;
+  auto pending_curve = ego_planner::UniformBspline(
+      mirrored_points, 3, 0.5);
+  const auto pending_terminal = ego_planner::imposeP4TerminalStop(
+      &pending_curve, terminalStartState(pending_curve),
       20.0, 100.0, 0.0);
-  ASSERT_TRUE(replacement_terminal.success) << replacement_terminal.reason;
-  manager.local_data_.position_traj_ = replacement_curve;
-  manager.local_data_.velocity_traj_ = replacement_curve.getDerivative();
+  ASSERT_TRUE(pending_terminal.success) << pending_terminal.reason;
+  manager.local_data_.position_traj_ = pending_curve;
+  manager.local_data_.velocity_traj_ = pending_curve.getDerivative();
   manager.local_data_.acceleration_traj_ =
       manager.local_data_.velocity_traj_.getDerivative();
-  manager.local_data_.traj_id_ = 97;
-  manager.local_data_.start_time_ = rclcpp::Time(10, 200000000,
-                                                 RCL_ROS_TIME);
-  manager.local_data_.duration_ = replacement_curve.getTimeSum();
+  manager.local_data_.traj_id_ = 952;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = pending_curve.getTimeSum();
   manager.setPlanningRiskContextForTest(
-      nullptr, 10.0, occupancy, risk, fresh_execution);
-  auto replacement_decision = manager.lastP4ForwardDecision();
-  replacement_decision.planning_attempt_id =
+      nullptr, 10.0, occupancy, risk, execution_one);
+  auto pending_decision = manager.lastP4ForwardDecision();
+  pending_decision.planning_attempt_id =
       manager.planningRiskContext().planning_attempt_id;
-  manager.setP4ForwardDecisionForTest(std::move(replacement_decision));
+  manager.setP4ForwardDecisionForTest(std::move(pending_decision));
   ASSERT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   ASSERT_EQ(manager.lastP4ActualCurveCertification().detail,
@@ -12680,32 +12832,64 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(
       manager.p4ChannelPreparationLifecycleForTest().freshness_retry_count,
       1u);
-  EXPECT_TRUE(
-      manager.p4ChannelPreparationLifecycleForTest().lifecycle_failure.empty());
 
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            failed_channel_id);
+  manager.setP4ForwardDecisionForTest(
+      *manager.pendingP4ChannelWorkItemForTest());
+  manager.clearP4PendingChannelWorkItemForTest();
   manager.setPlanningRiskContextForTest(
-      snapshot, 10.0, occupancy, risk, fresh_execution);
-  manager.setLatestRiskSnapshotForTest(snapshot);
+      snapshot_one, 10.0, occupancy, risk, execution_one);
+  manager.setLatestRiskSnapshotForTest(snapshot_one);
+  auto failed_decision = manager.lastP4ForwardDecision();
+  failed_decision.planning_attempt_id =
+      manager.planningRiskContext().planning_attempt_id;
+  manager.setP4ForwardDecisionForTest(std::move(failed_decision));
+  ASSERT_EQ(
+      manager.recordP4NormalChannelCurveFailure(
+          10.0, ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "terminal_sibling_hard_failure", &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+
+  auto execution_two = makeP4ExecutionSnapshot(
+      snapshot_one, risk, 20.0, 902u);
+  execution_two->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      snapshot_one, 20.0, occupancy, risk, execution_two);
+  manager.setLatestRiskSnapshotForTest(snapshot_one);
+  bool waiting = false;
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
-      10.0, &waiting));
+      20.0, &waiting));
   EXPECT_FALSE(waiting);
   ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "final_bspline_before_p5", 10.0))
+      "final_bspline_before_p5", 20.0))
+      << manager.lastP4ActualCurveCertification().detail;
+  ASSERT_EQ(
+      manager.prepareP4NormalChannelComparison(20.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_NE(manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
+            failed_channel_id)
+      << "a terminal sibling in the current retry generation must not be "
+         "erased and regenerated when another sibling advances snapshots";
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      20.0, &waiting));
+  EXPECT_FALSE(waiting);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 20.0))
       << manager.lastP4ActualCurveCertification().detail;
   EXPECT_EQ(
-      manager.prepareP4NormalChannelComparison(10.0, &reason),
+      manager.prepareP4NormalChannelComparison(20.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
-  EXPECT_EQ(reason, "normal_channel_comparison_complete");
-  EXPECT_EQ(manager.lastP4ForwardDecision().candidates.size(), 2u);
-  EXPECT_EQ(manager.lastP4ForwardDecision().channel_comparison_state,
-            ego_planner::P4ChannelComparisonState::COMPLETE);
-  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
-            ego_planner::P4ForwardSelectionAuthority::FORMAL);
-  EXPECT_NE(manager.lastP4ForwardDecision().selected_channel_id, 0u);
-  EXPECT_EQ(
-      manager.p4ChannelPreparationLifecycleForTest().freshness_retry_count,
-      1u);
+  EXPECT_TRUE(
+      manager.p4ChannelPreparationLifecycleForTest().lifecycle_failure.empty());
   EXPECT_LE(
       manager.p4ChannelPreparationLifecycleForTest().transition_count,
       manager.p4ChannelPreparationLifecycleForTest().transition_limit);
