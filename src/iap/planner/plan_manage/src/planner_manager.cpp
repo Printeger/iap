@@ -10648,16 +10648,28 @@ namespace ego_planner
       if (next_unprepared != last_p4_forward_decision_.candidates.end())
       {
         P4ForwardDecision next = last_p4_forward_decision_;
+        next.action = P4ForwardAction::CANDIDATE_READY;
+        next.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+        next.selection_authority = P4ForwardSelectionAuthority::NONE;
+        next.formal_support = false;
         next.selected_candidate_id = next_unprepared->candidate_id;
         next.selected_channel_id = next_unprepared->channel_id;
+        next.runner_up_candidate_id = 0u;
+        next.runner_up_channel_id = 0u;
         next.selected_guide = next_unprepared->path;
         next.selected_actual_endpoint = Eigen::Vector3d::Constant(
             std::numeric_limits<double>::quiet_NaN());
+        next.runner_up_actual_endpoint = Eigen::Vector3d::Constant(
+            std::numeric_limits<double>::quiet_NaN());
         next.selected_unevaluated_suffix_m =
+            std::numeric_limits<double>::quiet_NaN();
+        next.runner_up_unevaluated_suffix_m =
             std::numeric_limits<double>::quiet_NaN();
         next.channel_comparison_state =
             P4ChannelComparisonState::PARTIAL_COMPARISON;
         next.successor_failure = P4SuccessorFailure::NONE;
+        next.planning_disposition =
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
         next.reason = "successor_next_channel_after_typed_failure:" + detail;
         last_p4_forward_decision_ = next;
         p4_pending_channel_work_item_ = std::move(next);

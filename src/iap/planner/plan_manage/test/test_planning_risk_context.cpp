@@ -10640,8 +10640,18 @@ TEST(P4PreparedSuccessorPolicy,
         std::to_string(channel_id);
     multi_channel.candidates.push_back(std::move(candidate));
   }
+  multi_channel.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  multi_channel.executable_intent =
+      ego_planner::P4ExecutableIntent::FINAL_CHANNEL;
+  multi_channel.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::FORMAL;
+  multi_channel.formal_support = true;
+  multi_channel.planning_disposition =
+      ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
   multi_channel.selected_candidate_id = 1u;
   multi_channel.selected_channel_id = 17u;
+  multi_channel.runner_up_candidate_id = 2u;
+  multi_channel.runner_up_channel_id = 29u;
   multi_channel.selected_guide = multi_channel.candidates.front().path;
   multi_channel_manager.setP4ForwardDecisionForTest(multi_channel);
   multi_channel_manager.recordPreparedP4SuccessorCurveFailure(
@@ -10658,6 +10668,24 @@ TEST(P4PreparedSuccessorPolicy,
       multi_channel_manager.pendingP4ChannelWorkItemForTest()
           ->selected_channel_id,
       29u);
+  EXPECT_EQ(multi_channel_manager.lastP4ForwardDecision().action,
+            ego_planner::P4ForwardAction::CANDIDATE_READY);
+  EXPECT_EQ(
+      multi_channel_manager.lastP4ForwardDecision().executable_intent,
+      ego_planner::P4ExecutableIntent::FINAL_CHANNEL);
+  EXPECT_EQ(
+      multi_channel_manager.lastP4ForwardDecision().selection_authority,
+      ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(multi_channel_manager.lastP4ForwardDecision().formal_support);
+  EXPECT_EQ(
+      multi_channel_manager.lastP4ForwardDecision().planning_disposition,
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+  EXPECT_EQ(
+      multi_channel_manager.lastP4ForwardDecision().runner_up_candidate_id,
+      0u);
+  EXPECT_EQ(
+      multi_channel_manager.lastP4ForwardDecision().runner_up_channel_id,
+      0u);
   EXPECT_EQ(multi_channel_manager.lastP4ForwardDecision().successor_failure,
             ego_planner::P4SuccessorFailure::NONE);
 
