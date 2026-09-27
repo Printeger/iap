@@ -6183,8 +6183,33 @@ namespace ego_planner
             successor.action == P4ForwardAction::DEFER_RISK_SELECTION &&
             successor.executable_intent ==
                 P4ExecutableIntent::LIMITED_PREFIX;
-        constrainP4DecisionToCommittedTopology(&successor);
+        const bool committed_constraint_applied =
+            constrainP4DecisionToCommittedTopology(&successor);
         completed.decision = successor;
+        if (completed.ready && successor.successor_fast_path &&
+            committed_constraint_applied &&
+            successor.executable_intent == P4ExecutableIntent::HOLD &&
+            successor.reason ==
+                "committed_topology_post_exit_comparison_required")
+        {
+          // A worker result can arrive after the synchronous fast-path slot.
+          // Reuse the existing one-shot full-search lane instead of allowing
+          // the generic ready-result bookkeeping below to relabel the
+          // topology-crossing guide as executable.
+          p4_successor_preparation_state_ =
+              P4SuccessorPreparationState::ROUTE_PENDING;
+          p4_successor_schedule_.force_full_search = true;
+          p4_successor_schedule_.result_delivered = false;
+          p4_successor_schedule_.awaiting_new_snapshot = false;
+          p4_successor_schedule_.last_failure = P4SuccessorFailure::NONE;
+          successor.result_status = P4ForwardResultStatus::PENDING;
+          successor.successor_fast_path = false;
+          successor.planning_disposition =
+              P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          successor.reason =
+              "successor_committed_exit_full_search_pending";
+          return successor;
+        }
         if (((!completed.ready && route_risk_is_diagnostic) ||
              generic_limited_prefix) &&
             !successor.successor_fast_path &&
@@ -10829,6 +10854,20 @@ namespace ego_planner
     const auto &commitment = *p4_committed_topology_;
     const double corridor_radius_m =
         p4RefinementCorridorRadius(p4_forward_limits_);
+    const auto extends_past_committed_exit =
+        [&commitment, corridor_radius_m](
+            const P4ForwardCandidate &candidate) {
+          const auto &path = candidate.path.size() >= 2u
+              ? candidate.path : candidate.topology_path;
+          if (path.size() < 2u)
+            return false;
+          const auto exit_on_candidate = projectP4Polyline(
+              path, commitment.exit_point);
+          return std::isfinite(exit_on_candidate.distance_m) &&
+              exit_on_candidate.distance_m <= corridor_radius_m &&
+              p4PolylineLength(path) >
+                  exit_on_candidate.station_m + corridor_radius_m;
+        };
     const auto compatible = [&commitment, corridor_radius_m](
         const P4ForwardCandidate &candidate) {
       const auto &path = candidate.path.size() >= 2u
@@ -10901,7 +10940,13 @@ namespace ego_planner
         (decision->action == P4ForwardAction::CANDIDATE_READY ||
          decision->action == P4ForwardAction::RISK_SELECTED ||
          decision->action == P4ForwardAction::DEFER_RISK_SELECTION);
-    if (continuations.empty() || !route_result_can_prepare_actual)
+    const bool unselected_post_exit_fast_path =
+        decision->successor_fast_path &&
+        std::any_of(
+            continuations.begin(), continuations.end(),
+            extends_past_committed_exit);
+    if (continuations.empty() || !route_result_can_prepare_actual ||
+        unselected_post_exit_fast_path)
     {
       decision->action = P4ForwardAction::DEFER_RISK_SELECTION;
       decision->executable_intent = P4ExecutableIntent::HOLD;
@@ -10917,8 +10962,9 @@ namespace ego_planner
       decision->speed_cap_mps = 0.0;
       decision->planning_disposition =
           P4PlanningDisposition::HOLD_REQUIRED;
-      decision->reason =
-          "committed_topology_continuation_not_yet_proven";
+      decision->reason = unselected_post_exit_fast_path
+          ? "committed_topology_post_exit_comparison_required"
+          : "committed_topology_continuation_not_yet_proven";
       return true;
     }
 
@@ -12139,65 +12185,56 @@ namespace ego_planner
               candidate_deadline_s + 1.0e-9;
       if (!next_channel_fits)
       {
-        std::vector<P4PreparedChannelRecord> deadline_records;
-        for (const auto &entry : p4_prepared_channel_bundles_)
-          if (entry.second.complete() &&
-              entry.second.channel_record.feasible() &&
-              entry.second.decision.decision_event_id ==
-                  bundle.decision.decision_event_id)
-            deadline_records.push_back(entry.second.channel_record);
-        const auto deadline_comparison = compareP4PreparedChannels(
-            deadline_records, bundle.decision.snapshot_identity,
-            deadline_records.size(),
-            p4_execution_certificate_.successor_channel_id);
-        const auto winner = p4_prepared_channel_bundles_.find(
-            deadline_comparison.winner_channel_id);
-        if (!deadline_records.empty() &&
-            deadline_comparison.winner_channel_id > 0u &&
-            winner != p4_prepared_channel_bundles_.end() &&
-            winner->second.complete())
-        {
-          P4PreparedSuccessorBundle selected_bundle = winner->second;
-          selected_bundle.decision.channel_comparison_state =
-              P4ChannelComparisonState::PARTIAL_COMPARISON;
-          selected_bundle.decision.selected_channel_id =
-              deadline_comparison.winner_channel_id;
-          selected_bundle.decision.runner_up_channel_id =
-              deadline_comparison.runner_up_channel_id;
-          selected_bundle.decision.selected_actual_endpoint =
-              selected_bundle.channel_record.actual_endpoint;
-          selected_bundle.decision.selected_unevaluated_suffix_m =
-              selected_bundle.channel_record.unevaluated_suffix_m;
-          selected_bundle.decision.reason =
-              "successor_deadline_complete_winner_cached";
-          p4_cached_successor_bundle_ = std::move(selected_bundle);
-          p4_cached_successor_activation_in_progress_ = false;
-          p4_successor_preparation_state_ =
-              P4SuccessorPreparationState::PREPARED_CERTIFIED;
-          p4_successor_schedule_.result_delivered = true;
-          last_p4_forward_decision_ =
-              p4_cached_successor_bundle_->decision;
-          p4_pending_channel_work_item_.reset();
-          p4_pending_channel_context_.reset();
-          appendP4ForwardDecision(
-              last_p4_forward_decision_,
-              "successor_deadline_complete_winner", deadline_now_s);
-          P4ExecutionCheckDiagnostics prepared;
-          prepared.applicable = true;
-          prepared.allowed = true;
-          prepared.identity_match = true;
-          prepared.execution_snapshot_id =
-              p4_cached_successor_bundle_->certificate.execution_snapshot_id;
-          prepared.direct_batch_duration_ms =
-              p4_cached_successor_bundle_->direct_risk_evidence.
-                  compute_duration_ms;
-          prepared.reason =
-              "successor_deadline_complete_winner_cached";
-          appendP4ExecutionEvent(
-              "SUCCESSOR_DEADLINE_WINNER_RETAINED", deadline_now_s,
-              prepared);
-          return finish(true, "successor_deadline_complete_winner_cached");
-        }
+        // A complete actual curve is not a comparison winner while another
+        // enumerated sibling remains unprepared.  Publishing it at the
+        // deadline lets route enumeration order choose the next topology and
+        // rewards a shorter/retreating curve for omitting future evidence.
+        // Keep the certified parent authoritative and terminate this rolling
+        // attempt; the ordinary guard/replan path may start a fresh cohort.
+        p4_cached_successor_bundle_.reset();
+        p4_cached_successor_activation_in_progress_ = false;
+        p4_pending_channel_work_item_.reset();
+        p4_pending_channel_context_.reset();
+        p4_prepared_successor_.reset();
+        p4_prepared_channel_bundles_.clear();
+        p4_successor_preparation_state_ =
+            P4SuccessorPreparationState::FAILED;
+        p4_successor_schedule_.result_delivered = true;
+        p4_successor_schedule_.last_failure =
+            P4SuccessorFailure::DEADLINE_MISSED;
+        last_p4_forward_decision_ = bundle.decision;
+        last_p4_forward_decision_.action =
+            P4ForwardAction::DEFER_RISK_SELECTION;
+        last_p4_forward_decision_.executable_intent =
+            P4ExecutableIntent::HOLD;
+        last_p4_forward_decision_.selection_authority =
+            P4ForwardSelectionAuthority::NONE;
+        last_p4_forward_decision_.formal_support = false;
+        last_p4_forward_decision_.selected_candidate_id = 0u;
+        last_p4_forward_decision_.selected_channel_id = 0u;
+        last_p4_forward_decision_.runner_up_candidate_id = 0u;
+        last_p4_forward_decision_.runner_up_channel_id = 0u;
+        last_p4_forward_decision_.selected_guide.clear();
+        last_p4_forward_decision_.successor_failure =
+            P4SuccessorFailure::DEADLINE_MISSED;
+        last_p4_forward_decision_.planning_disposition =
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+        last_p4_forward_decision_.reason =
+            "successor_deadline_incomplete_cohort_hold";
+        appendP4ForwardDecision(
+            last_p4_forward_decision_,
+            "successor_deadline_incomplete_cohort", deadline_now_s);
+        P4ExecutionCheckDiagnostics failed;
+        failed.applicable = true;
+        failed.allowed = false;
+        failed.identity_match = true;
+        failed.execution_snapshot_id =
+            p4_execution_certificate_.execution_snapshot_id;
+        failed.reason = "successor_deadline_incomplete_cohort_hold";
+        appendP4ExecutionEvent(
+            "SUCCESSOR_DEADLINE_INCOMPLETE_COHORT", deadline_now_s,
+            failed);
+        return finish(false, "successor_deadline_incomplete_cohort_hold");
       }
       last_p4_forward_decision_ = bundle.decision;
       last_p4_forward_decision_.selected_candidate_id =

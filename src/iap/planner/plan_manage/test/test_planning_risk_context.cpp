@@ -12850,8 +12850,35 @@ TEST(P4CommittedTopology,
       Eigen::Vector3d::Zero());
   ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
 
+  // Reusing a single successor guide may finish the entered topology, but
+  // it cannot silently choose a topology after the graph-derived exit.  A
+  // post-exit branch needs an ordinary all-channel search/comparison first.
+  auto crossing_fast_path = selected;
+  crossing_fast_path.decision_event_id = 704u;
+  crossing_fast_path.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  crossing_fast_path.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  crossing_fast_path.successor_fast_path = true;
+  crossing_fast_path.candidates = {
+      candidate(10u, 500u,
+          {Eigen::Vector3d(2.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0),
+           Eigen::Vector3d(6.0, 0.0, 1.0),
+           Eigen::Vector3d(8.0, 2.0, 1.0)})};
+  crossing_fast_path.selected_candidate_id = 10u;
+  crossing_fast_path.selected_channel_id = 500u;
+  crossing_fast_path.selected_guide =
+      crossing_fast_path.candidates.front().path;
+  ASSERT_TRUE(manager.constrainP4DecisionToCommittedTopologyForTest(
+      &crossing_fast_path));
+  EXPECT_EQ(crossing_fast_path.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(crossing_fast_path.selected_channel_id, 0u);
+  EXPECT_EQ(crossing_fast_path.reason,
+            "committed_topology_post_exit_comparison_required");
+
   auto rebuilt_event = selected;
-  rebuilt_event.decision_event_id = 704u;
+  rebuilt_event.decision_event_id = 705u;
   rebuilt_event.selected_candidate_id = 2u;
   rebuilt_event.selected_channel_id = 99u;
   rebuilt_event.selected_guide = rebuilt_event.candidates.back().path;
@@ -13670,14 +13697,13 @@ TEST(P4PreparedSuccessorPolicy,
       ego_planner::p4ControlPointHash(
           incumbent.position_traj_.getControlPoint()));
   manager.setPreparedP4SuccessorForTest(prepared);
-  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
-      9.9, &cache_reason)) << cache_reason;
-  EXPECT_EQ(cache_reason, "successor_deadline_complete_winner_cached");
+  EXPECT_FALSE(manager.cachePreparedP4SuccessorBundle(
+      9.9, &cache_reason));
+  EXPECT_EQ(cache_reason, "successor_deadline_incomplete_cohort_hold");
   EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
-  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
-  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()
-                ->decision.channel_comparison_state,
-            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::FAILED);
 
   // With a wide fixed window, the same production path still gives the peer
   // its bounded actual-curve opportunity.
@@ -13694,6 +13720,7 @@ TEST(P4PreparedSuccessorPolicy,
   second_channel.path_hash = "forward-runner-up-guide";
   multi_channel_decision.candidates.push_back(second_channel);
   manager.setP4ForwardDecisionForTest(std::move(multi_channel_decision));
+  manager.setPreparedP4SuccessorForTest(prepared);
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
       9.9, &cache_reason))
       << cache_reason;
@@ -14418,10 +14445,13 @@ TEST(P4PreparedSuccessorPolicy,
       Eigen::Vector3d(8.0, 0.0, 1.0));
 
   ASSERT_EQ(decision.result_status,
-            ego_planner::P4ForwardResultStatus::READY);
-  ASSERT_EQ(decision.candidates.size(), 1u);
-  EXPECT_EQ(decision.selected_candidate_id, 11u);
-  EXPECT_EQ(decision.selected_channel_id, 501u);
-  EXPECT_EQ(decision.reason, "successor_fast_path_ready");
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_EQ(decision.selected_channel_id, 0u);
+  EXPECT_EQ(decision.reason,
+            "successor_committed_exit_full_search_pending");
+  EXPECT_TRUE(manager.p4SuccessorFullSearchFallbackPendingForTest());
   EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
 }
