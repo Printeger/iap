@@ -12636,22 +12636,64 @@ TEST(P4PreparedChannelPreparation,
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
-
-  const auto later_snapshot = makeP4SelectionSnapshot(
-      20.0, frozen_occupancy->geometry_id, true, 2);
-  auto later_execution = makeP4ExecutionSnapshot(
-      later_snapshot, risk, 20.0, 805u);
-  later_execution->occupancy = occupancy;
-  manager.setPlanningRiskContextForTest(
-      later_snapshot, 20.0, occupancy, risk, later_execution);
-  manager.setLatestRiskSnapshotForTest(later_snapshot);
   ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
-      20.0, &waiting));
+      10.0, &waiting));
   EXPECT_FALSE(waiting);
+
+  // A loaded planning callback can replace the cached sibling with a new
+  // exact curve while the cohort is already using its one common fresh
+  // snapshot generation. Snapshot-not-ready is the new curve's initial
+  // pending state, not a request to begin a second cohort-wide retry.
+  Eigen::MatrixXd replacement_points = p4StoppedControlPoints();
+  replacement_points.row(1) *= -1.0;
+  replacement_points(1, replacement_points.cols() / 2) += 0.01;
+  auto replacement_curve = ego_planner::UniformBspline(
+      replacement_points, 3, 0.5);
+  const auto replacement_terminal = ego_planner::imposeP4TerminalStop(
+      &replacement_curve, terminalStartState(replacement_curve),
+      20.0, 100.0, 0.0);
+  ASSERT_TRUE(replacement_terminal.success) << replacement_terminal.reason;
+  manager.local_data_.position_traj_ = replacement_curve;
+  manager.local_data_.velocity_traj_ = replacement_curve.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 97;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 200000000,
+                                                 RCL_ROS_TIME);
+  manager.local_data_.duration_ = replacement_curve.getTimeSum();
+  manager.setPlanningRiskContextForTest(
+      nullptr, 10.0, occupancy, risk, fresh_execution);
+  auto replacement_decision = manager.lastP4ForwardDecision();
+  replacement_decision.planning_attempt_id =
+      manager.planningRiskContext().planning_attempt_id;
+  manager.setP4ForwardDecisionForTest(std::move(replacement_decision));
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  ASSERT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "normal_channel_risk_snapshot_not_ready");
+  ASSERT_EQ(
+      manager.deferP4NormalChannelCertificationForRiskSnapshot(
+          10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
   EXPECT_EQ(
-      manager.recordP4NormalChannelCurveFailure(
-          20.0, ego_planner::P4PreparedCurveFailure::IDENTITY,
-          "planning_attempt_identity_changed_before_final_commit", &reason),
+      manager.p4ChannelPreparationLifecycleForTest().freshness_retry_count,
+      1u);
+  EXPECT_TRUE(
+      manager.p4ChannelPreparationLifecycleForTest().lifecycle_failure.empty());
+
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, risk, fresh_execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      10.0, &waiting));
+  EXPECT_FALSE(waiting);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0))
+      << manager.lastP4ActualCurveCertification().detail;
+  EXPECT_EQ(
+      manager.prepareP4NormalChannelComparison(10.0, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
   EXPECT_EQ(reason, "normal_channel_comparison_complete");

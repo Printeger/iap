@@ -12635,11 +12635,16 @@ namespace ego_planner
         });
     // Once one sibling is terminal, a not-ready/superseded snapshot for a
     // later sibling means the cohort no longer has common authorization
-    // evidence. Reuse the existing single bounded freshness retry for all
-    // retained exact curves. Before the first healthy generation no sibling
-    // can be terminal, so startup keeps waiting without consuming that retry.
-    const bool begin_freshness_retry = frozen_support_expired ||
-        (risk_snapshot_unavailable && completed_feasible_sibling);
+    // evidence. Begin the single bounded common-snapshot retry only from the
+    // original generation. A different exact curve first materialized while
+    // that retry is already active may wait for its initial usable snapshot;
+    // it must not restart the cohort-wide retry or be rejected as a second
+    // retry before it has produced any certification conclusion.
+    const uint32_t current_retry_generation = static_cast<uint32_t>(
+        lifecycle.freshness_retry_count);
+    const bool begin_freshness_retry = current_retry_generation == 0u &&
+        (frozen_support_expired ||
+         (risk_snapshot_unavailable && completed_feasible_sibling));
     const std::string control_hash = p4ControlPointHash(
         local_data_.position_traj_.getControlPoint());
     const std::string knot_hash = p4KnotVectorHash(
@@ -12678,7 +12683,8 @@ namespace ego_planner
     register_pending.decision = &last_p4_forward_decision_;
     register_pending.context = &planning_risk_context_;
     register_pending.bundle = &pending;
-    register_pending.retry_generation = begin_freshness_retry ? 1u : 0u;
+    register_pending.retry_generation = begin_freshness_retry
+        ? 1u : current_retry_generation;
     if (!transitionP4ChannelPreparation(
             register_pending, now_s, reason))
       return P4NormalChannelPreparationDisposition::REJECTED;
