@@ -9639,6 +9639,24 @@ TEST(P4PreparedChannelComparison,
   EXPECT_TRUE(std::isinf(summary.second));
 }
 
+TEST(P4PreparedChannelComparison,
+     ActualFimSummaryUsesDirectKnownFimWhenFormalSupportIsIncomplete)
+{
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.points.resize(2u);
+  evidence.relative_times = {0.0, 1.0};
+  evidence.points[0].fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  evidence.points[1].fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  evidence.points[0].known_fim_ratio = 0.4;
+  evidence.points[1].known_fim_ratio = 0.2;
+
+  const auto summary = ego_planner::summarizeP4ActualFimEvidence(evidence);
+  EXPECT_DOUBLE_EQ(summary.first, 0.4);
+  EXPECT_DOUBLE_EQ(summary.second, 0.3);
+  EXPECT_FALSE(evidence.complete);
+  EXPECT_FALSE(evidence.certified_safe);
+}
+
 TEST(P4PreparedSuccessorPolicy,
      BindsParentSwitchWindowBoundaryStateAndDirectAuthority)
 {

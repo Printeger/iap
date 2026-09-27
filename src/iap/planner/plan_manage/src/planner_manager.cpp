@@ -1433,7 +1433,13 @@ namespace ego_planner
     double previous_ratio = std::numeric_limits<double>::quiet_NaN();
     for (std::size_t index = 0u; index < evidence.points.size(); ++index)
     {
-      const double ratio = evidence.points[index].fim_ratio;
+      // Both values come from the same direct actual-curve query.  Formal FIM
+      // remains authoritative when available; MISSION may use the known,
+      // non-certified component only to rank otherwise locally admissible
+      // incomplete bundles.  Certification state is deliberately unchanged.
+      const double ratio = std::isfinite(evidence.points[index].fim_ratio)
+          ? evidence.points[index].fim_ratio
+          : evidence.points[index].known_fim_ratio;
       if (!std::isfinite(ratio) ||
           index >= evidence.relative_times.size() ||
           !std::isfinite(evidence.relative_times[index]))
