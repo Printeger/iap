@@ -1904,14 +1904,11 @@ namespace ego_planner
                 static_cast<int64_t>(kExposureRankScale) &&
             right_exposure_rank >=
                 static_cast<int64_t>(kExposureRankScale);
-        const bool any_known_peak =
-            std::isfinite(left->known_global_peak_ratio) ||
-            std::isfinite(right->known_global_peak_ratio);
         // A partially observed upper PL remains direct actual-curve risk
         // evidence only when the common forward range has some LOS support.
-        // With wholly unknown support, compare the actual pre-conservative
-        // FIM first; otherwise a shorter/closer unsupported curve can win by
-        // seeing less of the environment. This changes preference only.
+        // When that whole range is unknown, neither its partial upper PL nor
+        // advisory FIM ordering may replace the route preference frozen
+        // before sibling curve preparation. This changes preference only.
         if (!wholly_unknown)
         {
           const int known_peak_order = lower(
@@ -1920,14 +1917,12 @@ namespace ego_planner
           if (known_peak_order != 0)
             return known_peak_order < 0 ? Ordering::LEFT : Ordering::RIGHT;
         }
-        // When neither actual curve has any upper-PL evidence, retain the
-        // frozen route comparison's preference.  Sibling curve preparation
-        // overwrites selected_channel_id transactionally, so the immutable
-        // route preference is the only non-arbitrary topology signal here.
-        // This is ordering only: every hard local/dynamics/collision/braking
-        // predicate above remains mandatory and no execution authority is
-        // granted by this preference.
-        if (!any_known_peak)
+        // Sibling curve preparation overwrites selected_channel_id
+        // transactionally, so the immutable route preference is the only
+        // supported topology signal when the common actual range is wholly
+        // unknown. Every hard local/dynamics/collision/braking predicate
+        // above remains mandatory and this preference grants no authority.
+        if (wholly_unknown)
         {
           const bool left_preferred =
               left->channel_id == route_preference_channel_id;
@@ -1948,15 +1943,6 @@ namespace ego_planner
           const int order = lower(metric.first, metric.second);
           if (order != 0)
             return order < 0 ? Ordering::LEFT : Ordering::RIGHT;
-        }
-        if (wholly_unknown && any_known_peak)
-        {
-          const bool left_preferred =
-              left->channel_id == route_preference_channel_id;
-          const bool right_preferred =
-              right->channel_id == route_preference_channel_id;
-          if (left_preferred != right_preferred)
-            return left_preferred ? Ordering::LEFT : Ordering::RIGHT;
         }
         const int progress = lower(
             right->actual_progress_m, left->actual_progress_m);

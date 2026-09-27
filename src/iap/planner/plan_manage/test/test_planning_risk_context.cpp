@@ -9936,7 +9936,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     FullyUnknownActualSupportUsesFimBeforePartialUpperPeak)
+     FullyUnknownActualSupportKeepsFrozenRoutePreference)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -9983,21 +9983,22 @@ TEST(P4PreparedChannelComparison,
     return value;
   };
 
-  // Exact values from the clean fork-0 failure. Both actual curves have
-  // wholly unknown LOS support. The smaller partial upper peak therefore
-  // cannot turn the worse pre-conservative actual curve into the winner.
+  // Exact values from the latest clean fork-0 failure. Both actual curves
+  // have wholly unknown LOS support. The route comparison froze the low
+  // channel, and its partial upper peak and integrated FIM are also lower;
+  // a sub-percent advisory FIM-peak reversal must not switch topology.
   auto low_actual = record(2u);
-  low_actual.known_global_peak_ratio = 1.18961;
-  low_actual.fim_max_ratio = 0.012788;
-  low_actual.fim_integral = 2.29235;
+  low_actual.known_global_peak_ratio = 0.651845;
+  low_actual.fim_max_ratio = 0.0128469;
+  low_actual.fim_integral = 1.78702;
   auto high_actual = record(1u);
-  high_actual.known_global_peak_ratio = 1.08525;
-  high_actual.fim_max_ratio = 0.0128016;
-  high_actual.fim_integral = 2.05623;
+  high_actual.known_global_peak_ratio = 0.997274;
+  high_actual.fim_max_ratio = 0.0127607;
+  high_actual.fim_integral = 1.80237;
 
   auto comparison = ego_planner::compareP4PreparedChannels(
       {high_actual, low_actual}, snapshot, 2u, 0u,
-      high_actual.channel_id);
+      low_actual.channel_id);
   ASSERT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id, low_actual.channel_id);
@@ -10006,8 +10007,14 @@ TEST(P4PreparedChannelComparison,
   // established partial-upper-PL-before-FIM ordering.
   low_actual.unknown_support_fraction = 0.8;
   low_actual.combined_conservative_kappa = 0.8;
+  low_actual.known_global_peak_ratio = 1.18961;
+  low_actual.fim_max_ratio = 0.012788;
+  low_actual.fim_integral = 2.29235;
   high_actual.unknown_support_fraction = 0.8;
   high_actual.combined_conservative_kappa = 0.8;
+  high_actual.known_global_peak_ratio = 1.08525;
+  high_actual.fim_max_ratio = 0.0128016;
+  high_actual.fim_integral = 2.05623;
   comparison = ego_planner::compareP4PreparedChannels(
       {high_actual, low_actual}, snapshot, 2u, 0u,
       low_actual.channel_id);
