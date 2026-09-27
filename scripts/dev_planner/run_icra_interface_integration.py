@@ -974,39 +974,36 @@ def _forest_arm_centers(fork: dict, x_m: float) -> tuple[float, float]:
     )
 
 
-def analyze_forest_path(records: list[dict], variant: str) -> dict:
-    """Classify captured trajectory samples by the nearer fork centerline."""
-    if variant not in ("risk", "baseline"):
-        raise ValueError(f"unsupported forest path variant: {variant}")
-    forks = forest_scene_contract()["forks"]
+def _forest_path_votes(
+        points: list[list[float]], *, minimum_station: float = 0.15
+) -> tuple[dict[int, dict[str, int]], dict[int, str]]:
+    """Classify physical points using the scenario contract, never constants."""
+    contract = forest_scene_contract()
+    forks = contract["forks"]
+    corridor_half_width_m = 0.5 * float(contract["corridor_width_m"])
     votes = {index: {"low": 0, "high": 0}
              for index in range(len(forks))}
-    for row in records:
-        payload = row.get("payload", row)
-        point_sets = []
-        point = payload.get("position_xyz")
-        if isinstance(point, list):
-            point_sets.append(point)
-        points = payload.get("control_points_xyz")
-        if isinstance(points, list):
-            point_sets.extend(points)
-        for xyz in point_sets:
-            if not isinstance(xyz, list) or len(xyz) < 2:
+    for xyz in points:
+        if not isinstance(xyz, list) or len(xyz) < 2:
+            continue
+        try:
+            x_m, y_m = float(xyz[0]), float(xyz[1])
+        except (TypeError, ValueError):
+            continue
+        for fork in forks:
+            x_min = float(fork["x_min_m"])
+            length = float(fork["length_m"])
+            t = (x_m - x_min) / length
+            if not minimum_station <= t <= 1.0 - minimum_station:
                 continue
-            try:
-                x_m, y_m = float(xyz[0]), float(xyz[1])
-            except (TypeError, ValueError):
-                continue
-            for fork in forks:
-                x_min = float(fork["x_min_m"])
-                length = float(fork["length_m"])
-                t = (x_m - x_min) / length
-                if not 0.15 <= t <= 0.85:
-                    continue
-                low_y, high_y = _forest_arm_centers(fork, x_m)
-                arm = "low" if abs(y_m - low_y) < abs(y_m - high_y) else "high"
-                votes[int(fork["fork_index"])][arm] += 1
+            low_y, high_y = _forest_arm_centers(fork, x_m)
+            low_distance = abs(y_m - low_y)
+            high_distance = abs(y_m - high_y)
+            if min(low_distance, high_distance) > corridor_half_width_m:
                 break
+            arm = "low" if low_distance < high_distance else "high"
+            votes[int(fork["fork_index"])][arm] += 1
+            break
     selected = {}
     for index, arm_votes in votes.items():
         if arm_votes["low"] == arm_votes["high"]:
@@ -1014,16 +1011,221 @@ def analyze_forest_path(records: list[dict], variant: str) -> dict:
         else:
             selected[index] = (
                 "low" if arm_votes["low"] > arm_votes["high"] else "high")
+    return votes, selected
+
+
+def _forest_odom_traversals(points: list[list[float]]) -> tuple[dict, dict]:
+    """Require an ordered central-arm crossing for each actual odom fork."""
+    contract = forest_scene_contract()
+    forks = contract["forks"]
+    corridor_half_width_m = 0.5 * float(contract["corridor_width_m"])
+    observations = {int(fork["fork_index"]): [] for fork in forks}
+    for sample_index, xyz in enumerate(points):
+        if not isinstance(xyz, list) or len(xyz) < 2:
+            continue
+        try:
+            x_m, y_m = float(xyz[0]), float(xyz[1])
+        except (TypeError, ValueError):
+            continue
+        for fork in forks:
+            station = ((x_m - float(fork["x_min_m"])) /
+                       float(fork["length_m"]))
+            if not 0.25 <= station <= 0.75:
+                continue
+            low_y, high_y = _forest_arm_centers(fork, x_m)
+            low_distance = abs(y_m - low_y)
+            high_distance = abs(y_m - high_y)
+            if min(low_distance, high_distance) > corridor_half_width_m:
+                arm = "outside"
+            else:
+                arm = "low" if low_distance < high_distance else "high"
+            observations[int(fork["fork_index"])].append(
+                (sample_index, station, arm))
+            break
+
+    selected = {}
+    traversal_evidence = {}
+    for fork_index, samples in observations.items():
+        def crossing(arm: str) -> tuple[int, int] | None:
+            entry_index = None
+            previous_station = None
+            for sample_index, station, observed_arm in samples:
+                if observed_arm != arm:
+                    entry_index = None
+                    previous_station = None
+                    continue
+                if entry_index is None:
+                    if station <= 0.30:
+                        entry_index = sample_index
+                        previous_station = station
+                    continue
+                if station + 1.0e-9 < previous_station:
+                    entry_index = sample_index if station <= 0.30 else None
+                    previous_station = station if entry_index is not None else None
+                    continue
+                previous_station = station
+                if station >= 0.70:
+                    return entry_index, sample_index
+            return None
+
+        low_crossing = crossing("low")
+        high_crossing = crossing("high")
+        low_crossed = low_crossing is not None
+        high_crossed = high_crossing is not None
+        if low_crossed and high_crossed:
+            selected[fork_index] = "mixed"
+        elif high_crossed:
+            selected[fork_index] = "high"
+        elif low_crossed:
+            selected[fork_index] = "low"
+        else:
+            selected[fork_index] = "unresolved"
+        traversal_evidence[fork_index] = {
+            "central_sample_count": len(samples),
+            "outside_corridor_sample_count": sum(
+                arm == "outside" for _index, _station, arm in samples),
+            "low_crossed": low_crossed,
+            "high_crossed": high_crossed,
+            "low_entry_sample_index": (
+                low_crossing[0] if low_crossing is not None else None),
+            "low_exit_sample_index": (
+                low_crossing[1] if low_crossing is not None else None),
+            "high_entry_sample_index": (
+                high_crossing[0] if high_crossing is not None else None),
+            "high_exit_sample_index": (
+                high_crossing[1] if high_crossing is not None else None),
+            "first_station": samples[0][1] if samples else None,
+            "last_station": samples[-1][1] if samples else None,
+        }
+
+    ordered = True
+    previous_exit = -1
+    for fork in forks:
+        fork_index = int(fork["fork_index"])
+        arm = selected[fork_index]
+        crossing_indices = (
+            traversal_evidence[fork_index].get(
+                f"{arm}_entry_sample_index"),
+            traversal_evidence[fork_index].get(
+                f"{arm}_exit_sample_index"),
+        )
+        entry_index, exit_index = crossing_indices
+        if (arm not in ("low", "high") or entry_index is None or
+                exit_index is None or entry_index <= previous_exit):
+            ordered = False
+            break
+        previous_exit = exit_index
+    return selected, traversal_evidence, ordered
+
+
+def _forest_candidate_plan_events(rows: list[dict]) -> list[dict]:
+    """Return every planned candidate so absence/rejection remains visible."""
+    events = []
+    for row in rows:
+        points = []
+        for encoded in str(row.get("path_xyz", "")).split(";"):
+            try:
+                points.append([float(value) for value in encoded.split(":")])
+            except (TypeError, ValueError):
+                continue
+        _votes, arms = _forest_path_votes(points)
+        events.append({
+            "decision_event_id": str(row.get("decision_event_id", "")),
+            "planning_attempt_id": str(row.get("planning_attempt_id", "")),
+            "candidate_id": str(row.get("candidate_id", "")),
+            "channel_id": str(row.get("channel_id", "")),
+            "selected": str(row.get("selected", "0")) == "1",
+            "geometry_state": str(row.get("geometry_state", "")),
+            "risk_support": str(row.get("risk_support", "")),
+            "safety_state": str(row.get("safety_state", "")),
+            "risk_supported": str(row.get("risk_supported", "0")) == "1",
+            "safety_gate_passed":
+                str(row.get("safety_gate_passed", "0")) == "1",
+            "reason": str(row.get("reason", "")),
+            "selected_arms": {str(key): value for key, value in arms.items()
+                              if value != "unresolved"},
+        })
+    return events
+
+
+def _forest_actual_bundle_events(rows: list[dict]) -> list[dict]:
+    """Keep every actual-bundle terminal state, including rejected work."""
+    events = []
+    for row in rows:
+        endpoint = None
+        try:
+            parsed_endpoint = [float(row["actual_endpoint_x"]),
+                               float(row["actual_endpoint_y"]),
+                               float(row["actual_endpoint_z"])]
+            if all(math.isfinite(value) for value in parsed_endpoint):
+                endpoint = parsed_endpoint
+        except (KeyError, TypeError, ValueError):
+            pass
+        # An endpoint near a fork entrance/merge does not yet establish which
+        # arm the curve traverses. Keep the bundle identity and endpoint, but
+        # classify an arm only in the central half of the fork.
+        _votes, arms = _forest_path_votes(
+            [endpoint] if endpoint is not None else [], minimum_station=0.25)
+        events.append({
+            "stage": str(row.get("stage", "")),
+            "decision_event_id": str(row.get("decision_event_id", "")),
+            "planning_attempt_id": str(row.get("planning_attempt_id", "")),
+            "candidate_id": str(row.get("candidate_id", "")),
+            "channel_id": str(row.get("channel_id", "")),
+            "selected": str(row.get("selected", "0")) == "1",
+            "final_curve_status": str(row.get("final_curve_status", "")),
+            "actual_endpoint_m": endpoint,
+            "ranking_key": str(row.get("ranking_key", "")),
+            "rejection_reason": str(row.get("rejection_reason", "")),
+            "selected_arms": {str(key): value for key, value in arms.items()
+                              if value != "unresolved"},
+        })
+    return events
+
+
+def analyze_forest_path(
+        records: list[dict], variant: str,
+        forward_candidates: list[dict] | None = None,
+        forward_channel_decisions: list[dict] | None = None) -> dict:
+    """Accept branch choice only from actual odometry; report plans separately."""
+    if variant not in ("risk", "baseline"):
+        raise ValueError(f"unsupported forest path variant: {variant}")
+    odometry_points = []
+    for row in records:
+        if row.get("kind") != "iap_odom":
+            continue
+        payload = row.get("payload", row)
+        point = payload.get("position_m")
+        if isinstance(point, list):
+            odometry_points.append(point)
+    votes, _majority = _forest_path_votes(odometry_points)
+    selected, traversals, forks_ordered = _forest_odom_traversals(
+        odometry_points)
     low_count = sum(arm == "low" for arm in selected.values())
     high_count = sum(arm == "high" for arm in selected.values())
-    passed = low_count == 4 if variant == "risk" else high_count >= 3
+    passed = ((low_count == 4) if variant == "risk" else high_count >= 3)
+    passed = passed and forks_ordered
     return _result(
         [] if passed else [f"forest_{variant}_branch_selection_failed"],
         forest_variant=variant,
+        evidence_source="actual_odom",
         selected_arms={str(key): value for key, value in selected.items()},
+        actual_odom_selected_arms={
+            str(key): value for key, value in selected.items()},
         selected_low_risk_forks=low_count,
         selected_high_risk_forks=high_count,
         sample_votes={str(key): value for key, value in votes.items()},
+        actual_odom_sample_votes={
+            str(key): value for key, value in votes.items()},
+        actual_odom_traversals={
+            str(key): value for key, value in traversals.items()},
+        actual_odom_forks_ordered=forks_ordered,
+        candidate_plan_selection={
+            "events": _forest_candidate_plan_events(
+                forward_candidates or [])},
+        actual_certified_bundle_selection={
+            "events": _forest_actual_bundle_events(
+                forward_channel_decisions or [])},
     )
 
 
@@ -3479,6 +3681,9 @@ def analyze_run(
     forward_candidates = _read_csv(
         run_root /
         "exports/planner_p4_risk_astar_debug.csv.forward_candidates.csv")
+    forward_channel_decisions = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.forward_channel_decisions.csv")
     gnss_risk_detail = _read_csv(
         run_root /
         "exports/planner_p4_risk_astar_debug.csv.gnss_risk_detail.csv")
@@ -3556,7 +3761,9 @@ def analyze_run(
             p0 = analyze_p0(health, stage_start)
             stable, bspline_span = _stable_bspline(bsplines)
             poscmd_ok, poscmd_rate = _poscmd_sustained(poscmd_times)
-            path = analyze_forest_path(records, "baseline")
+            path = analyze_forest_path(
+                records, "baseline", forward_candidates,
+                forward_channel_decisions)
             failures = list(p0["failures"])
             if not stable:
                 failures.append("stable_bspline_missing")
@@ -3608,7 +3815,9 @@ def analyze_run(
                 scenario=scenario,
             )
             if _is_forest_scenario(scenario):
-                path = analyze_forest_path(records, "risk")
+                path = analyze_forest_path(
+                    records, "risk", forward_candidates,
+                    forward_channel_decisions)
                 result["forest_path"] = path
                 result["failures"] = list(dict.fromkeys([
                     *result["failures"], *path["failures"]]))
@@ -3617,7 +3826,9 @@ def analyze_run(
         if not _is_forest_scenario(scenario):
             return base
         risk = analyze_forest_risk(records, health, decisions, lineage)
-        path = analyze_forest_path(records, forest_variant or "risk")
+        path = analyze_forest_path(
+            records, forest_variant or "risk", forward_candidates,
+            forward_channel_decisions)
         failures = [*base["failures"], *risk["failures"], *path["failures"]]
         return _result(
             failures,

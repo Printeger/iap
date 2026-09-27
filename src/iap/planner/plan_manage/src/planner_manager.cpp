@@ -130,6 +130,53 @@ namespace ego_planner
       return p4ControlPointHash(points);
     }
 
+    bool p4SetStableChannelPreference(
+        std::vector<P4ChannelSlot> *slots, const uint64_t winner_channel_id)
+    {
+      if (!slots || winner_channel_id == 0u)
+        return false;
+      const auto winner = std::find_if(
+          slots->begin(), slots->end(), [winner_channel_id](const auto &slot) {
+            return slot.stable_channel_id == winner_channel_id;
+          });
+      if (winner == slots->end())
+        return false;
+      for (auto &slot : *slots)
+        slot.preferred_by_last_actual_comparison =
+            slot.stable_channel_id == winner_channel_id;
+      return true;
+    }
+
+    void p4AnnotateActualComparisonWinner(
+        P4ForwardDecision *decision, const uint64_t winner_channel_id)
+    {
+      if (decision)
+        p4SetStableChannelPreference(
+            &decision->channel_slots, winner_channel_id);
+    }
+
+    uint64_t p4AnnotatedActualComparisonWinner(
+        const P4ForwardDecision &decision)
+    {
+      if (decision.channel_comparison_state !=
+              P4ChannelComparisonState::COMPLETE ||
+          decision.selected_channel_id == 0u)
+        return 0u;
+      const auto selected = std::find_if(
+          decision.channel_slots.begin(), decision.channel_slots.end(),
+          [&decision](const P4ChannelSlot &slot) {
+            return slot.stable_channel_id == decision.selected_channel_id &&
+                slot.preferred_by_last_actual_comparison;
+          });
+      const auto preferred_count = std::count_if(
+          decision.channel_slots.begin(), decision.channel_slots.end(),
+          [](const P4ChannelSlot &slot) {
+            return slot.preferred_by_last_actual_comparison;
+          });
+      return selected != decision.channel_slots.end() &&
+          preferred_count == 1 ? decision.selected_channel_id : 0u;
+    }
+
     P4SuccessorFailure p4SuccessorFailureForPreparedCurve(
         const P4PreparedCurveFailure failure)
     {
@@ -3463,6 +3510,12 @@ namespace ego_planner
       return false;
     const bool rejected_pending_candidate =
         p4_candidate_awaiting_activation_;
+    uint64_t queue_missed_actual_winner = 0u;
+    if (rejected_pending_candidate &&
+        rejection_reason == "queue_deadline_missed_rebuild_required" &&
+        p4_pending_activation_state_)
+      queue_missed_actual_winner = p4AnnotatedActualComparisonWinner(
+          p4_pending_activation_state_->published_decision);
     constexpr int64_t kMaximumSameClockDeadlineLatenessNs =
         10LL * 1000LL * 1000LL * 1000LL;
     const int64_t deadline_lateness_ns = event_time_ns - start_time_ns;
@@ -3496,6 +3549,8 @@ namespace ego_planner
     {
       p4_candidate_awaiting_activation_ = false;
       restoreP4ExecutionCommitmentAfterCandidateRejection();
+      p4SetStableChannelPreference(
+          &p4_channel_slots_, queue_missed_actual_winner);
       p4_successor_preparation_state_ =
           P4SuccessorPreparationState::ROUTE_PENDING;
       p4_cached_successor_bundle_.reset();
@@ -9978,6 +10033,13 @@ namespace ego_planner
     return true;
   }
 
+  bool EGOPlannerManager::retainP4ActualWinnerForQueueMiss()
+  {
+    return p4SetStableChannelPreference(
+        &p4_channel_slots_,
+        p4AnnotatedActualComparisonWinner(last_p4_forward_decision_));
+  }
+
   void EGOPlannerManager::stageP4ExecutionCandidateForActivation()
   {
     if (p4_candidate_awaiting_activation_)
@@ -10423,6 +10485,8 @@ namespace ego_planner
               P4SuccessorFailure::NONE;
           selected_bundle.decision.reason =
               "successor_channel_typed_failure_winner_retained";
+          p4AnnotateActualComparisonWinner(
+              &selected_bundle.decision, comparison.winner_channel_id);
           p4_cached_successor_bundle_ = std::move(selected_bundle);
           p4_cached_successor_activation_in_progress_ = false;
           p4_successor_preparation_state_ =
@@ -10875,6 +10939,8 @@ namespace ego_planner
             runner->second.channel_record.unevaluated_suffix_m;
       }
     }
+    p4AnnotateActualComparisonWinner(
+        &selected_bundle.decision, comparison.winner_channel_id);
     p4_cached_successor_bundle_ = std::move(selected_bundle);
     p4_cached_successor_activation_in_progress_ = false;
     if (!appendP4ForwardDecision(
@@ -11798,6 +11864,8 @@ namespace ego_planner
         P4ExecutionAuthority::FORMAL_RISK_SELECTED;
     selected_bundle.certificate.successor_channel_id =
         comparison.winner_channel_id;
+    p4AnnotateActualComparisonWinner(
+        &selected_bundle.decision, comparison.winner_channel_id);
     local_data_ = selected_bundle.trajectory;
     last_p4_forward_decision_ = selected_bundle.decision;
     p4_execution_certificate_ = selected_bundle.certificate;

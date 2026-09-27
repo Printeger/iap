@@ -59,6 +59,7 @@ TEST(P4ChannelSlotIdentity,
   std::vector<ego_planner::P4ChannelSlot> previous(2);
   previous[0].stable_channel_id = 17;
   previous[0].topology_path = left;
+  previous[0].preferred_by_last_actual_comparison = true;
   previous[1].stable_channel_id = 29;
   previous[1].topology_path = right;
   auto shifted_left = left;
@@ -73,6 +74,9 @@ TEST(P4ChannelSlotIdentity,
   EXPECT_EQ(slots[0].stable_channel_id, 29u);
   EXPECT_EQ(slots[1].stable_channel_id, 17u);
   EXPECT_EQ(slots[2].stable_channel_id, 100u);
+  EXPECT_FALSE(slots[0].preferred_by_last_actual_comparison);
+  EXPECT_TRUE(slots[1].preferred_by_last_actual_comparison);
+  EXPECT_FALSE(slots[2].preferred_by_last_actual_comparison);
 }
 
 TEST(P4ChannelSlotIdentity,
@@ -1803,6 +1807,140 @@ TEST(P4ForwardRoute, BestEffortAcceptsLocallyValidSnapshotWithoutGnssEpoch)
   EXPECT_NE(decision.trigger_reason, P4ForwardTriggerReason::REQUEST_INVALID);
   EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   EXPECT_FALSE(decision.selected_guide.empty());
+}
+
+TEST(P4ForwardRoute,
+     BestEffortKeepsLastActualWinnerAheadOfVolatileIncompleteRiskProxies)
+{
+  auto initial_request = straightRequest();
+  initial_request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  initial_request.geometry = [](const Eigen::Vector3d &point) {
+      const bool separator = point.x() >= 2.0 && point.x() <= 4.0 &&
+          std::abs(point.y()) <= 0.6;
+      const bool outside = std::abs(point.y()) > 2.5 || point.z() < 0.5 ||
+          point.z() > 1.5;
+      return separator || outside ? P4ForwardGeometryState::OCCUPIED
+                                  : P4ForwardGeometryState::CLEAR;
+    };
+  auto initial = P4ForwardRoutePlanner().decide(initial_request);
+  ASSERT_GE(initial.channel_slots.size(), 2u) << initial.reason;
+
+  auto preferred = std::find_if(
+      initial.channel_slots.begin(), initial.channel_slots.end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.topology_path[slot.topology_path.size() / 2u].y() > 0.0;
+      });
+  ASSERT_NE(preferred, initial.channel_slots.end());
+  preferred->preferred_by_last_actual_comparison = true;
+  const uint64_t preferred_channel_id = preferred->stable_channel_id;
+
+  auto incomplete_request = initial_request;
+  incomplete_request.prior_channel_slots = initial.channel_slots;
+  incomplete_request.snapshot_identity.gnss_epoch_identity = 0u;
+  incomplete_request.snapshot_identity.gnss_epoch_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  incomplete_request.risk_batch = [](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    samples->clear();
+    samples->reserve(queries.size());
+    for (const auto &query : queries) {
+      P4ForwardRiskSample sample;
+      sample.stale = false;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = P4ForwardSafetyState::UNKNOWN;
+      sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      // The previously selected positive-y channel now has a slightly worse
+      // incomplete proxy. It remains locally safe, but this proxy is not a
+      // new complete risk comparison and must not flip topology by itself.
+      sample.unknown_coverage = query.position.y() > 0.0 ? 0.18 : 0.10;
+      sample.fim_ratio = query.position.y() > 0.0 ? 0.08 : 0.04;
+      sample.reason = "gnss_epoch_unavailable";
+      samples->push_back(std::move(sample));
+    }
+    return true;
+  };
+
+  const auto incomplete =
+      P4ForwardRoutePlanner().decide(incomplete_request);
+
+  ASSERT_EQ(incomplete.action, P4ForwardAction::CANDIDATE_READY)
+      << incomplete.reason;
+  EXPECT_EQ(incomplete.selected_channel_id, preferred_channel_id);
+  ASSERT_FALSE(incomplete.selected_guide.empty());
+  EXPECT_GT(incomplete.selected_guide[
+                incomplete.selected_guide.size() / 2u].y(),
+            0.0);
+  EXPECT_TRUE(std::none_of(
+      incomplete.channel_slots.begin(), incomplete.channel_slots.end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.preferred_by_last_actual_comparison;
+      }));
+
+  auto following_request = incomplete_request;
+  following_request.prior_channel_slots = incomplete.channel_slots;
+  const auto following = P4ForwardRoutePlanner().decide(following_request);
+  ASSERT_EQ(following.action, P4ForwardAction::CANDIDATE_READY)
+      << following.reason;
+  EXPECT_NE(following.selected_channel_id, preferred_channel_id);
+  ASSERT_FALSE(following.selected_guide.empty());
+  EXPECT_LT(following.selected_guide[
+                following.selected_guide.size() / 2u].y(),
+            0.0);
+}
+
+TEST(P4ForwardRoute,
+     CompleteRiskEvidenceOverridesLastActualWinnerPreference)
+{
+  auto initial_request = straightRequest();
+  initial_request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  initial_request.geometry = [](const Eigen::Vector3d &point) {
+      const bool separator = point.x() >= 2.0 && point.x() <= 4.0 &&
+          std::abs(point.y()) <= 0.6;
+      const bool outside = std::abs(point.y()) > 2.5 || point.z() < 0.5 ||
+          point.z() > 1.5;
+      return separator || outside ? P4ForwardGeometryState::OCCUPIED
+                                  : P4ForwardGeometryState::CLEAR;
+    };
+  auto initial = P4ForwardRoutePlanner().decide(initial_request);
+  ASSERT_GE(initial.channel_slots.size(), 2u) << initial.reason;
+  auto preferred = std::find_if(
+      initial.channel_slots.begin(), initial.channel_slots.end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.topology_path[slot.topology_path.size() / 2u].y() > 0.0;
+      });
+  ASSERT_NE(preferred, initial.channel_slots.end());
+  preferred->preferred_by_last_actual_comparison = true;
+  const uint64_t preferred_channel_id = preferred->stable_channel_id;
+
+  auto complete_request = initial_request;
+  complete_request.prior_channel_slots = initial.channel_slots;
+  complete_request.risk = [](const Eigen::Vector3d &point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = 0.5;
+      sample.fim_ratio = point.y() > 0.0 ? 0.6 : 0.2;
+      sample.reason = "ok";
+      return sample;
+    };
+  bindTestRiskBatch(&complete_request);
+
+  const auto complete = P4ForwardRoutePlanner().decide(complete_request);
+
+  ASSERT_EQ(complete.action, P4ForwardAction::CANDIDATE_READY)
+      << complete.reason;
+  EXPECT_NE(complete.selected_channel_id, preferred_channel_id);
+  ASSERT_FALSE(complete.selected_guide.empty());
+  EXPECT_LT(complete.selected_guide[
+                complete.selected_guide.size() / 2u].y(),
+            0.0);
 }
 
 TEST(P4ForwardRoute,

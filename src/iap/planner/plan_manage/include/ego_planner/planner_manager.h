@@ -1165,6 +1165,7 @@ namespace ego_planner
     // gates run. Preserve the executing certificate as a small transaction so
     // rejection cannot split the incumbent curve from its authority identity.
     bool preserveP4ExecutionCommitmentForCandidate();
+    bool retainP4ActualWinnerForQueueMiss();
     void restoreP4ExecutionCommitmentAfterCandidateRejection();
     void commitP4ExecutionCandidate();
     void stageP4ExecutionCandidateForActivation();
@@ -1378,6 +1379,14 @@ namespace ego_planner
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);
+    }
+    void setP4ChannelSlotsForTest(std::vector<P4ChannelSlot> slots)
+    {
+      p4_channel_slots_ = std::move(slots);
+    }
+    const std::vector<P4ChannelSlot> &p4ChannelSlotsForTest() const
+    {
+      return p4_channel_slots_;
     }
     void setP4ForwardDecisionForNextReplanForTest(P4ForwardDecision decision)
     {

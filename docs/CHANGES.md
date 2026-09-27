@@ -3,6 +3,19 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-incomplete-route-preference): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — retain the winner of a complete actual-curve channel comparison
+  as a one-route-transaction recovery/replanning hint only when that winner
+  misses its publication queue window and the next route has globally
+  incomplete evidence. A successful activation retains no hint. The hint uses the
+  existing stable channel slot, is consumed after one route decision, and is
+  refreshed only by another complete actual comparison; it therefore cannot
+  leak across an unobserved later fork. Complete risk evidence and all local
+  collision, clearance, dynamics, braking, freshness and identity gates still
+  override it. Forest acceptance now uses ordered actual-odom central-arm
+  crossings that remain inside the contract corridor on one arm from entry
+  to exit, while compact evidence separately retains every planned
+  candidate and every actual-bundle terminal/rejection state.
 - fix(bounded-live-evidence): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-410 —
   make compact evidence the production default for interface-integration
   development and acceptance runs. Candidate/channel comparisons, execution

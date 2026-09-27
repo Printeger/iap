@@ -335,11 +335,19 @@ For each candidate trajectory τ:
   geometry/time/risk decomposition are retained. Execution remains a rolling
   reaction-and-stop envelope and is re-evaluated on every new immutable
   snapshot.
-- Globally incomplete candidates are compared first by the mean unknown
+- Globally incomplete candidates normally compare first by the mean unknown
   LOS-sample fraction over eligible satellites, then usable satellite count,
   geometry condition, predicted support recovery, LiDAR observability, local
-  clearance and progress. One missing ray sample is not treated like an
-  entirely unsupported satellite ray.
+  clearance and progress. The one bounded recovery exception is a stable
+  channel selected by a complete actual-bundle comparison whose publication
+  then missed its queue window: the resulting recovery/replan gives it a
+  one-transaction scheduling preference over incomplete route proxies. A
+  successful activation does not retain the hint. The route transaction
+  consumes that preference; only another complete actual comparison can
+  refresh it. Complete current risk evidence and every hard local gate still
+  override it, and it is not execution authority or a claim of low risk. One
+  missing ray sample is not treated like an entirely unsupported satellite
+  ray.
 - Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
   LiDAR FIM. It evaluates the actual nominal and braking splines against
   obstacle surfaces using the vehicle/tracking/calibrated-surface/curve/safety

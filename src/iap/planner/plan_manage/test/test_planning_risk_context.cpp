@@ -11288,6 +11288,47 @@ TEST(P4PreparedChannelPreparation,
 // below is intentionally not production evidence and is not an end-to-end
 // acceptance test; P4ProductionEvidenceReplay covers that chain.
 TEST(P4PreparedChannelPreparation,
+     ActualWinnerBecomesRouteHintOnlyAfterQueueMiss)
+{
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ChannelSlot first;
+  first.stable_channel_id = 11u;
+  ego_planner::P4ChannelSlot second;
+  second.stable_channel_id = 22u;
+  manager.setP4ChannelSlotsForTest({first, second});
+
+  ego_planner::P4ForwardDecision compared;
+  compared.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  compared.selected_channel_id = second.stable_channel_id;
+  second.preferred_by_last_actual_comparison = true;
+  compared.channel_slots = {first, second};
+  manager.setP4ForwardDecisionForTest(std::move(compared));
+
+  const auto preferred_count = [&manager]() {
+    return std::count_if(
+        manager.p4ChannelSlotsForTest().begin(),
+        manager.p4ChannelSlotsForTest().end(),
+        [](const ego_planner::P4ChannelSlot &slot) {
+          return slot.preferred_by_last_actual_comparison;
+        });
+  };
+  // Completing an actual comparison alone does not leak a hint into the next
+  // ordinary route transaction.
+  EXPECT_EQ(preferred_count(), 0);
+
+  ASSERT_TRUE(manager.retainP4ActualWinnerForQueueMiss());
+  EXPECT_EQ(preferred_count(), 1);
+  EXPECT_TRUE(std::find_if(
+      manager.p4ChannelSlotsForTest().begin(),
+      manager.p4ChannelSlotsForTest().end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.stable_channel_id == 22u &&
+            slot.preferred_by_last_actual_comparison;
+      }) != manager.p4ChannelSlotsForTest().end());
+}
+
+TEST(P4PreparedChannelPreparation,
      TwoForkReplaySelectsRightThenLeftWithFormalLineage)
 {
   ensureRclcpp();
@@ -11383,6 +11424,13 @@ TEST(P4PreparedChannelPreparation,
     second.path_hash = "fork-second-" +
         std::to_string(second.channel_id);
     decision.candidates = {first, second};
+    ego_planner::P4ChannelSlot first_slot;
+    first_slot.stable_channel_id = first.channel_id;
+    first_slot.topology_path = first.path;
+    ego_planner::P4ChannelSlot second_slot;
+    second_slot.stable_channel_id = second.channel_id;
+    second_slot.topology_path = second.path;
+    decision.channel_slots = {first_slot, second_slot};
     decision.selected_candidate_id = first.candidate_id;
     decision.selected_channel_id = first.channel_id;
     decision.selected_guide = first.path;
@@ -11442,6 +11490,7 @@ TEST(P4PreparedChannelPreparation,
   fork_one.candidates[1].path = sampled_guide(fork_one_right_curve);
   fork_one.selected_guide = fork_one.candidates[0].path;
   const uint64_t fork_one_right_channel = fork_one.candidates[1].channel_id;
+  manager.setP4ChannelSlotsForTest(fork_one.channel_slots);
   manager.setP4ForwardDecisionForTest(std::move(fork_one));
   std::string reason;
   EXPECT_EQ(
@@ -11466,6 +11515,20 @@ TEST(P4PreparedChannelPreparation,
             ego_planner::P4ForwardSelectionAuthority::FORMAL);
   EXPECT_EQ(selected_fork_one.selected_channel_id,
             fork_one_right_channel);
+  ASSERT_EQ(selected_fork_one.channel_slots.size(), 2u);
+  EXPECT_EQ(std::count_if(
+      selected_fork_one.channel_slots.begin(),
+      selected_fork_one.channel_slots.end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.preferred_by_last_actual_comparison;
+      }), 1);
+  EXPECT_TRUE(std::find_if(
+      selected_fork_one.channel_slots.begin(),
+      selected_fork_one.channel_slots.end(),
+      [fork_one_right_channel](const ego_planner::P4ChannelSlot &slot) {
+        return slot.stable_channel_id == fork_one_right_channel &&
+            slot.preferred_by_last_actual_comparison;
+      }) != selected_fork_one.channel_slots.end());
   ASSERT_GE(selected_fork_one.selected_guide.size(), 2u);
   EXPECT_LT(selected_fork_one.selected_guide[1].y(), 0.0);
   EXPECT_TRUE(selected_fork_one.selected_actual_endpoint.allFinite());
@@ -11485,6 +11548,12 @@ TEST(P4PreparedChannelPreparation,
       manager.executionInstanceId(), manager.local_data_.traj_id_,
       manager.local_data_.start_time_.nanoseconds(),
       manager.local_data_.curve_hash_));
+  EXPECT_EQ(std::count_if(
+      manager.p4ChannelSlotsForTest().begin(),
+      manager.p4ChannelSlotsForTest().end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.preferred_by_last_actual_comparison;
+      }), 0);
   const Eigen::Vector3d fork_two_request =
       manager.p4SuccessorMissionTargetForTest(
           Eigen::Vector3d(-8.0, 0.0, 1.5),
@@ -11524,6 +11593,20 @@ TEST(P4PreparedChannelPreparation,
             ego_planner::P4ForwardSelectionAuthority::FORMAL);
   EXPECT_EQ(selected_fork_two.selected_channel_id,
             fork_two_left_channel);
+  ASSERT_EQ(selected_fork_two.channel_slots.size(), 2u);
+  EXPECT_EQ(std::count_if(
+      selected_fork_two.channel_slots.begin(),
+      selected_fork_two.channel_slots.end(),
+      [](const ego_planner::P4ChannelSlot &slot) {
+        return slot.preferred_by_last_actual_comparison;
+      }), 1);
+  EXPECT_TRUE(std::find_if(
+      selected_fork_two.channel_slots.begin(),
+      selected_fork_two.channel_slots.end(),
+      [fork_two_left_channel](const ego_planner::P4ChannelSlot &slot) {
+        return slot.stable_channel_id == fork_two_left_channel &&
+            slot.preferred_by_last_actual_comparison;
+      }) != selected_fork_two.channel_slots.end());
   ASSERT_GE(selected_fork_two.selected_guide.size(), 2u);
   EXPECT_GT(selected_fork_two.selected_guide[1].y(), 0.0);
   EXPECT_TRUE(selected_fork_two.selected_actual_endpoint.allFinite());

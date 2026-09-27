@@ -2122,6 +2122,7 @@ namespace ego_planner
             "deadline missed; adaptive lead is now %.3f s",
             info->traj_id_,
             planner_manager_->requiredTrajectoryLeadTimeSeconds());
+        planner_manager_->retainP4ActualWinnerForQueueMiss();
         reject_candidate();
         return false;
       }

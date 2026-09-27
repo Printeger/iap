@@ -4100,6 +4100,11 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         output.deferred_trajectory.clear();
         output.speed_cap_mps = 0.0;
       }
+      // A saved actual-comparison winner stabilizes only the immediately
+      // following route transaction. A completed comparison may refresh it;
+      // otherwise it must not leak through a later topology split/fork.
+      for (auto &slot : output.channel_slots)
+        slot.preferred_by_last_actual_comparison = false;
       return output;
     };
 
@@ -4574,9 +4579,22 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     }
     return finalize(std::move(decision));
   }
+  uint64_t preferred_actual_comparison_channel_id = 0u;
+  for (const auto &slot : decision.channel_slots)
+  {
+    if (!slot.preferred_by_last_actual_comparison)
+      continue;
+    if (preferred_actual_comparison_channel_id != 0u)
+    {
+      preferred_actual_comparison_channel_id = 0u;
+      break;
+    }
+    preferred_actual_comparison_channel_id = slot.stable_channel_id;
+  }
   const auto risk_order =
     [task_mode = request.limits.task_mode,
-     incumbent_channel_id = request.incumbent_channel_id](
+     incumbent_channel_id = request.incumbent_channel_id,
+     preferred_actual_comparison_channel_id](
       const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
       const auto group = [](const P4ForwardCandidate* candidate) {
         if (candidate->safety_gate_passed ||
@@ -4586,6 +4604,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       };
       if (group(lhs) != group(rhs)) return group(lhs) < group(rhs);
       if (group(lhs) == 2) {
+        const bool lhs_preferred =
+            lhs->channel_id == preferred_actual_comparison_channel_id;
+        const bool rhs_preferred =
+            rhs->channel_id == preferred_actual_comparison_channel_id;
+        if (lhs_preferred != rhs_preferred)
+          return lhs_preferred;
         if (std::abs(lhs->unknown_coverage - rhs->unknown_coverage) >
             kEpsilon) {
           return lhs->unknown_coverage < rhs->unknown_coverage;

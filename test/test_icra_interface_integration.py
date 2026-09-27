@@ -3,6 +3,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -1947,19 +1948,126 @@ class TestStageAnalyzer(unittest.TestCase):
         low_points = []
         high_points = []
         for fork in contract["forks"]:
-            x = fork["x_min_m"] + 0.5 * fork["length_m"]
-            low_points.append([x, 4.0 * fork["low_risk_y_sign"], 1.5])
-            high_points.append([x, -2.8 * fork["low_risk_y_sign"], 1.5])
+            for station in (0.25, 0.5, 0.75):
+                x = fork["x_min_m"] + station * fork["length_m"]
+                shape = math.sin(math.pi * station)
+                low_points.append([
+                    x, 4.0 * fork["low_risk_y_sign"] * shape, 1.5])
+                high_points.append([
+                    x, -2.8 * fork["low_risk_y_sign"] * shape, 1.5])
         low = MODULE.analyze_forest_path([
-            {"kind": "poscmd", "payload": {"position_xyz": point}}
+            {"kind": "iap_odom", "payload": {"position_m": point}}
             for point in low_points], "risk")
         high = MODULE.analyze_forest_path([
-            {"kind": "poscmd", "payload": {"position_xyz": point}}
+            {"kind": "iap_odom", "payload": {"position_m": point}}
             for point in high_points], "baseline")
         self.assertEqual(low["result"], "PASS")
         self.assertEqual(high["result"], "PASS")
+        self.assertTrue(low["actual_odom_forks_ordered"])
+        self.assertTrue(high["actual_odom_forks_ordered"])
         self.assertEqual(low["selected_low_risk_forks"], 4)
         self.assertEqual(high["selected_high_risk_forks"], 4)
+
+        reverse_fork_order = [
+            point for offset in range(len(low_points) - 3, -1, -3)
+            for point in low_points[offset:offset + 3]]
+        reversed_low = MODULE.analyze_forest_path([
+            {"kind": "iap_odom", "payload": {"position_m": point}}
+            for point in reverse_fork_order], "risk")
+        self.assertEqual(reversed_low["result"], "FAIL")
+        self.assertFalse(reversed_low["actual_odom_forks_ordered"])
+        self.assertEqual(reversed_low["selected_low_risk_forks"], 4)
+
+        outside_points = [
+            [point[0], 20.0, point[2]] for point in low_points]
+        outside = MODULE.analyze_forest_path([
+            {"kind": "iap_odom", "payload": {"position_m": point}}
+            for point in outside_points], "risk")
+        self.assertEqual(outside["result"], "FAIL")
+        self.assertEqual(outside["selected_low_risk_forks"], 0)
+        self.assertGreater(
+            outside["actual_odom_traversals"]["0"]
+                   ["outside_corridor_sample_count"], 0)
+
+        switched_mid_fork = list(low_points)
+        switched_mid_fork[1] = high_points[1]
+        switched = MODULE.analyze_forest_path([
+            {"kind": "iap_odom", "payload": {"position_m": point}}
+            for point in switched_mid_fork], "risk")
+        self.assertEqual(switched["result"], "FAIL")
+        self.assertEqual(switched["actual_odom_selected_arms"]["0"],
+                         "unresolved")
+
+    def test_forest_path_separates_plan_bundle_and_actual_odom(self):
+        contract = MODULE.forest_scene_contract()
+        low_points = []
+        high_points = []
+        low_midpoints = []
+        for fork in contract["forks"]:
+            for station in (0.25, 0.5, 0.75):
+                x = fork["x_min_m"] + station * fork["length_m"]
+                shape = math.sin(math.pi * station)
+                low_points.append([
+                    x, 4.0 * fork["low_risk_y_sign"] * shape, 1.5])
+                high_points.append([
+                    x, -2.8 * fork["low_risk_y_sign"] * shape, 1.5])
+            low_midpoints.append(low_points[-2])
+        records = [
+            {"kind": "iap_odom", "payload": {"position_m": point}}
+            for point in low_points]
+        # Planned output deliberately disagrees. It must never substitute
+        # for the actual odometry acceptance source.
+        records.append({
+            "kind": "normal_bspline",
+            "payload": {"control_points_xyz": high_points},
+        })
+        candidates = []
+        bundles = []
+        for index, point in enumerate(low_midpoints):
+            candidates.append({
+                "decision_event_id": str(index + 1),
+                "planning_attempt_id": str(100 + index),
+                "candidate_id": "1", "channel_id": str(10 + index),
+                "selected": "1", "risk_support": "INCOMPLETE",
+                "path_xyz": ":".join(str(value) for value in point),
+            })
+            bundles.append({
+                "stage": "normal_channel_comparison_complete",
+                "decision_event_id": str(index + 1),
+                "planning_attempt_id": str(100 + index),
+                "candidate_id": "1", "channel_id": str(10 + index),
+                "selected": "1", "final_curve_status": "INCOMPLETE",
+                "actual_endpoint_x": str(point[0]),
+                "actual_endpoint_y": str(point[1]),
+                "actual_endpoint_z": str(point[2]),
+            })
+
+        result = MODULE.analyze_forest_path(
+            records, "risk", candidates, bundles)
+
+        self.assertEqual(result["result"], "PASS")
+        self.assertEqual(result["evidence_source"], "actual_odom")
+        self.assertEqual(
+            list(result["actual_odom_selected_arms"].values()),
+            ["low", "low", "low", "low"])
+        self.assertEqual(len(result["candidate_plan_selection"]["events"]), 4)
+        self.assertEqual(
+            len(result["actual_certified_bundle_selection"]["events"]), 4)
+
+        wrong_actual = list(records)
+        for index in range(3, 6):
+            wrong_actual[index] = {
+                "kind": "iap_odom",
+                "payload": {"position_m": high_points[index]},
+            }
+        failed = MODULE.analyze_forest_path(
+            wrong_actual, "risk", candidates, bundles)
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertEqual(failed["actual_odom_selected_arms"]["1"], "high")
+        self.assertEqual(
+            failed["candidate_plan_selection"]["events"][1]
+                  ["selected_arms"]["1"],
+            "low")
     def test_p0_deadline_uses_launch_start_not_earlier_capture_start(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             run_root = Path(temporary_directory)

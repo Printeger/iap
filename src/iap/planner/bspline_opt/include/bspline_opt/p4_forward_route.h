@@ -443,6 +443,12 @@ namespace ego_planner
     uint64_t occupancy_generation = 0;
     uint64_t gnss_epoch_identity = 0;
     P4ChannelEvaluationState state = P4ChannelEvaluationState::DISCOVERED;
+    // Decision evidence marks the complete actual-comparison winner here.
+    // The manager promotes it to a scheduling hint only after that winner
+    // misses its publication queue window. It is consumed by the next route
+    // transaction, never grants execution authority, and is considered only
+    // when current risk evidence is incomplete for both candidates.
+    bool preferred_by_last_actual_comparison = false;
   };
 
   std::vector<P4ChannelSlot> assignP4StableChannelSlots(

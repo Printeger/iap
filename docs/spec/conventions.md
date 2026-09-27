@@ -405,6 +405,19 @@
   bounded preparation deadline expires, the state is `PARTIAL_COMPARISON` and
   only already certified finite progress is eligible. RiskGrid is a search
   hint and cannot authorize or veto any final curve.
+- If a complete actual-bundle comparison selected a stable channel but that
+  winner later misses its publication queue window, the manager may retain
+  the winner as a one-transaction route-scheduling hint for the resulting
+  recovery/replan. On the immediately following route transaction, and only
+  when both current channel candidates have incomplete
+  global-risk support, that actual-bundle winner is scheduled before volatile
+  unknown/FIM route proxies. The hint is consumed by that transaction and can
+  be refreshed only by another complete actual-bundle comparison, so it cannot
+  leak from a successfully activated winner or through an unobserved later
+  topology split. Current complete risk
+  evidence, hard local failure and the full actual-bundle ordering above still
+  override it. This hint is neither execution authority nor evidence that the
+  channel is low risk.
 - A queued braking guard has explicit `REQUESTED`, `QUEUED`, `ACTIVATED` and
   `ABSENT` controller states. Time reaching the switch stamp is not proof of
   execution: only a matching traj_server `ACTIVATED` acknowledgement permits
