@@ -1498,6 +1498,8 @@ namespace ego_planner
     {
       return constrainP4DecisionToCommittedTopology(decision);
     }
+    bool prepareNormalChannelsForActualCertificationForTest(
+        P4ForwardDecision *decision);
     bool p4CommittedTopologyPendingForTest() const
     {
       return p4_committed_topology_.has_value() &&

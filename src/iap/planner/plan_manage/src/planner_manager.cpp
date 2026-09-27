@@ -2487,6 +2487,7 @@ namespace ego_planner
         return false;
 
       const P4ForwardCandidate *first = nullptr;
+      const P4ForwardCandidate *selected = nullptr;
       std::set<uint64_t> channel_ids;
       for (const auto &candidate : decision->candidates)
       {
@@ -2497,26 +2498,34 @@ namespace ego_planner
           continue;
         if (!first)
           first = &candidate;
+        if ((decision->selected_candidate_id > 0u &&
+             candidate.candidate_id == decision->selected_candidate_id) ||
+            (decision->selected_candidate_id == 0u &&
+             decision->selected_channel_id > 0u &&
+             candidate.channel_id == decision->selected_channel_id))
+          selected = &candidate;
         channel_ids.insert(candidate.channel_id);
       }
       if (!first || channel_ids.size() < 2u)
         return false;
+      const P4ForwardCandidate *work_item = selected ? selected : first;
 
       // Route-level risk over the complete guide is diagnostic. It cannot
       // veto construction of the exact terminal-stop B-splines whose swept
       // tubes, braking library and direct-risk evidence are the actual motion
-      // authority. Select only the first stable work item here; the existing
-      // normal-channel preparation transaction freezes and certifies every
-      // remaining guide before comparing complete bundles.
+      // authority. Keep a sibling already selected by the bounded preparation
+      // transaction; only a new route decision falls back to the first stable
+      // work item. The transaction certifies every remaining guide before
+      // comparing complete bundles.
       decision->action = P4ForwardAction::CANDIDATE_READY;
       decision->executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
       decision->selection_authority = P4ForwardSelectionAuthority::NONE;
       decision->formal_support = false;
-      decision->selected_candidate_id = first->candidate_id;
-      decision->selected_channel_id = first->channel_id;
+      decision->selected_candidate_id = work_item->candidate_id;
+      decision->selected_channel_id = work_item->channel_id;
       decision->runner_up_candidate_id = 0u;
       decision->runner_up_channel_id = 0u;
-      decision->selected_guide = first->path;
+      decision->selected_guide = work_item->path;
       decision->selected_actual_endpoint = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());
       decision->runner_up_actual_endpoint = Eigen::Vector3d::Constant(
@@ -3017,6 +3026,12 @@ namespace ego_planner
     execution_instance_id_ = std::max<std::uint64_t>(
         1u, static_cast<std::uint64_t>(
             std::chrono::steady_clock::now().time_since_epoch().count()));
+  }
+
+  bool EGOPlannerManager::prepareNormalChannelsForActualCertificationForTest(
+      P4ForwardDecision *decision)
+  {
+    return prepareNormalChannelsForActualCertification(decision);
   }
 
   bool P4PreparedSuccessorBundle::rebindUnpublishedTrajectoryId(

@@ -12759,6 +12759,11 @@ TEST(P4CommittedTopology,
   EXPECT_EQ(next_fork.selected_candidate_id, 22u);
   EXPECT_EQ(next_fork.selected_channel_id, 602u);
   EXPECT_EQ(next_fork.route_preference_channel_id, 602u);
+  ASSERT_TRUE(
+      manager.prepareNormalChannelsForActualCertificationForTest(&next_fork));
+  EXPECT_EQ(next_fork.selected_candidate_id, 22u);
+  EXPECT_EQ(next_fork.selected_channel_id, 602u);
+  EXPECT_EQ(next_fork.selected_guide, next_fork.candidates.back().path);
 }
 
 TEST(P4CommittedTopology,
