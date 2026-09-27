@@ -9975,9 +9975,12 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.95, 182u));
   manager.clearPlanningRiskContext();
   ASSERT_EQ(manager.planningRiskContext().planning_attempt_id, 0u);
-  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u))
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.96, 183u, 10.95))
+      << "an advanced execution snapshot cannot retry the exact child from "
+         "the same queued odometry state";
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u, 10.96))
       << "the safety observer must schedule the existing FSM lane that "
-         "creates the planning transaction";
+         "creates the planning transaction after exact vehicle state advances";
   EXPECT_TRUE(manager.p4SuccessorAwaitingNewSnapshotForTest());
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(
@@ -9989,7 +9992,7 @@ TEST(P4PreparedSuccessorPolicy,
   const uint64_t retry_attempt_id =
       manager.planningRiskContext().planning_attempt_id;
   ASSERT_NE(retry_attempt_id, failed_attempt_id);
-  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.96, 183u, 10.96));
   EXPECT_FALSE(manager.p4SuccessorAwaitingNewSnapshotForTest());
   EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 183u);
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
@@ -10011,7 +10014,8 @@ TEST(P4PreparedSuccessorPolicy,
       << "a repeated freshness rejection must retain the snapshot actually "
          "used by the retry, not regress to the frozen guide snapshot";
   EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.97, 183u));
-  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.98, 184u));
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(10.98, 184u, 10.97));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.98, 184u, 10.98));
   EXPECT_EQ(manager.p4SuccessorLastAttemptSnapshotIdForTest(), 184u);
 }
 
@@ -10138,6 +10142,23 @@ TEST(P4PreparedSuccessorPolicy,
   auto advanced_execution =
       std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
   advanced_execution->execution_snapshot_id = 183u;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.05, occupancy, advanced_execution->forward_risk_batch,
+      advanced_execution);
+  const auto advanced_snapshot_same_state =
+      manager.evaluateP4ForwardRouteForTest(
+          Eigen::Vector3d(0.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+          parent.approved_endpoint);
+  EXPECT_EQ(advanced_snapshot_same_state.result_status,
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(advanced_snapshot_same_state.reason,
+            "successor_curve_waiting_for_new_snapshot");
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_EQ(manager.pendingP4ChannelWorkItemForTest()->planning_attempt_id,
+            failed_attempt_id)
+      << "an advanced execution snapshot must not release retained work from "
+         "the same exact planning state";
+
   manager.setPlanningRiskContextForTest(
       snapshot, 10.06, occupancy, advanced_execution->forward_risk_batch,
       advanced_execution);

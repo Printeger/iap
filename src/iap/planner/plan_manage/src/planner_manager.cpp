@@ -3754,8 +3754,11 @@ namespace ego_planner
   }
 
   bool EGOPlannerManager::p4SuccessorPreparationDue(
-      const double now_s, const uint64_t current_execution_snapshot_id)
+      const double now_s, const uint64_t current_execution_snapshot_id,
+      double current_planning_state_stamp_s)
   {
+    if (!std::isfinite(current_planning_state_stamp_s))
+      current_planning_state_stamp_s = now_s;
     uint64_t effective_execution_snapshot_id =
         current_execution_snapshot_id;
     if (effective_execution_snapshot_id == 0u && p0_risk_grid_runtime_ &&
@@ -3885,6 +3888,18 @@ namespace ego_planner
               true,
               p4_successor_schedule_.last_attempt_execution_snapshot_id,
               effective_execution_snapshot_id))
+        return false;
+      // An execution snapshot can advance on the safety thread while the
+      // mutually-exclusive odometry callback is still queued behind that
+      // same expensive safety turn. Re-running the actual curve against the
+      // identical vehicle state only reproduces the freshness failure and
+      // can starve the callback that supplies the required new state.
+      if (!std::isfinite(current_planning_state_stamp_s) ||
+          !std::isfinite(
+              p4_successor_schedule_.last_attempt_planning_state_stamp_s) ||
+          current_planning_state_stamp_s <=
+              p4_successor_schedule_.last_attempt_planning_state_stamp_s +
+                  1.0e-9)
         return false;
       // A safety callback can observe the advancing execution snapshot while
       // no planning transaction is active.  Report the work as schedulable so
@@ -5487,7 +5502,8 @@ namespace ego_planner
     // B-spline, braking, P5 and latest-snapshot checks before publication.
     const double successor_now_s = plannerNow().seconds();
     const bool successor_due = p4SuccessorPreparationDue(
-        successor_now_s, execution ? execution->execution_snapshot_id : 0u);
+        successor_now_s, execution ? execution->execution_snapshot_id : 0u,
+        planning_risk_context_.planning_start_s);
     const auto consume_pending_channel_work_item =
         [this](
             const bool successor_retry)
@@ -10402,6 +10418,7 @@ namespace ego_planner
       p4_successor_schedule_.last_attempt_execution_snapshot_id = std::max(
           p4_successor_schedule_.last_attempt_execution_snapshot_id,
           failed_snapshot_id);
+      p4_successor_schedule_.last_attempt_planning_state_stamp_s = now_s;
       p4_successor_schedule_.last_failure = failure;
       p4_successor_schedule_.result_delivered = false;
       p4_successor_schedule_.awaiting_new_snapshot = true;

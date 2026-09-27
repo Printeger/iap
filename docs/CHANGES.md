@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-successor-freshness-state-watermark): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — after an actual successor curve is rejected for stale exposure
+  evidence, require both a newer execution snapshot and a newer exact planning
+  state before scheduling its retained frozen channel again. The safety
+  watchdog may continue on its extrapolated scheduling clock, but repeated
+  certification of the same queued odometry state can no longer monopolize
+  the mutually-exclusive callback group and starve odometry. The retry remains
+  on the existing FSM lane and all snapshot freshness, local clearance,
+  collision, dynamics, braking, identity, P5 and fixed-deadline gates are
+  unchanged.
 - fix(p4-degraded-actual-risk-order): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — when two locally safe actual bundles have incomplete global
   intervals and equal unknown exposure, retain their already-computed

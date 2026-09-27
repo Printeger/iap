@@ -348,6 +348,14 @@
   is left to the runtime watchdog. Rejections name the changed semantic source
   (`direct_risk`, `support`, `Integrity/GNSS`, collision, incomplete query or
   curve identity), not a generic authority-ID mismatch.
+- A successor actual-curve freshness rejection retains the frozen channel as
+  pending work. It may be retried only after both execution-snapshot identity
+  and the exact planning-state stamp have advanced beyond the rejected
+  attempt. Watchdog/scheduling time may drive the existing FSM lane but cannot
+  stand in for a new odometry state. This prevents repeated certification of
+  one physical state from starving the callback that supplies the next state;
+  the retry still rebuilds the ordinary actual curve and passes every normal
+  freshness, local-assurance, braking, P5 and publication gate.
 - Successor failures are typed as STRICT GNSS limit/exposure, support or
   individual input staleness, local clearance, braking, direct-query timeout,
   latest-snapshot semantic change, collision, dynamics, insufficient progress,

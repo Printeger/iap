@@ -1581,7 +1581,8 @@ namespace ego_planner
             planner_manager_->p4ExecutionCertificate(),
             planner_manager_->p4ExecutionRevoked());
         const bool p5_successor_due = p5_rolling_successor &&
-            planner_manager_->p4SuccessorPreparationDue(now_s);
+            planner_manager_->p4SuccessorPreparationDue(
+                now_s, 0u, plannerNow().seconds());
         const bool p5_successor_handoff_ready =
             p4SafetyObserverShouldDriveSuccessorPlanning(
                 p4PlannerStateOwnsActiveCommand(
@@ -1617,7 +1618,8 @@ namespace ego_planner
         planner_manager_->p4ExecutionCertificate(),
         planner_manager_->p4ExecutionRevoked());
     const bool successor_due = rolling_successor &&
-        planner_manager_->p4SuccessorPreparationDue(now_s);
+        planner_manager_->p4SuccessorPreparationDue(
+            now_s, 0u, plannerNow().seconds());
     if (p4SafetyObserverShouldDriveSuccessorPlanning(
             // REPLAN_TRAJ does not stop the acknowledged command. In
             // particular, a P5 request can enter REPLAN just before the

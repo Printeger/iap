@@ -1100,7 +1100,9 @@ namespace ego_planner
       return p4_forward_worker_.resultReady();
     }
     bool p4SuccessorPreparationDue(
-        double now_s, uint64_t current_execution_snapshot_id = 0);
+        double now_s, uint64_t current_execution_snapshot_id = 0,
+        double current_planning_state_stamp_s =
+            std::numeric_limits<double>::quiet_NaN());
     P4PlanningDisposition p4PlanningDisposition() const {
       return p4_planning_disposition_;
     }
@@ -1814,6 +1816,8 @@ namespace ego_planner
           std::numeric_limits<double>::quiet_NaN();
       P4BoundedExecutionGuide fixed_bounded_guide;
       uint64_t last_attempt_execution_snapshot_id = 0;
+      double last_attempt_planning_state_stamp_s =
+          std::numeric_limits<double>::quiet_NaN();
       // Route preparation may finish before the one-second execution
       // commitment permits an atomic switch. Keep that immutable result here
       // instead of discarding it or rerunning geometry search.
