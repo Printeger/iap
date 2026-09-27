@@ -611,6 +611,10 @@ namespace ego_planner
     bool optimizeReboundCostForTest(Eigen::MatrixXd &control_points, double ts,
                                     int max_iterations, double &final_cost,
                                     int &iterations);
+    bool p4ActualCurveGuideCorridorSatisfiedForTest(
+        const Eigen::MatrixXd &control_points) const {
+      return p4ActualCurveGuideCorridorSatisfied(control_points);
+    }
     bool optimizeP1BasePrepassForTest(Eigen::MatrixXd &control_points, double ts,
                                       int max_iterations, double &final_cost,
                                       int &iterations);
@@ -739,6 +743,8 @@ namespace ego_planner
     };
     std::vector<P4ActualCurveGuideCorridorConstraint>
         p4_actual_curve_guide_corridor_constraints_;
+    std::vector<Eigen::Vector3d> p4_actual_curve_guide_corridor_;
+    double p4_actual_curve_guide_maximum_deviation_m_{0.0};
     void invalidateP4AttemptLineage();
     void syncP4AdmittedLineage();
     static P4AttemptLineageRecord makeP4AttemptLineageRecord(
@@ -793,6 +799,8 @@ namespace ego_planner
     void calcP4ActualCurveFixedClearanceCost(
         const Eigen::MatrixXd &q, double &cost,
         Eigen::MatrixXd &gradient);
+    bool p4ActualCurveGuideCorridorSatisfied(
+        const Eigen::MatrixXd &q) const;
     void calcMovingObjCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcSwarmCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);

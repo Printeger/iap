@@ -685,6 +685,8 @@ namespace ego_planner
       const double maximum_deviation_m)
   {
     p4_actual_curve_guide_corridor_constraints_.clear();
+    p4_actual_curve_guide_corridor_.clear();
+    p4_actual_curve_guide_maximum_deviation_m_ = 0.0;
     if (seed_control_points.rows() != 3 ||
         seed_control_points.cols() < order_ + 1 ||
         !seed_control_points.allFinite() || !std::isfinite(interval_s) ||
@@ -698,6 +700,8 @@ namespace ego_planner
                     }))
       return;
 
+    p4_actual_curve_guide_corridor_ = guide;
+    p4_actual_curve_guide_maximum_deviation_m_ = maximum_deviation_m;
     setBsplineInterval(interval_s);
     const int span_count = seed_control_points.cols() - order_;
     constexpr int kSamplesPerSpan = 4;
@@ -757,6 +761,8 @@ namespace ego_planner
   {
     p4_actual_curve_clearance_constraints_.clear();
     p4_actual_curve_guide_corridor_constraints_.clear();
+    p4_actual_curve_guide_corridor_.clear();
+    p4_actual_curve_guide_maximum_deviation_m_ = 0.0;
     p4_actual_curve_planning_clearance_buffer_m_ = 0.0;
   }
 
@@ -3023,6 +3029,54 @@ namespace ego_planner
     }
   }
 
+  bool BsplineOptimizer::p4ActualCurveGuideCorridorSatisfied(
+      const Eigen::MatrixXd &q) const
+  {
+    if (p4_actual_curve_guide_corridor_constraints_.empty())
+      return true;
+    if (p4_actual_curve_guide_corridor_.size() < 2u ||
+        !(p4_actual_curve_guide_maximum_deviation_m_ > 0.0))
+      return false;
+    for (const auto &constraint :
+         p4_actual_curve_guide_corridor_constraints_)
+    {
+      if (constraint.first_control_point < 0 ||
+          constraint.first_control_point + 3 >= q.cols() ||
+          !(constraint.maximum_deviation_m > 0.0))
+        return false;
+      Eigen::Vector3d point = Eigen::Vector3d::Zero();
+      for (int basis = 0; basis < 4; ++basis)
+        point += constraint.weights[static_cast<std::size_t>(basis)] *
+            q.col(constraint.first_control_point + basis);
+      if (!point.allFinite())
+        return false;
+      double nearest_squared = std::numeric_limits<double>::infinity();
+      for (std::size_t segment = 0u;
+           segment + 1u < p4_actual_curve_guide_corridor_.size(); ++segment)
+      {
+        const Eigen::Vector3d delta =
+            p4_actual_curve_guide_corridor_[segment + 1u] -
+            p4_actual_curve_guide_corridor_[segment];
+        const double squared_length = delta.squaredNorm();
+        const double alpha = squared_length > 1.0e-12
+            ? std::clamp(
+                  (point - p4_actual_curve_guide_corridor_[segment]).dot(
+                      delta) / squared_length,
+                  0.0, 1.0)
+            : 0.0;
+        const Eigen::Vector3d projection =
+            p4_actual_curve_guide_corridor_[segment] + alpha * delta;
+        nearest_squared = std::min(
+            nearest_squared, (point - projection).squaredNorm());
+      }
+      if (!std::isfinite(nearest_squared) ||
+          std::sqrt(nearest_squared) >
+              p4_actual_curve_guide_maximum_deviation_m_ + 1.0e-9)
+        return false;
+    }
+    return true;
+  }
+
   void BsplineOptimizer::calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
   {
 
@@ -3628,7 +3682,7 @@ namespace ego_planner
     rclcpp::Time t0 = rclcpp::Clock().now(), t1, t2;
     int restart_nums = 0, rebound_times = 0;
     ;
-    bool flag_force_return, flag_occ, success;
+    bool flag_force_return, flag_occ, flag_p4_guide_corridor, success;
     new_lambda2_ = lambda2_;
     constexpr int MAX_RESART_NUMS_SET = 3;
     current_p1_checkpoints_.clear();
@@ -3640,6 +3694,7 @@ namespace ego_planner
       iter_num_ = 0;
       flag_force_return = false;
       flag_occ = false;
+      flag_p4_guide_corridor = false;
       success = false;
 
       // 控制点数组初始化
@@ -3895,6 +3950,23 @@ namespace ego_planner
         // ROS_WARN("Solver error in planning!, return = %s", lbfgs::lbfgs_strerror(result));
         flag_force_return = false;
 
+        // The guide penalty shapes the actual curve, but execution authority
+        // still requires the immutable topology-tube postcondition.  Do not
+        // report a soft-constraint solution as successful and leave final
+        // geometry commit to discard this channel.  Reuse the existing
+        // bounded rebound restarts and collision weight escalation; no
+        // topology, clearance, collision, or dynamics gate is relaxed.
+        if (!p4ActualCurveGuideCorridorSatisfied(cps_.points))
+        {
+          flag_p4_guide_corridor = true;
+          restart_nums++;
+          new_lambda2_ *= 2;
+          printf("\033[32miter(+1)=%d,time(ms)=%5.3f, guide corridor "
+                 "violated, keep optimizing\n\033[0m",
+                 iter_num_, time_ms);
+          continue;
+        }
+
         /*** collision check, phase 1 ***/
         if ((min_ellip_dist_ != INIT_min_ellip_dist_) && (min_ellip_dist_ > swarm_clearance_))
         {
@@ -4026,7 +4098,10 @@ namespace ego_planner
       }
 
     } while (
-        ((flag_occ || ((min_ellip_dist_ != INIT_min_ellip_dist_) && (min_ellip_dist_ > swarm_clearance_))) && restart_nums < MAX_RESART_NUMS_SET) ||
+        ((flag_occ || flag_p4_guide_corridor ||
+          ((min_ellip_dist_ != INIT_min_ellip_dist_) &&
+           (min_ellip_dist_ > swarm_clearance_))) &&
+         restart_nums < MAX_RESART_NUMS_SET) ||
         (flag_force_return && force_stop_type_ == STOP_FOR_REBOUND && rebound_times <= 20));
 
     return success;
@@ -6067,14 +6142,14 @@ namespace ego_planner
         pre_lattice.support_signature == post_lattice.support_signature &&
         !pre_lattice.support_signature.empty();
     trace.optimization_success = reboundCandidateUsable(
-        result, final_cost, x.data(), variable_num_);
+        result, final_cost, x.data(), variable_num_) &&
+        p4ActualCurveGuideCorridorSatisfied(control_points);
     trace.selection_score = final_cost;
     trace.selection_reason = trace.optimization_success
         ? "deterministic_single_candidate" : "optimizer_failure";
     last_p1_optimization_trace_ = trace;
     captureP1PostOptimizationTrajectory(control_points, ts);
-    return reboundCandidateUsable(
-        result, final_cost, x.data(), variable_num_);
+    return trace.optimization_success;
   }
 
   double BsplineOptimizer::p1LbfgsGradientEpsilon(

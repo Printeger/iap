@@ -2163,6 +2163,126 @@ TEST(P4ActualCurveClearanceOptimization,
 }
 
 TEST(P4ActualCurveClearanceOptimization,
+     BoundedReboundKeepsSharpFrozenGuideInsideTopologyTube) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_curve_sharp_guide_corridor.csv").string());
+  ego_planner::SwarmTrajData swarm;
+  optimizer->setSwarmTrajs(&swarm);
+  optimizer->setDroneId(0);
+
+  // This is the bounded shape rejected in the 2026-09-27 clean live: the
+  // actual curve is locally safe, but smoothing around the two coarse guide
+  // corners must not make the optimizer report success outside the immutable
+  // topology tube checked again at geometry commit.
+  const std::vector<Eigen::Vector3d> guide{
+      Eigen::Vector3d(-8.87003, -0.845655, 1.31730),
+      Eigen::Vector3d(-4.25, 3.25, 1.25),
+      Eigen::Vector3d(-3.25, 2.75, 1.25),
+      Eigen::Vector3d(-0.915632, -0.0118684, 1.49698)};
+  std::vector<double> cumulative{0.0};
+  for (std::size_t index = 1; index < guide.size(); ++index)
+    cumulative.push_back(
+        cumulative.back() + (guide[index] - guide[index - 1]).norm());
+  Eigen::MatrixXd points(3, 48);
+  for (Eigen::Index column = 0; column < points.cols(); ++column) {
+    const double station = cumulative.back() *
+        static_cast<double>(column) /
+        static_cast<double>(points.cols() - 1);
+    const auto upper = std::upper_bound(
+        cumulative.begin(), cumulative.end(), station);
+    const std::size_t segment = std::min<std::size_t>(
+        guide.size() - 2u,
+        upper == cumulative.begin()
+            ? 0u
+            : static_cast<std::size_t>(
+                  std::distance(cumulative.begin(), upper) - 1));
+    const double length = cumulative[segment + 1u] - cumulative[segment];
+    const double alpha = length > 1.0e-12
+        ? (station - cumulative[segment]) / length
+        : 0.0;
+    points.col(column) =
+        guide[segment] + alpha * (guide[segment + 1u] - guide[segment]);
+  }
+  optimizer->setP4ActualCurveClearanceConstraints(
+      points, 0.2, {}, 0.05, 0.1);
+  constexpr double kOptimizerTubeM = 0.45;
+  optimizer->setP4ActualCurveGuideCorridor(
+      points, 0.2, guide, kOptimizerTubeM);
+  optimizer->setLocalTargetPt(guide.back());
+
+  double final_cost = std::numeric_limits<double>::quiet_NaN();
+  int iterations = 0;
+  ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+      points, 0.2, 200, final_cost, iterations));
+  EXPECT_TRUE(optimizer->p4ActualCurveGuideCorridorSatisfiedForTest(points));
+  ego_planner::UniformBspline actual(points, 3, 0.2);
+  const double duration_s = actual.getTimeSum();
+  double maximum_deviation_m = 0.0;
+  for (int sample = 0; sample <= 2000; ++sample) {
+    const Eigen::Vector3d point = actual.evaluateDeBoorT(
+        duration_s * static_cast<double>(sample) / 2000.0);
+    double nearest_squared = std::numeric_limits<double>::infinity();
+    for (std::size_t segment = 0; segment + 1u < guide.size(); ++segment) {
+      const Eigen::Vector3d delta = guide[segment + 1u] - guide[segment];
+      const double alpha = delta.squaredNorm() > 1.0e-12
+          ? std::clamp(
+                (point - guide[segment]).dot(delta) / delta.squaredNorm(),
+                0.0, 1.0)
+          : 0.0;
+      nearest_squared = std::min(
+          nearest_squared,
+          (point - (guide[segment] + alpha * delta)).squaredNorm());
+    }
+    maximum_deviation_m = std::max(
+        maximum_deviation_m, std::sqrt(nearest_squared));
+  }
+  EXPECT_LE(maximum_deviation_m, 0.5);
+}
+
+TEST(P4ActualCurveClearanceOptimization,
+     ReboundCannotReportSuccessOutsideFrozenGuideTube) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_curve_guide_postcondition.csv").string());
+  ego_planner::SwarmTrajData swarm;
+  optimizer->setSwarmTrajs(&swarm);
+  optimizer->setDroneId(0);
+
+  const std::vector<Eigen::Vector3d> guide{
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(8.0, 0.0, 1.0)};
+  Eigen::MatrixXd points(3, 24);
+  for (Eigen::Index column = 0; column < points.cols(); ++column)
+    points.col(column) = Eigen::Vector3d(
+        8.0 * static_cast<double>(column) /
+            static_cast<double>(points.cols() - 1),
+        0.0, 1.0);
+  optimizer->setP4ActualCurveClearanceConstraints(
+      points, 0.2, {}, 0.05, 0.1);
+  optimizer->setP4ActualCurveGuideCorridor(points, 0.2, guide, 0.45);
+  // An inconsistent terminal objective makes the old soft penalty return a
+  // nominally successful curve outside the frozen guide. Production targets
+  // are guide-bound; this adversarial objective isolates the missing hard
+  // optimizer postcondition without weakening the final commit gate.
+  optimizer->setLocalTargetPt(Eigen::Vector3d(8.0, 5.0, 1.0));
+
+  double final_cost = std::numeric_limits<double>::quiet_NaN();
+  int iterations = 0;
+  const bool success = optimizer->optimizeReboundCostForTest(
+      points, 0.2, 200, final_cost, iterations);
+  EXPECT_FALSE(
+      success &&
+      !optimizer->p4ActualCurveGuideCorridorSatisfiedForTest(points));
+}
+
+TEST(P4ActualCurveClearanceOptimization,
      PreservesTheMeasuredCurrentFrameClearanceChange) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureTwoForkNoCollision(map.get());
