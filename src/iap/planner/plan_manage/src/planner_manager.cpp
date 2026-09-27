@@ -11743,6 +11743,27 @@ namespace ego_planner
             P4PreparedCurveFailure::FRESHNESS &&
         p4_last_actual_curve_certification_.detail ==
             "final_bspline_corridor_support_stale_or_invalid:EXPIRED";
+    const bool risk_snapshot_unavailable =
+        p4_last_actual_curve_certification_.failure ==
+            P4PreparedCurveFailure::INCOMPLETE &&
+        (p4_last_actual_curve_certification_.detail ==
+                 "normal_channel_risk_snapshot_not_ready" ||
+         p4_last_actual_curve_certification_.detail ==
+                 "normal_channel_risk_snapshot_superseded");
+    const bool completed_feasible_sibling = std::any_of(
+        p4_prepared_channel_bundles_.begin(),
+        p4_prepared_channel_bundles_.end(), [](const auto &entry) {
+          return entry.second.state ==
+                     P4SuccessorPreparationState::PREPARED_CERTIFIED &&
+              entry.second.channel_record.feasible();
+        });
+    // Once one sibling is terminal, a not-ready/superseded snapshot for a
+    // later sibling means the cohort no longer has common authorization
+    // evidence. Reuse the existing single bounded freshness retry for all
+    // retained exact curves. Before the first healthy generation no sibling
+    // can be terminal, so startup keeps waiting without consuming that retry.
+    const bool begin_freshness_retry = frozen_support_expired ||
+        (risk_snapshot_unavailable && completed_feasible_sibling);
     const std::string control_hash = p4ControlPointHash(
         local_data_.position_traj_.getControlPoint());
     const std::string knot_hash = p4KnotVectorHash(
@@ -11775,13 +11796,13 @@ namespace ego_planner
         local_data_.position_traj_.getTimeSum();
     pending.channel_record.failure = P4PreparedCurveFailure::INCOMPLETE;
     P4ChannelPreparationTransition register_pending;
-    register_pending.kind = frozen_support_expired
+    register_pending.kind = begin_freshness_retry
         ? P4ChannelPreparationTransitionKind::BEGIN_FRESHNESS_RETRY
         : P4ChannelPreparationTransitionKind::REGISTER_PENDING_BUNDLE;
     register_pending.decision = &last_p4_forward_decision_;
     register_pending.context = &planning_risk_context_;
     register_pending.bundle = &pending;
-    register_pending.retry_generation = frozen_support_expired ? 1u : 0u;
+    register_pending.retry_generation = begin_freshness_retry ? 1u : 0u;
     if (!transitionP4ChannelPreparation(
             register_pending, now_s, reason))
       return P4NormalChannelPreparationDisposition::REJECTED;
