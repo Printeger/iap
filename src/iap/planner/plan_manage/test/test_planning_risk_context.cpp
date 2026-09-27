@@ -13741,6 +13741,19 @@ TEST(P4CommittedTopology, ActualExitCompletesCommitmentWithoutHardFailure)
       Eigen::Vector3d(3.0, -2.0, 1.0), Eigen::Vector3d(0.4, 0.0, 0.0),
       Eigen::Vector3d::Zero());
   ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  // The optimizer's refinement tube includes stopping reserve and can reach
+  // well behind the graph-derived merge.  Merely entering that broad tube is
+  // not actual-odometry evidence that the selected topology was completed.
+  const Eigen::Vector3d final_segment =
+      selected.common_anchor - selected.candidates.front().path[3];
+  const Eigen::Vector3d before_exit =
+      selected.common_anchor - 0.5 * final_segment.normalized();
+  manager.updateP4CommittedTopologyForTest(
+      before_exit, Eigen::Vector3d(0.4, 0.0, 0.0),
+      Eigen::Vector3d::Zero());
+  EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
   manager.updateP4CommittedTopologyForTest(
       selected.common_anchor, Eigen::Vector3d(0.4, 0.0, 0.0),
       Eigen::Vector3d::Zero());
