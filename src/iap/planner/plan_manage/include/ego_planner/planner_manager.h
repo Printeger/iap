@@ -625,9 +625,11 @@ namespace ego_planner
   };
 
   // Build the exact records consumed by sibling comparison. Incomplete
-  // actual GNSS evidence is retained only when every sibling covers an
-  // equivalent forward space-time schedule; otherwise route preference is
-  // the last comparable signal and all hard feasibility gates remain intact.
+  // actual GNSS evidence is retained only over the cohort's intersecting
+  // query-time window and the forward distance reached by every sibling in
+  // that window. This prevents a shorter or retreating curve from winning by
+  // omitting future evidence without requiring different certified traversal
+  // rates to cross every forward station at the same instant.
   std::vector<P4PreparedChannelRecord>
   p4CommonForwardPreparedChannelRecords(
       const std::map<uint64_t, P4PreparedSuccessorBundle> &bundles);

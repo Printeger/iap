@@ -10171,7 +10171,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     IncompleteActualPeaksRequireEquivalentForwardTiming)
+     IncompleteActualPeaksRequireCommonForwardSpaceTimeCoverage)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -10218,13 +10218,13 @@ TEST(P4PreparedChannelComparison,
     value.decision.local_target = Eigen::Vector3d(10.0, 0.0, 0.0);
     auto &evidence = value.direct_risk_evidence;
     evidence.trajectory_start_ns = 10000000000LL;
-    evidence.positions = {
-        Eigen::Vector3d(0.0, 0.0, 0.0),
-        Eigen::Vector3d(1.0, 0.0, 0.0),
-        Eigen::Vector3d(2.0, 0.0, 0.0)};
+    evidence.positions.reserve(relative_times.size());
+    for (std::size_t index = 0u; index < relative_times.size(); ++index)
+      evidence.positions.emplace_back(
+          static_cast<double>(index), 0.0, 0.0);
     evidence.relative_times = std::move(relative_times);
-    evidence.nominal_sample_rows = {true, true, true};
-    evidence.points.resize(3u);
+    evidence.nominal_sample_rows.assign(evidence.positions.size(), true);
+    evidence.points.resize(evidence.positions.size());
     for (auto &point : evidence.points)
     {
       point.pl_upper_available = true;
@@ -10256,6 +10256,41 @@ TEST(P4PreparedChannelComparison,
             ego_planner::P4ChannelComparisonState::COMPLETE);
   EXPECT_EQ(comparison.winner_channel_id,
             equivalent.channel_record.channel_id);
+
+  // Both actual curves start from the same frozen execution epoch and have
+  // dense evidence over a shared eight-second/eight-metre forward window.
+  // Different certified traversal rates are not missing evidence: compare
+  // the common space-time window instead of demanding identical crossing
+  // times at every station and falling back to the guide preference.
+  std::vector<double> slower_times;
+  std::vector<double> faster_times;
+  for (std::size_t index = 0u; index <= 10u; ++index)
+  {
+    slower_times.push_back(static_cast<double>(index));
+    faster_times.push_back(0.8 * static_cast<double>(index));
+  }
+  auto slower_preferred = bundle(71u, 1.2, slower_times);
+  auto faster_lower_risk = bundle(72u, 0.8, faster_times);
+  const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle>
+      common_space_time_bundles{
+          {slower_preferred.channel_record.channel_id, slower_preferred},
+          {faster_lower_risk.channel_record.channel_id, faster_lower_risk}};
+  const auto common_space_time_records =
+      ego_planner::p4CommonForwardPreparedChannelRecords(
+          common_space_time_bundles);
+  ASSERT_EQ(common_space_time_records.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      common_space_time_records.begin(), common_space_time_records.end(),
+      [](const auto &record) {
+        return std::isfinite(record.known_global_peak_ratio);
+      }));
+  comparison = ego_planner::compareP4PreparedChannels(
+      common_space_time_records, snapshot, 2u, 0u,
+      slower_preferred.channel_record.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id,
+            faster_lower_risk.channel_record.channel_id);
 
   auto shorter_time = bundle(72u, 0.8, {0.0, 0.2, 0.4});
   const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle> bundles{

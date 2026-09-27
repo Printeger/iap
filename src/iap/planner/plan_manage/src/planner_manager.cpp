@@ -1650,10 +1650,12 @@ namespace ego_planner
     };
   }
 
-  P4DirectTrajectoryRiskEvidence p4ActualRiskEvidenceWithinForwardRange(
+  static P4DirectTrajectoryRiskEvidence
+  p4ActualRiskEvidenceWithinForwardSpaceTime(
       const P4DirectTrajectoryRiskEvidence &evidence,
       const Eigen::Vector3d &origin, const Eigen::Vector3d &forward_target,
-      const double maximum_forward_m, double *available_forward_m)
+      const double maximum_forward_m, const double minimum_query_time_s,
+      const double maximum_query_time_s, double *available_forward_m)
   {
     if (available_forward_m)
       *available_forward_m = 0.0;
@@ -1670,6 +1672,19 @@ namespace ego_planner
     {
       if (index < evidence.nominal_sample_rows.size() &&
           !evidence.nominal_sample_rows[index])
+        continue;
+      const double relative_time_s = index < evidence.relative_times.size()
+          ? evidence.relative_times[index]
+          : std::numeric_limits<double>::quiet_NaN();
+      const double query_time_s =
+          static_cast<double>(evidence.trajectory_start_ns) * 1.0e-9 +
+          relative_time_s;
+      if ((std::isfinite(minimum_query_time_s) ||
+           std::isfinite(maximum_query_time_s)) &&
+          (!std::isfinite(relative_time_s) ||
+           evidence.trajectory_start_ns <= 0 ||
+           query_time_s < minimum_query_time_s - 1.0e-6 ||
+           query_time_s > maximum_query_time_s + 1.0e-6))
         continue;
       const double forward_m =
           (evidence.positions[index] - origin).dot(axis);
@@ -1689,6 +1704,17 @@ namespace ego_planner
     return cropped;
   }
 
+  P4DirectTrajectoryRiskEvidence p4ActualRiskEvidenceWithinForwardRange(
+      const P4DirectTrajectoryRiskEvidence &evidence,
+      const Eigen::Vector3d &origin, const Eigen::Vector3d &forward_target,
+      const double maximum_forward_m, double *available_forward_m)
+  {
+    return p4ActualRiskEvidenceWithinForwardSpaceTime(
+        evidence, origin, forward_target, maximum_forward_m,
+        -std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::infinity(), available_forward_m);
+  }
+
   std::vector<P4PreparedChannelRecord>
   p4CommonForwardPreparedChannelRecords(
       const std::map<uint64_t, P4PreparedSuccessorBundle> &bundles)
@@ -1699,6 +1725,11 @@ namespace ego_planner
       std::size_t forward_coverage_count = 0u;
       std::size_t feasible_bundle_count = 0u;
       bool all_feasible_evidence_complete = true;
+      double common_query_begin_s =
+          -std::numeric_limits<double>::infinity();
+      double common_query_end_s =
+          std::numeric_limits<double>::infinity();
+      std::size_t temporal_coverage_count = 0u;
       for (const auto &entry : bundles)
       {
         if (!entry.second.channel_record.feasible())
@@ -1707,12 +1738,58 @@ namespace ego_planner
         all_feasible_evidence_complete =
             all_feasible_evidence_complete &&
             entry.second.direct_risk_evidence.complete;
+        const auto &evidence = entry.second.direct_risk_evidence;
+        double first_relative_s = std::numeric_limits<double>::infinity();
+        double last_relative_s =
+            -std::numeric_limits<double>::infinity();
+        for (std::size_t index = 0u;
+             index < evidence.relative_times.size(); ++index)
+        {
+          if (index < evidence.nominal_sample_rows.size() &&
+              !evidence.nominal_sample_rows[index])
+            continue;
+          const double relative_s = evidence.relative_times[index];
+          if (!std::isfinite(relative_s))
+            continue;
+          first_relative_s = std::min(first_relative_s, relative_s);
+          last_relative_s = std::max(last_relative_s, relative_s);
+        }
+        if (evidence.trajectory_start_ns > 0 &&
+            std::isfinite(first_relative_s) &&
+            std::isfinite(last_relative_s) &&
+            last_relative_s >= first_relative_s)
+        {
+          const double start_s =
+              static_cast<double>(evidence.trajectory_start_ns) * 1.0e-9;
+          common_query_begin_s = std::max(
+              common_query_begin_s, start_s + first_relative_s);
+          common_query_end_s = std::min(
+              common_query_end_s, start_s + last_relative_s);
+          ++temporal_coverage_count;
+        }
+      }
+      const bool use_common_time_window = feasible_bundle_count >= 2u &&
+          temporal_coverage_count == feasible_bundle_count &&
+          std::isfinite(common_query_begin_s) &&
+          std::isfinite(common_query_end_s) &&
+          common_query_end_s > common_query_begin_s + 1.0e-6;
+      for (const auto &entry : bundles)
+      {
+        if (!entry.second.channel_record.feasible())
+          continue;
         double coverage_m = 0.0;
-        (void)p4ActualRiskEvidenceWithinForwardRange(
+        (void)p4ActualRiskEvidenceWithinForwardSpaceTime(
             entry.second.direct_risk_evidence,
             entry.second.decision.request_position,
             entry.second.decision.local_target,
-            std::numeric_limits<double>::max(), &coverage_m);
+            std::numeric_limits<double>::max(),
+            all_feasible_evidence_complete
+                ? -std::numeric_limits<double>::infinity()
+                : common_query_begin_s,
+            all_feasible_evidence_complete
+                ? std::numeric_limits<double>::infinity()
+                : common_query_end_s,
+            &coverage_m);
         if (std::isfinite(coverage_m) && coverage_m > 0.0)
         {
           common_forward_coverage_m = std::min(
@@ -1724,137 +1801,8 @@ namespace ego_planner
           feasible_bundle_count >= 2u &&
           forward_coverage_count == feasible_bundle_count &&
           std::isfinite(common_forward_coverage_m) &&
-          common_forward_coverage_m > 0.0;
-      const auto forward_timing_profile = [common_forward_coverage_m](
-          const P4PreparedSuccessorBundle &bundle) {
-        struct Profile
-        {
-          std::vector<std::pair<double, double>> crossings;
-          double sample_period_s =
-              std::numeric_limits<double>::infinity();
-        } profile;
-        const auto &evidence = bundle.direct_risk_evidence;
-        const Eigen::Vector3d delta = bundle.decision.local_target -
-            bundle.decision.request_position;
-        if (delta.norm() <= 1.0e-9 ||
-            evidence.trajectory_start_ns <= 0 ||
-            evidence.positions.size() != evidence.points.size() ||
-            evidence.positions.size() != evidence.relative_times.size())
-          return profile;
-        const Eigen::Vector3d axis = delta.normalized();
-        double last_forward_m = -std::numeric_limits<double>::infinity();
-        double previous_time_s = std::numeric_limits<double>::quiet_NaN();
-        std::vector<double> sample_periods;
-        for (std::size_t index = 0u;
-             index < evidence.positions.size(); ++index)
-        {
-          if (index < evidence.nominal_sample_rows.size() &&
-              !evidence.nominal_sample_rows[index])
-            continue;
-          const double relative_time_s = evidence.relative_times[index];
-          const double forward_m =
-              (evidence.positions[index] - bundle.decision.request_position)
-                  .dot(axis);
-          if (!std::isfinite(relative_time_s) ||
-              !std::isfinite(forward_m))
-            continue;
-          if (std::isfinite(previous_time_s) &&
-              relative_time_s > previous_time_s)
-            sample_periods.push_back(relative_time_s - previous_time_s);
-          previous_time_s = relative_time_s;
-          if (forward_m < -1.0e-6 ||
-              forward_m > common_forward_coverage_m + 1.0e-6 ||
-              forward_m <= last_forward_m + 1.0e-6)
-            continue;
-          profile.crossings.emplace_back(
-              std::max(0.0, forward_m),
-              static_cast<double>(evidence.trajectory_start_ns) * 1.0e-9 +
-                  relative_time_s);
-          last_forward_m = forward_m;
-        }
-        if (!sample_periods.empty())
-        {
-          const auto middle = sample_periods.begin() +
-              static_cast<std::ptrdiff_t>(sample_periods.size() / 2u);
-          std::nth_element(
-              sample_periods.begin(), middle, sample_periods.end());
-          profile.sample_period_s = *middle;
-        }
-        return profile;
-      };
-      const auto time_at_forward = [](const auto &profile,
-                                      const double station_m) {
-        if (profile.crossings.empty() ||
-            station_m < profile.crossings.front().first - 1.0e-6 ||
-            station_m > profile.crossings.back().first + 1.0e-6)
-          return std::numeric_limits<double>::quiet_NaN();
-        const auto upper = std::lower_bound(
-            profile.crossings.begin(), profile.crossings.end(), station_m,
-            [](const auto &sample, const double station) {
-              return sample.first < station;
-            });
-        if (upper == profile.crossings.begin())
-          return upper->second;
-        if (upper == profile.crossings.end())
-          return profile.crossings.back().second;
-        const auto lower = std::prev(upper);
-        const double span_m = upper->first - lower->first;
-        if (span_m <= 1.0e-9)
-          return upper->second;
-        const double alpha = std::clamp(
-            (station_m - lower->first) / span_m, 0.0, 1.0);
-        return lower->second + alpha * (upper->second - lower->second);
-      };
-      bool incomplete_timing_comparable = use_common_forward_evidence;
-      std::optional<decltype(forward_timing_profile(
-          std::declval<const P4PreparedSuccessorBundle &>()))>
-          reference_profile;
-      if (use_common_forward_evidence && !all_feasible_evidence_complete)
-      {
-        for (const auto &entry : bundles)
-        {
-          if (!entry.second.channel_record.feasible())
-            continue;
-          const auto profile = forward_timing_profile(entry.second);
-          if (profile.crossings.size() < 2u ||
-              !std::isfinite(profile.sample_period_s) ||
-              profile.crossings.front().first > 1.0e-3 ||
-              profile.crossings.back().first + 1.0e-3 <
-                  common_forward_coverage_m)
-          {
-            incomplete_timing_comparable = false;
-            break;
-          }
-          if (!reference_profile)
-          {
-            reference_profile = profile;
-            continue;
-          }
-          const double time_tolerance_s = std::max(
-              reference_profile->sample_period_s,
-              profile.sample_period_s) + 1.0e-6;
-          for (const double fraction :
-               std::array<double, 5>{{0.0, 0.25, 0.5, 0.75, 1.0}})
-          {
-            const double station_m =
-                fraction * common_forward_coverage_m;
-            const double reference_time_s =
-                time_at_forward(*reference_profile, station_m);
-            const double candidate_time_s =
-                time_at_forward(profile, station_m);
-            if (!std::isfinite(reference_time_s) ||
-                !std::isfinite(candidate_time_s) ||
-                std::abs(reference_time_s - candidate_time_s) >
-                    time_tolerance_s)
-            {
-              incomplete_timing_comparable = false;
-              break;
-            }
-          }
-          if (!incomplete_timing_comparable)
-            break;
-        }
-      }
+          common_forward_coverage_m > 0.0 &&
+          (all_feasible_evidence_complete || use_common_time_window);
       const auto clear_whole_curve_risk_order = [](
           P4PreparedChannelRecord *record) {
         record->risk_interval_complete = false;
@@ -1879,16 +1827,20 @@ namespace ego_planner
         if (feasible_bundle_count >= 2u && record.feasible())
         {
           clear_whole_curve_risk_order(&record);
-          if (use_common_forward_evidence &&
-              (all_feasible_evidence_complete ||
-               incomplete_timing_comparable))
+          if (use_common_forward_evidence)
           {
             const auto common_evidence =
-                p4ActualRiskEvidenceWithinForwardRange(
+                p4ActualRiskEvidenceWithinForwardSpaceTime(
                     entry.second.direct_risk_evidence,
                     entry.second.decision.request_position,
                     entry.second.decision.local_target,
-                    common_forward_coverage_m);
+                    common_forward_coverage_m,
+                    all_feasible_evidence_complete
+                        ? -std::numeric_limits<double>::infinity()
+                        : common_query_begin_s,
+                    all_feasible_evidence_complete
+                        ? std::numeric_limits<double>::infinity()
+                        : common_query_end_s, nullptr);
             p4ApplyRiskIntervalSummary(common_evidence, &record);
             const auto common_fim =
                 summarizeP4ActualFimEvidence(common_evidence);
