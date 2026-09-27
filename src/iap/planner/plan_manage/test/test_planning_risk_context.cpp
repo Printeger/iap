@@ -11789,7 +11789,7 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
-     NormalMultiChannelDecisionPreparesEveryActualCurveBeforePublication)
+     FrozenRoutePreferenceSurvivesSiblingCallbackAndMissingActualPl)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -11846,20 +11846,23 @@ TEST(P4PreparedChannelPreparation,
   decision.selection_authority =
       ego_planner::P4ForwardSelectionAuthority::NONE;
   decision.formal_support = false;
-  decision.selected_channel_id = decision.candidates.front().channel_id;
   auto second_channel = decision.candidates.front();
   second_channel.candidate_id += 1u;
   second_channel.channel_id += 1u;
   second_channel.path[1].y() *= -1.0;
   second_channel.path_hash = "normal-runner-up-guide";
   decision.candidates.push_back(second_channel);
-  const uint64_t first_candidate_id =
-      decision.candidates.front().candidate_id;
-  const uint64_t first_channel_id = decision.candidates.front().channel_id;
+  const uint64_t first_candidate_id = second_channel.candidate_id;
+  const uint64_t first_channel_id = second_channel.channel_id;
+  decision.selected_candidate_id = first_candidate_id;
+  decision.selected_channel_id = first_channel_id;
+  decision.route_preference_channel_id = first_channel_id;
+  decision.selected_guide = second_channel.path;
   manager.setP4ForwardDecisionForTest(std::move(decision));
 
-  auto stopped = ego_planner::UniformBspline(
-      p4StoppedControlPoints(), 3, 0.5);
+  Eigen::MatrixXd preferred_points = p4StoppedControlPoints();
+  preferred_points.row(1) *= -1.0;
+  auto stopped = ego_planner::UniformBspline(preferred_points, 3, 0.5);
   const auto terminal = ego_planner::imposeP4TerminalStop(
       &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
   ASSERT_TRUE(terminal.success) << terminal.reason;
@@ -11877,6 +11880,39 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
+  const auto make_missing_actual_pl = [&manager](const double fim_ratio) {
+    auto certificate = manager.p4ExecutionCertificate();
+    certificate.global_peak_ratio =
+        std::numeric_limits<double>::quiet_NaN();
+    certificate.global_exposure_integral_ratio_s = 0.0;
+    manager.setP4ExecutionCertificateForTest(std::move(certificate));
+    auto evidence = manager.latestP4DirectRiskEvidence();
+    evidence.trajectory_assurance.global.peak_ratio =
+        std::numeric_limits<double>::quiet_NaN();
+    evidence.trajectory_assurance.global.maximum_continuous_exceedance_s =
+        0.0;
+    evidence.trajectory_assurance.global.exceedance_integral_ratio_s = 0.0;
+    for (auto &point : evidence.points)
+    {
+      point.pl_lower_available = false;
+      point.pl_upper_available = false;
+      point.safety_ratio_lower =
+          std::numeric_limits<double>::quiet_NaN();
+      point.safety_ratio_upper =
+          std::numeric_limits<double>::quiet_NaN();
+      point.fim_ratio = fim_ratio;
+      point.known_fim_ratio = fim_ratio;
+      point.known_occupancy_kappa = 0.0;
+      point.unknown_support_fraction = 0.0;
+      point.unknown_kappa_upper_bound = 0.0;
+      point.combined_conservative_kappa = 0.0;
+    }
+    manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
+  };
+  // Match the clean-live shape: the route-preferred side has no actual
+  // upper-PL evidence and a microscopically worse advisory FIM value.
+  make_missing_actual_pl(0.0130);
+
   std::string reason;
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
@@ -11888,18 +11924,24 @@ TEST(P4PreparedChannelPreparation,
   ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
   EXPECT_EQ(
       manager.pendingP4ChannelWorkItemForTest()->selected_candidate_id,
-      second_channel.candidate_id);
+      manager.lastP4ForwardDecision().candidates.front().candidate_id);
   EXPECT_EQ(
       manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
-      second_channel.channel_id);
+      manager.lastP4ForwardDecision().candidates.front().channel_id);
+  EXPECT_EQ(
+      manager.pendingP4ChannelWorkItemForTest()->route_preference_channel_id,
+      first_channel_id);
 
   auto second_decision =
       *manager.pendingP4ChannelWorkItemForTest();
+  // A sibling callback owns only the current work selection. It must not be
+  // able to replace the route preference frozen when the cohort began.
+  second_decision.route_preference_channel_id =
+      second_decision.selected_channel_id;
   manager.clearP4PendingChannelWorkItemForTest();
   manager.setP4ForwardDecisionForTest(std::move(second_decision));
-  Eigen::MatrixXd mirrored_points = p4StoppedControlPoints();
-  mirrored_points.row(1) *= -1.0;
-  auto mirrored = ego_planner::UniformBspline(mirrored_points, 3, 0.5);
+  auto mirrored = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
   manager.local_data_.position_traj_ = mirrored;
   manager.local_data_.velocity_traj_ = mirrored.getDerivative();
   manager.local_data_.acceleration_traj_ =
@@ -11908,6 +11950,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.duration_ = mirrored.getTimeSum();
   ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
+  make_missing_actual_pl(0.0125);
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
           10.0, &reason),
@@ -11919,7 +11962,7 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
             first_channel_id);
   EXPECT_EQ(manager.lastP4ForwardDecision().runner_up_channel_id,
-            second_channel.channel_id);
+            manager.lastP4ForwardDecision().candidates.front().channel_id);
   EXPECT_TRUE(
       manager.lastP4ForwardDecision().selected_actual_endpoint.allFinite());
   EXPECT_TRUE(

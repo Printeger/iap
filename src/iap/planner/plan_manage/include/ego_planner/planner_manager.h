@@ -1600,6 +1600,7 @@ namespace ego_planner
       int parent_trajectory_id = 0;
       int64_t parent_start_time_ns = 0;
       std::string parent_curve_hash;
+      uint64_t route_preference_channel_id = 0;
       std::set<uint64_t> expected_channel_ids;
       std::optional<P4ChannelPreparationIdentity> pending_identity;
       std::optional<P4ChannelPreparationIdentity> active_identity;

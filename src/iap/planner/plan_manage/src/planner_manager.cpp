@@ -10477,6 +10477,8 @@ namespace ego_planner
           lifecycle.expected_channel_ids.insert(candidate.channel_id);
       lifecycle.diagnostics.expected_channel_count =
           lifecycle.expected_channel_ids.size();
+      lifecycle.route_preference_channel_id =
+          transition.decision->route_preference_channel_id;
       lifecycle.diagnostics.transition_limit =
           std::max<std::size_t>(8u,
               lifecycle.expected_channel_ids.size() * 6u + 2u);
@@ -10597,6 +10599,11 @@ namespace ego_planner
           return failP4ChannelPreparationLifecycle(
               "work_identity_consumed_twice", now_s, reason);
         *transition.consumed_decision = *p4_pending_channel_work_item_;
+        // The selected channel is transactional sibling work. Restore the
+        // route comparison winner frozen when this cohort began so a later
+        // callback cannot turn its current sibling into the risk preference.
+        transition.consumed_decision->route_preference_channel_id =
+            lifecycle.route_preference_channel_id;
         if (transition.context)
           transition.consumed_decision->planning_attempt_id =
               transition.context->planning_attempt_id;
@@ -12504,7 +12511,10 @@ namespace ego_planner
         prepared_records, bundle.decision.snapshot_identity,
         expected_channel_ids.size(),
         p4_execution_commitment_backup_.certificate.successor_channel_id,
-        bundle.decision.route_preference_channel_id);
+        p4_channel_preparation_lifecycle_.diagnostics.decision_event_id ==
+                bundle.decision.decision_event_id
+            ? p4_channel_preparation_lifecycle_.route_preference_channel_id
+            : bundle.decision.route_preference_channel_id);
     if (comparison.state == P4ChannelComparisonState::PARTIAL_COMPARISON)
     {
       P4ForwardDecision observe = bundle.decision;
