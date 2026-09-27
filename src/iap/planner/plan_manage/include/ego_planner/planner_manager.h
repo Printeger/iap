@@ -1247,6 +1247,7 @@ namespace ego_planner
     // A candidate mutates LocalTrajData before the final lineage/P5/publish
     // gates run. Preserve the executing certificate as a small transaction so
     // rejection cannot split the incumbent curve from its authority identity.
+    bool abandonP4PreparationAfterStoppedRevocation();
     bool preserveP4ExecutionCommitmentForCandidate();
     bool retainP4ActualWinnerForQueueMiss();
     void restoreP4ExecutionCommitmentAfterCandidateRejection();
@@ -1478,6 +1479,10 @@ namespace ego_planner
     void setP4ExecutionCertificateForTest(P4ExecutionCertificate certificate)
     {
       p4_execution_certificate_ = std::move(certificate);
+    }
+    void setP4ExecutionRevokedForTest(const bool revoked)
+    {
+      p4_execution_revoked_ = revoked;
     }
     void setP4FixedBoundedGuideForTest(P4BoundedExecutionGuide guide)
     {

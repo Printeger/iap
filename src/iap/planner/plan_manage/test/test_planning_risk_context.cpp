@@ -11884,6 +11884,47 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
             terminal_winner.selected_channel_id);
 
+  // Runtime support can revoke a normal curve at its already-stopped
+  // terminal suffix without producing a separate guard trajectory.  The
+  // next normal decision must use its newly acquired planning context, not a
+  // pending context or terminal cohort owned by the revoked curve.  Keep the
+  // revocation latch set: only certification and publication of the new
+  // exact curve may restore execution authority.
+  auto stopped_revoked = manager.p4ExecutionCertificate();
+  stopped_revoked.valid = true;
+  stopped_revoked.trajectory_id = manager.local_data_.traj_id_;
+  stopped_revoked.start_time_ns =
+      manager.local_data_.start_time_.nanoseconds();
+  stopped_revoked.duration_s = manager.local_data_.position_traj_.getTimeSum();
+  stopped_revoked.control_points_hash = manager.local_data_.curve_hash_;
+  stopped_revoked.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  manager.setP4ExecutionCertificateForTest(stopped_revoked);
+  manager.setP4ExecutionRevokedForTest(true);
+  const int64_t stopped_revoked_endpoint_ns = stopped_revoked.start_time_ns +
+      static_cast<int64_t>(std::llround(
+          stopped_revoked.duration_s * 1.0e9));
+  manager.setTimeProvider([stopped_revoked_endpoint_ns]() {
+    return rclcpp::Time(stopped_revoked_endpoint_ns, RCL_ROS_TIME);
+  });
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      stopped_revoked.trajectory_id, stopped_revoked.start_time_ns,
+      static_cast<double>(stopped_revoked_endpoint_ns) * 1.0e-9 + 1.0,
+      "revoked_terminal_successor_pending",
+      stopped_revoked.control_points_hash);
+  manager.setP4PendingChannelWorkItemForTest(first_retry_decision);
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  ASSERT_TRUE(manager.abandonP4PreparationAfterStoppedRevocation());
+  EXPECT_TRUE(manager.p4ExecutionRevoked())
+      << "abandoning stale preparation must not restore revoked authority";
+  EXPECT_FALSE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_FALSE(manager.p4ChannelPreparationLifecycleForTest().terminal);
+  EXPECT_EQ(manager.p4ChannelPreparationLifecycleForTest().decision_event_id,
+            0u);
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::ROUTE_PENDING);
+  manager.setP4ExecutionRevokedForTest(false);
+
   // The certified guard is now the stopped execution parent.  Starting the
   // first ordinary candidate transaction from that endpoint must abandon the
   // terminal pre-guard cohort before a new route event is consumed.

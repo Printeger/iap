@@ -1022,7 +1022,15 @@ namespace ego_planner
       else
       {
         if (enable_fail_safe_ && odom_vel_.norm() < 0.1)
+        {
+          // A revoked curve may already be at its certified stopped suffix,
+          // leaving no separate guard command to activate. Retire only the
+          // old preparation transaction at this one-shot recovery boundary;
+          // execution stays revoked until a fresh normal curve is certified.
+          (void)planner_manager_->
+              abandonP4PreparationAfterStoppedRevocation();
           changeFSMExecState(GEN_NEW_TRAJ, "FSM");
+        }
       }
 
       flag_escape_emergency_ = false;

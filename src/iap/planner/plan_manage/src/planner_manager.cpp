@@ -10675,6 +10675,32 @@ namespace ego_planner
         state.last_activated_curve_hash;
   }
 
+  bool EGOPlannerManager::abandonP4PreparationAfterStoppedRevocation()
+  {
+    // A runtime support revocation can occur on the terminal stopped suffix,
+    // where no additional braking curve is needed or publishable. Retire the
+    // old speculative transaction exactly at the FSM's stopped-recovery
+    // boundary. Keep the revocation latch: the next normal curve must still
+    // pass complete certification before it can regain execution authority.
+    if (!p4_execution_revoked_ || !p4_execution_certificate_.valid ||
+        !committedP4TrajectoryReachedEndpoint(plannerNow().seconds()))
+      return false;
+    if (p4_successor_schedule_.parent_trajectory_id > 0)
+      p4_successor_worker_.cancelParent(
+          p4_successor_schedule_.parent_trajectory_id);
+    p4_successor_schedule_ = P4SuccessorScheduleState{};
+    p4_successor_preparation_state_ =
+        P4SuccessorPreparationState::ROUTE_PENDING;
+    p4_prepared_successor_.reset();
+    p4_cached_successor_bundle_.reset();
+    p4_cached_successor_activation_in_progress_ = false;
+    P4ChannelPreparationTransition reset;
+    reset.kind = P4ChannelPreparationTransitionKind::RESET;
+    reset.clear_bundles = true;
+    return transitionP4ChannelPreparation(
+        reset, plannerNow().seconds(), nullptr);
+  }
+
   bool EGOPlannerManager::preserveP4ExecutionCommitmentForCandidate()
   {
     // A queued child and its executing parent form one activation
