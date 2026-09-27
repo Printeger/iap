@@ -1100,7 +1100,12 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.compute_budget_ms": "150.0",
     "p4.forward.gnss_core_policy": "braking_window_pointwise",
     "p4.forward.window_transition_overlap_s": "0.4",
-    "p4.execution.successor_prepare_wcet_s": "1.2",
+    # The clean four-fork live observed 2.937 s from the frozen candidate
+    # start budget to the final publication boundary under the production
+    # callback load. Reserve that measured bound up front so a fully certified
+    # multi-channel winner is not discarded and rebuilt from the same stopped
+    # parent merely because less than the mandatory 200 ms queue margin remains.
+    "p4.execution.successor_prepare_wcet_s": "3.0",
     "p4.execution.successor_control_switch_margin_s": "0.2",
     "p4.execution.successor_scheduler_guard_s": "0.2",
     # Full route plus actual-curve preparation took 2.2--2.3 s in the
