@@ -1614,6 +1614,17 @@ namespace ego_planner
           execFSMCallback();
           return;
         }
+        // A bounded successor recovery has already reached its terminal
+        // result for this exact executing parent. The parent curve is a
+        // certified terminal-stop trajectory, so a soft P5 replan request
+        // retains it through the existing endpoint HOLD. Falling through to
+        // ordinary normal planning would bypass the successor transaction
+        // and repeatedly return an unproven committed continuation. Hard P5,
+        // collision, identity and revocation actions take their separate
+        // guard/emergency branches above and remain unchanged.
+        if (p5_rolling_successor &&
+            planner_manager_->p4CommittedContinuationTerminalHold())
+          return;
         if (!planner_manager_->p4GuardTransitionPending())
           changeFSMExecState(REPLAN_TRAJ, "P5_REPLAN");
         return;

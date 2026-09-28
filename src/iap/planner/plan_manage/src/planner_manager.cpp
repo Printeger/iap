@@ -12113,10 +12113,84 @@ namespace ego_planner
       }
     }
 
+    // A transiently failed rolling transaction must not strand an aircraft
+    // that has already entered a topology. Retire the exact failed window and
+    // give the same full parent identity one fresh route/actual-curve
+    // transaction. This is route regeneration, not revival of the rejected
+    // curve or its snapshot retry. The parent identity stored on the active
+    // commitment makes the recovery finite even when planning-attempt IDs or
+    // snapshots continue to advance.
+    const P4PreparedCurveFailure committed_failure =
+        p4PreparedFailureForSuccessorFailure(failure);
+    const bool strict_global = p4_global_exposure_policy_.task_mode ==
+        iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+    if (p4_committed_topology_ && p4_committed_topology_->active &&
+        !p4CommittedTopologyHardFailureType(
+            committed_failure, strict_global))
+    {
+      const std::string parent_identity =
+          std::to_string(p4_successor_schedule_.parent_trajectory_id) + ":" +
+          std::to_string(p4_successor_schedule_.parent_start_time_ns) + ":" +
+          p4_successor_schedule_.parent_control_points_hash;
+      if (p4_successor_schedule_.parent_trajectory_id > 0 &&
+          p4_successor_schedule_.parent_start_time_ns > 0 &&
+          !p4_successor_schedule_.parent_control_points_hash.empty() &&
+          p4_committed_topology_->recovered_successor_parent_identity !=
+              parent_identity)
+      {
+        P4ForwardDecision failed_decision = last_p4_forward_decision_;
+        failed_decision.successor_failure = failure;
+        failed_decision.planning_disposition =
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+        failed_decision.reason = failure_reason;
+        appendP4ForwardDecision(
+            failed_decision,
+            "committed_topology_successor_regeneration_required", now_s);
+
+        p4_committed_topology_->recovered_successor_parent_identity =
+            parent_identity;
+        p4_successor_worker_.cancelParent(
+            p4_successor_schedule_.parent_trajectory_id);
+        p4_successor_schedule_ = P4SuccessorScheduleState{};
+        p4_successor_preparation_state_ =
+            P4SuccessorPreparationState::ROUTE_PENDING;
+        p4_prepared_successor_.reset();
+        p4_pending_channel_work_item_.reset();
+        p4_pending_channel_context_.reset();
+        p4_cached_successor_bundle_.reset();
+        p4_cached_successor_activation_in_progress_ = false;
+        resetP4ChannelPreparationLifecycle(true);
+
+        last_p4_forward_decision_ = std::move(failed_decision);
+        last_p4_forward_decision_.result_status =
+            P4ForwardResultStatus::PENDING;
+        last_p4_forward_decision_.successor_failure =
+            P4SuccessorFailure::NONE;
+        last_p4_forward_decision_.reason =
+            "committed_topology_successor_regeneration_pending";
+        p4_planning_disposition_ =
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+        P4ExecutionCheckDiagnostics pending;
+        pending.applicable = true;
+        pending.allowed = true;
+        pending.identity_match = true;
+        pending.execution_snapshot_id = failed_snapshot_id;
+        pending.reason =
+            "committed_topology_successor_regeneration_pending";
+        appendP4ExecutionEvent(
+            "COMMITTED_TOPOLOGY_SUCCESSOR_REGENERATION_PENDING", now_s,
+            pending);
+        return;
+      }
+    }
+
     // With no complete sibling, a failed immutable child is terminal for
-    // this rolling attempt. Keep executing the already-certified parent to
-    // its stop; do not reinterpret the failure as permission to regenerate
-    // the rejected curve.
+    // this rolling attempt. Keep executing the already-certified terminal-
+    // stop parent; do not reinterpret the failure as permission to regenerate
+    // the rejected curve. A genuine hard failure is recorded only after the
+    // bounded full-search path has reached this terminal seam.
+    recordP4CommittedTopologyHardFailure(
+        committed_failure, failure_reason);
     p4_successor_preparation_state_ = P4SuccessorPreparationState::FAILED;
     p4_successor_schedule_.result_delivered = true;
     p4_successor_schedule_.awaiting_new_snapshot = false;
@@ -12130,6 +12204,8 @@ namespace ego_planner
     last_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
     last_p4_forward_decision_.reason = failure_reason;
+    p4_planning_disposition_ =
+        P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
     appendP4ForwardDecision(
         last_p4_forward_decision_, "successor_curve_preparation_failed",
         now_s);
@@ -20952,12 +21028,17 @@ namespace ego_planner
           !shouldReplaceCommittedLimitedPrefix(
               replacement, &replacement_reason))
       {
-        if (!corridor_progress_valid)
-          last_p4_forward_decision_.successor_failure =
-              P4SuccessorFailure::CORRIDOR_INVALID;
-        else if (!prepared_valid)
+        // A missed immutable switch window is a transaction deadline, not
+        // proof that the committed topology is geometrically blocked. Give
+        // the typed prepared-successor result precedence over the derivative
+        // corridor diagnostics so the recovery seam can distinguish a
+        // transient expired window from a fresh hard geometry failure.
+        if (!prepared_valid)
           last_p4_forward_decision_.successor_failure =
               prepared_validation_failure;
+        else if (!corridor_progress_valid)
+          last_p4_forward_decision_.successor_failure =
+              P4SuccessorFailure::CORRIDOR_INVALID;
         else if (replacement_reason == "minimum_endpoint_progress_not_met")
           last_p4_forward_decision_.successor_failure =
               P4SuccessorFailure::PROGRESS_INSUFFICIENT;

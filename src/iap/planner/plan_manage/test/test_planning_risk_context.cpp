@@ -11192,6 +11192,170 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
+     EnteredTopologyGetsOneBoundedSuccessorRegenerationThenSafeHold)
+{
+  ego_planner::EGOPlannerManager manager;
+  const auto candidate = [](const uint64_t candidate_id,
+                            const uint64_t channel_id,
+                            std::vector<Eigen::Vector3d> path) {
+    ego_planner::P4ForwardCandidate value;
+    value.candidate_id = candidate_id;
+    value.channel_id = channel_id;
+    value.path = path;
+    value.topology_path = std::move(path);
+    value.path_hash = "recovery-channel-" + std::to_string(channel_id);
+    value.occupancy_supported = true;
+    value.geometry_state = ego_planner::P4ForwardGeometryState::CLEAR;
+    return value;
+  };
+
+  constexpr uint64_t kCommittedChannel = 317u;
+  ego_planner::P4ForwardDecision selected;
+  selected.result_status = ego_planner::P4ForwardResultStatus::READY;
+  selected.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  selected.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  selected.decision_event_id = 410u;
+  selected.common_anchor = Eigen::Vector3d(6.0, 0.0, 1.0);
+  selected.candidates = {
+      candidate(1u, kCommittedChannel,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, -2.0, 1.0),
+           Eigen::Vector3d(5.0, -2.0, 1.0), selected.common_anchor}),
+      candidate(2u, 419u,
+          {Eigen::Vector3d(0.0, 0.0, 1.0),
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, 2.0, 1.0),
+           Eigen::Vector3d(5.0, 2.0, 1.0), selected.common_anchor})};
+  selected.selected_candidate_id = 1u;
+  selected.selected_channel_id = kCommittedChannel;
+  selected.selected_guide = selected.candidates.front().path;
+  ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0),
+      Eigen::Vector3d(0.4, 0.0, 0.0), Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+
+  Eigen::MatrixXd control_points(3, 8);
+  for (int index = 0; index < control_points.cols(); ++index)
+    control_points.col(index) = Eigen::Vector3d(
+        3.0 + 0.25 * static_cast<double>(index), -2.0, 1.0);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(control_points, 3, 0.5);
+  manager.local_data_.velocity_traj_ =
+      manager.local_data_.position_traj_.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+  manager.local_data_.traj_id_ = 73;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  manager.local_data_.curve_hash_ = "recovery-parent";
+
+  ego_planner::P4ExecutionCertificate parent;
+  parent.valid = true;
+  parent.authority =
+      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
+  parent.trajectory_id = manager.local_data_.traj_id_;
+  parent.start_time_ns = manager.local_data_.start_time_.nanoseconds();
+  parent.duration_s = manager.local_data_.duration_;
+  parent.latest_rolling_switch_elapsed_s = manager.local_data_.duration_;
+  parent.execution_deadline_s = 30.0;
+  parent.control_points_hash = manager.local_data_.curve_hash_;
+  parent.approved_endpoint =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          manager.local_data_.duration_);
+  parent.successor_channel_id = kCommittedChannel;
+  parent.successor_topology_path = selected.candidates.front().path;
+  manager.setP4ExecutionCertificateForTest(parent);
+  ASSERT_TRUE(manager.recordTrajectoryCommandPublished(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash));
+  ASSERT_TRUE(manager.recordTrajectoryActivated(
+      manager.executionInstanceId(), parent.trajectory_id,
+      parent.start_time_ns, parent.control_points_hash));
+
+  ego_planner::P4ForwardDecision failed = selected;
+  failed.decision_event_id = 411u;
+  failed.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  failed.executable_intent =
+      ego_planner::P4ExecutableIntent::FINAL_CHANNEL;
+  failed.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  failed.candidates = {selected.candidates.front()};
+  failed.selected_candidate_id = failed.candidates.front().candidate_id;
+  failed.selected_channel_id = failed.candidates.front().channel_id;
+  failed.selected_guide = failed.candidates.front().path;
+  failed.successor_fast_path = false;
+  manager.setP4ForwardDecisionForTest(failed);
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      parent.trajectory_id, parent.start_time_ns, 11.0,
+      "successor_full_search_fallback_ready", parent.control_points_hash);
+
+  // Missing the old immutable preparation window is transient: retire that
+  // transaction and make one new parent-bound successor request schedulable.
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.9, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
+      "successor_switch_window_missed");
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::ROUTE_PENDING);
+  EXPECT_FALSE(manager.p4CommittedContinuationTerminalHold());
+  EXPECT_FALSE(manager.p4CommittedTopologyHardFailureForTest());
+  EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.1, 52u, 11.1));
+
+  // A newly generated route may contain a tempting sibling, but recovery is
+  // still constrained to the topology actually entered by odometry.
+  ego_planner::P4ForwardDecision regenerated;
+  regenerated.result_status = ego_planner::P4ForwardResultStatus::READY;
+  regenerated.action = ego_planner::P4ForwardAction::RISK_SELECTED;
+  regenerated.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::COMPLETE;
+  regenerated.decision_event_id = 412u;
+  regenerated.request_position = Eigen::Vector3d(3.0, -2.0, 1.0);
+  regenerated.common_anchor = selected.common_anchor;
+  regenerated.candidates = {
+      candidate(11u, kCommittedChannel,
+          {regenerated.request_position,
+           Eigen::Vector3d(5.0, -2.0, 1.0), selected.common_anchor}),
+      candidate(12u, 521u,
+          {regenerated.request_position,
+           Eigen::Vector3d(1.0, 0.0, 1.0),
+           Eigen::Vector3d(3.0, 2.0, 1.0), selected.common_anchor})};
+  regenerated.selected_candidate_id = 12u;
+  regenerated.selected_channel_id = 521u;
+  regenerated.selected_guide = regenerated.candidates.back().path;
+  ASSERT_TRUE(manager.constrainP4DecisionToCommittedTopologyForTest(
+      &regenerated));
+  ASSERT_EQ(regenerated.candidates.size(), 1u);
+  EXPECT_EQ(regenerated.selected_channel_id, kCommittedChannel);
+  EXPECT_EQ(regenerated.reason, "committed_topology_single_continuation");
+
+  // A second transient failure for the exact same executing parent is the
+  // bounded end of recovery. It keeps the certified terminal-stop parent and
+  // does not reopen route generation or silently release the topology.
+  manager.setP4ForwardDecisionForTest(regenerated);
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      parent.trajectory_id, parent.start_time_ns, 12.0,
+      "successor_full_search_fallback_ready", parent.control_points_hash);
+  manager.recordPreparedP4SuccessorCurveFailure(
+      11.9, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
+      "successor_switch_window_missed_again");
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::FAILED);
+  EXPECT_TRUE(manager.p4CommittedContinuationTerminalHold());
+  EXPECT_FALSE(manager.p4CommittedTopologyHardFailureForTest());
+  EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(12.1, 53u, 12.1));
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(12.2, 54u, 12.2));
+  EXPECT_EQ(ego_planner::classifyP4PlanningCycle(
+                false, manager.p4PlanningDisposition(), true),
+            ego_planner::P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT);
+}
+
+TEST(P4PreparedSuccessorPolicy,
      UnresolvedMultiChannelLimitedParentRequiresFullSearchWithoutYAxisBias)
 {
   ego_planner::P4ForwardDecision parent;

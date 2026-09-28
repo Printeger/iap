@@ -1211,6 +1211,13 @@ namespace ego_planner
     {
       return p4_pending_braking_anchor_.has_value();
     }
+    bool p4CommittedContinuationTerminalHold() const
+    {
+      return p4_committed_topology_ && p4_committed_topology_->active &&
+          p4_successor_preparation_state_ ==
+              P4SuccessorPreparationState::FAILED &&
+          p4_successor_schedule_.result_delivered;
+    }
     bool p4GuardCommandNeedsPublication(int trajectory_id) const;
     bool markP4GuardCommandPublished(int trajectory_id);
     bool rescheduleRejectedP4Guard(
@@ -1722,6 +1729,12 @@ namespace ego_planner
       bool active = false;
       bool hard_failure_proven = false;
       std::string hard_failure_reason;
+      // One failed rolling transaction may be rebuilt for the same exact
+      // executing parent. Keeping the full parent identity here prevents a
+      // timer or a new planning-attempt number from reopening it forever;
+      // activation of a genuinely new parent naturally receives one bounded
+      // recovery opportunity of its own.
+      std::string recovered_successor_parent_identity;
     };
     bool stageP4CommittedTopology(const P4ForwardDecision &decision);
     void updateP4CommittedTopology(
