@@ -9932,10 +9932,12 @@ TEST(P4PreparedChannelComparison,
     };
 
   auto low_actual = record(91u);
+  low_actual.authorization_group = 1;
   low_actual.known_global_peak_ratio = 0.8;
   low_actual.fim_max_ratio = 0.0130;
   low_actual.fim_integral = 1.6;
   auto high_actual = record(92u);
+  high_actual.authorization_group = 0;
   high_actual.known_global_peak_ratio = 1.1;
   high_actual.fim_max_ratio = 0.0125;
   high_actual.fim_integral = 1.8;

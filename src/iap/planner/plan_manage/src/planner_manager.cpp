@@ -1927,9 +1927,6 @@ namespace ego_planner
     enum class Ordering {LEFT, RIGHT, EQUAL};
     const auto compare = [&](const P4PreparedChannelRecord *left,
                              const P4PreparedChannelRecord *right) {
-        if (left->authorization_group != right->authorization_group)
-          return left->authorization_group < right->authorization_group
-              ? Ordering::LEFT : Ordering::RIGHT;
         const auto lower = [](double lhs, double rhs) {
             if (!std::isfinite(lhs)) lhs =
                 std::numeric_limits<double>::infinity();
@@ -1952,6 +1949,24 @@ namespace ego_planner
             }
             return lower(lhs, rhs);
           };
+        const bool common_known_actual_peak =
+            std::isfinite(left->known_global_peak_ratio) &&
+            std::isfinite(right->known_global_peak_ratio);
+        const int common_known_peak_order = common_known_actual_peak
+            ? lower_risk_observation(
+                left->known_global_peak_ratio,
+                right->known_global_peak_ratio)
+            : 0;
+        // Both records have already passed the mode-specific execution
+        // authority and every hard local safety predicate.  A distinct
+        // upper-PL observation over their common actual forward range is
+        // therefore a risk preference, even when one MISSION certificate is
+        // truthfully degraded.  Without such common evidence, retain the
+        // established formal-before-degraded ordering.
+        if (left->authorization_group != right->authorization_group &&
+            common_known_peak_order == 0)
+          return left->authorization_group < right->authorization_group
+              ? Ordering::LEFT : Ordering::RIGHT;
         const auto left_metrics = primary_risk_metrics(left);
         const auto right_metrics = primary_risk_metrics(right);
         for (std::size_t index = 0u; index < left_metrics.size(); ++index)
