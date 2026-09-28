@@ -1274,6 +1274,7 @@ namespace ego_planner
     bool activateP4NormalChannelPendingCertification(
         double now_s, bool *waiting_for_risk_snapshot = nullptr);
     bool preparedP4SuccessorBundleDue(double now_s) const;
+    bool preparedP4SuccessorBundleExpired(double now_s) const;
     bool activatePreparedP4SuccessorBundle(
         double now_s, std::string *reason = nullptr);
     bool commitP4PreparedBundle(
@@ -1481,10 +1482,11 @@ namespace ego_planner
       p4_successor_schedule_.deadline.planned_switch_time_s =
           planned_switch_time_s;
       p4_successor_schedule_.deadline.candidate_ready_deadline_s =
-          planned_switch_time_s - std::max({
+          planned_switch_time_s - std::max(
               p4_successor_deadline_policy_.
-                  latest_snapshot_reauthorization_budget_s,
-              p4_successor_deadline_policy_.scheduler_guard_s, 0.2});
+                      latest_snapshot_reauthorization_budget_s +
+                  p4_successor_deadline_policy_.scheduler_guard_s,
+              0.2);
       last_p4_forward_decision_.reason = std::move(decision_reason);
     }
     void setP4ExecutionCertificateForTest(P4ExecutionCertificate certificate)

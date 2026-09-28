@@ -12663,19 +12663,33 @@ namespace ego_planner
     const double minimum_commitment_end_s =
         static_cast<double>(boundary.parent_start_time_ns) * 1.0e-9 + 1.0;
     const double reauthorization_window_start_s =
-        boundary.planned_switch_time_s - std::max({
+        boundary.planned_switch_time_s - std::max(
             p4_successor_deadline_policy_.
-                latest_snapshot_reauthorization_budget_s,
-            p4_successor_deadline_policy_.scheduler_guard_s, 0.2});
+                    latest_snapshot_reauthorization_budget_s +
+                p4_successor_deadline_policy_.scheduler_guard_s,
+            0.2);
     // Preparation can finish arbitrarily early, but the exact cached curve is
     // rebound to the latest snapshot only in the already budgeted handoff
-    // window.  Keep returning due after that point so a genuinely stale
+    // window. Snapshot compute and scheduler dispatch are sequential, so this
+    // window reserves both budgets. Keep returning due so a genuinely stale
     // callback is consumed by validation and the bounded regeneration seam;
     // silently hiding an expired cache would strand the committed parent.
     return std::isfinite(boundary.planned_switch_time_s) &&
         boundary.planned_switch_time_s + 1.0e-9 >=
             minimum_commitment_end_s &&
         now_s + 1.0e-9 >= reauthorization_window_start_s;
+  }
+
+  bool EGOPlannerManager::preparedP4SuccessorBundleExpired(
+      const double now_s) const
+  {
+    return p4_cached_successor_bundle_ &&
+        p4_cached_successor_bundle_->complete() && std::isfinite(now_s) &&
+        std::isfinite(
+            p4_cached_successor_bundle_->boundary.planned_switch_time_s) &&
+        now_s -
+                p4_cached_successor_bundle_->boundary.planned_switch_time_s >
+            0.2;
   }
 
   bool EGOPlannerManager::p4ActualCurveAwaitingRiskSnapshot() const

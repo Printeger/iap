@@ -8751,7 +8751,7 @@ TEST(P4SuccessorDeadlineScheduling,
 
   const auto &reanchored = manager.p4SuccessorDeadlineForTest();
   EXPECT_NEAR(reanchored.latest_prepare_start_s, 21.2, 1.0e-12);
-  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 22.3, 1.0e-12);
+  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 22.15, 1.0e-12);
   EXPECT_NEAR(reanchored.planned_switch_time_s, 22.5, 1.0e-12);
 }
 
@@ -14963,10 +14963,12 @@ TEST(P4PreparedSuccessorPolicy,
   // consumed rather than leaving a permanent hidden cache.
   EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(9.9));
   EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.149));
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.15));
-  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.80));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.649));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.65));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.85));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(11.0));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleExpired(11.2));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleExpired(11.201));
 
   // Isolate snapshot reauthorization from the scheduling assertions above:
   // this child and parent share their exact t=0 boundary at the fixed anchor.

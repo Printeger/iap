@@ -200,7 +200,11 @@ TEST(P4SuccessorDeadlinePolicy,
     policy, 40.0, 72.0);
   ASSERT_TRUE(long_segment.valid);
   EXPECT_NEAR(long_segment.planned_switch_time_s, 42.5, 1.0e-12);
-  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 42.3, 1.0e-12);
+  // Latest-snapshot work and scheduler dispatch are sequential parts of the
+  // handoff.  The cached curve must become due early enough for both, rather
+  // than giving the scheduler permission to consume the reauthorization
+  // budget itself.
+  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 42.15, 1.0e-12);
   EXPECT_LT(long_segment.planned_switch_time_s, 72.0 - 0.2);
 
   auto low_scheduler_guard = policy;

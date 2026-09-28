@@ -2663,11 +2663,14 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   // commitment is not allowed before it has executed for one second.  Keep
   // the switch anchor inside the parent duration; sub-second parents simply
   // reach their endpoint instead of being replaced early.
+  // Reauthorization compute and scheduler dispatch happen in sequence.  A
+  // max() lets scheduler delay consume the whole snapshot budget and can make
+  // an already certified child first visible only after its switch anchor.
   result.candidate_ready_deadline_s = std::max(
     trajectory_start_s,
     result.planned_switch_time_s -
-      std::max({policy.latest_snapshot_reauthorization_budget_s,
-        policy.scheduler_guard_s, 0.2}));
+      std::max(policy.latest_snapshot_reauthorization_budget_s +
+        policy.scheduler_guard_s, 0.2));
   result.valid = result.latest_prepare_start_s <=
     result.candidate_ready_deadline_s + kEpsilon;
   result.reason = result.valid ? "ok" : "insufficient_preparation_window";

@@ -1162,7 +1162,16 @@ namespace ego_planner
       // parent curve/certificate before the exact activation ACK arrives.
       return P4PlanningCycleResult::CONTINUE_COMMITTED;
     }
-    if (shouldDeferP4PlanningForRiskGridReady())
+    const double planning_now_s = plannerNow().seconds();
+    const bool expired_cached_successor =
+        planner_manager_->preparedP4SuccessorBundleExpired(planning_now_s);
+    // Inside the immutable switch window, absence of a fresh planning
+    // authority keeps the exact cached child waiting. Once the unchanged
+    // +0.2 s hard window has actually expired, let the existing validator
+    // consume the deadline failure before it consults snapshot authority;
+    // that is the only path into the already bounded regeneration seam.
+    if (shouldDeferP4PlanningForRiskGridReady() &&
+        !expired_cached_successor)
       return P4PlanningCycleResult::RETRYABLE_FAILURE;
 
     LocalTrajData *info = &planner_manager_->local_data_;
