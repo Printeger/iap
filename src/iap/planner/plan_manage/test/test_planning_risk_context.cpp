@@ -15073,6 +15073,39 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(manager.latestP4DirectRiskEvidence().execution_snapshot_id,
             bound_execution_b->execution_snapshot_id);
 
+  // Reproduce the publication-boundary race from the clean live.  The cached
+  // child has just been reauthorized against the latest snapshot acquired by
+  // its dedicated transaction, while a newer planning-context snapshot is
+  // delivered before the generic certificate check.  The ordinary path must
+  // still reject that mismatch; the prepared-successor transaction must not
+  // discard its completed exact-curve authorization and start over.
+  const auto execution_race = makeP4ExecutionSnapshot(
+      snapshot, directRiskCallback(0.5), 10.0, 84u);
+  auto occupancy_race = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution_race->occupancy);
+  occupancy_race->frozen_grid_map_epoch = frozen_occupancy;
+  auto bound_execution_race =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(
+          *execution_race);
+  bound_execution_race->occupancy = occupancy_race;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy_race, directRiskCallback(0.5),
+      bound_execution_race);
+  ego_planner::P4PreparedCurveFailure publication_failure =
+      ego_planner::P4PreparedCurveFailure::NONE;
+  std::string publication_reason;
+  EXPECT_FALSE(manager.validateP4PublicationCertificate(
+      manager.local_data_, reauthorization_ros_s, &publication_failure,
+      &publication_reason));
+  EXPECT_EQ(publication_failure,
+            ego_planner::P4PreparedCurveFailure::SNAPSHOT_MISMATCH);
+  EXPECT_EQ(publication_reason, "p4_publication_snapshot_identity_mismatch");
+  EXPECT_TRUE(manager.validateP4PublicationCertificate(
+      manager.local_data_, reauthorization_ros_s, &publication_failure,
+      &publication_reason, true)) << publication_reason;
+  EXPECT_EQ(publication_failure, ego_planner::P4PreparedCurveFailure::NONE);
+  EXPECT_EQ(publication_reason, "p4_publication_certificate_valid");
+
   const auto execution_c = makeP4ExecutionSnapshot(
       snapshot, directRiskCallback(1.01), 10.0, 83u);
   auto occupancy_c = std::make_shared<ego_planner::P0OccupancyEpoch>(

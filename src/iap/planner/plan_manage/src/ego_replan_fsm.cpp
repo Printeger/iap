@@ -2139,7 +2139,7 @@ namespace ego_planner
       bool publication_valid =
           planner_manager_->validateP4PublicationCertificate(
               *info, publication_now_s, &publication_failure,
-              &publication_reason);
+              &publication_reason, using_cached_successor);
       if (!publication_valid &&
           (publication_failure == P4PreparedCurveFailure::FRESHNESS ||
            publication_failure ==
@@ -2156,7 +2156,7 @@ namespace ego_planner
           publication_valid =
               planner_manager_->validateP4PublicationCertificate(
                   *info, publication_now_s, &publication_failure,
-                  &publication_reason);
+                  &publication_reason, using_cached_successor);
         }
       }
       if (!publication_valid)

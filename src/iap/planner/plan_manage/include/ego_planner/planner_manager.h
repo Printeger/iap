@@ -1157,7 +1157,8 @@ namespace ego_planner
     bool validateP4PublicationCertificate(
         const LocalTrajData &trajectory, double now_s,
         P4PreparedCurveFailure *failure = nullptr,
-        std::string *reason = nullptr) const;
+        std::string *reason = nullptr,
+        bool execution_snapshot_reauthorized_in_transaction = false) const;
     bool commitP4CertifiedPublication(double stamp_s);
     void updateP4CommittedTopologyFromOdometry(
         const Eigen::Vector3d &position, const Eigen::Vector3d &velocity,

@@ -9728,7 +9728,8 @@ namespace ego_planner
 
   bool EGOPlannerManager::validateP4PublicationCertificate(
       const LocalTrajData &trajectory, const double now_s,
-      P4PreparedCurveFailure *failure, std::string *reason) const
+      P4PreparedCurveFailure *failure, std::string *reason,
+      const bool execution_snapshot_reauthorized_in_transaction) const
   {
     const auto finish = [failure, reason](
         const bool accepted, const P4PreparedCurveFailure typed_failure,
@@ -9779,26 +9780,40 @@ namespace ego_planner
             certificate.execution_snapshot_id)
       return finish(false, P4PreparedCurveFailure::SNAPSHOT_MISMATCH,
                     "p4_publication_snapshot_identity_invalid");
-    const auto publication_snapshot = p4PublicationValidationSnapshot(
-        p0_risk_grid_runtime_
-            ? p0_risk_grid_runtime_->
-                  acquireExecutionRiskSnapshotForEvaluation(now_s)
-            : nullptr,
-        planning_risk_context_.execution_snapshot);
-    if (publication_snapshot)
+    // A cached successor reaches this check only after its dedicated handoff
+    // transaction has acquired the latest causal execution snapshot, queried
+    // the exact curve and parent bridge, rebuilt local assurance, rechecked
+    // geometry, and rebound the certificate.  Do not require that snapshot to
+    // remain globally newest while that bounded transaction is completing:
+    // P0 may publish another snapshot during the direct query itself.  All
+    // certificate identity, freshness, deadline, mode, and assurance checks
+    // below remain mandatory.  Other publication paths still compare against
+    // the latest snapshot here.
+    if (!execution_snapshot_reauthorized_in_transaction)
     {
-      const auto &current = *publication_snapshot;
-      const auto &identity = certificate.snapshot_identity;
-      const uint64_t occupancy_generation = current.occupancy
-          ? current.occupancy->generation : 0u;
-      if (current.execution_snapshot_id != certificate.execution_snapshot_id ||
-          iap::canonicalRiskGridSourceIdentityHash(current.source_identity) !=
-              identity.risk_source_identity_hash ||
-          current.source_identity.gnss_epoch_identity !=
-              identity.gnss_epoch_identity ||
-          occupancy_generation != identity.occupancy_generation)
-        return finish(false, P4PreparedCurveFailure::SNAPSHOT_MISMATCH,
-                      "p4_publication_snapshot_identity_mismatch");
+      const auto publication_snapshot = p4PublicationValidationSnapshot(
+          p0_risk_grid_runtime_
+              ? p0_risk_grid_runtime_->
+                    acquireExecutionRiskSnapshotForEvaluation(now_s)
+              : nullptr,
+          planning_risk_context_.execution_snapshot);
+      if (publication_snapshot)
+      {
+        const auto &current = *publication_snapshot;
+        const auto &identity = certificate.snapshot_identity;
+        const uint64_t occupancy_generation = current.occupancy
+            ? current.occupancy->generation : 0u;
+        if (current.execution_snapshot_id !=
+                certificate.execution_snapshot_id ||
+            iap::canonicalRiskGridSourceIdentityHash(
+                current.source_identity) !=
+                identity.risk_source_identity_hash ||
+            current.source_identity.gnss_epoch_identity !=
+                identity.gnss_epoch_identity ||
+            occupancy_generation != identity.occupancy_generation)
+          return finish(false, P4PreparedCurveFailure::SNAPSHOT_MISMATCH,
+                        "p4_publication_snapshot_identity_mismatch");
+      }
     }
 
     if (!std::isfinite(now_s) ||
