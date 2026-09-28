@@ -15084,10 +15084,42 @@ TEST(P4PreparedSuccessorPolicy,
   manager.setP4ExecutionCertificateForTest(parent_certificate);
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(
       10.15, bound_execution_c->execution_snapshot_id));
+  ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
   EXPECT_TRUE(manager.activatePreparedP4SuccessorBundle(10.15, &reason));
   EXPECT_EQ(reason, "successor_prepared_bundle_activated");
   EXPECT_TRUE(manager.activatingPreparedP4SuccessorBundle());
   EXPECT_EQ(manager.local_data_.traj_id_, 92);
+
+  // Reproduce the live handoff ordering: the immutable child is due, but the
+  // callback briefly has no latest execution snapshot. That is a retryable
+  // reauthorization input gap, not a terminal curve result and not permission
+  // to discard the cache or start an ordinary normal event.
+  manager.clearPlanningRiskContext();
+  EXPECT_FALSE(manager.validatePreparedP4SuccessorBeforePublish(
+      incumbent, 10.15, &reason));
+  EXPECT_EQ(reason, "successor_latest_execution_authority_invalid");
+  manager.restoreP4ExecutionCommitmentAfterCandidateRejection();
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->state,
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+  EXPECT_FALSE(manager.activatingPreparedP4SuccessorBundle());
+
+  // A later callback in the same closed window consumes the same cached
+  // child with a fresh snapshot. No route enumeration or new child identity
+  // is needed before the existing publication transaction can commit.
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy_c, directRiskCallback(1.01),
+      bound_execution_c);
+  ASSERT_TRUE(manager.preserveP4ExecutionCommitmentForCandidate());
+  ASSERT_TRUE(manager.activatePreparedP4SuccessorBundle(10.16, &reason));
+  EXPECT_TRUE(manager.validatePreparedP4SuccessorBeforePublish(
+      incumbent, 10.16, &reason)) << reason;
+  EXPECT_EQ(reason, "prepared_successor_publish_revalidated");
+  EXPECT_TRUE(manager.commitP4PreparedBundle(10.16, &reason)) << reason;
+  EXPECT_EQ(reason, "successor_cached_curve_publish_committed");
 }
 
 TEST(P4PreparedSuccessorPolicy,

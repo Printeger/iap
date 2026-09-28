@@ -13988,7 +13988,11 @@ namespace ego_planner
                             const bool valid, const std::string &why,
                             const P4SuccessorFailure failure) {
       if (reason) *reason = why;
-      if (!valid && p4_prepared_successor_)
+      const bool waiting_for_latest_execution_authority =
+          !valid && failure == P4SuccessorFailure::INTEGRITY_STALE &&
+          why == "successor_latest_execution_authority_invalid";
+      if (!valid && p4_prepared_successor_ &&
+          !waiting_for_latest_execution_authority)
       {
         p4_prepared_successor_->assurance.complete = false;
         p4_prepared_successor_->assurance.safe = false;
@@ -14006,8 +14010,23 @@ namespace ego_planner
         appendP4ExecutionEvent(
             "PREPARED_SUCCESSOR_PUBLISH_REJECTED", now_s, rejected);
       }
+      if (waiting_for_latest_execution_authority &&
+          p4_cached_successor_bundle_ &&
+          p4_cached_successor_bundle_->complete())
+      {
+        // The exact child was already fully certified. A handoff callback
+        // without a latest execution snapshot cannot publish it, but it also
+        // cannot turn that immutable curve into a terminal failure or allow
+        // an ordinary normal event to replace its preparation identity.
+        p4_cached_successor_activation_in_progress_ = false;
+        p4_successor_preparation_state_ =
+            P4SuccessorPreparationState::PREPARED_CERTIFIED;
+        p4_cached_successor_bundle_->state =
+            P4SuccessorPreparationState::PREPARED_CERTIFIED;
+      }
       if (!valid && p4_cached_successor_bundle_ &&
-          failure != P4SuccessorFailure::DEADLINE_MISSED)
+          failure != P4SuccessorFailure::DEADLINE_MISSED &&
+          !waiting_for_latest_execution_authority)
       {
         p4_successor_preparation_state_ =
             P4SuccessorPreparationState::FAILED;
