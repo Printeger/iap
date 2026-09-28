@@ -1723,11 +1723,21 @@ namespace ego_planner
           std::numeric_limits<double>::infinity();
       std::size_t forward_coverage_count = 0u;
       std::size_t feasible_bundle_count = 0u;
+      int64_t common_trajectory_start_ns = 0;
+      bool common_trajectory_start = true;
       for (const auto &entry : bundles)
       {
         if (!entry.second.channel_record.feasible())
           continue;
         ++feasible_bundle_count;
+        const int64_t trajectory_start_ns =
+            entry.second.direct_risk_evidence.trajectory_start_ns;
+        if (trajectory_start_ns <= 0)
+          common_trajectory_start = false;
+        else if (common_trajectory_start_ns == 0)
+          common_trajectory_start_ns = trajectory_start_ns;
+        else if (trajectory_start_ns != common_trajectory_start_ns)
+          common_trajectory_start = false;
         double coverage_m = 0.0;
         (void)p4ActualRiskEvidenceWithinForwardSpaceTime(
             entry.second.direct_risk_evidence,
@@ -1747,6 +1757,7 @@ namespace ego_planner
       const bool use_common_forward_evidence =
           feasible_bundle_count >= 2u &&
           forward_coverage_count == feasible_bundle_count &&
+          common_trajectory_start && common_trajectory_start_ns > 0 &&
           std::isfinite(common_forward_coverage_m) &&
           common_forward_coverage_m > 0.0;
       const auto clear_whole_curve_risk_order = [](

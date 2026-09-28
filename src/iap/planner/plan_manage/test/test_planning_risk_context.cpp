@@ -10263,6 +10263,37 @@ TEST(P4PreparedChannelComparison,
   EXPECT_EQ(comparison.winner_channel_id,
             equivalent.channel_record.channel_id);
 
+  // Reproduce the fork-1 clean-live retry seam. The preferred bundle kept
+  // the cohort's original frozen start, while a sibling that exhausted its
+  // fresh-snapshot retry was rebuilt about two seconds later. Forward
+  // station alone does not make those time-dependent upper-PL observations
+  // common evidence. The later sibling must not use the resulting lower
+  // peak to replace the frozen route preference.
+  auto original_start_preferred = bundle(73u, 1.2, {0.0, 1.0, 2.0});
+  auto later_retry = bundle(74u, 0.8, {0.0, 1.0, 2.0});
+  later_retry.direct_risk_evidence.trajectory_start_ns += 1904350042LL;
+  const std::map<uint64_t, ego_planner::P4PreparedSuccessorBundle>
+      mixed_start_bundles{
+          {original_start_preferred.channel_record.channel_id,
+           original_start_preferred},
+          {later_retry.channel_record.channel_id, later_retry}};
+  const auto mixed_start_records =
+      ego_planner::p4CommonForwardPreparedChannelRecords(
+          mixed_start_bundles);
+  ASSERT_EQ(mixed_start_records.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      mixed_start_records.begin(), mixed_start_records.end(),
+      [](const auto &record) {
+        return !std::isfinite(record.known_global_peak_ratio);
+      }));
+  comparison = ego_planner::compareP4PreparedChannels(
+      mixed_start_records, snapshot, 2u, 0u,
+      original_start_preferred.channel_record.channel_id);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id,
+            original_start_preferred.channel_record.channel_id);
+
   // Both actual curves start from the same frozen execution epoch and have
   // dense evidence over the same forward stations. Different certified
   // traversal rates are not missing spatial evidence: compare the common
