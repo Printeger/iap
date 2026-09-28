@@ -2726,12 +2726,12 @@ namespace ego_planner
       const P4ForwardCandidate *work_item = selected ? selected : first;
 
       // The selected route is already the bounded route-level preference.
-      // Some normal-recovery handoffs carry that selection but omit the
-      // redundant preference field. Freeze it here, before selected_channel
-      // becomes transactional sibling work, so incomplete actual evidence
-      // cannot let preparation order or prefix-only FIM choose a topology.
-      if (decision->route_preference_channel_id == 0u)
-        decision->route_preference_channel_id = work_item->channel_id;
+      // A normal-recovery handoff can retain a nonzero sibling preference
+      // from an older ordering, so normalize it here before selected_channel
+      // becomes transactional sibling work. Incomplete actual evidence must
+      // not let that stale field, preparation order, or prefix-only FIM
+      // choose a topology.
+      decision->route_preference_channel_id = work_item->channel_id;
 
       // Route-level risk over the complete guide is diagnostic. It cannot
       // veto construction of the exact terminal-stop B-splines whose swept

@@ -12641,10 +12641,12 @@ TEST(P4PreparedChannelPreparation,
   decision.selected_candidate_id = first_candidate_id;
   decision.selected_channel_id = first_channel_id;
   // The route result has already selected this guide, but an intermediate
-  // normal-preparation handoff may omit the redundant preference field. The
-  // cohort must freeze the selected route rather than allowing later
-  // sibling FIM noise to become the topology decision.
-  decision.route_preference_channel_id = 0u;
+  // normal-preparation handoff may retain a nonzero preference from an older
+  // sibling ordering. The cohort must freeze the current route selection
+  // rather than allowing that stale field or later sibling FIM noise to
+  // become the topology decision.
+  decision.route_preference_channel_id =
+      decision.candidates.front().channel_id;
   decision.selected_guide = second_channel.path;
   ASSERT_TRUE(
       manager.prepareNormalChannelsForActualCertificationForTest(&decision));
