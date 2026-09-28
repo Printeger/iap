@@ -22,6 +22,7 @@ namespace ego_planner
 
   inline constexpr char kP4ForwardDecisionSchema[] =
     "p4_forward_route_decision_v18";
+  inline constexpr double kP4MinimumTrajectoryQueueMarginS = 0.2;
 
   enum class P4ForwardResultStatus
   {

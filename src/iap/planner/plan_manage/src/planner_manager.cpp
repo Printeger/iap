@@ -3334,7 +3334,6 @@ namespace ego_planner
     // well as at candidate construction. On a loaded executor the publisher,
     // DDS delivery, traj_server callback, and timer promotion all consume
     // this interval; a 50 ms residual repeatedly arrived after start.
-    constexpr double kMinimumQueueAndSchedulingMarginS = 0.2;
     const double remaining_s = start_time_s - now_s;
     double observed_pre_publish_s =
         requiredTrajectoryLeadTimeSeconds() - remaining_s;
@@ -3352,7 +3351,7 @@ namespace ego_planner
         observed_pre_publish_s = std::max(
             observed_pre_publish_s, steady_pre_publish_s);
     }
-    if (remaining_s + 1.0e-9 >= kMinimumQueueAndSchedulingMarginS)
+    if (remaining_s + 1.0e-9 >= kP4MinimumTrajectoryQueueMarginS)
       return true;
     // The start was assigned requiredLeadTimeSeconds() before final
     // certification. Recover the elapsed certification work from that frozen
@@ -3365,7 +3364,7 @@ namespace ego_planner
       maximum_trajectory_pipeline_latency_s_ = std::max(
           maximum_trajectory_pipeline_latency_s_,
           observed_pre_publish_s +
-              (kMinimumQueueAndSchedulingMarginS - 0.05));
+              (kP4MinimumTrajectoryQueueMarginS - 0.05));
     return false;
   }
 
@@ -12681,14 +12680,16 @@ namespace ego_planner
         boundary.planned_switch_time_s - std::max(
             p4_successor_deadline_policy_.
                     latest_snapshot_reauthorization_budget_s +
-                p4_successor_deadline_policy_.scheduler_guard_s,
-            0.2);
+                p4_successor_deadline_policy_.scheduler_guard_s +
+                kP4MinimumTrajectoryQueueMarginS,
+            kP4MinimumTrajectoryQueueMarginS);
     // Preparation can finish arbitrarily early, but the exact cached curve is
     // rebound to the latest snapshot only in the already budgeted handoff
-    // window. Snapshot compute and scheduler dispatch are sequential, so this
-    // window reserves both budgets. Keep returning due so a genuinely stale
-    // callback is consumed by validation and the bounded regeneration seam;
-    // silently hiding an expired cache would strand the committed parent.
+    // window. Snapshot compute, scheduler dispatch, and the traj_server queue
+    // margin are sequential, so this window reserves all three. Keep returning
+    // due so a genuinely stale callback is consumed by validation and the
+    // bounded regeneration seam; silently hiding an expired cache would strand
+    // the committed parent.
     return std::isfinite(boundary.planned_switch_time_s) &&
         boundary.planned_switch_time_s + 1.0e-9 >=
             minimum_commitment_end_s &&

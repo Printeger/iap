@@ -1486,8 +1486,9 @@ namespace ego_planner
           planned_switch_time_s - std::max(
               p4_successor_deadline_policy_.
                       latest_snapshot_reauthorization_budget_s +
-                  p4_successor_deadline_policy_.scheduler_guard_s,
-              0.2);
+                  p4_successor_deadline_policy_.scheduler_guard_s +
+                  kP4MinimumTrajectoryQueueMarginS,
+              kP4MinimumTrajectoryQueueMarginS);
       last_p4_forward_decision_.reason = std::move(decision_reason);
     }
     void setP4ExecutionCertificateForTest(P4ExecutionCertificate certificate)

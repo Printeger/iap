@@ -8750,8 +8750,8 @@ TEST(P4SuccessorDeadlineScheduling,
   ASSERT_TRUE(manager.p4SuccessorPreparationDue(20.0, 77u));
 
   const auto &reanchored = manager.p4SuccessorDeadlineForTest();
-  EXPECT_NEAR(reanchored.latest_prepare_start_s, 21.2, 1.0e-12);
-  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 22.15, 1.0e-12);
+  EXPECT_NEAR(reanchored.latest_prepare_start_s, 21.0, 1.0e-12);
+  EXPECT_NEAR(reanchored.candidate_ready_deadline_s, 21.95, 1.0e-12);
   EXPECT_NEAR(reanchored.planned_switch_time_s, 22.5, 1.0e-12);
 }
 
@@ -14953,22 +14953,41 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.5));
 
   prepared.planned_switch_time_s = 11.0;
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      incumbent.traj_id_, incumbent.start_time_.nanoseconds(),
+      prepared.planned_switch_time_s,
+      "successor_full_search_fallback_ready",
+      prepared.parent_control_points_hash);
   manager.setPreparedP4SuccessorForTest(prepared);
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
       9.9, &cache_reason))
       << cache_reason;
   // The exact child stays cached while the parent executes.  It becomes due
-  // only in the existing latest-snapshot reauthorization window (0.2 s here)
-  // and remains due afterward so a late callback is explicitly rejected and
-  // consumed rather than leaving a permanent hidden cache.
+  // only in the existing latest-snapshot reauthorization window and remains
+  // due afterward so a late callback is explicitly rejected and consumed
+  // rather than leaving a permanent hidden cache.  Reauthorization compute,
+  // callback dispatch, and the mandatory 200 ms traj_server queue margin are
+  // sequential reservations before the immutable switch.
   EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(9.9));
   EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.149));
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.649));
-  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.65));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.449));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.45));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.85));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(11.0));
   EXPECT_FALSE(manager.preparedP4SuccessorBundleExpired(11.2));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleExpired(11.201));
+
+  // The clean live dispatched about 90 ms after the due boundary and spent
+  // less than the unchanged 150 ms reauthorization budget.  A successful
+  // transaction at that bound must still retain the hard 200 ms publication
+  // queue margin; the previous 10.65 due boundary left only 120 ms here.
+  const double delayed_dispatch_s =
+      manager.p4SuccessorDeadlineForTest().candidate_ready_deadline_s + 0.09;
+  const double reauthorization_complete_s = delayed_dispatch_s + 0.14;
+  EXPECT_NEAR(delayed_dispatch_s, 10.54, 1.0e-12);
+  EXPECT_NEAR(reauthorization_complete_s, 10.68, 1.0e-12);
+  EXPECT_TRUE(manager.trajectoryQueueDeadlineAvailable(
+      reauthorization_complete_s, prepared.planned_switch_time_s, false));
 
   // Reproduce the clean-live callback ordering.  The last delivered odometry
   // still stamps the planning state at 10.0 while the mutually-exclusive FSM

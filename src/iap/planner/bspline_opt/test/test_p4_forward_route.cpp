@@ -191,8 +191,8 @@ TEST(P4SuccessorDeadlinePolicy,
   const auto normal = ego_planner::computeP4SuccessorDeadline(
     policy, 10.0, 14.0);
   ASSERT_TRUE(normal.valid);
-  EXPECT_NEAR(normal.preparation_lead_s, 1.5, 1.0e-12);
-  EXPECT_NEAR(normal.latest_prepare_start_s, 11.2, 1.0e-12);
+  EXPECT_NEAR(normal.preparation_lead_s, 1.7, 1.0e-12);
+  EXPECT_NEAR(normal.latest_prepare_start_s, 11.0, 1.0e-12);
   EXPECT_NEAR(normal.planned_switch_time_s, 12.5, 1.0e-12);
   EXPECT_FALSE(normal.start_immediately);
 
@@ -200,11 +200,10 @@ TEST(P4SuccessorDeadlinePolicy,
     policy, 40.0, 72.0);
   ASSERT_TRUE(long_segment.valid);
   EXPECT_NEAR(long_segment.planned_switch_time_s, 42.5, 1.0e-12);
-  // Latest-snapshot work and scheduler dispatch are sequential parts of the
-  // handoff.  The cached curve must become due early enough for both, rather
-  // than giving the scheduler permission to consume the reauthorization
-  // budget itself.
-  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 42.15, 1.0e-12);
+  // Latest-snapshot work, scheduler dispatch, and the fixed traj_server queue
+  // margin are sequential parts of the handoff.  The cached curve must become
+  // due early enough for all three.
+  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 41.95, 1.0e-12);
   EXPECT_LT(long_segment.planned_switch_time_s, 72.0 - 0.2);
 
   auto low_scheduler_guard = policy;
@@ -213,7 +212,7 @@ TEST(P4SuccessorDeadlinePolicy,
       low_scheduler_guard, 40.0, 72.0);
   ASSERT_TRUE(absolute_queue_floor.valid);
   EXPECT_NEAR(
-      absolute_queue_floor.candidate_ready_deadline_s, 42.3, 1.0e-12);
+      absolute_queue_floor.candidate_ready_deadline_s, 42.1, 1.0e-12);
 
   const auto short_segment = ego_planner::computeP4SuccessorDeadline(
     policy, 20.0, 21.0);

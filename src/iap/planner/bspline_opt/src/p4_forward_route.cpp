@@ -2638,7 +2638,8 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   result.preparation_lead_s = policy.successor_prepare_wcet_s +
     policy.direct_authorization_budget_s +
     policy.latest_snapshot_reauthorization_budget_s +
-    policy.control_switch_margin_s + policy.scheduler_guard_s;
+    policy.control_switch_margin_s + policy.scheduler_guard_s +
+    kP4MinimumTrajectoryQueueMarginS;
   result.planned_switch_time_s = std::min({
     trajectory_end_s,
     trajectory_start_s + policy.maximum_parent_execution_before_switch_s,
@@ -2663,14 +2664,15 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   // commitment is not allowed before it has executed for one second.  Keep
   // the switch anchor inside the parent duration; sub-second parents simply
   // reach their endpoint instead of being replaced early.
-  // Reauthorization compute and scheduler dispatch happen in sequence.  A
-  // max() lets scheduler delay consume the whole snapshot budget and can make
-  // an already certified child first visible only after its switch anchor.
+  // Reauthorization compute, scheduler dispatch, and traj_server queueing
+  // happen in sequence.  Reserving only the first two can finish a valid
+  // latest-snapshot transaction with less than the publication queue margin.
   result.candidate_ready_deadline_s = std::max(
     trajectory_start_s,
     result.planned_switch_time_s -
       std::max(policy.latest_snapshot_reauthorization_budget_s +
-        policy.scheduler_guard_s, 0.2));
+        policy.scheduler_guard_s + kP4MinimumTrajectoryQueueMarginS,
+        kP4MinimumTrajectoryQueueMarginS));
   result.valid = result.latest_prepare_start_s <=
     result.candidate_ready_deadline_s + kEpsilon;
   result.reason = result.valid ? "ok" : "insufficient_preparation_window";
