@@ -14970,6 +14970,27 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(manager.preparedP4SuccessorBundleExpired(11.2));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleExpired(11.201));
 
+  // Reproduce the clean-live callback ordering.  The last delivered odometry
+  // still stamps the planning state at 10.0 while the mutually-exclusive FSM
+  // callback is busy and the steady scheduling clock reaches the immutable
+  // handoff window.  Cached-successor timing must follow that physical clock;
+  // the planning stamp remains frozen and must not be presented as new state.
+  auto handoff_node = std::make_shared<rclcpp::Node>(
+      "prepared_successor_handoff_clock_test");
+  ego_planner::EGOReplanFSM handoff_fsm;
+  handoff_fsm.setP4TerminalFlowForTest(
+      std::make_unique<ego_planner::EGOPlannerManager>(), handoff_node, {},
+      snapshot, rclcpp::Time(10, 0, RCL_ROS_TIME), [] { return false; });
+  handoff_fsm.setPlannerSchedulingElapsedForTest(0.70);
+  const double handoff_now_s =
+      handoff_fsm.preparedP4SuccessorNowForTest().seconds();
+  EXPECT_DOUBLE_EQ(handoff_fsm.plannerNowForTest().seconds(), 10.0);
+  EXPECT_GE(handoff_now_s, 10.69);
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(handoff_now_s));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleExpired(handoff_now_s));
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+
   // Isolate snapshot reauthorization from the scheduling assertions above:
   // this child and parent share their exact t=0 boundary at the fixed anchor.
   prepared.planned_switch_time_s = 10.01;

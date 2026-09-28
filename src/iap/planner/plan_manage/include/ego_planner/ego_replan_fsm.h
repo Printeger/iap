@@ -327,6 +327,7 @@ namespace ego_planner
     rclcpp::Time plannerNow() const;
     rclcpp::Time plannerSchedulingNow() const;
     rclcpp::Time executionWatchdogNow() const;
+    rclcpp::Time preparedP4SuccessorNow() const;
 
     /* ROS functions */
     void execFSMCallback();
@@ -375,6 +376,21 @@ namespace ego_planner
     rclcpp::Time executionWatchdogNowForTest() const
     {
       return executionWatchdogNow();
+    }
+    void setPlannerSchedulingElapsedForTest(double elapsed_s)
+    {
+      latest_odom_receive_steady_ = std::chrono::steady_clock::now() -
+          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+              std::chrono::duration<double>(elapsed_s));
+      have_odom_receive_steady_ = true;
+    }
+    rclcpp::Time preparedP4SuccessorNowForTest() const
+    {
+      return preparedP4SuccessorNow();
+    }
+    rclcpp::Time plannerNowForTest() const
+    {
+      return plannerNow();
     }
     void setP5PreEvaluationHookForTest(std::function<void()> hook)
     {

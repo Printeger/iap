@@ -536,6 +536,16 @@ namespace ego_planner
     return plannerSchedulingNow();
   }
 
+  rclcpp::Time EGOReplanFSM::preparedP4SuccessorNow() const
+  {
+    // Successor switch windows are queue/scheduling deadlines.  They must
+    // advance while the mutually-exclusive FSM callback temporarily delays
+    // odometry delivery, just like the watchdog that dispatched the handoff.
+    // The returned time is used only to consume an already-prepared exact
+    // curve; planning geometry and snapshot state remain bound to plannerNow.
+    return plannerSchedulingNow();
+  }
+
   void EGOReplanFSM::BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg)
   {
     size_t id = msg->drone_id;
@@ -1162,9 +1172,11 @@ namespace ego_planner
       // parent curve/certificate before the exact activation ACK arrives.
       return P4PlanningCycleResult::CONTINUE_COMMITTED;
     }
-    const double planning_now_s = plannerNow().seconds();
+    const double prepared_successor_now_s =
+        preparedP4SuccessorNow().seconds();
     const bool expired_cached_successor =
-        planner_manager_->preparedP4SuccessorBundleExpired(planning_now_s);
+        planner_manager_->preparedP4SuccessorBundleExpired(
+            prepared_successor_now_s);
     // Inside the immutable switch window, absence of a fresh planning
     // authority keeps the exact cached child waiting. Once the unchanged
     // +0.2 s hard window has actually expired, let the existing validator
@@ -1193,7 +1205,7 @@ namespace ego_planner
     // latest-snapshot reauthorization and publication transaction.
     if (p4PreparedSuccessorNeedsImmediateFollowup(
             success, planner_manager_->preparedP4SuccessorBundleDue(
-                         plannerNow().seconds())))
+                         preparedP4SuccessorNow().seconds())))
       success = callReboundReplan(false, false);
     auto cycle_result = classifyP4PlanningCycle(
         success, planner_manager_->p4PlanningDisposition(),
@@ -1685,6 +1697,8 @@ namespace ego_planner
       return false;
 
     const LocalTrajData previous_local_data = planner_manager_->local_data_;
+    const double prepared_successor_now_s =
+        preparedP4SuccessorNow().seconds();
 
     const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
         planner_manager_->p5_integrity_gate_->runtimeEnabled();
@@ -1782,11 +1796,11 @@ namespace ego_planner
     std::string cached_successor_reason;
     if (!rebound_planner_for_test_ &&
         planner_manager_->preparedP4SuccessorBundleDue(
-            plannerNow().seconds()))
+            prepared_successor_now_s))
     {
       using_cached_successor =
           planner_manager_->activatePreparedP4SuccessorBundle(
-              plannerNow().seconds(), &cached_successor_reason);
+              prepared_successor_now_s, &cached_successor_reason);
     }
     if (!using_cached_normal_curve && !using_cached_successor &&
         !rebound_planner_for_test_)
@@ -1975,7 +1989,7 @@ namespace ego_planner
       {
         std::string reauthorization_reason;
         if (!planner_manager_->validatePreparedP4SuccessorBeforePublish(
-                previous_local_data, plannerNow().seconds(),
+                previous_local_data, prepared_successor_now_s,
                 &reauthorization_reason))
         {
           RCLCPP_WARN(node_->get_logger(),
@@ -1984,7 +1998,7 @@ namespace ego_planner
           if (reauthorization_reason == "successor_switch_window_missed")
           {
             planner_manager_->recordPreparedP4SuccessorCurveFailure(
-                plannerNow().seconds(),
+                prepared_successor_now_s,
                 P4PreparedCurveFailure::COMPUTE_BUDGET,
                 reauthorization_reason);
           }
@@ -2119,7 +2133,9 @@ namespace ego_planner
       P4PreparedCurveFailure publication_failure =
           P4PreparedCurveFailure::INCOMPLETE;
       std::string publication_reason;
-      double publication_now_s = plannerNow().seconds();
+      double publication_now_s = using_cached_successor
+          ? prepared_successor_now_s
+          : plannerNow().seconds();
       bool publication_valid =
           planner_manager_->validateP4PublicationCertificate(
               *info, publication_now_s, &publication_failure,
@@ -2179,7 +2195,8 @@ namespace ego_planner
       // deadline is a canceled candidate, never a committed switch.
       const bool publication_committed = using_cached_successor
           ? planner_manager_->commitP4PreparedBundle(
-                plannerNow().seconds(), &successor_publish_reason)
+                prepared_successor_now_s,
+                &successor_publish_reason)
           : planner_manager_->commitP4CertifiedPublication(
                 plannerNow().seconds());
       if (!publication_committed)
