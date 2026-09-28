@@ -1748,6 +1748,9 @@ namespace ego_planner
         P4ForwardDecision *decision);
     void recordP4CommittedTopologyHardFailure(
         P4PreparedCurveFailure failure, const std::string &detail);
+    bool regenerateP4CommittedSuccessorAfterTransientFailure(
+        double now_s, uint64_t failed_snapshot_id,
+        P4SuccessorFailure failure, const std::string &failure_reason);
 
     int64_t steadyNowNs() const;
     bool executionFeedbackFresh(

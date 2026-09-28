@@ -11235,10 +11235,7 @@ TEST(P4PreparedSuccessorPolicy,
   selected.selected_channel_id = kCommittedChannel;
   selected.selected_guide = selected.candidates.front().path;
   ASSERT_TRUE(manager.stageP4CommittedTopologyForTest(selected));
-  manager.updateP4CommittedTopologyForTest(
-      Eigen::Vector3d(3.0, -2.0, 1.0),
-      Eigen::Vector3d(0.4, 0.0, 0.0), Eigen::Vector3d::Zero());
-  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
+  ASSERT_FALSE(manager.p4CommittedTopologyActiveForTest());
 
   Eigen::MatrixXd control_points(3, 8);
   for (int index = 0; index < control_points.cols(); ++index)
@@ -11336,7 +11333,9 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(manager.p4CommittedContinuationTerminalHold());
 
   // Only a genuinely stale callback beyond switch+0.2s retires the old
-  // immutable transaction and makes one new parent-bound request schedulable.
+  // immutable transaction. Reproduce the live ordering where this happens
+  // while the selected topology is staged but odometry has not crossed its
+  // graph-derived entry yet.
   EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
       prepared, parent.trajectory_id, parent.start_time_ns,
       parent.control_points_hash, 11.21, &timing_reason, true,
@@ -11347,6 +11346,18 @@ TEST(P4PreparedSuccessorPolicy,
   manager.recordPreparedP4SuccessorCurveFailure(
       11.21, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
       "successor_switch_window_missed");
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::FAILED);
+  EXPECT_FALSE(manager.p4CommittedTopologyActiveForTest());
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(11.22, 52u, 11.22));
+
+  // Once actual odometry enters that staged topology, the terminal rolling
+  // attempt must not strand the committed aircraft. Entry reuses the same
+  // one-shot, exact-parent regeneration policy as an already-active failure.
+  manager.updateP4CommittedTopologyForTest(
+      Eigen::Vector3d(3.0, -2.0, 1.0),
+      Eigen::Vector3d(0.4, 0.0, 0.0), Eigen::Vector3d::Zero());
+  ASSERT_TRUE(manager.p4CommittedTopologyActiveForTest());
   EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
             ego_planner::P4SuccessorPreparationState::ROUTE_PENDING);
   EXPECT_FALSE(manager.p4CommittedContinuationTerminalHold());
