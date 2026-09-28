@@ -1928,6 +1928,19 @@ namespace ego_planner
             if (rhs < lhs) return 1;
             return 0;
           };
+        const auto lower_risk_observation = [&lower](
+            const double lhs, const double rhs) {
+            if (std::isfinite(lhs) && std::isfinite(rhs))
+            {
+              constexpr double kRiskObservationRelativeTolerance = 1.0e-12;
+              const double scale = std::max({1.0, std::abs(lhs),
+                                             std::abs(rhs)});
+              if (std::abs(lhs - rhs) <=
+                  kRiskObservationRelativeTolerance * scale)
+                return 0;
+            }
+            return lower(lhs, rhs);
+          };
         const auto left_metrics = primary_risk_metrics(left);
         const auto right_metrics = primary_risk_metrics(right);
         for (std::size_t index = 0u; index < left_metrics.size(); ++index)
@@ -1953,7 +1966,7 @@ namespace ego_planner
         // common forward range. It therefore cannot reward a shorter or
         // backtracking curve for omitting farther risk, even when the full
         // support interval remains incomplete.
-        const int known_peak_order = lower(
+        const int known_peak_order = lower_risk_observation(
             left->known_global_peak_ratio,
             right->known_global_peak_ratio);
         if (known_peak_order != 0)

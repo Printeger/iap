@@ -4613,23 +4613,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
      incumbent_channel_id = request.incumbent_channel_id,
      preferred_actual_comparison_channel_id](
       const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
-      // MISSION may continue on an actual curve even when global support is
-      // incomplete, so completeness is not itself a lower-risk preference
-      // between two already-degraded routes. When both candidates contain
-      // observed hazard over the same route horizon, preserve that measured
-      // order for the downstream actual-curve comparison instead of seeding
-      // it with the more hazardous route merely because its support happened
-      // to be complete.
-      if (task_mode ==
-              iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
-          lhs->mission_degraded_candidate &&
-          rhs->mission_degraded_candidate &&
-          lhs->known_hazard_evidence && rhs->known_hazard_evidence &&
-          std::isfinite(lhs->known_hazard_max) &&
-          std::isfinite(rhs->known_hazard_max) &&
-          std::abs(lhs->known_hazard_max - rhs->known_hazard_max) >
-              kEpsilon)
-        return lhs->known_hazard_max < rhs->known_hazard_max;
       const auto group = [](const P4ForwardCandidate* candidate) {
         if (candidate->safety_gate_passed ||
             candidate->controlled_degraded_candidate) return 0;

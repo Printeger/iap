@@ -9964,7 +9964,7 @@ TEST(P4PreparedChannelComparison,
 }
 
 TEST(P4PreparedChannelComparison,
-     EqualKnownActualPeakKeepsIncompleteRoutePreferenceBeforeFimNoise)
+     NumericallyEqualKnownActualPeakKeepsIncompleteRoutePreference)
 {
   ego_planner::P4ForwardSnapshotIdentity snapshot;
   snapshot.geometry_id = "frozen-map";
@@ -10021,6 +10021,12 @@ TEST(P4PreparedChannelComparison,
   preferred.fim_max_ratio = 0.0129997;
   preferred.fim_integral = 1.79939;
   auto sibling = record(1u);
+  // The clean live reported the same physical HPL on both common prefixes,
+  // but their independently accumulated doubles differed below 1e-15. That
+  // arithmetic residue is not a distinct risk observation and must not
+  // outrank the frozen full-route preference.
+  sibling.known_global_peak_ratio =
+      preferred.known_global_peak_ratio - 1.0e-15;
   sibling.fim_max_ratio = 0.0129718;
   sibling.fim_integral = 1.80999;
 
