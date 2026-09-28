@@ -1972,6 +1972,13 @@ namespace ego_planner
           RCLCPP_WARN(node_->get_logger(),
                       "Cached P4 successor reauthorization failed: %s",
                       reauthorization_reason.c_str());
+          if (reauthorization_reason == "successor_switch_window_missed")
+          {
+            planner_manager_->recordPreparedP4SuccessorCurveFailure(
+                plannerNow().seconds(),
+                P4PreparedCurveFailure::COMPUTE_BUDGET,
+                reauthorization_reason);
+          }
           reject_candidate();
           return false;
         }

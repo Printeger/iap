@@ -10531,9 +10531,12 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_TRUE(ego_planner::validateP4PreparedSuccessor(
       successor, 17, 1234, "parent_hash", 10.1, &reason));
   EXPECT_EQ(reason, "prepared_successor_ready");
-  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+  // Actual-curve preparation is intentionally early.  The immutable child
+  // is certified and cached while its parent continues executing; only a
+  // callback that arrives after the closed switch window is stale.
+  EXPECT_TRUE(ego_planner::validateP4PreparedSuccessor(
       successor, 17, 1234, "parent_hash", 9.9, &reason));
-  EXPECT_EQ(reason, "successor_switch_window_missed");
+  EXPECT_EQ(reason, "prepared_successor_ready");
 
   successor.successor_position.x() += 0.3;
   EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
@@ -11294,17 +11297,62 @@ TEST(P4PreparedSuccessorPolicy,
       parent.trajectory_id, parent.start_time_ns, 11.0,
       "successor_full_search_fallback_ready", parent.control_points_hash);
 
-  // Missing the old immutable preparation window is transient: retire that
-  // transaction and make one new parent-bound successor request schedulable.
+  // Reproduce the live ordering: the full-search actual curve completes
+  // before its immutable switch.  Early completion is a cacheable success,
+  // not a missed window and must not consume the bounded regeneration.
+  ego_planner::P4PreparedSuccessor prepared;
+  prepared.parent_trajectory_id = parent.trajectory_id;
+  prepared.parent_start_time_ns = parent.start_time_ns;
+  prepared.parent_control_points_hash = parent.control_points_hash;
+  prepared.planned_switch_time_s = 11.0;
+  const double parent_switch_elapsed_s = 1.0;
+  prepared.incumbent_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          parent_switch_elapsed_s);
+  prepared.incumbent_velocity =
+      manager.local_data_.velocity_traj_.evaluateDeBoorT(
+          parent_switch_elapsed_s);
+  prepared.incumbent_acceleration =
+      manager.local_data_.acceleration_traj_.evaluateDeBoorT(
+          parent_switch_elapsed_s);
+  prepared.successor_position = prepared.incumbent_position;
+  prepared.successor_velocity = prepared.incumbent_velocity;
+  prepared.successor_acceleration = prepared.incumbent_acceleration;
+  prepared.execution_snapshot_id = 51u;
+  prepared.assurance.complete = true;
+  prepared.assurance.safe = true;
+  prepared.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
+  std::string timing_reason;
+  ego_planner::P4SuccessorFailure timing_failure =
+      ego_planner::P4SuccessorFailure::NONE;
+  EXPECT_TRUE(ego_planner::validateP4PreparedSuccessor(
+      prepared, parent.trajectory_id, parent.start_time_ns,
+      parent.control_points_hash, 10.9, &timing_reason, true,
+      &timing_failure));
+  EXPECT_EQ(timing_reason, "prepared_successor_ready");
+  EXPECT_EQ(timing_failure, ego_planner::P4SuccessorFailure::NONE);
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::CURVE_PREPARING);
+  EXPECT_FALSE(manager.p4CommittedContinuationTerminalHold());
+
+  // Only a genuinely stale callback beyond switch+0.2s retires the old
+  // immutable transaction and makes one new parent-bound request schedulable.
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      prepared, parent.trajectory_id, parent.start_time_ns,
+      parent.control_points_hash, 11.21, &timing_reason, true,
+      &timing_failure));
+  EXPECT_EQ(timing_reason, "successor_switch_window_missed");
+  EXPECT_EQ(timing_failure,
+            ego_planner::P4SuccessorFailure::DEADLINE_MISSED);
   manager.recordPreparedP4SuccessorCurveFailure(
-      10.9, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
+      11.21, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
       "successor_switch_window_missed");
   EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
             ego_planner::P4SuccessorPreparationState::ROUTE_PENDING);
   EXPECT_FALSE(manager.p4CommittedContinuationTerminalHold());
   EXPECT_FALSE(manager.p4CommittedTopologyHardFailureForTest());
   EXPECT_TRUE(manager.p4CommittedTopologyActiveForTest());
-  EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.1, 52u, 11.1));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.22, 52u, 11.22));
 
   // A newly generated route may contain a tempting sibling, but recovery is
   // still constrained to the topology actually entered by odometry.
@@ -11340,8 +11388,15 @@ TEST(P4PreparedSuccessorPolicy,
   manager.setP4SuccessorPreparationBoundaryForTest(
       parent.trajectory_id, parent.start_time_ns, 12.0,
       "successor_full_search_fallback_ready", parent.control_points_hash);
+  prepared.planned_switch_time_s = 12.0;
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      prepared, parent.trajectory_id, parent.start_time_ns,
+      parent.control_points_hash, 12.21, &timing_reason, true,
+      &timing_failure));
+  EXPECT_EQ(timing_failure,
+            ego_planner::P4SuccessorFailure::DEADLINE_MISSED);
   manager.recordPreparedP4SuccessorCurveFailure(
-      11.9, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
+      12.21, ego_planner::P4PreparedCurveFailure::COMPUTE_BUDGET,
       "successor_switch_window_missed_again");
   EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
             ego_planner::P4SuccessorPreparationState::FAILED);
@@ -14740,7 +14795,7 @@ TEST(P4PreparedSuccessorPolicy,
 
   ego_planner::LocalTrajData incumbent = manager.local_data_;
   incumbent.traj_id_ = 91;
-  incumbent.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  incumbent.start_time_ = rclcpp::Time(9, 0, RCL_ROS_TIME);
   manager.local_data_.parent_execution_instance_id_ =
       incumbent.execution_instance_id_;
   manager.local_data_.parent_traj_id_ = incumbent.traj_id_;
@@ -14762,6 +14817,22 @@ TEST(P4PreparedSuccessorPolicy,
   prepared.assurance.complete = true;
   prepared.assurance.safe = true;
   prepared.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      incumbent.traj_id_, incumbent.start_time_.nanoseconds(),
+      prepared.planned_switch_time_s,
+      "successor_full_search_fallback_ready",
+      prepared.parent_control_points_hash);
+  std::string early_reason;
+  ego_planner::P4SuccessorFailure early_failure =
+      ego_planner::P4SuccessorFailure::NONE;
+  ASSERT_TRUE(ego_planner::validateP4PreparedSuccessor(
+      prepared, incumbent.traj_id_, incumbent.start_time_.nanoseconds(),
+      prepared.parent_control_points_hash, 10.1, &early_reason, true,
+      &early_failure)) << early_reason;
+  EXPECT_EQ(early_reason, "prepared_successor_ready");
+  EXPECT_EQ(early_failure, ego_planner::P4SuccessorFailure::NONE);
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::CURVE_PREPARING);
   manager.setPreparedP4SuccessorForTest(prepared);
   std::string cache_reason;
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
@@ -14769,6 +14840,12 @@ TEST(P4PreparedSuccessorPolicy,
       << cache_reason;
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
   EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
+  EXPECT_EQ(manager.p4SuccessorPreparationStateForTest(),
+            ego_planner::P4SuccessorPreparationState::PREPARED_CERTIFIED);
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()
+                ->boundary.parent_trajectory_id,
+            incumbent.traj_id_);
+  EXPECT_FALSE(manager.p4CommittedContinuationTerminalHold());
 
   // Candidate enumeration retained from a formally resolved parent does not
   // reopen its actual-curve comparison.  A certified fast-path child remains
@@ -14872,29 +14949,31 @@ TEST(P4PreparedSuccessorPolicy,
   ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
 
   // The complete P4 actual bundle is sufficient for candidate completeness;
-  // there is no second P5 preview admission to cache.
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.5));
+  // at the switch window it becomes due for its one latest-snapshot pass.
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.5));
 
   prepared.planned_switch_time_s = 11.0;
   manager.setPreparedP4SuccessorForTest(prepared);
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
       9.9, &cache_reason))
       << cache_reason;
-  // A complete cached child is queued immediately.  Waiting until only the
-  // measured minimum lead remains can miss the immutable switch window when
-  // the loaded executor delays the next FSM callback; traj_server still
-  // activates it only at the fixed start after full-identity ACK matching.
-  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(9.9));
-  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.149));
-  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.15));
+  // The exact child stays cached while the parent executes.  It becomes due
+  // only in the existing latest-snapshot reauthorization window (0.2 s here)
+  // and remains due afterward so a late callback is explicitly rejected and
+  // consumed rather than leaving a permanent hidden cache.
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(9.9));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.149));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.15));
   EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.80));
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.85));
-  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(11.0));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(10.85));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(11.0));
 
   // Isolate snapshot reauthorization from the scheduling assertions above:
   // this child and parent share their exact t=0 boundary at the fixed anchor.
   prepared.planned_switch_time_s = 10.01;
   manager.setPreparedP4SuccessorForTest(prepared);
+  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
+      10.0, &cache_reason)) << cache_reason;
 
   // Handoff-time authorization is recomputed even when the immutable input
   // tuple has the same snapshot ID: evaluation time and the global exposure

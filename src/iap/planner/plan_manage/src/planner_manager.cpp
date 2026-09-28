@@ -1178,8 +1178,7 @@ namespace ego_planner
     if (!std::isfinite(now_s) ||
         !std::isfinite(successor.planned_switch_time_s) ||
         (require_switch_window &&
-         (now_s + 1.0e-9 < successor.planned_switch_time_s ||
-          now_s - successor.planned_switch_time_s > 0.2)))
+         now_s - successor.planned_switch_time_s > 0.2))
       return finish(false, "successor_switch_window_missed",
                     P4SuccessorFailure::DEADLINE_MISSED);
     if (!successor.incumbent_position.allFinite() ||
@@ -11798,8 +11797,14 @@ namespace ego_planner
     // is diagnostic text and may already have been replaced by a lower-level
     // B-spline/refinement failure; using it as a gate can strand the lane in
     // CURVE_PREPARING forever.
+    const bool expired_cached_reauthorization =
+        p4_successor_preparation_state_ ==
+            P4SuccessorPreparationState::REAUTHORIZING &&
+        last_p4_forward_decision_.successor_failure ==
+            P4SuccessorFailure::DEADLINE_MISSED;
     if (p4_successor_preparation_state_ !=
-            P4SuccessorPreparationState::CURVE_PREPARING)
+            P4SuccessorPreparationState::CURVE_PREPARING &&
+        !expired_cached_reauthorization)
       return;
     // A freshness rejection has already consumed the failed actual curve and
     // left only a frozen channel work item waiting for a newer execution
@@ -11909,7 +11914,8 @@ namespace ego_planner
     // never retried or granted authority, and every full-search candidate
     // still passes the ordinary actual-curve, braking, P5 and publication
     // gates below.
-    if (last_p4_forward_decision_.successor_fast_path &&
+    if (!expired_cached_reauthorization &&
+        last_p4_forward_decision_.successor_fast_path &&
         !freshness_retry_exhausted)
     {
       P4ForwardDecision failed_decision = last_p4_forward_decision_;
@@ -12656,20 +12662,20 @@ namespace ego_planner
     const auto &boundary = p4_cached_successor_bundle_->boundary;
     const double minimum_commitment_end_s =
         static_cast<double>(boundary.parent_start_time_ns) * 1.0e-9 + 1.0;
-    constexpr double kMinimumQueueMarginS = 0.2;
-    const double latest_queue_time_s =
-        boundary.planned_switch_time_s - kMinimumQueueMarginS;
-    // Queue a complete, certified child as soon as it exists.  The immutable
-    // start time still controls activation, while latest-snapshot
-    // reauthorization, the publication certificate, the queue-deadline gate
-    // and full-identity ACK matching remain mandatory.  Delaying publication
-    // until only the measured minimum lead remains is not a safety property
-    // and can lose the whole fixed window if a loaded executor starves the
-    // next FSM timer callback.
+    const double reauthorization_window_start_s =
+        boundary.planned_switch_time_s - std::max({
+            p4_successor_deadline_policy_.
+                latest_snapshot_reauthorization_budget_s,
+            p4_successor_deadline_policy_.scheduler_guard_s, 0.2});
+    // Preparation can finish arbitrarily early, but the exact cached curve is
+    // rebound to the latest snapshot only in the already budgeted handoff
+    // window.  Keep returning due after that point so a genuinely stale
+    // callback is consumed by validation and the bounded regeneration seam;
+    // silently hiding an expired cache would strand the committed parent.
     return std::isfinite(boundary.planned_switch_time_s) &&
         boundary.planned_switch_time_s + 1.0e-9 >=
             minimum_commitment_end_s &&
-        now_s <= latest_queue_time_s + 1.0e-9;
+        now_s + 1.0e-9 >= reauthorization_window_start_s;
   }
 
   bool EGOPlannerManager::p4ActualCurveAwaitingRiskSnapshot() const
@@ -13986,7 +13992,8 @@ namespace ego_planner
         appendP4ExecutionEvent(
             "PREPARED_SUCCESSOR_PUBLISH_REJECTED", now_s, rejected);
       }
-      if (!valid && p4_cached_successor_bundle_)
+      if (!valid && p4_cached_successor_bundle_ &&
+          failure != P4SuccessorFailure::DEADLINE_MISSED)
       {
         p4_successor_preparation_state_ =
             P4SuccessorPreparationState::FAILED;
@@ -14041,7 +14048,7 @@ namespace ego_planner
             current, incumbent.traj_id_,
             incumbent.start_time_.nanoseconds(),
             p4ControlPointHash(incumbent_position.getControlPoint()),
-            now_s, &prepared_reason, false, &prepared_failure))
+            now_s, &prepared_reason, true, &prepared_failure))
       return finish(false, prepared_reason, prepared_failure);
 
     const auto execution = p0_risk_grid_runtime_
@@ -18301,7 +18308,13 @@ namespace ego_planner
         evaluated = evaluateP4ForwardRoute(
             start_pt, start_vel, start_acc, local_target_pt);
       }
-      if (!preparingP4SuccessorCurve())
+      // evaluateP4ForwardRoute() is the seam that consumes a completed
+      // rolling route and enters CURVE_PREPARING.  Freeze that ownership once
+      // for the whole rebound transaction.  Later certification/cache work
+      // must not be reclassified as an ordinary immediate replacement merely
+      // because another callback advances shared preparation state.
+      frozen_successor_curve_preparation = preparingP4SuccessorCurve();
+      if (!frozen_successor_curve_preparation)
       {
         constrainP4DecisionToCommittedTopology(&evaluated);
         prepareNormalChannelsForActualCertification(&evaluated);
@@ -18493,7 +18506,8 @@ namespace ego_planner
         // seed before any B-spline resampling so every immediate actual is a
         // terminal-stop segment; the full route remains on the candidate for
         // successor direction and unevaluated-suffix diagnostics.
-        const bool preparing_successor = preparingP4SuccessorCurve();
+        const bool preparing_successor =
+            frozen_successor_curve_preparation;
         const auto selected_candidate = std::find_if(
             last_p4_forward_decision_.candidates.begin(),
             last_p4_forward_decision_.candidates.end(),
@@ -18655,10 +18669,8 @@ namespace ego_planner
       // to CURVE_PREPARING.  Bind the future parent switch state here, before
       // constructing any B-spline samples.  Doing this only in the FSM is too
       // early: at that point the completed route may not have been observed.
-      if (p4_successor_preparation_state_ ==
-          P4SuccessorPreparationState::CURVE_PREPARING)
+      if (frozen_successor_curve_preparation)
       {
-        frozen_successor_curve_preparation = true;
         frozen_handoff_start_time_ns = static_cast<int64_t>(std::llround(
             p4_successor_schedule_.deadline.planned_switch_time_s * 1.0e9));
         Eigen::Vector3d successor_start_position;
