@@ -164,7 +164,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   // ── Debug CSV logging ───────────────────────────────────────────────────
   // Activated by config_gnss.json: "enable_debug_csv": true
   // Or by setting gnss_debug_csv_ = true before first injection.
-  // Writes per-factor residuals to /tmp/iap_gnss_factor_debug.csv
+  // Writes per-factor residuals to export/glio/iap_gnss_factor_debug.csv.
   bool                debug_csv_enabled_ = false;
   std::ofstream       debug_csv_file_;
   std::mutex          debug_csv_mutex_;

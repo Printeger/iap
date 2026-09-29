@@ -37,7 +37,7 @@
     "gamma_lidar_max": 10.0,
     "icp_quality_stride": 1,
     "enable_icp_csv": true,
-    "icp_csv_path": "/tmp/demo11_iap_icp.csv",
+    "icp_csv_path": "demo11_iap_icp.csv",
 
     "validate_imu": true,
     "save_imu_rate_trajectory": true,

@@ -3,6 +3,7 @@
 #include <iap/util/config.hpp>
 #include <iap/util/extension_module_ros2.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/run_log_manager.hpp>
 
 #include <builtin_interfaces/msg/time.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -144,7 +145,11 @@ public:
     enable_metrics_csv_ = config.param_nested<bool>(
         {"glim_ros", "sim"}, "enable_metrics_csv", true);
     metrics_csv_path_ = config.param_nested<std::string>(
-        {"glim_ros", "sim"}, "metrics_csv_path", "/tmp/iap_sim_truth_vs_est.csv");
+        {"glim_ros", "sim"}, "metrics_csv_path", "iap_sim_truth_vs_est.csv");
+    if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+      metrics_csv_path_ =
+          run_logs->export_path("simulation/iap_sim_truth_vs_est.csv").string();
+    }
 
     if (enable_metrics_csv_) {
       open_metrics_csv_();

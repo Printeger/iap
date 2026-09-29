@@ -20,7 +20,7 @@
     "sigma_ecef_origin": 5.0,
     "sigma_ecef_rot": 0.087,
     "enable_debug_csv": true,
-    "debug_csv_path": "/tmp/demo11_iap_gnss_factor_debug.csv"
+    "debug_csv_path": "demo11_iap_gnss_factor_debug.csv"
   },
   "integrity": {
     "enable": true,
@@ -39,9 +39,9 @@
     "recovery_count": 1,
     "gnss_araim_enable_constellation_hypotheses": false,
     "enable_araim_csv": true,
-    "araim_csv_path": "/tmp/demo11_iap_araim.csv",
+    "araim_csv_path": "demo11_iap_araim.csv",
     "enable_traj_csv": true,
-    "traj_csv_path": "/tmp/demo11_traj_with_gnss.csv",
+    "traj_csv_path": "demo11_traj_with_gnss.csv",
     "enable_araim_markers": false,
     "araim_marker_topic": "/iap/araim_envelopes",
     "araim_marker_history_size": 60,
@@ -60,6 +60,6 @@
     "lidar_araim_gamma_condition_max": 5.0,
     "lidar_araim_sigma_ss_min_m": 0.02,
     "enable_lidar_araim_stage0_csv": false,
-    "lidar_araim_stage0_csv_path": "/tmp/iap_lidar_araim_stage0.csv"
+    "lidar_araim_stage0_csv_path": "iap_lidar_araim_stage0.csv"
   }
 }

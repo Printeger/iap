@@ -15,7 +15,7 @@
     "map_frame_id": "map",
     "publish_imu2lidar": true,
     "tf_time_offset": 1e-6,
-    "dump_path": "/tmp/demo6_truth_control_bag_dump",
+    "dump_path": "demo6_truth_control_bag_dump",
 
     "extension_modules": [
       "libgnss_extension.so",
@@ -43,7 +43,7 @@
       "alignment_max_time_diff": 0.05,
       "truth_cache_duration": 2.0,
       "enable_metrics_csv": true,
-      "metrics_csv_path": "/tmp/demo6_truth_control_bag_truth_vs_est.csv"
+      "metrics_csv_path": "demo6_truth_control_bag_truth_vs_est.csv"
     },
 
     "imu_qos": {

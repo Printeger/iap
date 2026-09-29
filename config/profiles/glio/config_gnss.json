@@ -16,7 +16,7 @@
     "sigma_ecef_origin": 5.0,
     "sigma_ecef_rot": 0.087,
     "enable_debug_csv": true,
-    "debug_csv_path": "/tmp/iap_gnss_factor_debug.csv"
+    "debug_csv_path": "iap_gnss_factor_debug.csv"
   },
   "integrity": {
     "enable": false,

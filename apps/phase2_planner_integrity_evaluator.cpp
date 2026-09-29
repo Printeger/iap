@@ -678,7 +678,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   Phase2PlannerIntegrityEvaluator()
       : rclcpp::Node("phase2_planner_integrity_evaluator"),
         predictor_(predictor_params_) {
-    declare_parameter<std::string>("log_root", "/home/dev/ws_iap/src/iap/log");
+    declare_parameter<std::string>("log_root", "");
     declare_parameter<std::string>("run_dir", "");
     declare_parameter<std::string>("map_source", "unknown");
     declare_parameter<std::string>("odom_topic", "/drone_0_visual_slam/odom");

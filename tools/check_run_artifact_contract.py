@@ -37,7 +37,12 @@ def maintained_files() -> list[Path]:
         PACKAGE_ROOT / "launch",
     ):
         for path in root.rglob("*"):
-            if not path.is_file() or "bp" in path.parts or "test" in path.parts:
+            if (
+                not path.is_file()
+                or "bp" in path.parts
+                or "test" in path.parts
+                or path.name.startswith("test_")
+            ):
                 continue
             if path.suffix in {".cpp", ".hpp", ".py"}:
                 files.append(path)

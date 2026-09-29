@@ -1869,7 +1869,7 @@ ARG_DEFAULTS = [
     ("start_planner", "true"),
     ("record_bag", "false"),
     ("run_validator", "true"),
-    ("bag_output_dir", "/home/dev/ws_iap/src/iap/results/planner_validation/bags"),
+    ("bag_output_dir", ""),
     ("runtime_root_dir", ""),
     ("export_root_dir", ""),
     ("iap_log_root", ""),
@@ -2559,11 +2559,24 @@ def _materialize_gnss_scenario(scenario_file, export_dir):
 
 def _resolve_run_roots(config_name, experiment_name, scenario_name, run_token,
                        *, runtime_root_dir="", export_root_dir=""):
-    runtime_base = Path(runtime_root_dir).expanduser() if runtime_root_dir else Path("/tmp")
+    fallback_run = Path(
+        os.environ.get(
+            "IAP_RUN_DIR",
+            Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+            / "iap"
+            / "log"
+            / "legacy_unscoped",
+        )
+    )
+    runtime_base = (
+        Path(runtime_root_dir).expanduser()
+        if runtime_root_dir
+        else fallback_run / "metadata" / "config"
+    )
     export_base = (
         Path(export_root_dir).expanduser()
         if export_root_dir
-        else Path("/home/dev/ws_iap/src/iap/results/planner_validation/exports")
+        else fallback_run / "export" / "planner"
     )
     runtime_root = runtime_base / f"iap_{config_name}_test_planner_{run_token}"
     export_dir = export_base / (

@@ -11,10 +11,10 @@
     "config_global_mapping": "../../sim_ego/config_global_mapping_gpu.json",
     "config_gnss": "config_gnss.json",
     "enable_timing_csv": true,
-    "timing_csv_path": "/tmp/iap_glio_timing.csv"
+    "timing_csv_path": "iap_glio_timing.csv"
   },
   "logging": {
-    "log_dir": "/tmp/iap_glio_logs",
+    "log_dir": "iap_glio_logs",
     "save_logs": true,
     "rotate_logs": true,
     "max_file_size_kb": 8192,

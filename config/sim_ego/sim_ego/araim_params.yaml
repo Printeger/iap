@@ -99,7 +99,7 @@ fgo_info:
 # ============================================================================
 debug:
   enable_csv: true          # write per-epoch CSV (controlled by IAP_DEBUG_CSV=1)
-  csv_path: "/tmp/iap_araim_debug.csv"
+  csv_path: "iap_araim_debug.csv"
   enable_rviz_markers: true
   marker_topic: "/iap/integrity_markers"
   report_topic: "/iap/integrity"

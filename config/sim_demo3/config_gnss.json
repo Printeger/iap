@@ -16,7 +16,7 @@
     "sigma_ecef_origin": 5.0,
     "sigma_ecef_rot": 0.087,
     "enable_debug_csv": false,
-    "debug_csv_path": "/tmp/iap_gnss_factor_debug.csv"
+    "debug_csv_path": "iap_gnss_factor_debug.csv"
   },
   "integrity": {
     "enable": false,
@@ -32,8 +32,8 @@
     "h_min": 2.0,
     "VAL_default": 20.0,
     "enable_araim_csv": false,
-    "araim_csv_path": "/tmp/iap_araim.csv",
+    "araim_csv_path": "iap_araim.csv",
     "enable_traj_csv": false,
-    "traj_csv_path": "/tmp/traj_with_gnss.csv"
+    "traj_csv_path": "traj_with_gnss.csv"
   }
 }

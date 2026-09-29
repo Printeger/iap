@@ -213,9 +213,9 @@ GnssExtensionModule::GnssExtensionModule()
   if (enable_csv) {
     debug_csv_enabled_ = true;
     std::string csv_path = config.param<std::string>(
-        "gnss", "debug_csv_path", "/tmp/iap_gnss_factor_debug.csv");
+        "gnss", "debug_csv_path", "iap_gnss_factor_debug.csv");
     if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
-      csv_path = run_logs->export_path("iap_gnss_factor_debug.csv").string();
+      csv_path = run_logs->export_path("glio/iap_gnss_factor_debug.csv").string();
     }
     const std::filesystem::path csv_file_path(csv_path);
     if (csv_file_path.has_parent_path()) {

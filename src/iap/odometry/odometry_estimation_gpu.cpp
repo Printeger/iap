@@ -95,9 +95,9 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   icp_quality_stride = std::max(1, config.param<int>("odometry_estimation", "icp_quality_stride", 1));
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
   icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
-                                                  "/tmp/iap_icp.csv");
+                                                  "iap_icp.csv");
   if (const auto* run_logs = RunLogManager::get_if_initialized()) {
-    icp_csv_path = run_logs->export_path("iap_icp.csv").string();
+    icp_csv_path = run_logs->export_path("glio/iap_icp.csv").string();
   }
 
   spdlog::info("[odometry_gpu] icp_quality_stride={} enable_icp_csv={} icp_csv_path={}",

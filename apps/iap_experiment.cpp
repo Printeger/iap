@@ -4,9 +4,7 @@
 // Usage:
 //   ros2 run iap iap_experiment --ros-args -p scenario:=forest_01
 //
-// Produces:
-//   /tmp/iap_experiment_<scenario>_<baseline>.csv
-//   /tmp/iap_experiment_<scenario>_summary.md
+// Produces run-scoped CSV and Markdown artifacts below export/analysis/.
 //
 // NOTE: This is a stub runner. Actual sensor replay / ROS2 bag integration
 //       is deferred to the integration phase. The runner demonstrates the
@@ -130,11 +128,10 @@ ExperimentResult run_baseline(int baseline, const std::string& label,
   mc.set_mission_success(success);
   mc.log_summary(label);
 
-  std::string csv_path =
-      "/tmp/iap_experiment_" + scenario + "_" + label + ".csv";
+  std::string csv_path = "iap_experiment_" + scenario + "_" + label + ".csv";
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
     csv_path = run_logs->export_path(
-      "iap_experiment_" + scenario + "_" + label + ".csv").string();
+      "analysis/iap_experiment_" + scenario + "_" + label + ".csv").string();
   }
   mc.write_csv(csv_path);
 
@@ -190,10 +187,10 @@ int main(int argc, char** argv) {
   results.push_back(iap::experiments::run_baseline(2, "IntegAware", scenario));
 
   // Write comparison table
-  std::string table_path = "/tmp/iap_experiment_" + scenario + "_summary.md";
+  std::string table_path = "iap_experiment_" + scenario + "_summary.md";
   if (const auto* initialized_run_logs = glim::RunLogManager::get_if_initialized()) {
     table_path = initialized_run_logs->export_path(
-      "iap_experiment_" + scenario + "_summary.md").string();
+      "analysis/iap_experiment_" + scenario + "_summary.md").string();
   }
   iap::experiments::write_comparison_table(results, table_path);
   iap::experiments::write_comparison_table(results, "");  // also to stdout

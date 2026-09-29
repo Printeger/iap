@@ -75,9 +75,9 @@ OdometryEstimationCPUParams::OdometryEstimationCPUParams() : OdometryEstimationI
   icp_cond_threshold = config.param<double>("odometry_estimation", "icp_cond_threshold", 500.0);
   gamma_lidar_max    = config.param<double>("odometry_estimation", "gamma_lidar_max",    10.0);
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
-  icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path", "/tmp/iap_icp.csv");
+  icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path", "iap_icp.csv");
   if (const auto* run_logs = RunLogManager::get_if_initialized()) {
-    icp_csv_path = run_logs->export_path("iap_icp.csv").string();
+    icp_csv_path = run_logs->export_path("glio/iap_icp.csv").string();
   }
   spdlog::info("[odometry_cpu] enable_icp_csv={} icp_csv_path={}", enable_icp_csv, icp_csv_path);
 

@@ -8,6 +8,7 @@
 
 #include <iap/integrity/integrity_types.hpp>
 #include <iap/integrity/araim_types.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -31,7 +32,7 @@ namespace iap {
 ///   n_trunks, tdop, worst_hyp
 ///
 /// Enabled by environment variable IAP_ARAIM_DEBUG_CSV=1
-/// Output path from IAP_ARAIM_DEBUG_CSV_PATH or default /tmp/iap_araim_debug.csv
+/// Output path from IAP_ARAIM_DEBUG_CSV_PATH or the current run.
 class AraimDebugCSV {
  public:
   /// Env-var-controlled constructor (IAP_ARAIM_DEBUG_CSV=1).
@@ -196,7 +197,16 @@ inline AraimDebugCSV::AraimDebugCSV() {
   if (env && std::string(env) == "1") {
     enabled_ = true;
     const char* path_env = std::getenv("IAP_ARAIM_DEBUG_CSV_PATH");
-    open_file(path_env ? path_env : "/tmp/iap_araim_debug.csv");
+    if (path_env && *path_env) {
+      open_file(path_env);
+    } else if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+      open_file(run_logs->export_path(
+          "current_integrity/iap_araim_debug.csv").string());
+    } else {
+      enabled_ = false;
+      spdlog::warn(
+          "[araim_debug] IAP_ARAIM_DEBUG_CSV requested without a run or explicit path");
+    }
   }
 }
 

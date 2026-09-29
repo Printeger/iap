@@ -230,9 +230,9 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   // ── ARAIM debug CSV (IAP-RQ-200 observability) ───────────────────────────
   const bool araim_csv_en = config.param<bool>("integrity", "enable_araim_csv", false);
   std::string araim_csv_path = config.param<std::string>(
-      "integrity", "araim_csv_path", "/tmp/iap_araim.csv");
+      "integrity", "araim_csv_path", "iap_araim.csv");
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
-    araim_csv_path = run_logs->export_path("iap_araim.csv").string();
+    araim_csv_path = run_logs->export_path("current_integrity/iap_araim.csv").string();
   }
   araim_debug_csv_ = std::make_unique<AraimDebugCSV>(araim_csv_en, araim_csv_path);
   logger_->info("[IntegrityExt] ARAIM CSV: {} → {}",
@@ -241,10 +241,10 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   const bool araim_pl_decomp_csv_en = config.param<bool>(
       "integrity", "enable_araim_pl_decomp_csv", false);
   std::string araim_pl_decomp_csv_path = config.param<std::string>(
-      "integrity", "araim_pl_decomp_csv_path", "/tmp/iap_araim_pl_decomp.csv");
+      "integrity", "araim_pl_decomp_csv_path", "iap_araim_pl_decomp.csv");
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
     araim_pl_decomp_csv_path =
-        run_logs->export_path("iap_araim_pl_decomp.csv").string();
+        run_logs->export_path("current_integrity/iap_araim_pl_decomp.csv").string();
   }
   araim_pl_decomp_csv_ = std::make_unique<AraimPLDecompCSV>(
       araim_pl_decomp_csv_en, araim_pl_decomp_csv_path);
@@ -256,10 +256,10 @@ IntegrityExtensionModule::IntegrityExtensionModule()
       "integrity", "enable_lidar_araim_stage0_csv", false);
   std::string lidar_stage0_csv_path = config.param<std::string>(
       "integrity", "lidar_araim_stage0_csv_path",
-      "/tmp/iap_lidar_araim_stage0.csv");
+      "iap_lidar_araim_stage0.csv");
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
     lidar_stage0_csv_path =
-        run_logs->export_path("iap_lidar_araim_stage0.csv").string();
+        run_logs->export_path("current_integrity/iap_lidar_araim_stage0.csv").string();
   }
   lidar_araim_stage0_csv_ = std::make_unique<LidarAraimDebugCSV>(
       lidar_stage0_csv_en, lidar_stage0_csv_path);
@@ -270,9 +270,9 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   // ── Trajectory CSV ────────────────────────────────────────────────────────
   const bool traj_en = config.param<bool>("integrity", "enable_traj_csv", false);
   std::string traj_path = config.param<std::string>(
-      "integrity", "traj_csv_path", "/tmp/traj_with_gnss.csv");
+      "integrity", "traj_csv_path", "traj_with_gnss.csv");
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
-    traj_path = run_logs->export_path("traj_with_gnss.csv").string();
+    traj_path = run_logs->export_path("current_integrity/traj_with_gnss.csv").string();
   }
   if (traj_en) {
     const std::filesystem::path traj_csv_path(traj_path);

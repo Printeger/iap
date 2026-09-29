@@ -51,25 +51,22 @@ std::shared_ptr<spdlog::logger> create_module_logger(const std::string& module_n
   const auto* config = glim::GlobalConfig::get_if_initialized();
   const std::string log_filename = sanitize_log_name(module_name == "glim" ? "main" : module_name);
 
-  std::filesystem::path log_path;
-  if (const auto* run_logs = RunLogManager::get_if_initialized()) {
-    log_path = run_logs->runtime_path("iap_" + log_filename + ".log");
-  } else {
-    const std::string log_dir = config
-      ? config->param<std::string>("logging", "log_dir", std::string("/tmp"))
-      : std::string("/tmp");
-    log_path = std::filesystem::path(log_dir) / ("iap_" + log_filename + ".log");
-  }
-
-  if (log_path.has_parent_path() && !std::filesystem::exists(log_path.parent_path())) {
-    std::filesystem::create_directories(log_path.parent_path());
-  }
-
   logger = spdlog::stdout_color_mt(module_name);
   logger->sinks().push_back(get_ringbuffer_sink());
 
   if (config && !config->param<bool>("logging", "save_logs", true)) {
     return logger;
+  }
+  const auto* run_logs = RunLogManager::get_if_initialized();
+  if (!run_logs) {
+    spdlog::warn(
+      "[logging] RunLogManager is not initialized; file logging for '{}' is disabled",
+      module_name);
+    return logger;
+  }
+  const auto log_path = run_logs->runtime_path("iap_" + log_filename + ".log");
+  if (!std::filesystem::exists(log_path.parent_path())) {
+    std::filesystem::create_directories(log_path.parent_path());
   }
 
   const bool rotate_logs = config ? config->param<bool>("logging", "rotate_logs", true) : true;

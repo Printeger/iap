@@ -20,7 +20,7 @@
     "sigma_ecef_origin": 5.0,
     "sigma_ecef_rot": 0.087,
     "enable_debug_csv": true,
-    "debug_csv_path": "/tmp/demo9_iap_gnss_factor_debug.csv"
+    "debug_csv_path": "demo9_iap_gnss_factor_debug.csv"
   },
   "integrity": {
     "enable": true,
@@ -36,9 +36,9 @@
     "h_min": 2.0,
     "VAL_default": 20.0,
     "enable_araim_csv": true,
-    "araim_csv_path": "/tmp/demo9_iap_araim.csv",
+    "araim_csv_path": "demo9_iap_araim.csv",
     "enable_traj_csv": true,
-    "traj_csv_path": "/tmp/demo9_traj_with_gnss.csv",
+    "traj_csv_path": "demo9_traj_with_gnss.csv",
     "enable_araim_markers": false,
     "araim_marker_topic": "/iap/araim_envelopes",
     "araim_marker_history_size": 60,

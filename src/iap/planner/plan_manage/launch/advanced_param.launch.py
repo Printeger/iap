@@ -70,7 +70,7 @@ def generate_launch_description():
     use_integrity_cost = LaunchConfiguration('use_integrity_cost', default=False)
     integrity_debug_csv_path = LaunchConfiguration(
         'integrity_debug_csv_path',
-        default='/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv')
+        default='')
     lambda_integrity = LaunchConfiguration('lambda_integrity', default=0.00001)
     p1_use_integrity_cost = LaunchConfiguration('p1_use_integrity_cost', default=False)
     p1_metrics_only = LaunchConfiguration('p1_metrics_only', default=True)

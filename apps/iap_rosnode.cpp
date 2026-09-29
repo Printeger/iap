@@ -95,8 +95,8 @@ public:
     intensity_field_ = sensor_config.param<std::string>("sensors", "intensity_field", "intensity");
     ring_field_ = sensor_config.param<std::string>("sensors", "ring_field", "ring");
 
-    const std::string legacy_dump_path = config_ros.param<std::string>("glim_ros", "dump_path", "/tmp/dump");
-    dump_path_ = run_logs.export_path("dump").string();
+    const std::string legacy_dump_path = config_ros.param<std::string>("glim_ros", "dump_path", "dump");
+    dump_path_ = run_logs.export_path("glio/dump").string();
     logger_->info("dump_path: {} (legacy config value: {})", dump_path_, legacy_dump_path);
 
     RCLCPP_INFO(get_logger(), "iap init stage=load_core_modules");
@@ -520,7 +520,7 @@ private:
 
   std::string imu_topic_;
   std::string points_topic_;
-  std::string dump_path_ = "/tmp/dump";
+  std::string dump_path_ = "dump";
   std::string intensity_field_ = "intensity";
   std::string ring_field_ = "ring";
   std::string configured_imu_frame_id_;

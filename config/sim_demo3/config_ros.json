@@ -13,7 +13,7 @@
     "map_frame_id": "map",
     "publish_imu2lidar": true,
     "tf_time_offset": 1e-6,
-    "dump_path": "/tmp/dump",
+    "dump_path": "dump",
     "extension_modules": [
       "librviz_viewer.so"
     ],

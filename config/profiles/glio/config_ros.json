@@ -13,7 +13,7 @@
     "map_frame_id": "map",
     "publish_imu2lidar": true,
     "tf_time_offset": 0.000001,
-    "dump_path": "/tmp/iap_glio_dump",
+    "dump_path": "iap_glio_dump",
     "extension_modules": ["libgnss_extension.so"],
     "imu_topic": "/livox/imu",
     "points_topic": "/livox/lidar",

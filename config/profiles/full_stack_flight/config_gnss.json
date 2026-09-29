@@ -16,7 +16,7 @@
     "sigma_ecef_origin": 5.0,
     "sigma_ecef_rot": 0.087,
     "enable_debug_csv": true,
-    "debug_csv_path": "/tmp/iap_full_stack_flight_gnss.csv"
+    "debug_csv_path": "iap_full_stack_flight_gnss.csv"
   },
   "integrity": {
     "enable": true,
@@ -32,9 +32,9 @@
     "h_min": 2.0,
     "VAL_default": 20.0,
     "enable_araim_csv": true,
-    "araim_csv_path": "/tmp/iap_full_stack_flight_araim.csv",
+    "araim_csv_path": "iap_full_stack_flight_araim.csv",
     "enable_traj_csv": true,
-    "traj_csv_path": "/tmp/iap_full_stack_flight_traj.csv",
+    "traj_csv_path": "iap_full_stack_flight_traj.csv",
     "enable_gnss_integrity": true,
     "enable_gnss_araim": true,
     "enable_lidar_integrity": true,
