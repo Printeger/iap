@@ -736,6 +736,7 @@ if(DEFINED ENV{ROS_VERSION})
       ament_add_gtest(test_trajectory_assurance test/test_trajectory_assurance.cpp)
       target_link_libraries(test_trajectory_assurance iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
+      ament_add_gtest(test_run_log_manager_standalone test/test_run_log_manager_standalone.cpp)
       ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
       ament_add_gtest(test_forked_forest_geometry
         test/test_forked_forest_geometry.cpp
@@ -744,6 +745,7 @@ if(DEFINED ENV{ROS_VERSION})
         test/test_demo11_publication_stamp_authority.cpp
       )
       target_link_libraries(test_run_log_manager iap)
+      target_link_libraries(test_run_log_manager_standalone iap)
       target_link_libraries(test_p1_fixture_geometry iap)
       target_link_libraries(test_forked_forest_geometry iap)
       target_link_libraries(test_demo11_publication_stamp_authority iap)

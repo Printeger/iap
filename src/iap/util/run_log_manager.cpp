@@ -112,10 +112,31 @@ RunLogManager::RunLogManager(std::string process_name, std::string config_dir_or
       config_dir_(std::move(config_dir_or_empty)),
       start_timestamp_(run_directory_timestamp()),
       start_timestamp_iso_(iso_utc_timestamp(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()))) {
-  log_root_ = resolve_log_root();
-  run_dir_ = log_root_ / start_timestamp_;
+  const std::string adopted_run = getenv_or_empty("IAP_RUN_DIR");
+  if (!adopted_run.empty()) {
+    const std::filesystem::path requested(adopted_run);
+    if (!requested.is_absolute()) {
+      throw std::invalid_argument("IAP_RUN_DIR must be absolute");
+    }
+    std::error_code ec;
+    run_dir_ = std::filesystem::canonical(requested, ec);
+    if (ec || !std::filesystem::is_directory(run_dir_)) {
+      throw std::invalid_argument("IAP_RUN_DIR must name an existing directory: " + adopted_run);
+    }
+    if (run_dir_ == run_dir_.root_path()) {
+      throw std::invalid_argument("IAP_RUN_DIR cannot be filesystem root");
+    }
+    log_root_ = run_dir_.parent_path();
+    start_timestamp_ = run_dir_.filename().string();
+  } else {
+    owns_run_ = true;
+    log_root_ = resolve_log_root();
+    allocate_run_directory();
+  }
   create_layout();
-  update_latest_symlink();
+  if (owns_run_) {
+    update_latest_symlink();
+  }
 }
 
 const std::filesystem::path& RunLogManager::log_root() const {
@@ -145,52 +166,113 @@ std::filesystem::path RunLogManager::metadata_path(const std::string& name) cons
 std::filesystem::path RunLogManager::category_path(const std::string& category,
                                                    const std::string& name) const {
   const std::filesystem::path base = run_dir_ / category;
-  return name.empty() ? base : (base / name);
+  if (name.empty()) {
+    return base;
+  }
+  const std::filesystem::path relative(name);
+  if (relative.is_absolute()) {
+    throw std::invalid_argument("artifact name must be relative: " + name);
+  }
+  for (const auto& component : relative) {
+    if (component == "..") {
+      throw std::invalid_argument("artifact name must not contain '..': " + name);
+    }
+  }
+  return (base / relative).lexically_normal();
 }
 
 std::filesystem::path RunLogManager::resolve_log_root() const {
-  const auto* config = GlobalConfig::get_if_initialized();
-  const std::string default_root = (std::filesystem::current_path() / "log").string();
-  const std::string configured_root = config
-    ? config->param<std::string>("logging", "log_dir", default_root)
-    : default_root;
-  return std::filesystem::path(configured_root);
+  std::filesystem::path root;
+  const std::string configured_root = getenv_or_empty("IAP_RUN_ROOT");
+  if (!configured_root.empty()) {
+    root = std::filesystem::path(configured_root);
+    if (!root.is_absolute()) {
+      throw std::invalid_argument("IAP_RUN_ROOT must be absolute");
+    }
+  } else {
+    const std::filesystem::path source_root(IAP_SOURCE_ROOT);
+    if (std::filesystem::is_regular_file(source_root / "CMakeLists.txt") &&
+        std::filesystem::is_directory(source_root / "src")) {
+      root = source_root / "log";
+    } else {
+      const std::string xdg_state_home = getenv_or_empty("XDG_STATE_HOME");
+      const std::string user_home = getenv_or_empty("HOME");
+      if (!xdg_state_home.empty()) {
+        root = std::filesystem::path(xdg_state_home) / "iap" / "log";
+      } else if (!user_home.empty()) {
+        root = std::filesystem::path(user_home) / ".local" / "state" / "iap" / "log";
+      } else {
+        throw std::runtime_error("cannot resolve IAP run root without HOME or XDG_STATE_HOME");
+      }
+    }
+  }
+  if (root == root.root_path()) {
+    throw std::invalid_argument("IAP_RUN_ROOT cannot be filesystem root");
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(root, ec);
+  if (ec) {
+    throw std::runtime_error("failed to create IAP_RUN_ROOT '" + root.string() + "': " + ec.message());
+  }
+  return std::filesystem::canonical(root);
+}
+
+void RunLogManager::allocate_run_directory() {
+  for (int collision = 0; collision < 100; ++collision) {
+    std::ostringstream suffix;
+    if (collision > 0) {
+      suffix << "_" << std::setw(2) << std::setfill('0') << collision;
+    }
+    const auto candidate = log_root_ / (start_timestamp_ + suffix.str());
+    std::error_code ec;
+    if (std::filesystem::create_directory(candidate, ec)) {
+      run_dir_ = std::filesystem::canonical(candidate);
+      start_timestamp_ = run_dir_.filename().string();
+      return;
+    }
+    if (!ec && std::filesystem::exists(candidate)) {
+      continue;
+    }
+    if (ec != std::errc::file_exists) {
+      throw std::runtime_error("failed to allocate run directory '" + candidate.string() + "': " + ec.message());
+    }
+  }
+  throw std::runtime_error("could not allocate a unique run directory below " + log_root_.string());
 }
 
 void RunLogManager::create_layout() {
-  std::error_code ec;
-  std::filesystem::create_directories(runtime_path(""), ec);
-  ec.clear();
-  std::filesystem::create_directories(profiling_path(""), ec);
-  ec.clear();
-  std::filesystem::create_directories(export_path(""), ec);
-  ec.clear();
-  std::filesystem::create_directories(metadata_path(""), ec);
+  for (const auto& directory : {
+           runtime_path(""), profiling_path(""), export_path(""), metadata_path("")}) {
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) {
+      throw std::runtime_error("failed to create run artifact directory '" +
+                               directory.string() + "': " + ec.message());
+    }
+  }
 }
 
 void RunLogManager::update_latest_symlink() const {
   const auto latest = log_root_ / "latest";
   std::error_code ec;
 
-  if (std::filesystem::exists(latest, ec) || std::filesystem::is_symlink(latest, ec)) {
-    ec.clear();
-    if (std::filesystem::is_symlink(latest, ec)) {
-      std::filesystem::remove(latest, ec);
-    } else {
-      std::filesystem::remove_all(latest, ec);
-    }
-    if (ec) {
-      spdlog::warn("[RunLogManager] failed to remove existing latest link '{}': {}",
-                   latest.string(), ec.message());
-      return;
-    }
+  if (std::filesystem::exists(latest, ec) && !std::filesystem::is_symlink(latest, ec)) {
+    throw std::runtime_error("IAP latest path exists and is not a symlink: " + latest.string());
   }
 
+  const auto temporary = log_root_ /
+      (".latest." + std::to_string(::getpid()) + "." + start_timestamp_);
   ec.clear();
-  std::filesystem::create_directory_symlink(run_dir_.filename(), latest, ec);
+  std::filesystem::remove(temporary, ec);
+  ec.clear();
+  std::filesystem::create_directory_symlink(run_dir_.filename(), temporary, ec);
   if (ec) {
-    spdlog::warn("[RunLogManager] failed to create latest symlink '{}': {}",
-                 latest.string(), ec.message());
+    throw std::runtime_error("failed to create temporary latest symlink: " + ec.message());
+  }
+  std::filesystem::rename(temporary, latest, ec);
+  if (ec) {
+    std::filesystem::remove(temporary);
+    throw std::runtime_error("failed to update latest symlink: " + ec.message());
   }
 }
 

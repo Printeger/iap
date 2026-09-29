@@ -29,6 +29,7 @@ private:
   std::filesystem::path category_path(const std::string& category,
                                       const std::string& name) const;
   std::filesystem::path resolve_log_root() const;
+  void allocate_run_directory();
   void create_layout();
   void update_latest_symlink() const;
   std::map<std::string, std::string> collect_run_info_fields() const;
@@ -39,6 +40,7 @@ private:
   std::string start_timestamp_iso_;
   std::filesystem::path log_root_;
   std::filesystem::path run_dir_;
+  bool owns_run_ = false;
 };
 
 }  // namespace glim
