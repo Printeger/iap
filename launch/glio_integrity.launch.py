@@ -12,7 +12,13 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    LogInfo,
+    OpaqueFunction,
+    RegisterEventHandler,
+)
+from launch.event_handlers import OnShutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -23,6 +29,8 @@ if str(_INCLUDES) not in sys.path:
 from profile_runtime import materialize_profile  # noqa: E402
 from run_directory import (  # noqa: E402
     adopt_run_directory,
+    finalize_run_from_shutdown,
+    register_config_snapshot,
     register_subordinate_manifest,
     resolve_run_directory,
 )
@@ -38,10 +46,7 @@ def _setup(context):
     output_dir = (
         adopt_run_directory(internal_run)
         if internal_run
-        else resolve_run_directory(
-            LaunchConfiguration("output_dir").perform(context),
-            entrypoint="glio_integrity",
-        )
+        else resolve_run_directory(entrypoint="glio_integrity")
     )
     integrity_profile = LaunchConfiguration("integrity_profile").perform(context)
     forbid_sim = _as_bool(
@@ -57,13 +62,15 @@ def _setup(context):
         integrity_profile=integrity_profile,
         forbid_sim_extensions=forbid_sim,
     )
-    register_subordinate_manifest(
-        output_dir,
-        output_dir / "metadata" / "manifests" / "launch_profile_manifest.json",
-    )
+    if not internal_run:
+        register_config_snapshot(output_dir, Path(runtime_config))
+        register_subordinate_manifest(
+            output_dir,
+            output_dir / "metadata" / "manifests" / "launch_profile_manifest.json",
+        )
     imu_topic = LaunchConfiguration("imu_topic").perform(context)
     points_topic = LaunchConfiguration("points_topic").perform(context)
-    return [
+    actions = [
         LogInfo(
             msg=(
                 "[glio_integrity] contract=GLIO+CurrentIntegrityMonitor "
@@ -88,6 +95,17 @@ def _setup(context):
             ],
         ),
     ]
+    if not internal_run:
+        actions.append(
+            RegisterEventHandler(
+                OnShutdown(
+                    on_shutdown=lambda event, _context: finalize_run_from_shutdown(
+                        output_dir, event
+                    )
+                )
+            )
+        )
+    return actions
 
 
 def generate_launch_description():
@@ -103,11 +121,6 @@ def generate_launch_description():
                 "config_path",
                 default_value=default_config,
                 description="Profile containing GNSS and integrity extensions.",
-            ),
-            DeclareLaunchArgument(
-                "output_dir",
-                default_value="",
-                description="Optional absolute override; empty creates a timestamped integrity run.",
             ),
             DeclareLaunchArgument(
                 "run_dir",

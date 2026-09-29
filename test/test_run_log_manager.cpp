@@ -48,4 +48,8 @@ TEST(RunLogManagerTest, AdoptsOwnerRunWithoutAllocatingNestedTimestamp) {
   EXPECT_FALSE(std::filesystem::exists(temp_root / "latest"));
   EXPECT_THROW(first.export_path("../escape.csv"), std::invalid_argument);
   EXPECT_THROW(first.runtime_path("/tmp/escape.log"), std::invalid_argument);
+  const auto outside = temp_root / "outside";
+  std::filesystem::create_directories(outside);
+  std::filesystem::create_directory_symlink(outside, first.export_path("") / "linked");
+  EXPECT_THROW(first.export_path("linked/escape.csv"), std::invalid_argument);
 }

@@ -1,10 +1,14 @@
 import importlib.util
+import fcntl
 import json
 import os
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from launch import LaunchContext
@@ -26,6 +30,37 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             raise RuntimeError(f"cannot load {path}")
         spec.loader.exec_module(module)
         return module
+
+    @staticmethod
+    def _make_retention_run(
+        root: Path,
+        name: str,
+        *,
+        ended_at: datetime,
+        lifecycle: str = "completed",
+        run_class: str = "development",
+        retention_class: str = "ordinary",
+    ) -> Path:
+        run = root / name
+        (run / "metadata").mkdir(parents=True)
+        manifest = {
+            "schema_version": "iap_run_artifact_v1",
+            "run_id": name,
+            "run_root": str(root),
+            "run_dir": str(run),
+            "started_at_utc": (ended_at - timedelta(hours=1)).isoformat().replace(
+                "+00:00", "Z"
+            ),
+            "ended_at_utc": ended_at.isoformat().replace("+00:00", "Z"),
+            "lifecycle": lifecycle,
+            "safety_outcome": "not_applicable",
+            "run_class": run_class,
+            "retention_class": retention_class,
+        }
+        (run / "metadata/run_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        return run
 
     def test_all_historical_scenario_names_are_in_catalog(self):
         catalog = json.loads(
@@ -101,6 +136,21 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertNotIn(
                 'executable="phase2_planner_integrity_evaluator"', source
             )
+
+    def test_each_canonical_entrypoint_has_one_owner_and_propagates_both_run_envs(self):
+        for filename in (
+            "glio.launch.py",
+            "glio_integrity.launch.py",
+            "iap_sim.launch.py",
+            "iap_flight.launch.py",
+        ):
+            source = (LAUNCH / filename).read_text(encoding="utf-8")
+            self.assertEqual(source.count("resolve_run_directory("), 1, filename)
+            self.assertIn('"IAP_RUN_DIR"', source, filename)
+            self.assertIn('"ROS_LOG_DIR"', source, filename)
+        for filename in ("glio.launch.py", "glio_integrity.launch.py"):
+            source = (LAUNCH / filename).read_text(encoding="utf-8")
+            self.assertIn("adopt_run_directory(internal_run)", source, filename)
 
     def test_flight_graph_has_no_simulator_or_bag_process(self):
         source = (LAUNCH / "iap_flight.launch.py").read_text(encoding="utf-8")
@@ -210,6 +260,29 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                             assert_contained(child)
 
                 assert_contained(secondary)
+
+    def test_legacy_artifact_paths_use_only_basename_and_warn(self):
+        helper = self._load_launch("_includes/profile_runtime.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertWarns(DeprecationWarning):
+                redirected = helper._redirect_artifact_paths(
+                    {
+                        "debug_csv_path": "/tmp/legacy/debug.csv",
+                        "dump_path": "/tmp/legacy/dump-v1",
+                        "log_dir": "/tmp/legacy/logs",
+                    },
+                    export_dir=root / "export/glio",
+                    log_dir=root / "runtime",
+                    dump_dir=root / "export/glio/dump",
+                )
+            self.assertEqual(
+                Path(redirected["debug_csv_path"]), root / "export/glio/debug.csv"
+            )
+            self.assertEqual(
+                Path(redirected["dump_path"]), root / "export/glio/dump-v1"
+            )
+            self.assertEqual(Path(redirected["log_dir"]), root / "runtime")
 
     def test_sim_profile_reuses_exact_scenarios_without_test_processes(self):
         canonical = (LAUNCH / "iap_sim.launch.py").read_text(encoding="utf-8")
@@ -323,8 +396,8 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
             os.environ, {"IAP_RUN_ROOT": temporary}
         ), mock.patch.object(helper, "_new_run_id", return_value="20260929T120000Z_000"):
-            first = helper.resolve_run_directory("", entrypoint="glio")
-            second = helper.resolve_run_directory("", entrypoint="glio")
+            first = helper.resolve_run_directory(entrypoint="glio")
+            second = helper.resolve_run_directory(entrypoint="glio")
             self.assertEqual(first, Path(temporary) / "20260929T120000Z_000")
             self.assertEqual(second, Path(temporary) / "20260929T120000Z_000_01")
             self.assertTrue(first.is_dir())
@@ -342,13 +415,33 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(manifest["entrypoint"], "glio")
             self.assertEqual(manifest["lifecycle"], "active")
 
+    def test_concurrent_allocation_is_unique_and_latest_is_atomic(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ), mock.patch.object(helper, "_new_run_id", return_value="20260929T120000Z_000"):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                runs = list(
+                    executor.map(
+                        lambda _: helper.resolve_run_directory(entrypoint="glio"),
+                        range(8),
+                    )
+                )
+
+            self.assertEqual(len(set(runs)), 8)
+            self.assertEqual(
+                (Path(temporary) / "latest").resolve(), max(runs, key=lambda p: p.name)
+            )
+            for run in runs:
+                helper.finalize_run(run, lifecycle="completed")
+
     def test_automatic_sim_run_directory_is_grouped_by_scenario(self):
         helper = self._load_launch("_includes/run_directory.py")
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
             os.environ, {"IAP_RUN_ROOT": temporary}
         ):
             run_dir = helper.resolve_run_directory(
-                "", entrypoint="iap_sim", scenario="fused_nominal"
+                entrypoint="iap_sim", scenario="fused_nominal"
             )
             self.assertEqual(run_dir.parent, Path(temporary))
 
@@ -358,18 +451,16 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             os.environ.pop("IAP_RUN_ROOT", None)
             self.assertEqual(helper._default_run_root(), REPO / "log")
 
-    def test_explicit_run_directory_remains_an_absolute_override(self):
-        helper = self._load_launch("_includes/run_directory.py")
-        with tempfile.TemporaryDirectory() as temporary:
-            requested = Path(temporary) / "chosen"
-            self.assertEqual(
-                helper.resolve_run_directory(str(requested), entrypoint="glio"),
-                requested.resolve(),
-            )
-            with self.assertRaisesRegex(RuntimeError, "must be an absolute path"):
-                helper.resolve_run_directory("relative/run", entrypoint="glio")
-            with self.assertRaisesRegex(RuntimeError, "already exists"):
-                helper.resolve_run_directory(str(requested), entrypoint="glio")
+    def test_output_dir_is_not_a_canonical_launch_argument(self):
+        for filename in (
+            "glio.launch.py",
+            "glio_integrity.launch.py",
+            "iap_sim.launch.py",
+            "iap_flight.launch.py",
+        ):
+            source = (LAUNCH / filename).read_text(encoding="utf-8")
+            self.assertNotIn('LaunchConfiguration("output_dir")', source, filename)
+            self.assertNotIn('"output_dir",\n', source, filename)
 
     def test_latest_never_regresses_to_an_older_automatic_run(self):
         helper = self._load_launch("_includes/run_directory.py")
@@ -383,6 +474,201 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             helper._update_latest(parent, older)
             self.assertEqual((parent / "latest").resolve(), newer)
 
+    def test_latest_refuses_to_replace_an_ordinary_file(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            run = parent / "20260929T010101Z_001"
+            run.mkdir()
+            latest = parent / "latest"
+            latest.write_text("operator-owned", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "not a symlink"):
+                helper._update_latest(parent, run)
+            self.assertEqual(latest.read_text(encoding="utf-8"), "operator-owned")
+
+    def test_retention_keeps_latest_three_and_all_runs_from_last_seven_days(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        now = datetime(2026, 9, 29, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runs = []
+            for day in (1, 2, 3, 4, 5):
+                runs.append(
+                    self._make_retention_run(
+                        root,
+                        f"2026090{day}T000000Z_000",
+                        ended_at=datetime(2026, 9, day, tzinfo=timezone.utc),
+                    )
+                )
+            recent = self._make_retention_run(
+                root,
+                "20260801T000000Z_000",
+                ended_at=now - timedelta(days=6),
+            )
+            boundary = self._make_retention_run(
+                root,
+                "20260701T000000Z_000",
+                ended_at=now - timedelta(days=7),
+            )
+
+            removed = helper.prune_development_runs(root, now=now)
+
+            self.assertEqual(
+                {path.name for path in removed},
+                {"20260901T000000Z_000", "20260902T000000Z_000"},
+            )
+            self.assertTrue(recent.is_dir())
+            self.assertTrue(boundary.is_dir())
+            for run in runs[2:]:
+                self.assertTrue(run.is_dir())
+            self.assertFalse(any(root.glob(".retention-trash.*")))
+
+    def test_retention_skips_nonordinary_unfinished_invalid_symlink_and_locked_runs(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        now = datetime(2026, 9, 29, tzinfo=timezone.utc)
+        old = now - timedelta(days=30)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ordinary = [
+                self._make_retention_run(
+                    root, f"2026080{day}T000000Z_000", ended_at=old
+                )
+                for day in (1, 2, 3, 4)
+            ]
+            active = self._make_retention_run(
+                root,
+                "20260805T000000Z_000",
+                ended_at=old,
+                lifecycle="active",
+            )
+            formal = self._make_retention_run(
+                root,
+                "20260806T000000Z_000",
+                ended_at=old,
+                run_class="formal",
+            )
+            protected = self._make_retention_run(
+                root,
+                "20260807T000000Z_000",
+                ended_at=old,
+                retention_class="protected",
+            )
+            invalid = root / "20260808T000000Z_000"
+            (invalid / "metadata").mkdir(parents=True)
+            (invalid / "metadata/run_manifest.json").write_text("not-json")
+            outside = root / "outside"
+            outside.mkdir()
+            linked = root / "20260809T000000Z_000"
+            linked.symlink_to(outside, target_is_directory=True)
+            ordinary_file = root / "20260811T000000Z_000"
+            ordinary_file.write_text("do not delete", encoding="utf-8")
+            locked = self._make_retention_run(
+                root, "20260710T000000Z_000", ended_at=old
+            )
+            lock_path = locked / "metadata/.active.lock"
+            with lock_path.open("a", encoding="utf-8") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                removed = helper.prune_development_runs(root, now=now)
+
+            self.assertEqual({path.name for path in removed}, {ordinary[0].name})
+            for run in (
+                active,
+                formal,
+                protected,
+                invalid,
+                linked,
+                locked,
+                ordinary_file,
+            ):
+                self.assertTrue(run.exists() or run.is_symlink())
+            self.assertTrue(outside.is_dir())
+
+    def test_external_root_retention_requires_explicit_opt_in(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        old = datetime.now(timezone.utc) - timedelta(days=30)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            old_runs = [
+                self._make_retention_run(
+                    root, f"2026080{day}T000000Z_000", ended_at=old
+                )
+                for day in (1, 2, 3, 4)
+            ]
+            with mock.patch.dict(
+                os.environ,
+                {"IAP_RUN_ROOT": str(root)},
+                clear=False,
+            ), mock.patch.object(
+                helper, "_new_run_id", return_value="20260929T120000Z_000"
+            ):
+                os.environ.pop("IAP_RETENTION_ENABLED", None)
+                helper.resolve_run_directory(entrypoint="glio")
+                self.assertTrue(all(run.is_dir() for run in old_runs))
+
+                os.environ["IAP_RETENTION_ENABLED"] = "1"
+                helper.resolve_run_directory(entrypoint="glio")
+                self.assertFalse(old_runs[0].exists())
+                self.assertTrue(all(run.is_dir() for run in old_runs[1:]))
+
+    def test_retention_failure_does_not_block_run_allocation(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ,
+            {"IAP_RUN_ROOT": temporary, "IAP_RETENTION_ENABLED": "1"},
+        ), mock.patch.object(
+            helper, "prune_development_runs", side_effect=OSError("lock failed")
+        ):
+            with self.assertWarnsRegex(UserWarning, "retention skipped"):
+                run = helper.resolve_run_directory(entrypoint="glio")
+            self.assertTrue(run.is_dir())
+
+    def test_finalize_run_updates_lifecycle_and_safety_outcome_atomically(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ):
+            run = helper.resolve_run_directory(entrypoint="iap_sim")
+            helper.finalize_run(
+                run, lifecycle="completed", safety_outcome="hold"
+            )
+            manifest = json.loads(
+                (run / "metadata/run_manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["lifecycle"], "completed")
+            self.assertEqual(manifest["safety_outcome"], "hold")
+            self.assertIsNotNone(manifest["ended_at_utc"])
+            with self.assertRaisesRegex(ValueError, "lifecycle"):
+                helper.finalize_run(run, lifecycle="holding")
+
+    def test_shutdown_mapping_and_config_snapshot_index(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ):
+            interrupted = helper.resolve_run_directory(entrypoint="glio")
+            config_dir = interrupted / "metadata/config/iap"
+            helper.register_config_snapshot(interrupted, config_dir)
+            helper.finalize_run_from_shutdown(
+                interrupted,
+                SimpleNamespace(reason="ctrl-c (SIGINT)", due_to_sigint=True),
+            )
+            manifest = json.loads(
+                (interrupted / "metadata/run_manifest.json").read_text()
+            )
+            self.assertEqual(manifest["lifecycle"], "interrupted")
+            self.assertEqual(manifest["config_snapshots"], ["metadata/config/iap"])
+
+            failed = helper.resolve_run_directory(entrypoint="iap_sim")
+            helper.finalize_run_from_shutdown(
+                failed,
+                SimpleNamespace(
+                    reason="Caught exception in launch (see debug for traceback): boom",
+                    due_to_sigint=False,
+                ),
+            )
+            manifest = json.loads((failed / "metadata/run_manifest.json").read_text())
+            self.assertEqual(manifest["lifecycle"], "failed")
+
     def test_glio_omitted_output_uses_automatic_run_directory(self):
         glio = self._load_launch("glio.launch.py")
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
@@ -392,7 +678,6 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             context.launch_configurations.update(
                 {
                     "config_path": str(REPO / "config/profiles/glio"),
-                    "output_dir": "",
                     "imu_topic": "/imu",
                     "points_topic": "/points",
                     "use_sim_time": "false",
@@ -410,26 +695,29 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
     def test_each_canonical_entrypoint_constructs_a_graph(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            environment = mock.patch.dict(
+                os.environ, {"IAP_RUN_ROOT": str(root / "runs")}
+            )
+            environment.start()
+            self.addCleanup(environment.stop)
 
             glio = self._load_launch("glio.launch.py")
             context = LaunchContext()
             context.launch_configurations.update(
                 {
                     "config_path": str(REPO / "config/profiles/glio"),
-                    "output_dir": str(root / "glio"),
                     "imu_topic": "/imu",
                     "points_topic": "/points",
                     "use_sim_time": "false",
                 }
             )
-            self.assertEqual(len(glio._setup(context)), 2)
+            self.assertEqual(len(glio._setup(context)), 3)
 
             integrity = self._load_launch("glio_integrity.launch.py")
             context = LaunchContext()
             context.launch_configurations.update(
                 {
                     "config_path": str(REPO / "config/profiles/glio_integrity"),
-                    "output_dir": str(root / "integrity"),
                     "imu_topic": "/imu",
                     "points_topic": "/points",
                     "use_sim_time": "false",
@@ -438,14 +726,13 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                     "runtime_contract": "glio_integrity",
                 }
             )
-            self.assertEqual(len(integrity._setup(context)), 2)
+            self.assertEqual(len(integrity._setup(context)), 3)
 
             simulation = self._load_launch("iap_sim.launch.py")
             context = LaunchContext()
             context.launch_configurations.update(
                 {
                     "scenario": "fused_nominal",
-                    "output_dir": str(root / "sim"),
                     "start_rviz": "false",
                     "planner_start_delay_s": "0",
                     "run_duration_s": "0",
@@ -454,7 +741,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             with mock.patch.object(
                 simulation, "get_package_share_directory", return_value=str(REPO)
             ):
-                self.assertEqual(len(simulation._setup(context)), 3)
+                self.assertEqual(len(simulation._setup(context)), 4)
 
             flight = self._load_launch("iap_flight.launch.py")
             context = LaunchContext()
@@ -462,7 +749,6 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 {
                     "flight_authorized": "true",
                     "controller_handshake_confirmed": "true",
-                    "output_dir": str(root / "flight"),
                     "config_path": str(REPO / "config/profiles/full_stack_flight"),
                     "imu_topic": "/imu",
                     "points_topic": "/points",
@@ -497,7 +783,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             with mock.patch.object(
                 flight, "get_package_share_directory", side_effect=package_share
             ):
-                self.assertEqual(len(flight._setup(context)), 5)
+                self.assertEqual(len(flight._setup(context)), 6)
 
     def test_historical_launches_exist_only_in_backup(self):
         canonical = {

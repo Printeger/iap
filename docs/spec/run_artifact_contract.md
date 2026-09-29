@@ -41,10 +41,9 @@ and so on. Allocation and `latest` updates are serialized by a lock in the run
 root. `latest` is an atomically replaced relative symlink. A non-symlink named
 `latest` is an error and MUST NOT be removed.
 
-The deprecated launch argument `output_dir` is a migration-only exception. It
-MUST be absolute and not already exist, MUST emit a warning, and MUST be removed
-after all four canonical entrypoints pass the new contract tests. New tools and
-documentation MUST use `IAP_RUN_ROOT`.
+The former user-facing launch argument `output_dir` has been removed from all
+four canonical entrypoints. New tools and documentation MUST use
+`IAP_RUN_ROOT`; `run_dir` exists only for private owner-to-child adoption.
 
 ## 3. Required layout
 

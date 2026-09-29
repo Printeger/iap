@@ -40,7 +40,8 @@ class AnalyzerContractTest(unittest.TestCase):
                     {
                         "schema_version": "iap_run_artifact_v1",
                         "run_id": run.name,
-                        "lifecycle": "completed",
+                        "lifecycle": "failed",
+                        "safety_outcome": "hold",
                     }
                 ),
                 encoding="utf-8",
@@ -66,6 +67,13 @@ class AnalyzerContractTest(unittest.TestCase):
                 self.assertEqual(analyzer.main(), 0)
             self.assertTrue((run / "export/analysis/report.json").is_file())
             self.assertFalse((run / "analysis").exists())
+            report = json.loads(
+                (run / "export/analysis/report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["metadata"]["run_info"]["lifecycle"], "failed")
+            self.assertEqual(
+                report["metadata"]["run_info"]["safety_outcome"], "hold"
+            )
             external = Path(temporary) / "explicit-analysis"
             analyzer.register_external_analysis_export(run, external)
             manifest = json.loads(

@@ -1,18 +1,22 @@
 #include <iap/util/run_log_manager.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
 #include <vector>
 
+#include <sys/file.h>
 #include <unistd.h>
 
 #include <nlohmann/json.hpp>
@@ -116,12 +120,179 @@ void atomic_write_json(const std::filesystem::path& path, const nlohmann::json& 
   }
 }
 
+bool truthy(const std::string& value) {
+  std::string normalized = value;
+  std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return normalized == "1" || normalized == "true" ||
+         normalized == "yes" || normalized == "on";
+}
+
+bool retention_enabled(const std::filesystem::path& root) {
+  const std::string configured = getenv_or_empty("IAP_RETENTION_ENABLED");
+  if (!configured.empty()) {
+    return truthy(configured);
+  }
+  std::error_code ec;
+  const auto repository_root = std::filesystem::weakly_canonical(
+      std::filesystem::path(IAP_SOURCE_ROOT) / "log", ec);
+  return !ec && root == repository_root;
+}
+
+std::optional<std::time_t> parse_utc_timestamp(const std::string& value) {
+  std::tm tm{};
+  std::istringstream stream(value);
+  stream >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+  if (stream.fail()) {
+    return std::nullopt;
+  }
+#if defined(_WIN32)
+  return _mkgmtime(&tm);
+#else
+  return timegm(&tm);
+#endif
+}
+
+struct RetentionCandidate {
+  std::filesystem::path path;
+  std::time_t ended_at = 0;
+};
+
+std::optional<RetentionCandidate> load_retention_candidate(
+    const std::filesystem::path& root,
+    const std::filesystem::path& path) {
+  static const std::regex run_id_pattern(
+      R"(^\d{8}T\d{6}Z_\d{3}(_\d{2})?$)");
+  std::error_code ec;
+  const auto status = std::filesystem::symlink_status(path, ec);
+  if (ec || status.type() != std::filesystem::file_type::directory ||
+      !std::regex_match(path.filename().string(), run_id_pattern)) {
+    return std::nullopt;
+  }
+  const auto manifest_path = path / "metadata" / "run_manifest.json";
+  const auto manifest_status = std::filesystem::symlink_status(manifest_path, ec);
+  if (ec || manifest_status.type() != std::filesystem::file_type::regular) {
+    return std::nullopt;
+  }
+  nlohmann::json manifest;
+  try {
+    std::ifstream stream(manifest_path);
+    stream >> manifest;
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+  try {
+    const std::string lifecycle = manifest.value("lifecycle", "");
+    if (manifest.value("schema_version", "") != "iap_run_artifact_v1" ||
+        manifest.value("run_id", "") != path.filename().string() ||
+        manifest.value("run_root", "") != root.string() ||
+        manifest.value("run_dir", "") != path.string() ||
+        (lifecycle != "completed" && lifecycle != "failed" && lifecycle != "interrupted") ||
+        manifest.value("run_class", "") != "development" ||
+        manifest.value("retention_class", "") != "ordinary") {
+      return std::nullopt;
+    }
+    const auto ended_at = parse_utc_timestamp(manifest.value("ended_at_utc", ""));
+    if (!ended_at) {
+      return std::nullopt;
+    }
+    return RetentionCandidate{path, *ended_at};
+  } catch (const nlohmann::json::exception&) {
+    return std::nullopt;
+  }
+}
+
+bool run_is_locked(const std::filesystem::path& run_dir) {
+  const auto lock_path = run_dir / "metadata" / ".active.lock";
+  std::error_code ec;
+  const auto status = std::filesystem::symlink_status(lock_path, ec);
+  if (status.type() == std::filesystem::file_type::not_found) {
+    return false;
+  }
+  if (ec || status.type() != std::filesystem::file_type::regular) {
+    return true;
+  }
+  const int fd = ::open(lock_path.c_str(), O_RDWR | O_NOFOLLOW);
+  if (fd < 0) {
+    return true;
+  }
+  const bool locked = ::flock(fd, LOCK_EX | LOCK_NB) != 0;
+  if (!locked) {
+    ::flock(fd, LOCK_UN);
+  }
+  ::close(fd);
+  return locked;
+}
+
+void prune_development_runs(const std::filesystem::path& root) {
+  if (!retention_enabled(root)) {
+    return;
+  }
+  const auto lock_path = root / ".retention.lock";
+  const int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
+  if (lock_fd < 0 || ::flock(lock_fd, LOCK_EX) != 0) {
+    if (lock_fd >= 0) {
+      ::close(lock_fd);
+    }
+    spdlog::warn("[RunLogManager] retention disabled: cannot lock {}", lock_path.string());
+    return;
+  }
+
+  try {
+    std::vector<RetentionCandidate> candidates;
+    for (const auto& entry : std::filesystem::directory_iterator(root)) {
+      if (const auto candidate = load_retention_candidate(root, entry.path())) {
+        candidates.push_back(*candidate);
+      }
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const auto& lhs, const auto& rhs) {
+                return lhs.path.filename().string() > rhs.path.filename().string();
+              });
+    const std::time_t now = std::time(nullptr);
+    constexpr double seven_days_seconds = 7.0 * 24.0 * 60.0 * 60.0;
+    for (std::size_t index = 3; index < candidates.size(); ++index) {
+      const auto& candidate = candidates[index];
+      if (std::difftime(now, candidate.ended_at) <= seven_days_seconds ||
+          run_is_locked(candidate.path) ||
+          !load_retention_candidate(root, candidate.path)) {
+        continue;
+      }
+      const auto quarantine = root /
+          (".retention-trash." + candidate.path.filename().string() + "." +
+           std::to_string(::getpid()));
+      std::error_code ec;
+      std::filesystem::rename(candidate.path, quarantine, ec);
+      if (ec) {
+        spdlog::warn("[RunLogManager] retention could not quarantine {}: {}",
+                     candidate.path.string(), ec.message());
+        continue;
+      }
+      std::filesystem::remove_all(quarantine, ec);
+      if (ec) {
+        spdlog::warn("[RunLogManager] retention could not remove {}: {}",
+                     quarantine.string(), ec.message());
+      }
+    }
+  } catch (const std::exception& error) {
+    spdlog::warn("[RunLogManager] retention skipped after error: {}", error.what());
+  }
+  ::flock(lock_fd, LOCK_UN);
+  ::close(lock_fd);
+}
+
 }  // namespace
 
 RunLogManager& RunLogManager::initialize(const std::string& process_name,
                                          const std::string& config_dir_or_empty) {
   if (!g_run_log_manager) {
     g_run_log_manager.reset(new RunLogManager(process_name, config_dir_or_empty));
+    std::atexit([] {
+      if (g_run_log_manager) {
+        g_run_log_manager->finalize_owner_manifest();
+        g_run_log_manager.reset();
+      }
+    });
   }
   return *g_run_log_manager;
 }
@@ -161,12 +332,14 @@ RunLogManager::RunLogManager(std::string process_name, std::string config_dir_or
   } else {
     owns_run_ = true;
     log_root_ = resolve_log_root();
+    prune_development_runs(log_root_);
     allocate_run_directory();
   }
   create_layout();
   if (owns_run_) {
     write_owner_manifest();
     update_latest_symlink();
+    acquire_active_lock();
   }
 }
 
@@ -209,7 +382,18 @@ std::filesystem::path RunLogManager::category_path(const std::string& category,
       throw std::invalid_argument("artifact name must not contain '..': " + name);
     }
   }
-  return (base / relative).lexically_normal();
+  std::error_code ec;
+  const auto resolved_base = std::filesystem::weakly_canonical(base, ec);
+  if (ec) {
+    throw std::invalid_argument("artifact category cannot be resolved: " + category);
+  }
+  const auto resolved = std::filesystem::weakly_canonical(base / relative, ec);
+  if (ec || std::mismatch(
+                resolved_base.begin(), resolved_base.end(), resolved.begin(), resolved.end())
+                .first != resolved_base.end()) {
+    throw std::invalid_argument("artifact path escapes its category: " + name);
+  }
+  return resolved;
 }
 
 std::filesystem::path RunLogManager::resolve_log_root() const {
@@ -299,26 +483,53 @@ void RunLogManager::create_layout() {
 
 void RunLogManager::update_latest_symlink() const {
   const auto latest = log_root_ / "latest";
+  const auto lock_path = log_root_ / ".latest.lock";
+  const int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
+  if (lock_fd < 0 || ::flock(lock_fd, LOCK_EX) != 0) {
+    if (lock_fd >= 0) {
+      ::close(lock_fd);
+    }
+    throw std::runtime_error("failed to lock latest symlink update: " + lock_path.string());
+  }
   std::error_code ec;
+  try {
+    if (std::filesystem::exists(latest, ec) && !std::filesystem::is_symlink(latest, ec)) {
+      throw std::runtime_error("IAP latest path exists and is not a symlink: " + latest.string());
+    }
+    ec.clear();
+    if (std::filesystem::is_symlink(latest, ec)) {
+      const auto current = std::filesystem::read_symlink(latest, ec).filename().string();
+      if (ec) {
+        throw std::runtime_error("failed to read latest symlink: " + ec.message());
+      }
+      if (current >= run_dir_.filename().string()) {
+        ::flock(lock_fd, LOCK_UN);
+        ::close(lock_fd);
+        return;
+      }
+    }
 
-  if (std::filesystem::exists(latest, ec) && !std::filesystem::is_symlink(latest, ec)) {
-    throw std::runtime_error("IAP latest path exists and is not a symlink: " + latest.string());
+    const auto temporary = log_root_ /
+        (".latest." + std::to_string(::getpid()) + "." + start_timestamp_);
+    ec.clear();
+    std::filesystem::remove(temporary, ec);
+    ec.clear();
+    std::filesystem::create_directory_symlink(run_dir_.filename(), temporary, ec);
+    if (ec) {
+      throw std::runtime_error("failed to create temporary latest symlink: " + ec.message());
+    }
+    std::filesystem::rename(temporary, latest, ec);
+    if (ec) {
+      std::filesystem::remove(temporary);
+      throw std::runtime_error("failed to update latest symlink: " + ec.message());
+    }
+  } catch (...) {
+    ::flock(lock_fd, LOCK_UN);
+    ::close(lock_fd);
+    throw;
   }
-
-  const auto temporary = log_root_ /
-      (".latest." + std::to_string(::getpid()) + "." + start_timestamp_);
-  ec.clear();
-  std::filesystem::remove(temporary, ec);
-  ec.clear();
-  std::filesystem::create_directory_symlink(run_dir_.filename(), temporary, ec);
-  if (ec) {
-    throw std::runtime_error("failed to create temporary latest symlink: " + ec.message());
-  }
-  std::filesystem::rename(temporary, latest, ec);
-  if (ec) {
-    std::filesystem::remove(temporary);
-    throw std::runtime_error("failed to update latest symlink: " + ec.message());
-  }
+  ::flock(lock_fd, LOCK_UN);
+  ::close(lock_fd);
 }
 
 std::map<std::string, std::string> RunLogManager::collect_run_info_fields() const {
@@ -374,7 +585,7 @@ void RunLogManager::write_owner_manifest() const {
       {"retention_class", "ordinary"},
       {"build", {{"build_type", IAP_BUILD_TYPE}}},
       {"host", nlohmann::json::object()},
-      {"config_snapshots", nlohmann::json::array()},
+      {"config_snapshots", {"metadata/config"}},
       {"subordinate_manifests", nlohmann::json::array()},
       {"external_exports", nlohmann::json::array()},
   };
@@ -397,6 +608,55 @@ void RunLogManager::write_owner_manifest() const {
   }
   manifest["source"] = source;
   atomic_write_json(metadata_path("run_manifest.json"), manifest);
+}
+
+void RunLogManager::acquire_active_lock() {
+  const auto path = metadata_path(".active.lock");
+  active_lock_fd_ = ::open(path.c_str(), O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
+  if (active_lock_fd_ < 0 || ::flock(active_lock_fd_, LOCK_EX | LOCK_NB) != 0) {
+    if (active_lock_fd_ >= 0) {
+      ::close(active_lock_fd_);
+      active_lock_fd_ = -1;
+    }
+    throw std::runtime_error("failed to acquire run active lock: " + path.string());
+  }
+}
+
+void RunLogManager::finalize_owner_manifest() noexcept {
+  if (!owns_run_) {
+    return;
+  }
+  bool finalized = false;
+  try {
+    const auto path = metadata_path("run_manifest.json");
+    nlohmann::json manifest;
+    {
+      std::ifstream stream(path);
+      stream >> manifest;
+    }
+    if (manifest.value("run_id", "") != run_dir_.filename().string() ||
+        manifest.value("run_dir", "") != run_dir_.string()) {
+      throw std::runtime_error("owner manifest identity changed before finalization");
+    }
+    manifest["lifecycle"] = "completed";
+    manifest["ended_at_utc"] = iso_utc_timestamp(std::time(nullptr));
+    atomic_write_json(path, manifest);
+    finalized = true;
+  } catch (const std::exception& error) {
+    spdlog::warn("[RunLogManager] failed to finalize owner manifest: {}", error.what());
+  }
+  if (active_lock_fd_ >= 0) {
+    ::flock(active_lock_fd_, LOCK_UN);
+    ::close(active_lock_fd_);
+    active_lock_fd_ = -1;
+  }
+  if (finalized) {
+    owns_run_ = false;
+  }
+}
+
+void RunLogManager::complete_owned_run() noexcept {
+  finalize_owner_manifest();
 }
 
 void RunLogManager::write_run_info(const std::map<std::string, std::string>& extra_fields) const {

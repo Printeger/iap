@@ -22,6 +22,7 @@ public:
   std::filesystem::path metadata_path(const std::string& name = std::string()) const;
 
   void write_run_info(const std::map<std::string, std::string>& extra_fields = {}) const;
+  void complete_owned_run() noexcept;
 
 private:
   RunLogManager(std::string process_name, std::string config_dir_or_empty);
@@ -33,6 +34,8 @@ private:
   void create_layout();
   void update_latest_symlink() const;
   void write_owner_manifest() const;
+  void acquire_active_lock();
+  void finalize_owner_manifest() noexcept;
   std::map<std::string, std::string> collect_run_info_fields() const;
 
   std::string process_name_;
@@ -42,6 +45,7 @@ private:
   std::filesystem::path log_root_;
   std::filesystem::path run_dir_;
   bool owns_run_ = false;
+  int active_lock_fd_ = -1;
 };
 
 }  // namespace glim

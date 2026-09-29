@@ -20,7 +20,9 @@ inline bool enabled() {
   static bool initialized = false;
   static bool value = true;
   if (!initialized) {
-    value = glim::GlobalConfig::instance()->param<bool>("global", "enable_timing_csv", true);
+    value = glim::GlobalConfig::instance()->param<bool>(
+        "global", "enable_timing_csv", true) &&
+        glim::RunLogManager::get_if_initialized() != nullptr;
     initialized = true;
   }
   return value;
@@ -31,13 +33,7 @@ inline const std::string& path() {
   if (!value.empty()) return value;
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
     value = run_logs->profiling_path("iap_timing.csv").string();
-    return value;
   }
-  // Fallback: use IAP_SOURCE_ROOT to construct a sensible default.
-  // The hardcoded default was previously a machine-specific path
-  // (/home/dev/code/ws_iap/...) that broke when the workspace moved.
-  value = glim::GlobalConfig::instance()->param<std::string>(
-      "global", "timing_csv_path", std::string(IAP_SOURCE_ROOT) + "/log/res/iap_timing.csv");
   return value;
 }
 

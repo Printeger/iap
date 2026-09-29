@@ -16,9 +16,9 @@ Every entrypoint automatically allocates one collision-safe
 `--symlink-install` workspace the default root is `src/iap/log`; entrypoint and
 scenario identity live in `metadata/run_manifest.json`, not in extra directory
 levels. The root maintains one concurrency-safe `latest` symlink. Set
-`IAP_RUN_ROOT` once to change the base. The deprecated absolute `output_dir`
-override remains for migration only and emits a warning. The deprecated
-`phase2_planner_integrity_evaluator` is forbidden from all four graphs.
+`IAP_RUN_ROOT` once to change the base. The former `output_dir` launch argument
+has been removed. The deprecated `phase2_planner_integrity_evaluator` is
+forbidden from all four graphs.
 
 ## Commands
 
@@ -57,12 +57,17 @@ environment rather than changing every command:
 export IAP_RUN_ROOT=/data/iap_runs
 ```
 
-The old one-run override is migration-only; new automation must use an isolated
-`IAP_RUN_ROOT` instead:
+Automatic retention is enabled only for the repository-local default root. To
+enable it for an explicitly configured root, opt in after reviewing that root:
 
 ```bash
-ros2 launch iap glio.launch.py output_dir:=/data/iap_runs/manual/glio_check
+export IAP_RETENTION_ENABLED=1
 ```
+
+Retention keeps the newest three finalized runs and all runs from the last
+seven days. It ignores active, locked, protected, formal, malformed, and
+symlinked directories; the complete policy is in
+`docs/spec/run_artifact_contract.md`.
 
 The two full-stack profiles use GPU odometry by default. Do not run either ROS
 launch unless the immediately preceding preflight reports `GPU_READY`; device

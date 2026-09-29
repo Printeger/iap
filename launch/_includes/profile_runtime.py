@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -50,11 +51,35 @@ def _redirect_artifact_paths(
         redirected: dict[str, Any] = {}
         for key, child in value.items():
             if isinstance(child, str) and key.endswith("_csv_path"):
-                redirected[key] = str(export_dir / (Path(child).name or f"{key}.csv"))
+                configured = Path(child)
+                if configured.parent != Path("."):
+                    warnings.warn(
+                        f"legacy {key} directory is ignored; only its basename is used",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                redirected[key] = str(
+                    export_dir / (configured.name or f"{key}.csv")
+                )
             elif isinstance(child, str) and key == "log_dir":
+                if child and Path(child).parent != Path("."):
+                    warnings.warn(
+                        "legacy log_dir is ignored; runtime logs are run-scoped",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 redirected[key] = str(log_dir)
             elif isinstance(child, str) and key == "dump_path":
-                redirected[key] = str(dump_dir)
+                configured = Path(child)
+                if configured.parent != Path("."):
+                    warnings.warn(
+                        "legacy dump_path directory is ignored; only its basename is used",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                redirected[key] = str(
+                    dump_dir.parent / (configured.name or dump_dir.name)
+                )
             else:
                 redirected[key] = _redirect_artifact_paths(
                     child,

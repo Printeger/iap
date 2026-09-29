@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import json
+import shutil
 import socket
 import subprocess
 import uuid
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import fcntl
 
 
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_\d{3}(?:_\d{2})?$")
+_TERMINAL_LIFECYCLES = {"completed", "failed", "interrupted"}
+_LIFECYCLES = {"active", *_TERMINAL_LIFECYCLES}
+_SAFETY_OUTCOMES = {"executable", "hold", "not_applicable", "unknown"}
+_ACTIVE_LOCKS: dict[Path, object] = {}
+
+
+def _release_all_active_locks() -> None:
+    for lock in list(_ACTIVE_LOCKS.values()):
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock.close()
+    _ACTIVE_LOCKS.clear()
+
+
+atexit.register(_release_all_active_locks)
 _MODULES = {
     "glio": ["GLIO"],
     "glio_integrity": ["GLIO", "Current Integrity Monitor"],
@@ -74,10 +94,133 @@ def _new_run_id() -> str:
     return f"{timestamp}_{now.microsecond // 1000:03d}"
 
 
+def _parse_utc(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _retention_enabled(parent: Path) -> bool:
+    configured = os.environ.get("IAP_RETENTION_ENABLED")
+    if configured is not None:
+        return configured.strip().lower() in {"1", "true", "yes", "on"}
+    package_root = Path(__file__).resolve().parents[2]
+    return parent.resolve() == (package_root / "log").resolve()
+
+
+def _load_retention_manifest(run_dir: Path) -> tuple[dict, datetime] | None:
+    if run_dir.is_symlink() or not run_dir.is_dir() or not _RUN_ID.fullmatch(run_dir.name):
+        return None
+    manifest_path = run_dir / "metadata" / "run_manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    ended_at = _parse_utc(manifest.get("ended_at_utc"))
+    if (
+        manifest.get("schema_version") != "iap_run_artifact_v1"
+        or manifest.get("run_id") != run_dir.name
+        or manifest.get("run_dir") != str(run_dir)
+        or manifest.get("run_root") != str(run_dir.parent)
+        or manifest.get("lifecycle") not in _TERMINAL_LIFECYCLES
+        or manifest.get("run_class") != "development"
+        or manifest.get("retention_class") != "ordinary"
+        or ended_at is None
+    ):
+        return None
+    return manifest, ended_at
+
+
+def _run_is_locked(run_dir: Path) -> bool:
+    lock_path = run_dir / "metadata" / ".active.lock"
+    if lock_path.is_symlink():
+        return True
+    if not lock_path.exists():
+        return False
+    if not lock_path.is_file():
+        return True
+    try:
+        with lock_path.open("r+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    except (OSError, BlockingIOError):
+        return True
+    return False
+
+
+def prune_development_runs(
+    parent: Path,
+    *,
+    now: datetime | None = None,
+    keep_latest: int = 3,
+    max_age: timedelta = timedelta(days=7),
+) -> list[Path]:
+    """Safely remove eligible old development runs directly below ``parent``."""
+
+    parent = _validated_absolute(Path(parent), "retention root")
+    if keep_latest < 0 or max_age < timedelta(0):
+        raise ValueError("retention limits must be non-negative")
+    if not parent.is_dir():
+        return []
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    lock_path = parent / ".retention.lock"
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    removed: list[Path] = []
+    try:
+        lock_fd = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        warnings.warn(f"retention disabled: cannot safely open {lock_path}: {error}")
+        return removed
+
+    with os.fdopen(lock_fd, "r+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        records: list[tuple[Path, datetime]] = []
+        for child in parent.iterdir():
+            loaded = _load_retention_manifest(child)
+            if loaded is not None:
+                records.append((child, loaded[1]))
+        records.sort(key=lambda item: item[0].name, reverse=True)
+        protected = {path.name for path, _ in records[:keep_latest]}
+        cutoff = current_time - max_age
+
+        for run_dir, ended_at in records[keep_latest:]:
+            if run_dir.name in protected or ended_at >= cutoff or _run_is_locked(run_dir):
+                continue
+            # Re-read identity and policy under the root lock immediately before
+            # the destructive transition.
+            loaded = _load_retention_manifest(run_dir)
+            if loaded is None or loaded[1] >= cutoff or run_dir.is_symlink():
+                continue
+            quarantine = parent / f".retention-trash.{run_dir.name}.{uuid.uuid4().hex}"
+            try:
+                os.replace(run_dir, quarantine)
+                shutil.rmtree(quarantine)
+                removed.append(run_dir)
+            except OSError as error:
+                warnings.warn(f"retention could not remove {run_dir}: {error}")
+    return removed
+
+
 def _update_latest(parent: Path, run_dir: Path) -> None:
     latest = parent / "latest"
     lock_path = parent / ".latest.lock"
-    with lock_path.open("a", encoding="utf-8") as lock:
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    lock_fd = os.open(lock_path, flags, 0o600)
+    with os.fdopen(lock_fd, "r+", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         if latest.exists() and not latest.is_symlink():
             raise RuntimeError(f"automatic run latest path is not a symlink: {latest}")
@@ -95,39 +238,34 @@ def _update_latest(parent: Path, run_dir: Path) -> None:
                 temporary.unlink()
 
 
+def _acquire_active_lock(run_dir: Path) -> None:
+    lock_path = run_dir / "metadata" / ".active.lock"
+    lock = lock_path.open("a", encoding="utf-8")
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        lock.close()
+        raise
+    _ACTIVE_LOCKS[run_dir] = lock
+
+
 def resolve_run_directory(
-    requested_output_dir: str,
     *,
     entrypoint: str,
     scenario: str = "",
 ) -> Path:
-    """Return an explicit directory or atomically allocate a timestamped one."""
-
-    requested = str(requested_output_dir).strip()
-    if requested:
-        warnings.warn(
-            "output_dir is deprecated; configure IAP_RUN_ROOT instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        run_dir = _validated_absolute(Path(requested), "output_dir")
-        run_dir.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            run_dir.mkdir()
-        except FileExistsError as error:
-            raise RuntimeError(
-                f"output_dir already exists; choose a new directory: {run_dir}"
-            ) from error
-        _create_layout(run_dir)
-        run_dir = run_dir.resolve()
-        _write_run_manifest(run_dir, entrypoint=entrypoint, scenario=scenario)
-        return run_dir
+    """Atomically allocate one timestamped run below ``IAP_RUN_ROOT``."""
 
     _component(entrypoint, "entrypoint")
     if str(scenario).strip():
         _component(scenario, "scenario")
     parent = _default_run_root()
     parent.mkdir(parents=True, exist_ok=True)
+    if _retention_enabled(parent):
+        try:
+            prune_development_runs(parent)
+        except Exception as error:
+            warnings.warn(f"retention skipped after error: {error}")
 
     run_id = _new_run_id()
     for collision in range(100):
@@ -141,6 +279,7 @@ def resolve_run_directory(
         _create_layout(run_dir)
         _write_run_manifest(run_dir, entrypoint=entrypoint, scenario=scenario)
         _update_latest(parent, run_dir)
+        _acquire_active_lock(run_dir)
         return run_dir
     raise RuntimeError(f"could not allocate a unique run directory below {parent}")
 
@@ -198,6 +337,10 @@ def _write_run_manifest(run_dir: Path, *, entrypoint: str, scenario: str) -> Non
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     commit = _git_value("rev-parse", "HEAD")
     dirty = bool(_git_value("status", "--porcelain"))
+    package_root = Path(__file__).resolve().parents[2]
+    source_layout = (package_root / "CMakeLists.txt").is_file() and (
+        package_root / "src"
+    ).is_dir()
     manifest = {
         "schema_version": "iap_run_artifact_v1",
         "run_id": run_dir.name,
@@ -213,13 +356,70 @@ def _write_run_manifest(run_dir: Path, *, entrypoint: str, scenario: str) -> Non
         "run_class": "development",
         "retention_class": "ordinary",
         "source": {"git_commit": commit or None, "git_worktree_clean": not dirty},
-        "build": {},
+        "build": {
+            "package_layout": "source" if source_layout else "installed_share",
+            "package_root": str(package_root),
+            "ros_distro": os.environ.get("ROS_DISTRO"),
+        },
         "host": {"hostname": socket.gethostname()},
         "config_snapshots": [],
         "subordinate_manifests": [],
         "external_exports": [],
     }
     _atomic_write_json(run_dir / "metadata" / "run_manifest.json", manifest)
+
+
+def finalize_run(
+    run_dir: Path,
+    *,
+    lifecycle: str,
+    safety_outcome: str | None = None,
+) -> None:
+    """Atomically record the run owner's terminal lifecycle decision."""
+
+    if lifecycle not in _TERMINAL_LIFECYCLES:
+        raise ValueError(
+            f"lifecycle must be one of {sorted(_TERMINAL_LIFECYCLES)}, got {lifecycle!r}"
+        )
+    if safety_outcome is not None and safety_outcome not in _SAFETY_OUTCOMES:
+        raise ValueError(
+            f"safety_outcome must be one of {sorted(_SAFETY_OUTCOMES)}, "
+            f"got {safety_outcome!r}"
+        )
+    run_dir = _validated_absolute(Path(run_dir), "run_dir")
+    manifest_path = run_dir / "metadata" / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("run_id") != run_dir.name or manifest.get("run_dir") != str(run_dir):
+        raise RuntimeError(f"run manifest identity does not match {run_dir}")
+    manifest["lifecycle"] = lifecycle
+    manifest["ended_at_utc"] = datetime.now(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    if safety_outcome is not None:
+        manifest["safety_outcome"] = safety_outcome
+    _atomic_write_json(manifest_path, manifest)
+    lock = _ACTIVE_LOCKS.pop(run_dir, None)
+    if lock is not None:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock.close()
+
+
+def finalize_run_from_shutdown(run_dir: Path, event: object) -> None:
+    """Map ROS launch shutdown semantics onto the run lifecycle enum."""
+
+    reason = str(getattr(event, "reason", ""))
+    if bool(getattr(event, "due_to_sigint", False)):
+        lifecycle = "interrupted"
+    elif reason.startswith("Caught exception in launch"):
+        lifecycle = "failed"
+    else:
+        lifecycle = "completed"
+    try:
+        finalize_run(run_dir, lifecycle=lifecycle)
+    except Exception as error:
+        warnings.warn(f"could not finalize run {run_dir}: {error}")
 
 
 def write_subordinate_manifest(run_dir: Path, name: str, value: dict) -> Path:
@@ -237,6 +437,17 @@ def register_subordinate_manifest(run_dir: Path, path: Path) -> None:
     relative = path.resolve().relative_to(run_dir.resolve()).as_posix()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     references = manifest.setdefault("subordinate_manifests", [])
+    if relative not in references:
+        references.append(relative)
+        references.sort()
+        _atomic_write_json(manifest_path, manifest)
+
+
+def register_config_snapshot(run_dir: Path, path: Path) -> None:
+    manifest_path = run_dir / "metadata" / "run_manifest.json"
+    relative = path.resolve().relative_to(run_dir.resolve()).as_posix()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    references = manifest.setdefault("config_snapshots", [])
     if relative not in references:
         references.append(relative)
         references.sort()

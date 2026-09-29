@@ -15,9 +15,11 @@ from launch.actions import (
     IncludeLaunchDescription,
     LogInfo,
     OpaqueFunction,
+    RegisterEventHandler,
     SetEnvironmentVariable,
     TimerAction,
 )
+from launch.event_handlers import OnShutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -26,7 +28,13 @@ from launch_ros.actions import Node
 _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
-from run_directory import resolve_run_directory, write_subordinate_manifest  # noqa: E402
+from run_directory import (  # noqa: E402
+    finalize_run_from_shutdown,
+    register_config_snapshot,
+    register_subordinate_manifest,
+    resolve_run_directory,
+    write_subordinate_manifest,
+)
 
 
 def _as_bool(value: str) -> bool:
@@ -95,8 +103,11 @@ def _setup(context):
             "iap_flight requires controller_handshake_confirmed:=true after the "
             "vehicle-side command/feedback handshake has passed"
         )
-    output_dir = resolve_run_directory(
-        LaunchConfiguration("output_dir").perform(context), entrypoint="iap_flight"
+    output_dir = resolve_run_directory(entrypoint="iap_flight")
+    register_config_snapshot(output_dir, output_dir / "metadata" / "config" / "iap")
+    register_subordinate_manifest(
+        output_dir,
+        output_dir / "metadata" / "manifests" / "launch_profile_manifest.json",
     )
     calibration_id = LaunchConfiguration(
         "local_surface_error_calibration_id"
@@ -314,6 +325,13 @@ def _setup(context):
         ),
         estimator,
         TimerAction(period=delay, actions=[planner, traj_server]),
+        RegisterEventHandler(
+            OnShutdown(
+                on_shutdown=lambda event, _context: finalize_run_from_shutdown(
+                    output_dir, event
+                )
+            )
+        ),
     ]
 
 
@@ -325,11 +343,6 @@ def generate_launch_description():
             DeclareLaunchArgument("flight_authorized", default_value="false"),
             DeclareLaunchArgument(
                 "controller_handshake_confirmed", default_value="false"
-            ),
-            DeclareLaunchArgument(
-                "output_dir",
-                default_value="",
-                description="Optional absolute override; empty creates a timestamped flight run.",
             ),
             DeclareLaunchArgument("config_path", default_value=default_config),
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),

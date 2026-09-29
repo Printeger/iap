@@ -20,8 +20,10 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     OpaqueFunction,
+    RegisterEventHandler,
     SetEnvironmentVariable,
 )
+from launch.event_handlers import OnShutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -29,7 +31,12 @@ from launch.substitutions import LaunchConfiguration
 _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
-from run_directory import resolve_run_directory, write_subordinate_manifest  # noqa: E402
+from run_directory import (  # noqa: E402
+    finalize_run_from_shutdown,
+    register_config_snapshot,
+    resolve_run_directory,
+    write_subordinate_manifest,
+)
 
 
 def _catalog(iap_share: Path) -> dict:
@@ -50,10 +57,9 @@ def _setup(context):
         valid = ", ".join(sorted(catalog))
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario}'; valid: {valid}")
 
-    output_dir = resolve_run_directory(
-        LaunchConfiguration("output_dir").perform(context),
-        entrypoint="iap_sim",
-        scenario=scenario,
+    output_dir = resolve_run_directory(entrypoint="iap_sim", scenario=scenario)
+    register_config_snapshot(
+        output_dir, output_dir / "metadata" / "config" / "full_stack"
     )
 
     manifest = {
@@ -101,7 +107,14 @@ def _setup(context):
                     "planner_start_delay_s"
                 ).perform(context),
             }.items(),
-        )
+        ),
+        RegisterEventHandler(
+            OnShutdown(
+                on_shutdown=lambda event, _context: finalize_run_from_shutdown(
+                    output_dir, event
+                )
+            )
+        ),
     ]
 
 
@@ -109,11 +122,6 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("scenario", default_value="fused_nominal"),
-            DeclareLaunchArgument(
-                "output_dir",
-                default_value="",
-                description="Optional absolute override; empty creates a timestamped scenario run.",
-            ),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),
