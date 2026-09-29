@@ -13,9 +13,10 @@
   independent process/interface exists.
 - Advisory Integrity uses the maintained P0 path. Do not start or restore
   `phase2_planner_integrity_evaluator` in a canonical graph.
-- Root `test_planner.launch.py` is a temporary compatibility link for
-  validation infrastructure, not a canonical entrypoint. Maintained shared
-  graph code belongs under `_includes/full_stack_runtime.py`.
+- Historical launch files exist only under `bp/`; do not restore root-level
+  compatibility copies or links. Maintained shared graph code belongs under
+  `_includes/full_stack_runtime.py`. The build may install `bp/` for frozen
+  script compatibility, but new code must not invoke those launch files.
 - Add scenarios to `config/scenarios/catalog.json`; do not grow one launch
   argument per scenario property.
 - Every run requires an explicit absolute output directory.

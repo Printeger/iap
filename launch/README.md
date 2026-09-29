@@ -117,7 +117,7 @@ is:
 - Config: the maintained full-stack runtime materializes `config/sim_demo11`
   below the run directory. Scenario names come from
   `config/scenarios/catalog.json`; their exact established parameters are
-  still resolved by the private runtime shared with `test_planner`.
+  resolved by the private `_includes/full_stack_runtime.py` implementation.
 - Results: everything is rooted below `output_dir`.
 
 ### `iap_flight.launch.py`
@@ -149,18 +149,19 @@ is:
 
 - `_includes/` contains private implementation included by canonical profiles.
   `simulation_environment.launch.py` must never start an IAP algorithm module.
-  `full_stack_runtime.py` owns the maintained simulation graph;
-  `test_planner.launch.py` is only a temporary compatibility link for frozen
-  validation scripts.
+  `full_stack_runtime.py` owns the maintained simulation graph.
 - `tests/` is for focused launch tests and fixtures.
 - `experiments/` is for paper/frozen experiment wrappers.
 - `tools/` is for offline visualization and qualification helpers.
 - `legacy/` is the eventual home for retained historical entrypoints.
-- `bp/` is the temporary pre-refactor backup and is excluded from installation.
-  Historical root files remain compatibility entrypoints during the validation
-  stage; their byte-for-byte backups live in `bp/`. Both are removed or moved
-  to `legacy/` only after every canonical profile has recorded integration/live
-  evidence and all frozen references have been migrated.
+- `bp/` is the temporary pre-refactor backup and the sole source location for
+  those launch files; they must not also appear at the launch root. It remains
+  installed during the transition so frozen scripts can resolve their old
+  basenames, but none of them is canonical. Historical qualification profiles
+  remain self-contained in `bp/test_planner.launch.py`; the maintained
+  `_includes/full_stack_runtime.py` does not load code from `bp/`. Move or
+  delete the backup only after every canonical profile has recorded
+  integration/live evidence and all frozen references have been migrated.
 
 Static or `--show-args` success is not real-flight acceptance. Removing `bp/`
 requires recorded runtime evidence for all four canonical contracts.

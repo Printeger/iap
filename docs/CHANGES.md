@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- refactor(launch-root-cleanup): IAP-RQ-300 / IAP-RQ-410 — remove all
+  pre-refactor launch files and the temporary `test_planner.launch.py` link
+  from the launch root. Their retained copies remain only under `launch/bp`,
+  which remains installed temporarily so frozen scripts can resolve historical
+  basenames without restoring root copies. Canonical simulation tests now bind
+  directly to `_includes/full_stack_runtime.py`; historical regression tests
+  explicitly inspect their `bp` copies. Historical ICRA P0/P5 qualification
+  profiles remain in `bp/test_planner.launch.py` and are no longer loaded by
+  the maintained canonical runtime.
 - refactor(canonical-launch-interface): IAP-RQ-300 / IAP-RQ-410 — add four
   canonical launch entrypoints for GLIO, GLIO plus current Integrity, the full
   simulation stack, and the fail-closed real-flight stack. Runtime profiles
@@ -15,11 +24,10 @@
   three-run-plus-held-out local-surface calibration manifest and the registered
   planner-local-map contract before startup. Runtime config materialization
   redirects nested CSV/log/dump outputs below `output_dir`; `launch/bp` is
-  retained in source but excluded from installation. The maintained simulation
-  graph now lives under `_includes/full_stack_runtime.py`; the root
-  `test_planner.launch.py` is a compatibility link. Other historical root
-  launch files remain compatibility entrypoints until live validation; no
-  experiment evidence is deleted.
+  retained as the sole source copy of historical launch files. The maintained simulation
+  graph now lives under `_includes/full_stack_runtime.py`. Historical launch
+  files are retained only under `launch/bp`; no experiment evidence is
+  deleted.
 - fix(p4-frozen-route-preference): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — retain the immutable route-comparison winner while sibling
   actual curves from the same frozen decision are prepared. If neither

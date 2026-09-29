@@ -14,7 +14,7 @@ from run_p4_g0c_tests import require_hermetic_test_environment  # noqa: E402
 
 require_hermetic_test_environment()
 
-MODULE_PATH = REPO / "launch" / "test_icra.launch.py"
+MODULE_PATH = REPO / "launch" / "bp" / "test_icra.launch.py"
 SPEC = importlib.util.spec_from_file_location("test_icra_launch", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

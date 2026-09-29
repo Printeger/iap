@@ -1,6 +1,5 @@
 import json
 import hashlib
-import importlib.util
 import math
 import os
 import re
@@ -10,19 +9,6 @@ import sys
 import time
 import uuid
 from pathlib import Path
-
-_ICRA_P0_P5_HELPER_SPEC = importlib.util.spec_from_file_location(
-    "icra_p0_p5_qualification",
-    Path(__file__).resolve().parents[1] / "icra_p0_p5_qualification.py",
-)
-_ICRA_P0_P5_HELPER = importlib.util.module_from_spec(_ICRA_P0_P5_HELPER_SPEC)
-assert _ICRA_P0_P5_HELPER_SPEC.loader is not None
-_ICRA_P0_P5_HELPER_SPEC.loader.exec_module(_ICRA_P0_P5_HELPER)
-IcraP0P5ContractError = _ICRA_P0_P5_HELPER.ContractError
-load_icra_p0_p5_contract = _ICRA_P0_P5_HELPER.load_contract
-resolve_icra_p0_p5_launch_values = _ICRA_P0_P5_HELPER.resolve_launch_values
-resolve_icra_p0_p5_profile_values = _ICRA_P0_P5_HELPER.resolve_profile_values
-build_icra_p0_p5_launch_binding = _ICRA_P0_P5_HELPER.build_launch_binding
 
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch import LaunchDescription
@@ -45,12 +31,6 @@ from launch_ros.descriptions import ComposableNode
 
 
 P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
-ICRA_P0_P5_CONTRACT_PATH = "config/icra27/icra_p0_p5_qualification_v1.json"
-ICRA_P0_P5_CASE_BY_EXPERIMENT = {
-    "icra_p0_p5_qualification_safe_normal": "SAFE_NORMAL",
-    "icra_p0_p5_qualification_final_reject": "FINAL_REJECT",
-    "icra_p0_p5_qualification_runtime_fail": "RUNTIME_FAIL",
-}
 P4_G0C_EXPERIMENT_V1 = "p4_g0c_metrics_calibration_v1"
 P4_G0C_EXPERIMENT_V2 = "p4_g0c_metrics_calibration_v2"
 P4_G0C_EXPERIMENT_V3 = "p4_g0c_metrics_calibration_v3"
@@ -1709,18 +1689,6 @@ EXPERIMENT_PRESETS = {
         "p5_6.fixture.tau_min": "0.2",
         "p5_6.fixture.tau_max": "2.0",
     },
-    "icra_p0_p5_qualification_safe_normal": {
-        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
-        "planner_safety_profile": "icra_p0_p5",
-    },
-    "icra_p0_p5_qualification_final_reject": {
-        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
-        "planner_safety_profile": "icra_p0_p5",
-    },
-    "icra_p0_p5_qualification_runtime_fail": {
-        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
-        "planner_safety_profile": "icra_p0_p5",
-    },
     "p1_degraded_lidar_good": {
         "scenario": "gnss_degraded_lidar_good",
         "planner_safety_profile": "p1",
@@ -2422,112 +2390,6 @@ def _apply_preset_values(context, preset, user_overrides, iap_share, applied_key
         applied_keys.add(key)
 
 
-def _typed_contract_override(raw, expected):
-    if isinstance(expected, bool):
-        normalized = str(raw).strip().lower()
-        if normalized not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
-            return raw
-        return _as_bool(raw)
-    if isinstance(expected, int) and not isinstance(expected, bool):
-        try:
-            return int(str(raw).strip())
-        except ValueError:
-            return raw
-    if isinstance(expected, float):
-        try:
-            return float(str(raw).strip())
-        except ValueError:
-            return raw
-    return str(raw)
-
-
-def _resolve_icra_p0_p5_context(context, experiment, iap_share, overrides):
-    profile = LaunchConfiguration("planner_safety_profile").perform(context).strip()
-    case_id = ICRA_P0_P5_CASE_BY_EXPERIMENT.get(experiment)
-    if case_id is None and profile != "icra_p0_p5":
-        return None
-    contract_path = Path(iap_share) / ICRA_P0_P5_CONTRACT_PATH
-    contract = load_icra_p0_p5_contract(contract_path)
-    values = (
-        resolve_icra_p0_p5_launch_values(contract, case_id, overrides)
-        if case_id is not None
-        else resolve_icra_p0_p5_profile_values(contract, overrides)
-    )
-    return {
-        "case_id": case_id,
-        "contract": contract,
-        "contract_path": contract_path,
-        "fixture_alias": (
-            contract["cases"][case_id]["fixture_alias"]
-            if case_id is not None else "none_v1"
-        ),
-        "values": values,
-    }
-
-
-def _apply_icra_p0_p5_profile(
-    context, experiment, iap_share, user_overrides, applied_keys
-):
-    resolved = _resolve_icra_p0_p5_context(context, experiment, iap_share, {})
-    if resolved is None:
-        return None
-    expected = resolved["values"]
-    explicit_values = {}
-    for key in user_overrides:
-        if key not in context.launch_configurations:
-            continue
-        raw = context.launch_configurations[key]
-        explicit_values[key] = _typed_contract_override(raw, expected.get(key, raw))
-    try:
-        _resolve_icra_p0_p5_context(
-            context, experiment, iap_share, explicit_values
-        )
-    except IcraP0P5ContractError as exc:
-        raise RuntimeError(str(exc)) from exc
-    for key in applied_keys & set(expected):
-        actual = _typed_contract_override(context.launch_configurations[key], expected[key])
-        if actual != expected[key]:
-            raise RuntimeError(
-                f"conflicting preset value for {key}: {actual!r} != {expected[key]!r}"
-            )
-    for key, value in expected.items():
-        context.launch_configurations[key] = _launch_value(value)
-        applied_keys.add(key)
-    contract = resolved["contract"]
-    contract_path = resolved["contract_path"]
-    return {
-        "schema_version": contract["schema_version"],
-        "route_id": contract["route_id"],
-        "profile_name": contract["profile_name"],
-        "qualification_family": contract["qualification_family"],
-        "case_id": resolved["case_id"],
-        "fixture_alias": resolved["fixture_alias"],
-        "analyzer_version": contract["analyzer_version"],
-        "contract_path": str(contract_path.resolve()),
-        "contract_sha256": _sha256_file(contract_path),
-    }
-
-
-def _icra_p0_p5_launch_binding(context, experiment, iap_share, evidence):
-    resolved = _resolve_icra_p0_p5_context(context, experiment, iap_share, {})
-    if resolved is None:
-        return None
-    contract = resolved["contract"]
-    contract_path = resolved["contract_path"]
-    expected = resolved["values"]
-    effective = {
-        key: _typed_contract_override(
-            LaunchConfiguration(key).perform(context), expected_value
-        )
-        for key, expected_value in expected.items()
-    }
-    _resolve_icra_p0_p5_context(context, experiment, iap_share, effective)
-    return build_icra_p0_p5_launch_binding(
-        contract, contract_path, resolved["case_id"], evidence["git_commit"],
-        evidence["run_id"], effective,
-    )
-
-
 def _apply_presets(context, iap_share):
     user_overrides = _launch_arg_overrides()
 
@@ -2571,9 +2433,6 @@ def _apply_presets(context, iap_share):
     combo_preset = COMBO_PRESETS.get((experiment, scenario))
     if combo_preset:
         _apply_preset_values(context, combo_preset, user_overrides, iap_share, applied_keys)
-    _apply_icra_p0_p5_profile(
-        context, experiment, iap_share, user_overrides, applied_keys
-    )
     if experiment == "canonical_full_stack_sim":
         catalog_path = Path(iap_share) / "config" / "scenarios" / "catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
@@ -4242,10 +4101,6 @@ def _launch_setup(context):
         },
     }
     scenario_fingerprint = _scenario_fingerprint(scenario, scenario_contract)
-    icra_p0_p5_binding = _icra_p0_p5_launch_binding(
-        context, experiment, iap_share, evidence
-    )
-
     lidar_renderer_mode = LaunchConfiguration(
         "lidar_renderer_mode").perform(context)
     planner_local_map_contract, planner_local_map_contract_id = (
@@ -4259,7 +4114,7 @@ def _launch_setup(context):
         "mapping_effective_config": mapping_effective,
         "scenario_contract": scenario_contract,
         "scenario_fingerprint": scenario_fingerprint,
-        "icra_p0_p5_qualification": icra_p0_p5_binding,
+        "icra_p0_p5_qualification": None,
         "runtime_config_path": runtime_config_path,
         "iap_logging_effective_config": logging_effective,
         "corridor_map_stamp_authority_topic": LaunchConfiguration(

@@ -641,7 +641,6 @@ if(DEFINED ENV{ROS_VERSION})
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap
-      PATTERN "bp" EXCLUDE
       PATTERN "__pycache__" EXCLUDE
       PATTERN "*.pyc" EXCLUDE
       PATTERN "*.pyo" EXCLUDE

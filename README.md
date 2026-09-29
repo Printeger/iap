@@ -1,10 +1,20 @@
 # IAP - Integrity-Aware Positioning
 
-IAP 是一个基于 GLIM 架构的 3D LiDAR-IMU(-GNSS) 定位与建图系统。本仓库同时提供了面向无人机仿真的运行环境，包含随机森林地图、SO3 四旋翼动力学、仿真 LiDAR/IMU、GNSS 仿真、IAP 与仿真之间的桥接节点，以及 `demo1` 到 `demo11` 的分层示例。
+IAP 是一个基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位、完整性评估与安全规划系统。
 
-这份 README 面向新手：先完成构建，再按 demo 顺序运行。建议先跑不依赖 IAP 的 `demo1`/`demo2`，确认仿真和 RViz 正常；再跑 `demo4` 之后的 IAP 集成示例；最后跑 `demo7`/`demo8` 的 GNSS/ARAIM 场景、`demo9` 的 EGO planner 闭环验收、`demo10` 的 PI-lite 只读评估，以及最新的 `demo11` IAP 系统闭环验证。
+当前公开运行接口只有以下四个 canonical launch：
+
+- `glio.launch.py`
+- `glio_integrity.launch.py`
+- `iap_sim.launch.py`
+- `iap_flight.launch.py`
 
 ---
+
+> **历史资料边界：** 以下 `demo1`–`demo11`、`test_*` 和旧
+> `iap_rosnode.launch.py` 章节只用于理解或复现旧系统，不是当前推荐
+> 入口。新开发和日常运行只能使用上面的四个 canonical launch；旧文件
+> 的唯一源码副本位于 `launch/bp/`。详细启动契约见 `launch/README.md`。
 
 ## 1. 快速开始
 

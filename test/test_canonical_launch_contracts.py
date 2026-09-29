@@ -53,7 +53,9 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertEqual(set(catalog), expected)
 
     def test_canonical_scenario_resources_are_package_relative_and_present(self):
-        source = (LAUNCH / "test_planner.launch.py").read_text(encoding="utf-8")
+        source = (LAUNCH / "_includes/full_stack_runtime.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("results/icra27/icra070/install_v2", source)
         self.assertIn(
             '"gnss_scenario_file": "config/gnss_sim/demo7_skymask_nlos.yaml"',
@@ -201,7 +203,9 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         internal = (
             LAUNCH / "_includes/full_stack_simulation.launch.py"
         ).read_text(encoding="utf-8")
-        runtime = (LAUNCH / "test_planner.launch.py").read_text(encoding="utf-8")
+        runtime = (LAUNCH / "_includes/full_stack_runtime.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("full_stack_simulation.launch.py", canonical)
         self.assertIn('"experiment": "canonical_full_stack_sim"', internal)
         self.assertIn('"run_validator": "false"', internal)
@@ -214,6 +218,8 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertIn(
             '{"sim_time/enable": _param_bool(context, "sim_time_enable")}', runtime
         )
+        self.assertNotIn(' / "bp" / ', runtime)
+        self.assertNotIn("icra_p0_p5_qualification.py", runtime)
 
     def test_catalog_task_mode_is_applied_to_every_canonical_scenario(self):
         catalog = json.loads(
@@ -295,9 +301,9 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(retained, path.resolve())
             self.assertEqual(len(digest), 64)
 
-    def test_bp_is_not_installed(self):
+    def test_bp_is_installed_for_frozen_script_compatibility(self):
         cmake = (REPO / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn('PATTERN "bp" EXCLUDE', cmake)
+        self.assertNotIn('PATTERN "bp" EXCLUDE', cmake)
 
     def test_each_canonical_entrypoint_constructs_a_graph(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -391,22 +397,22 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             ):
                 self.assertEqual(len(flight._setup(context)), 3)
 
-    def test_backup_contains_every_previous_root_launch(self):
-        expected = {
-            path.name
-            for path in LAUNCH.iterdir()
-            if path.is_file()
-            and (
-                path.name.startswith(("demo", "test_", "icra"))
-                or path.name in {
-                    "iap_demo.launch.py",
-                    "iap_ego_sim.launch.py",
-                    "iap_rosnode.launch.py",
-                }
-            )
+    def test_historical_launches_exist_only_in_backup(self):
+        canonical = {
+            "glio.launch.py",
+            "glio_integrity.launch.py",
+            "iap_sim.launch.py",
+            "iap_flight.launch.py",
         }
-        backup = {path.name for path in (LAUNCH / "bp").iterdir() if path.is_file()}
-        self.assertTrue(expected.issubset(backup))
+        backup = {
+            path.name for path in (LAUNCH / "bp").iterdir() if path.is_file()
+        }
+        self.assertTrue(backup - {"README.md"})
+        for name in backup - {"README.md"}:
+            self.assertFalse((LAUNCH / name).exists(), name)
+            self.assertNotIn(name, canonical)
+        for name in canonical:
+            self.assertTrue((LAUNCH / name).is_file(), name)
 
 
 if __name__ == "__main__":

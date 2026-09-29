@@ -20,7 +20,7 @@ require_hermetic_test_environment()
 from launch import LaunchContext  # noqa: E402
 
 
-MODULE_PATH = REPO / "launch" / "test_planner.launch.py"
+MODULE_PATH = REPO / "launch" / "bp" / "test_planner.launch.py"
 SPEC = importlib.util.spec_from_file_location("test_planner_launch", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
