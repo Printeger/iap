@@ -136,4 +136,3 @@ absolute-artifact-path	src/iap/odometry/odometry_estimation_gpu.cpp	1665d40b9f4a
 absolute-artifact-path	src/iap/planner/plan_manage/launch/advanced_param.launch.py	4a8062a3de6cb4319fe1855d5e86cb1d9f47dbabd712f9d37321d0abccfb97b2
 absolute-artifact-path	src/iap/sim/sim_extension.cpp	e27821fbf2db4ce1f2935182964a4c7503b48b4dbbbac4bb19f5513a3bf24182
 absolute-artifact-path	src/iap/util/logging.cpp	ba467a13645adb0693b5f90006e654f1a5acf77f12cd15214e13bf6f17714792
-absolute-artifact-path	tools/ana_log.py	d29eabcecada460c773b9346cdee3cad2a3aa988619f3733dad171c984f1e57e

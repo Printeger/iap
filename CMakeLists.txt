@@ -757,6 +757,10 @@ if(DEFINED ENV{ROS_VERSION})
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_phase2_summary_schema.py
       )
       add_test(
+        NAME test_ana_log_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ana_log_contract.py
+      )
+      add_test(
         NAME test_icra006_provider_profile
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra006_provider_profile.py
       )

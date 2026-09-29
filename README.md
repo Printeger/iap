@@ -933,7 +933,7 @@ src/iap/log/latest -> <timestamp>/
 
 ### 5.1 一键分析：`ana_log.py`
 
-`tools/ana_log.py` 是推荐的运行日志总分析入口。它默认分析 `src/iap/log/latest`，会自动读取当前 run 目录里的日志、CSV、配置快照和导出文件，并把综合报告写到 `<run>/analysis/`。
+`tools/ana_log.py` 是推荐的运行日志总分析入口。它默认分析 `src/iap/log/latest`，会自动读取当前 run 目录里的日志、CSV、配置快照和导出文件，并把综合报告写到 `<run>/export/analysis/`。
 
 最常用命令：
 
@@ -947,7 +947,7 @@ python3 src/iap/tools/ana_log.py
 python3 src/iap/tools/ana_log.py \
   --run src/iap/log/20260430_120000
 
-# 指定输出目录
+# 显式导出到 run 外（该路径会登记进 run manifest）
 python3 src/iap/tools/ana_log.py \
   --run src/iap/log/latest \
   --out /tmp/iap_analysis
@@ -958,7 +958,7 @@ python3 src/iap/tools/ana_log.py \
 | 参数 | 作用 |
 |---|---|
 | `--run <dir>` | 指定要分析的 run 目录；默认 `src/iap/log/latest` |
-| `--out <dir>` | 指定分析结果输出目录；默认 `<run>/analysis` |
+| `--out <dir>` | 显式指定分析结果输出目录；默认 `<run>/export/analysis` |
 | `--no-plots` | 跳过 `ana_log.py` 自己生成的 PNG/SVG 图 |
 | `--skip-external-tools` | 不调用 `plot_icp_timing.py`、`plot_gnss_factor_debug.py`、`plot_araim_timeline.py` |
 | `--strict` | 如果 runtime 有 error/critical，或配置启用的产物缺失，则返回非零退出码，适合 CI |
@@ -968,16 +968,15 @@ python3 src/iap/tools/ana_log.py \
 | 输入 | 作用 |
 |---|---|
 | `runtime/*.log` | 统计运行日志、warning/error、加载模块、shutdown/save 信息 |
-| `metadata/run_info.json` | 读取 run 基本信息、配置目录、git/build 元信息 |
-| `metadata/config/*.json` | 判断哪些产物按配置应当存在 |
+| `metadata/run_manifest.json` | 读取 run 身份、生命周期、git/build 和 retention 元信息；旧 `run_info.json` 只读兼容 |
+| `metadata/config/**/*.json` | 判断哪些产物按配置应当存在 |
 | `profiling/iap_timing.csv` | 统计各模块耗时 mean/p50/p95/p99/max |
-| `export/iap_icp.csv` | 统计 ICP RMSE、inlier fraction、退化比例、condition number、`gamma_lidar` |
-| `export/iap_gnss_factor_debug.csv` | 统计 GNSS factor 类型、卫星/星座数量、residual 和 normalized residual |
-| `export/iap_araim.csv` | 统计 ARAIM epoch、SAFE/UNSAFE 状态、HPL/VPL/HAL/VAL/IM、hypothesis/detection 数量 |
-| `export/traj_with_gnss.csv` | 统计轨迹跨度、路径长度、x/y/z 分布 |
-| `export/iap_sim_truth_vs_est.csv` | 与 ARAIM epoch 匹配后做仿真真值完整性校验 |
-| `export/desired_vs_truth.csv` 或 `export/tracking_error.csv` | 统计 desired-vs-truth 跟踪误差 |
-| `export/dump/*` | 检查建图 dump 文件、submap 数量和总大小 |
+| `export/glio/*.csv` | ICP、GNSS factor 和 GLIO 轨迹诊断 |
+| `export/current_integrity/*.csv` | 当前 ARAIM、HPL/VPL/HAL/VAL/IM 和完整性轨迹 |
+| `export/advisory/` | 未来完整性、风险栅格和预测证据 |
+| `export/planner/` | 候选、P1–P5、lineage、认证和 HOLD 证据 |
+| `export/simulation/` | 仿真真值和 tracking metrics |
+| `export/glio/dump/*` | 建图 dump、submap 和 factor graph 数据 |
 
 默认输出：
 
