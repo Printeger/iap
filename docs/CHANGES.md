@@ -3,6 +3,23 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- refactor(canonical-launch-interface): IAP-RQ-300 / IAP-RQ-410 — add four
+  canonical launch entrypoints for GLIO, GLIO plus current Integrity, the full
+  simulation stack, and the fail-closed real-flight stack. Runtime profiles
+  now require an explicit output directory, validate estimator/integrity
+  extension sets, keep simulation and flight graphs separate, select all
+  maintained simulation scenarios through one catalog, and exclude the
+  deprecated Phase-2 evaluator. The canonical simulation profile reuses the
+  maintained exact scenario presets while disabling validators and automatic
+  recording, and uses one system-clock domain. Flight now binds a retained
+  three-run-plus-held-out local-surface calibration manifest and the registered
+  planner-local-map contract before startup. Runtime config materialization
+  redirects nested CSV/log/dump outputs below `output_dir`; `launch/bp` is
+  retained in source but excluded from installation. The maintained simulation
+  graph now lives under `_includes/full_stack_runtime.py`; the root
+  `test_planner.launch.py` is a compatibility link. Other historical root
+  launch files remain compatibility entrypoints until live validation; no
+  experiment evidence is deleted.
 - fix(p4-frozen-route-preference): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — retain the immutable route-comparison winner while sibling
   actual curves from the same frozen decision are prepared. If neither

@@ -1,0 +1,5273 @@
+import json
+import hashlib
+import importlib.util
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+_ICRA_P0_P5_HELPER_SPEC = importlib.util.spec_from_file_location(
+    "icra_p0_p5_qualification",
+    Path(__file__).resolve().parents[1] / "icra_p0_p5_qualification.py",
+)
+_ICRA_P0_P5_HELPER = importlib.util.module_from_spec(_ICRA_P0_P5_HELPER_SPEC)
+assert _ICRA_P0_P5_HELPER_SPEC.loader is not None
+_ICRA_P0_P5_HELPER_SPEC.loader.exec_module(_ICRA_P0_P5_HELPER)
+IcraP0P5ContractError = _ICRA_P0_P5_HELPER.ContractError
+load_icra_p0_p5_contract = _ICRA_P0_P5_HELPER.load_contract
+resolve_icra_p0_p5_launch_values = _ICRA_P0_P5_HELPER.resolve_launch_values
+resolve_icra_p0_p5_profile_values = _ICRA_P0_P5_HELPER.resolve_profile_values
+build_icra_p0_p5_launch_binding = _ICRA_P0_P5_HELPER.build_launch_binding
+
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.actions import EmitEvent
+from launch.actions import ExecuteProcess
+from launch.actions import LogInfo
+from launch.actions import OpaqueFunction
+from launch.actions import RegisterEventHandler
+from launch.actions import SetEnvironmentVariable
+from launch.actions import TimerAction
+from launch.conditions import IfCondition
+from launch.events import Shutdown
+from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EqualsSubstitution
+from launch.substitutions import NotEqualsSubstitution
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.actions import Node
+from launch_ros.descriptions import ComposableNode
+
+
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
+ICRA_P0_P5_CONTRACT_PATH = "config/icra27/icra_p0_p5_qualification_v1.json"
+ICRA_P0_P5_CASE_BY_EXPERIMENT = {
+    "icra_p0_p5_qualification_safe_normal": "SAFE_NORMAL",
+    "icra_p0_p5_qualification_final_reject": "FINAL_REJECT",
+    "icra_p0_p5_qualification_runtime_fail": "RUNTIME_FAIL",
+}
+P4_G0C_EXPERIMENT_V1 = "p4_g0c_metrics_calibration_v1"
+P4_G0C_EXPERIMENT_V2 = "p4_g0c_metrics_calibration_v2"
+P4_G0C_EXPERIMENT_V3 = "p4_g0c_metrics_calibration_v3"
+P4_G0C_EXPERIMENT_V4 = "p4_g0c_metrics_calibration_v4"
+P4_G0C_EXPERIMENT_V5 = "p4_g0c_metrics_calibration_v5"
+P4_G0C_EXPERIMENT_V6 = "p4_g0c_metrics_calibration_v6"
+P4_G0C_EXPERIMENT = P4_G0C_EXPERIMENT_V1
+P4_G0C_EXPERIMENTS = {
+    P4_G0C_EXPERIMENT_V1, P4_G0C_EXPERIMENT_V2, P4_G0C_EXPERIMENT_V3,
+    P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5,
+    P4_G0C_EXPERIMENT_V6,
+}
+P4_G0C_SCENARIO = "p4_g0c_free_corridor_v1"
+P4_G0C_REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
+P4_G0C_PROTOCOL_SHA256 = (
+    "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d"
+)
+P4_G0C_REGISTRY_SHA256 = (
+    "1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff"
+)
+P4_G0C_FIXTURE_SHA256 = (
+    "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710"
+)
+P4_G0C_FIXTURE_V2_SHA256 = (
+    "2ba39a328b8ba9deff0e82524cd5c8474484a0f4d0ff9abf8efb0da6e1cf86e4"
+)
+P4_G0C_RUNTIME_HASH_REQUIRED = "__declared_actual_sha256_required__"
+P4_G0C_ARTIFACT_PRESET = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v1.json",
+    "p4.g0c.protocol_sha256": P4_G0C_PROTOCOL_SHA256,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v1.json",
+    "p4.g0c.registry_sha256": P4_G0C_REGISTRY_SHA256,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
+    "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
+}
+P4_G0C_ARTIFACT_PRESET_V2 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v2.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v2.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
+    "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
+}
+P4_G0C_ARTIFACT_PRESET_V3 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v3.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v3.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
+    "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
+}
+P4_G0C_ARTIFACT_PRESET_V4 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v4.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v4.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
+    "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
+}
+P4_G0C_ARTIFACT_PRESET_V5 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v5.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v5.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v2.json",
+    "p4.g0c.fixture_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+}
+P4_G0C_ARTIFACT_PRESET_V6 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v6.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v6.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v2.json",
+    "p4.g0c.fixture_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+}
+P4_G0C_V5_CENTRAL_OBSTACLE_X_M = (-9.0, -7.0)
+P4_G0C_V4_P0_PROFILE_VALUES = {
+    "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p4.require_risk_grid_ready_before_planning": "true",
+}
+P4_G0C_V5_P0_PROFILE_VALUES = {
+    **P4_G0C_V4_P0_PROFILE_VALUES,
+    "p0.predictor.worker_count": "4",
+}
+P4_G0C_V6_P0_PROFILE_VALUES = {
+    **P4_G0C_V5_P0_PROFILE_VALUES,
+    "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0",
+    "p4.cost_query_policy": "CONSERVATIVE_OCCUPIED_COST_SUPPORT",
+}
+P4_G0C_FROZEN_LAUNCH_VALUES = {
+    "planner_safety_profile": "p4",
+    "planner_enable_p1": "false",
+    "planner_enable_p2": "false",
+    "planner_enable_p3_local": "false",
+    "planner_enable_p3_global": "false",
+    "planner_enable_p4": "true",
+    "planner_enable_p5_runtime": "false",
+    "planner_enable_p5_final": "false",
+    "p0.enable_risk_grid": "true",
+    "p1.use_integrity_cost": "false",
+    "p1.metrics_only": "false",
+    "p1.debug_csv_enable": "false",
+    "manager/p1_collision_fanout_clearance_m": "0.0",
+    "manager/p1_collision_fanout_preserve_homotopies": "false",
+    "manager/p1_collision_fanout_mirror_y": "false",
+    "p2.enable_candidate_ranking": "false",
+    "p2.metrics_only": "false",
+    "p2.debug_csv_enable": "false",
+    "p3.enable_local_reference_bias": "false",
+    "p3.enable_global_reference_bias": "false",
+    "p3.debug_csv_enable": "false",
+    "p4.enable_risk_aware_astar": "true",
+    "p4.metrics_only": "true",
+    "p4.max_extra_path_ratio": "1.30",
+    "p4.debug_csv_enable": "true",
+    "manager/use_distinctive_trajs": "false",
+    "safety_viz.enable_p1_viz": "false",
+    "safety_viz.enable_p2_viz": "false",
+    "safety_viz.enable_p3_viz": "false",
+    "safety_viz.enable_p4_viz": "false",
+    "record_bag": "false",
+    "start_rviz": "false",
+    "run_validator": "true",
+}
+P4_G0C_FROZEN_SCIENTIFIC_IDENTITY = {
+    "matrix_order": "seed_major_repetition_ascending",
+    "minimum_complete_decisions": 100,
+    "no_exclusion": True,
+    "no_overwrite": True,
+    "no_retry": True,
+    "numerical_noise_floor": {
+        "calibration_mutable": False,
+        "derivation": {
+            "artifact": "ieee754_binary64_precision_bound_v1",
+            "binary64_epsilon": 2.220446049250313e-16,
+            "multiplier": 4096,
+            "rounding": "round_up_to_1e-12",
+            "source": "deterministic_numeric_precision_only",
+            "unrounded_bound": 9.094947017729282e-13,
+        },
+        "unit": "risk_cost",
+        "value": 1e-12,
+    },
+    "path_ratio_consistency": {
+        "absolute_tolerance": 2e-5,
+        "calibration_mutable": False,
+        "derivation": {
+            "eligible_ratio_cap": 1.3,
+            "per_value_max_relative_rounding": 5e-6,
+            "rounding": "round_up_to_2e-5",
+            "serialization": (
+                "std_ostream_defaultfloat_precision_6_significant_digits"
+            ),
+            "three_value_worst_case_absolute_bound": 1.95002e-5,
+        },
+        "unit": "dimensionless",
+    },
+    "quantiles": {
+        "definition": (
+            "sort finite values ascending; h=(n-1)*p; interpolate between "
+            "floor(h) and ceil(h)"
+        ),
+        "interpolation": "linear_lower_plus_fraction_times_upper_minus_lower",
+        "method": "TYPE_7_LINEAR",
+        "tie_behavior": "stable_input_row_index",
+        "units": {
+            "improvement": "risk_cost",
+            "path_ratio": "dimensionless",
+            "total_search": "s",
+        },
+    },
+    "repetitions": [1, 2, 3],
+    "run_duration_s": 90,
+    "run_id_template": "p4-g0c-r2-seed{seed}-rep{repetition:02d}",
+    "seeds": [211, 223, 237, 253, 271],
+    "threshold_formulas": {
+        "max_improvement_min": "Q10(original_max-risk_max)",
+        "mean_improvement_min": "Q10(original_mean-risk_mean)",
+        "path_ratio_max": "min(1.30,Q95(path_ratio)+0.02)",
+        "total_search_timeout_s": (
+            "min(0.40,Q95(total_search_s)+max(0.01,0.20*Q95(total_search_s)))"
+        ),
+    },
+}
+
+
+def _so3_feedback_imu_topic(sim_imu_topic, _iap_imu_topic):
+    """Return the world-frame linear-acceleration stream expected by SO3Control."""
+    return sim_imu_topic
+
+
+def _lidar_output_semantics(renderer_mode):
+    """Describe the measurement contract actually emitted by the renderer."""
+    if renderer_mode == "spherical_first_hit_v1":
+        return "hit_only_first_return_pointcloud2"
+    if renderer_mode == "legacy_radius_crop_v1":
+        return "legacy_radius_crop_world_points"
+    return "unknown_renderer_semantics"
+
+
+def _sha256_file(path):
+    path = Path(path).resolve()
+    if not path.is_file():
+        return ""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _canonical_json_bytes(payload):
+    return (
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _p4_g0c_typed_value(value):
+    raw = str(value).strip()
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def _p4_g0c_profile_trace_binding(experiment, readiness_mode, csv_path):
+    enabled = experiment in {
+        P4_G0C_EXPERIMENT_V5, P4_G0C_EXPERIMENT_V6,
+    } and bool(readiness_mode)
+    return {
+        "enabled": enabled,
+        "path": (
+            str(Path(csv_path).with_name("p4_equal_arc_profile_trace.csv"))
+            if enabled else ""
+        ),
+    }
+
+
+def _validate_p4_g0c_profile_values(experiment, effective_values, explicit_overrides):
+    if str(experiment) not in P4_G0C_EXPERIMENTS:
+        return
+    for key, expected in P4_G0C_FROZEN_LAUNCH_VALUES.items():
+        actual = effective_values.get(key)
+        if _p4_g0c_typed_value(actual) != _p4_g0c_typed_value(expected):
+            qualifier = "conflicting explicit override" if key in explicit_overrides else "profile mismatch"
+            raise RuntimeError(
+                f"P4-G0C {qualifier} for {key}: expected {expected}, got {actual}"
+            )
+    if str(experiment) in {
+        P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5,
+        P4_G0C_EXPERIMENT_V6,
+    }:
+        profile = (
+            P4_G0C_V6_P0_PROFILE_VALUES
+            if str(experiment) == P4_G0C_EXPERIMENT_V6
+            else P4_G0C_V5_P0_PROFILE_VALUES
+            if str(experiment) == P4_G0C_EXPERIMENT_V5
+            else P4_G0C_V4_P0_PROFILE_VALUES
+        )
+        for key, expected in profile.items():
+            actual = effective_values.get(key)
+            if _p4_g0c_typed_value(actual) != _p4_g0c_typed_value(expected):
+                raise RuntimeError(
+                    f"P4-G0C profiled P0 mismatch for {key}: "
+                    f"expected {expected}, got {actual}"
+                )
+
+
+def _p4_g0c_binding(
+    *, experiment, protocol_path, registry_path, fixture_path,
+    declared_protocol_sha256, declared_registry_sha256,
+    declared_fixture_sha256, run_id, seed, repetition,
+    run_manifest_path, csv_path, effective_values,
+    child_environment=None, mutable_output_paths=None, readiness_mode=False,
+):
+    if str(experiment) not in P4_G0C_EXPERIMENTS:
+        return {}
+    version = (
+        6 if str(experiment) == P4_G0C_EXPERIMENT_V6
+        else 5 if str(experiment) == P4_G0C_EXPERIMENT_V5
+        else 4 if str(experiment) == P4_G0C_EXPERIMENT_V4
+        else 3 if str(experiment) == P4_G0C_EXPERIMENT_V3
+        else 2 if str(experiment) == P4_G0C_EXPERIMENT_V2
+        else 1
+    )
+    replacement = version >= 2
+    paths = {
+        "protocol": Path(protocol_path).expanduser().resolve(),
+        "registry": Path(registry_path).expanduser().resolve(),
+        "fixture": Path(fixture_path).expanduser().resolve(),
+    }
+    for name, path in paths.items():
+        if not path.is_file():
+            raise RuntimeError(f"P4-G0C {name} artifact is missing: {path}")
+    actual_hashes = {name: _sha256_file(path) for name, path in paths.items()}
+    if replacement:
+        # The full v2 protocol/registry trust anchor lives in the shared loader
+        # to keep protocol -> dependency -> launch acyclic. This launch freezes
+        # science independently and requires caller-declared actual hashes.
+        registered_hashes = {
+            "fixture": (
+                P4_G0C_FIXTURE_V2_SHA256
+                if version in {5, 6} else P4_G0C_FIXTURE_SHA256
+            )
+        }
+    else:
+        registered_hashes = {
+            "protocol": P4_G0C_PROTOCOL_SHA256,
+            "registry": P4_G0C_REGISTRY_SHA256,
+            "fixture": P4_G0C_FIXTURE_SHA256,
+        }
+    for name, actual in actual_hashes.items():
+        if name not in registered_hashes:
+            continue
+        if actual != registered_hashes[name]:
+            raise RuntimeError(f"P4-G0C {name} is not the registered artifact")
+    declared_hashes = {
+        "protocol": str(declared_protocol_sha256),
+        "registry": str(declared_registry_sha256),
+        "fixture": str(declared_fixture_sha256),
+    }
+    for name in actual_hashes:
+        if actual_hashes[name] != declared_hashes[name]:
+            raise RuntimeError(f"P4-G0C {name} hash mismatch")
+    try:
+        artifacts = {
+            name: json.loads(path.read_text()) for name, path in paths.items()
+        }
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"P4-G0C binding artifact is malformed: {exc}") from exc
+    for name, payload in artifacts.items():
+        if paths[name].read_bytes() != _canonical_json_bytes(payload):
+            raise RuntimeError(f"P4-G0C {name} artifact is not canonical")
+    protocol = artifacts["protocol"]
+    registry = artifacts["registry"]
+    fixture = artifacts["fixture"]
+    if registry.get("protocol_sha256") != actual_hashes["protocol"]:
+        raise RuntimeError("P4-G0C registry protocol hash mismatch")
+    if protocol.get("live_fixture", {}).get("sha256") != actual_hashes["fixture"]:
+        raise RuntimeError("P4-G0C protocol fixture hash mismatch")
+    expected_run_id = (
+        f"p4-g0c-r{version}-seed{int(seed)}-rep{int(repetition):02d}"
+        if replacement
+        else f"p4-g0c-seed{int(seed)}-rep{int(repetition):02d}"
+    )
+    if readiness_mode:
+        if (
+            version not in {4, 5, 6}
+            or not re.fullmatch(
+                rf"p4-g0c-r{version}-readiness-[a-z0-9-]+", run_id
+            )
+            or run_id in protocol.get("registered_run_ids", [])
+        ):
+            raise RuntimeError("P4-G0C readiness identity is not isolated")
+    elif run_id != expected_run_id or run_id not in protocol.get("registered_run_ids", []):
+        raise RuntimeError("P4-G0C run identity is not registered")
+    manifest_path = Path(run_manifest_path).expanduser().resolve()
+    decision_path = Path(csv_path).expanduser().resolve()
+    if (
+        manifest_path.parent != decision_path.parent
+        or manifest_path.parent.name != run_id
+    ):
+        raise RuntimeError("P4-G0C manifest and CSV must be in the immutable run directory")
+    typed_values = {
+        key: _p4_g0c_typed_value(effective_values[key])
+        for key in sorted(P4_G0C_FROZEN_LAUNCH_VALUES)
+    }
+    typed_values.update({
+        "gate": "G0C",
+        "p0.enabled": True,
+        "p4.enabled": True,
+        "p4.per_search_timeout_s": 0.2,
+        "selection_applied": False,
+    })
+    if version in {4, 5, 6}:
+        profile = (
+            P4_G0C_V6_P0_PROFILE_VALUES
+            if version == 6 else P4_G0C_V5_P0_PROFILE_VALUES
+            if version == 5 else P4_G0C_V4_P0_PROFILE_VALUES
+        )
+        typed_values.update({
+            key: _p4_g0c_typed_value(effective_values[key])
+            for key in profile
+        })
+        if version in {5, 6}:
+            typed_values["p0.predictor.worker_count"] = int(
+                effective_values["p0.predictor.worker_count"]
+            )
+        if version == 6:
+            typed_values["p0.horizons_s"] = [
+                float(item) for item in
+                str(effective_values["p0.horizons_s"]).split(",")
+            ]
+    expected_protocol_schema = (
+        f"p4_g0c_protocol_v{version}"
+    )
+    if protocol.get("schema_version") != expected_protocol_schema:
+        raise RuntimeError("P4-G0C protocol schema mismatch")
+    expected_science = dict(P4_G0C_FROZEN_SCIENTIFIC_IDENTITY)
+    if version in {3, 4, 5, 6}:
+        expected_science["run_id_template"] = (
+            f"p4-g0c-r{version}-seed{{seed}}-rep{{repetition:02d}}"
+        )
+    if replacement and any(
+        _canonical_json_bytes(protocol.get(key))
+        != _canonical_json_bytes(value)
+        for key, value in expected_science.items()
+    ):
+        raise RuntimeError(f"P4-G0C v{version} scientific identity mismatch")
+    if (
+        replacement
+        and _canonical_json_bytes(protocol.get("effective_values"))
+        != _canonical_json_bytes(typed_values)
+    ) or (
+        not replacement and protocol.get("effective_values") != typed_values
+    ):
+        raise RuntimeError("P4-G0C protocol effective config mismatch")
+    if (
+        registry.get("schema_version") != (
+            f"p4_threshold_registry_v{version}" if replacement
+            else "p4_threshold_registry_v1"
+        )
+        or registry.get("state") != "PROPOSED_UNCALIBRATED"
+        or registry.get("application_enabled") is not False
+        or registry.get("calibration_bundle_sha256") is not None
+        or set(registry.get("gates", {})) != {
+            "mean_improvement_min", "max_improvement_min",
+            "path_ratio_max", "total_search_timeout_s",
+        }
+        or any(value is not None for value in registry.get("gates", {}).values())
+        or (
+            _canonical_json_bytes(registry.get("numerical_noise_floor"))
+            != _canonical_json_bytes(protocol.get("numerical_noise_floor"))
+            if replacement
+            else registry.get("numerical_noise_floor")
+            != protocol.get("numerical_noise_floor")
+        )
+    ):
+        raise RuntimeError("P4-G0C proposed registry contract mismatch")
+    expected_fixture_schema = (
+        "p4_g0c_fixture_v2" if version in {5, 6} else "p4_g0c_fixture_v1"
+    )
+    if (
+        fixture.get("schema_version") != expected_fixture_schema
+        or fixture.get("scenario") != P4_G0C_SCENARIO
+    ):
+        raise RuntimeError("P4-G0C fixture contract mismatch")
+    effective_canonical = json.dumps(
+        typed_values, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    result = {
+        "schema_version": (
+            f"p4_g0c_run_manifest_v{version}" if replacement
+            else "p4_g0c_run_manifest_v1"
+        ),
+        "gate": "G0C",
+        "run_id": run_id,
+        "seed": int(seed),
+        "repetition": int(repetition),
+        "protocol_path": str(paths["protocol"]),
+        "protocol_sha256": actual_hashes["protocol"],
+        "registry_path": str(paths["registry"]),
+        "registry_sha256": actual_hashes["registry"],
+        "fixture_path": str(paths["fixture"]),
+        "fixture_sha256": actual_hashes["fixture"],
+        "effective_values": typed_values,
+        "effective_config_sha256": hashlib.sha256(effective_canonical).hexdigest(),
+        "csv_path": str(decision_path),
+        "required_process_set": list(P4_G0C_REQUIRED_PROCESSES),
+        "record_bag": False,
+        "start_rviz": False,
+        "selection_applied": False,
+        "immutable_run_id": True,
+        "overwrite_allowed": False,
+        **({
+            "dependency_manifest_sha256": protocol.get(
+                "runtime_dependency_manifest", {}
+            ).get("sha256"),
+            "replacement_lineage_sha256": protocol.get(
+                "replacement_lineage", {}
+            ).get("sha256"),
+        } if replacement else {}),
+    }
+    if version >= 3:
+        if not isinstance(child_environment, dict) or set(child_environment) != {
+            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"
+        }:
+            raise RuntimeError("P4-G0C child environment is malformed")
+        if not isinstance(mutable_output_paths, dict) or set(mutable_output_paths) != {
+            "bag_output_dir", "decision_csv_path", "export_root_dir",
+            "iap_log_root", "launch_command_path", "run_manifest_path",
+            "runtime_root_dir", "stdout_log_path",
+        }:
+            raise RuntimeError("P4-G0C mutable-output inventory is malformed")
+        run_dir = manifest_path.parent
+        runs_root = run_dir.parent
+        environment_root = runs_root / "launch_environment"
+        expected_environment = {
+            "HOME": str(environment_root / "home"),
+            "ROS_HOME": str(environment_root / "ros_home"),
+            "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+            "TMPDIR": str(environment_root / "tmp"),
+            "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
+        }
+        expected_outputs = {
+            "bag_output_dir": str(run_dir / "bags"),
+            "decision_csv_path": str(decision_path),
+            "export_root_dir": str(run_dir / "exports"),
+            "iap_log_root": str(run_dir / "runtime" / "iap_logs"),
+            "launch_command_path": str(run_dir / "launch_command.json"),
+            "run_manifest_path": str(manifest_path),
+            "runtime_root_dir": str(run_dir / "runtime"),
+            "stdout_log_path": str(run_dir / "stdout.log"),
+        }
+        if child_environment != expected_environment:
+            raise RuntimeError("P4-G0C child environment is not canonical")
+        if mutable_output_paths != expected_outputs:
+            raise RuntimeError("P4-G0C mutable-output inventory is not canonical")
+        if any(os.environ.get(key) != value for key, value in expected_environment.items()):
+            raise RuntimeError("P4-G0C propagated child environment mismatch")
+        result.update({
+            "child_environment": expected_environment,
+            "mutable_output_paths": expected_outputs,
+        })
+    if version in {5, 6}:
+        result["admission_parameter"] = {
+            "requested": True,
+            "effective": typed_values[
+                "p4.require_risk_grid_ready_before_planning"
+            ],
+        }
+    return result
+
+
+def _prepare_p4_g0c_context(context, experiment, iap_share):
+    if str(experiment) not in P4_G0C_EXPERIMENTS:
+        return {}
+    overrides = _launch_arg_overrides()
+    scenario = LaunchConfiguration("scenario").perform(context)
+    if scenario != P4_G0C_SCENARIO:
+        qualifier = "conflicting explicit override" if "scenario" in overrides else "profile mismatch"
+        raise RuntimeError(
+            f"P4-G0C {qualifier} for scenario: expected "
+            f"{P4_G0C_SCENARIO}, got {scenario}"
+        )
+    effective = {
+        key: LaunchConfiguration(key).perform(context)
+        for key in P4_G0C_FROZEN_LAUNCH_VALUES
+    }
+    if experiment in {
+        P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5,
+        P4_G0C_EXPERIMENT_V6,
+    }:
+        profile = (
+            P4_G0C_V6_P0_PROFILE_VALUES
+            if experiment == P4_G0C_EXPERIMENT_V6
+            else P4_G0C_V5_P0_PROFILE_VALUES
+            if experiment == P4_G0C_EXPERIMENT_V5
+            else P4_G0C_V4_P0_PROFILE_VALUES
+        )
+        effective.update({
+            key: LaunchConfiguration(key).perform(context)
+            for key in profile
+        })
+    _validate_p4_g0c_profile_values(experiment, effective, overrides)
+    expected_scenario_values = {
+        key: _maybe_resolve_iap_config_path(key, value, iap_share)
+        for key, value in SCENARIO_PRESETS[P4_G0C_SCENARIO].items()
+    }
+    if experiment in {P4_G0C_EXPERIMENT_V5, P4_G0C_EXPERIMENT_V6}:
+        expected_scenario_values.update({
+            "p1_fixture_central_x_min_m": str(
+                P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]
+            ),
+            "p1_fixture_central_x_max_m": str(
+                P4_G0C_V5_CENTRAL_OBSTACLE_X_M[1]
+            ),
+        })
+    for key, expected in expected_scenario_values.items():
+        actual = LaunchConfiguration(key).perform(context)
+        if _p4_g0c_typed_value(actual) != _p4_g0c_typed_value(expected):
+            qualifier = (
+                "conflicting explicit override"
+                if key in overrides else "scenario mismatch"
+            )
+            raise RuntimeError(
+                f"P4-G0C {qualifier} for {key}: "
+                f"expected {expected}, got {actual}"
+            )
+    seed = int(LaunchConfiguration("p4.g0c.seed").perform(context))
+    repetition = int(LaunchConfiguration("p4.g0c.repetition").perform(context))
+    for key in ("forest_random_seed", "gnss_random_seed", "terminal_wall_feature_seed"):
+        if key in overrides and int(LaunchConfiguration(key).perform(context)) != seed:
+            raise RuntimeError(f"P4-G0C conflicting explicit override for {key}")
+        context.launch_configurations[key] = str(seed)
+    csv_path = LaunchConfiguration("p4.g0c.csv_path").perform(context)
+    explicit_csv = LaunchConfiguration("p4.debug_csv_path").perform(context)
+    if "p4.debug_csv_path" in overrides and Path(explicit_csv).resolve() != Path(csv_path).resolve():
+        raise RuntimeError("P4-G0C conflicting explicit override for p4.debug_csv_path")
+    context.launch_configurations["p4.debug_csv_path"] = csv_path
+    readiness_mode = _param_bool(context, "p4.g0c.readiness_mode")
+    trace_binding = _p4_g0c_profile_trace_binding(
+        experiment, readiness_mode, csv_path)
+    profile_trace_enable = trace_binding["enabled"]
+    if "p4.profile_trace_enable" in overrides and \
+            _param_bool(context, "p4.profile_trace_enable") != profile_trace_enable:
+        raise RuntimeError(
+            "P4-G0C profile trace is permitted only for v5/v6 readiness"
+        )
+    profile_trace_path = trace_binding["path"]
+    if "p4.profile_trace_path" in overrides and \
+            LaunchConfiguration("p4.profile_trace_path").perform(context) != \
+            profile_trace_path:
+        raise RuntimeError("P4-G0C conflicting profile trace path")
+    context.launch_configurations["p4.profile_trace_enable"] = str(
+        profile_trace_enable).lower()
+    context.launch_configurations["p4.profile_trace_path"] = profile_trace_path
+    binding = _p4_g0c_binding(
+        experiment=experiment,
+        protocol_path=LaunchConfiguration("p4.g0c.protocol_path").perform(context),
+        registry_path=LaunchConfiguration("p4.g0c.registry_path").perform(context),
+        fixture_path=LaunchConfiguration("p4.g0c.fixture_path").perform(context),
+        declared_protocol_sha256=LaunchConfiguration(
+            "p4.g0c.protocol_sha256").perform(context),
+        declared_registry_sha256=LaunchConfiguration(
+            "p4.g0c.registry_sha256").perform(context),
+        declared_fixture_sha256=LaunchConfiguration(
+            "p4.g0c.fixture_sha256").perform(context),
+        run_id=LaunchConfiguration("p4.g0c.run_id").perform(context),
+        seed=seed,
+        repetition=repetition,
+        run_manifest_path=LaunchConfiguration(
+            "p4.g0c.run_manifest_path").perform(context),
+        csv_path=csv_path,
+        effective_values=effective,
+        readiness_mode=readiness_mode,
+        child_environment={
+            "HOME": LaunchConfiguration("p4.g0c.child_home").perform(context),
+            "ROS_HOME": LaunchConfiguration(
+                "p4.g0c.child_ros_home"
+            ).perform(context),
+            "ROS_LOG_DIR": LaunchConfiguration(
+                "p4.g0c.child_ros_log_dir"
+            ).perform(context),
+            "TMPDIR": LaunchConfiguration("p4.g0c.child_tmpdir").perform(context),
+            "XDG_RUNTIME_DIR": LaunchConfiguration(
+                "p4.g0c.child_xdg_runtime_dir"
+            ).perform(context),
+        },
+        mutable_output_paths={
+            "bag_output_dir": LaunchConfiguration("bag_output_dir").perform(context),
+            "decision_csv_path": csv_path,
+            "export_root_dir": LaunchConfiguration(
+                "export_root_dir"
+            ).perform(context),
+            "iap_log_root": LaunchConfiguration("iap_log_root").perform(context),
+            "launch_command_path": str(
+                Path(LaunchConfiguration(
+                    "p4.g0c.run_manifest_path"
+                ).perform(context)).expanduser().resolve().parent
+                / "launch_command.json"
+            ),
+            "run_manifest_path": LaunchConfiguration(
+                "p4.g0c.run_manifest_path"
+            ).perform(context),
+            "runtime_root_dir": LaunchConfiguration(
+                "runtime_root_dir"
+            ).perform(context),
+            "stdout_log_path": str(
+                Path(LaunchConfiguration(
+                    "p4.g0c.run_manifest_path"
+                ).perform(context)).expanduser().resolve().parent
+                / "stdout.log"
+            ),
+        },
+    )
+    manifest_path = Path(
+        LaunchConfiguration("p4.g0c.run_manifest_path").perform(context)
+    ).expanduser().resolve()
+    decision_path = Path(csv_path).expanduser().resolve()
+    if manifest_path.exists() or decision_path.exists():
+        raise RuntimeError("P4-G0C refuses existing manifest or decision CSV")
+    return binding
+
+
+def _mapping_backend_config_provenance(path):
+    path = Path(path).resolve()
+    if not path.is_file():
+        raise RuntimeError(f"effective mapping configuration is missing: {path}")
+    return {"path": str(path), "sha256": _sha256_file(path)}
+
+
+def _normalize_mapping_backend(value):
+    backend = str(value).strip().lower()
+    if backend not in {"gpu", "cpu"}:
+        raise RuntimeError(
+            "iap_mapping_backend must be exactly gpu or cpu; "
+            f"got '{backend}'"
+        )
+    return backend
+
+
+def _formal_calibration_provenance(value):
+    """Read immutable experiment provenance; never forward it to the planner."""
+    raw = str(value).strip()
+    if not raw:
+        return {}
+    path = Path(raw).expanduser().resolve()
+    if not path.is_file():
+        raise RuntimeError(f"P1 formal calibration file is missing: {path}")
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"P1 formal calibration is unreadable: {path}: {exc}") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != "p1_formal_tolerance_calibration_v1"
+        or not str(payload.get("calibration_id", "")).strip()
+        or not isinstance(payload.get("generated_at_epoch_s"), (int, float))
+    ):
+        raise RuntimeError(f"P1 formal calibration has an invalid contract: {path}")
+    return {
+        "calibration_id": payload["calibration_id"],
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "generated_at_epoch_s": float(payload["generated_at_epoch_s"]),
+        "generated_at_utc": str(payload.get("generated_at_utc", "")),
+    }
+
+
+def _command_text(command, cwd):
+    try:
+        return subprocess.check_output(command, cwd=str(cwd), text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def _git_repository(iap_prefix):
+    candidates = [
+        Path(__file__).resolve().parents[2],
+        Path(iap_prefix).resolve().parents[1] / "src" / "iap",
+    ]
+    for candidate in candidates:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _git_provenance(repo):
+    if repo is None:
+        return "", False
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=str(repo), text=True
+        ).strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=str(repo), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+        ).stdout
+        return commit, not bool(status.strip())
+    except (OSError, subprocess.CalledProcessError):
+        return "", False
+
+
+def _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario):
+    iap_prefix = Path(get_package_prefix("iap")).resolve()
+    repo = _git_repository(iap_prefix)
+    git_commit, git_worktree_clean = _git_provenance(repo)
+    ego_prefix = Path(get_package_prefix("ego_planner")).resolve()
+    bspline_prefix = Path(get_package_prefix("bspline_opt")).resolve()
+    workspace_install = iap_prefix.parent
+    planner_executable = (ego_prefix / "lib" / "ego_planner" / "ego_planner_node").resolve()
+    bspline_library = (bspline_prefix / "lib" / "libbspline_opt.a").resolve()
+    launch_path = Path(__file__).resolve()
+    return {
+        "schema_version": P1_EVIDENCE_SCHEMA_VERSION,
+        "run_id": uuid.uuid4().hex,
+        "git_commit": git_commit,
+        "baseline_commit": "34fa22f17c3778c2f98a777e01516b878c183120",
+        "git_worktree_clean": git_worktree_clean,
+        "source_repository": str(repo) if repo else "",
+        "workspace_root": str(iap_prefix.parents[1]),
+        "install_prefix": str(workspace_install),
+        "export_dir": str(Path(export_dir).resolve()),
+        "bag_path": str(Path(bag_output_dir).resolve()),
+        "experiment": experiment,
+        "scenario": scenario,
+        "process_start_stamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "process_start_epoch_s": time.time(),
+        "runtime_paths": {
+            "iap_prefix": str(iap_prefix),
+            "ego_planner_prefix": str(ego_prefix),
+            "bspline_opt_prefix": str(bspline_prefix),
+            "launch": {"path": str(launch_path), "sha256": _sha256_file(launch_path)},
+            "planner_executable": {"path": str(planner_executable), "sha256": _sha256_file(planner_executable)},
+            "bspline_library": {"path": str(bspline_library), "sha256": _sha256_file(bspline_library)},
+        },
+    }
+
+
+def _as_bool(value):
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _launch_arg_overrides():
+    keys = set()
+    for arg in sys.argv:
+        if ":=" in arg:
+            keys.add(arg.split(":=", 1)[0])
+    return keys
+
+
+def _resolve_fanout_mirror_value(
+    fixture_mirror, manager_mirror, explicit_overrides
+):
+    if "manager/p1_collision_fanout_mirror_y" in explicit_overrides:
+        return bool(manager_mirror)
+    return bool(fixture_mirror)
+
+
+def _manager_fanout_mirror_y(context, explicit_overrides=None):
+    overrides = (
+        _launch_arg_overrides()
+        if explicit_overrides is None
+        else explicit_overrides
+    )
+    return _resolve_fanout_mirror_value(
+        _param_bool(context, "p1_fixture_mirror_y"),
+        _param_bool(context, "manager/p1_collision_fanout_mirror_y"),
+        overrides,
+    )
+
+
+def _launch_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _csv_floats(value):
+    return [float(v.strip()) for v in str(value).split(",") if v.strip()]
+
+
+def _safe_path_component(value, fallback):
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(value)).strip("_")
+    return safe or fallback
+
+
+def _scenario_fingerprint(scenario, expanded_contract):
+    """Return a stable identity for the fully expanded scenario contract."""
+    canonical = json.dumps(
+        {"scenario": str(scenario), "contract": expanded_contract},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+OPEN_MAP_PRESET = {
+    "tree_density_lower_left_per_m2": "0.02",
+    "tree_density_lower_right_per_m2": "0.02",
+    "tree_density_upper_left_per_m2": "0.02",
+    "tree_density_upper_right_per_m2": "0.02",
+    "stratified_cell_size_m": "4.0",
+    "clear_corridor_enabled": "true",
+    "clear_corridor_center_y_m": "0.0",
+    "clear_corridor_half_width_y_m": "1.8",
+    "clear_corridor_x_min_m": "-12.5",
+    "clear_corridor_x_max_m": "12.5",
+    "trunk_radius_m": "0.10",
+    "trunk_min_height_m": "0.30",
+    "trunk_max_height_m": "1.15",
+    "canopy_density_lower_left": "0.0",
+    "canopy_density_lower_right": "0.0",
+    "canopy_density_upper_left": "0.0",
+    "canopy_density_upper_right": "0.0",
+    "terminal_wall_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "2.0",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.10",
+}
+
+
+P5_5_FIXTURE_ROUTE_WAYPOINTS = [
+    (12.0, 0.0, 1.2),
+    (-12.0, 0.0, 1.2),
+    (12.0, 0.0, 1.2),
+    (-12.0, 0.0, 1.2),
+]
+
+
+FEATURE_RICH_MAP_PRESET = {
+    "tree_density_lower_left_per_m2": "0.75",
+    "tree_density_lower_right_per_m2": "0.75",
+    "tree_density_upper_left_per_m2": "0.75",
+    "tree_density_upper_right_per_m2": "0.75",
+    "canopy_density_lower_left": "0.08",
+    "canopy_density_lower_right": "0.08",
+    "canopy_density_upper_left": "0.25",
+    "canopy_density_upper_right": "0.25",
+    "terminal_wall_enabled": "true",
+    "terminal_wall_feature_count": "64",
+    "corridor_walls_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "2.0",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.10",
+}
+
+
+DENSE_FOUR_FORK_FOREST_PRESET = {
+    "init_x": "-18.0",
+    "init_y": "0.0",
+    "init_z": "1.5",
+    "goal_x": "18.0",
+    "goal_y": "0.0",
+    "goal_z": "1.5",
+    "point_num": "1",
+    "map_size_x": "42.0",
+    "map_size_y": "22.0",
+    "map_size_z": "8.0",
+    "forest_layout_mode": "forked_s_forest_v1",
+    "forest_size_x_m": "40.0",
+    "forest_size_y_m": "20.0",
+    "forest_random_seed": "41021",
+    "tree_density_lower_left_per_m2": "0.25",
+    "tree_density_lower_right_per_m2": "0.25",
+    "tree_density_upper_left_per_m2": "0.25",
+    "tree_density_upper_right_per_m2": "0.25",
+    "stratified_cell_size_m": "2.0",
+    "canopy_density_lower_left": "0.65",
+    "canopy_density_lower_right": "0.65",
+    "canopy_density_upper_left": "0.65",
+    "canopy_density_upper_right": "0.65",
+    "canopy_hemisphere_radius_min_m": "0.8",
+    "canopy_hemisphere_radius_max_m": "1.5",
+    "canopy_ball_spacing_ratio": "2.0",
+    "canopy_resolution_m": "0.2",
+    "trunk_radius_m": "0.14",
+    "trunk_min_height_m": "3.2",
+    "trunk_max_height_m": "5.0",
+    "clear_corridor_enabled": "false",
+    "forked_forest.fork_count": "4",
+    "forked_forest.fork_x_min_m": "-16.0",
+    "forked_forest.fork_length_m": "8.0",
+    "forked_forest.low_risk_amplitude_m": "4.0",
+    "forked_forest.high_risk_amplitude_m": "2.8",
+    "forked_forest.corridor_width_m": "2.4",
+    "forked_forest.junction_clearance_radius_m": "2.0",
+    "forked_forest.start_x_m": "-18.0",
+    "forked_forest.goal_x_m": "18.0",
+    "forked_forest.risk_seed": "21",
+    "forked_forest.flight_clearance_z_m": "2.8",
+    "forked_forest.edge_tree_spacing_m": "0.5",
+    "forked_forest.edge_tree_height_m": "3.2",
+    "forked_forest.edge_canopy_radius_m": "1.5",
+    "forked_forest.side_boundary_tree_spacing_m": "0.28",
+    "terminal_wall_enabled": "false",
+    "corridor_walls_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-20.0",
+    "corridor_x_max_m": "20.0",
+    "corridor_half_width_y_m": "10.0",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.15",
+    "p1_map_fixture": "",
+}
+
+
+# v2 preserves the frozen forest geometry/seeds while changing the planner
+# contract: world truth remains simulator-only and the safety stack consumes
+# the EGO online occupancy epoch on a fixed task geofence.
+DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
+    **DENSE_FOUR_FORK_FOREST_PRESET,
+    "forest_layout_mode": "forked_s_forest_v2",
+    "forked_forest.start_canopy_clearance_radius_m": "5.0",
+    "grid_map/origin_x": "-21.0",
+    "grid_map/origin_y": "-11.0",
+    "grid_map/origin_z": "0.0",
+    # Restore the original EGO exploration contract for base rebound/A*: an
+    # unobserved voxel is geometrically traversable. P0 still reports missing
+    # risk evidence as UNKNOWN, and P4 defers formal risk selection until that
+    # independent support is complete.
+    "grid_map/unknown_as_occupied": "false",
+    "manager/planning_horizon": "8.0",
+    "fsm/planning_horizon": "8.0",
+    # Initial/refill channel refinement may run a bounded local A*; it is
+    # prepare-only work and never runs in the handoff callback.  Reserve enough
+    # wall time for both mirrored channels while direct authorization retains
+    # its independent 150 ms cap.
+    "p4.forward.route_compute_budget_ms": "1200.0",
+    "grid_map/local_update_range_x": "9.0",
+    "grid_map/local_update_range_y": "9.0",
+    "grid_map/local_update_range_z": "4.5",
+    "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
+    "planner_frame_mode": "glim_world",
+    "planner_local_map_enable": "true",
+    "allow_truth_alignment": "false",
+    "p0.online_mapping_mode": "true",
+    "p0.fit_grid_to_map_cloud": "false",
+    "p0.map_topic": "",
+    "p0.resolution_m": "0.5",
+    "p0.size_x_m": "42.0",
+    "p0.size_y_m": "22.0",
+    "p0.size_z_m": "8.0",
+    "p0.origin_x_m": "-21.0",
+    "p0.origin_y_m": "-11.0",
+    "p0.origin_z_m": "0.0",
+    "p0.provider_cost_source": "pre_conservative_fim_ratio",
+    "p0.require_safety_ratio_below_one_for_cost": "true",
+    # Receiver measurement evidence is anchor-only. Candidate LOS support is
+    # always evaluated at the candidate and task policy decides whether
+    # incomplete sky support is strict-unknown or best-effort soft attenuation.
+    "p0.predictor.gnss_measured_epoch_support_radius_m": "0.0",
+    "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": "0.25",
+    "p0.predictor.gnss.clearance_transition_m": "0.4",
+    "p0.alert_limit_policy_id": "fixed_hal20_val40_v1",
+    "p0.alert_limit_h_m": "20.0",
+    "p0.alert_limit_v_m": "40.0",
+    "p4.fallback_to_original_when_risk_not_ready": "false",
+    "p4.forward.reaction_time_s": "1.2",
+    "p4.assurance.task_mode": "mission_best_effort",
+    "p4.assurance.maximum_continuous_exceedance_s": "2.3",
+    "p4.assurance.maximum_exceedance_integral_ratio_s": "0.115",
+    "p4.forward.braking_accel_mps2": "1.5",
+    "p4.forward.vehicle_radius_m": "0.35",
+    "p4.forward.safety_margin_m": "0.5",
+    "p4.forward.max_lookahead_m": "8.0",
+    "p4.forward.sensing_range_m": "10.0",
+    "p4.forward.topology_resolution_m": "0.5",
+    "p4.forward.nominal_query_speed_mps": "1.5",
+    "p4.forward.route_compute_budget_ms": "1200.0",
+    "p4.forward.compute_budget_ms": "150.0",
+    "p4.forward.gnss_core_policy": "braking_window_pointwise",
+    "p4.forward.window_transition_overlap_s": "0.4",
+    # The clean four-fork live observed 2.937 s from the frozen candidate
+    # start budget to the final publication boundary under the production
+    # callback load. Reserve that measured bound up front so a fully certified
+    # multi-channel winner is not discarded and rebuilt from the same stopped
+    # parent merely because less than the mandatory 200 ms queue margin remains.
+    "p4.execution.successor_prepare_wcet_s": "3.0",
+    "p4.execution.successor_control_switch_margin_s": "0.2",
+    "p4.execution.successor_scheduler_guard_s": "0.2",
+    # Full route plus actual-curve preparation took 2.2--2.3 s in the
+    # production forest callback before the immutable 200 ms queue margin.
+    # Allow the scheduler to use the already-certified rolling switch at
+    # 4.0 s; computeP4SuccessorDeadline still clamps every command to that
+    # trajectory's own pre-deceleration/latest-switch certificate.
+    "p4.execution.successor_max_parent_execution_s": "4.0",
+    "p4.execution.successor_progress_jitter_floor_m": "0.10",
+    "p4.execution.successor_progress_stability_margin_m": "0.05",
+    "p4.forward.min_creep_progress_m": "0.25",
+    "p4.forward.max_limited_prefix_progress_m": "8.0",
+    "p4.forward.max_creep_progress_m": "-1.0",
+    "p4.forward.max_observe_speed_mps": "0.5",
+    "p4.forward.max_channel_searches": "32",
+    # Dense four-fork enumeration exceeded 60 ms once the local occupancy
+    # corridor contained the second fork.  This work runs in the cooperative
+    # route worker; the 250 ms allowance is still bounded by the 1.2 s route
+    # budget and does not relax any flight-safety predicate.
+    "p4.forward.channel_enumeration_budget_ms": "250.0",
+    "p4.forward.advisory_min_relative_improvement": "0.10",
+    "p4.execution.max_tracking_error_m": "0.15",
+    "p4.execution.marginal_unsafe_ratio_max": "1.005",
+    "p4.execution.marginal_confirm_distinct_evidence": "3",
+    "p4.execution.marginal_confirm_max_s": "0.35",
+    "integrity_dynamic_alert_limits": "false",
+    "integrity_hal_m": "20.0",
+    "integrity_val_m": "40.0",
+    "p5.pred_alert_limit_mode": "config_constant",
+    "p5.pred_alert_limit_constant_hal_m": "20.0",
+    "p5.pred_alert_limit_constant_val_m": "40.0",
+}
+
+
+DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET = {
+    # Two bounded 2.5 s parent executions, one certified terminal stop, and
+    # the 0.2 s switch plus 0.2 s scheduler margins require 7.680084270 s.
+    "p4.assurance.maximum_continuous_exceedance_s": "8.0",
+    # The incomplete-evidence conservative charge is (1.05 - 1.0) * 8.0.
+    "p4.assurance.maximum_exceedance_integral_ratio_s": "0.4",
+}
+
+
+CORRIDOR_DEGENERATE_MAP_PRESET = {
+    "forest_size_x_m": "30.0",
+    "forest_size_y_m": "6.0",
+    "tree_density_lower_left_per_m2": "0.0",
+    "tree_density_lower_right_per_m2": "0.0",
+    "tree_density_upper_left_per_m2": "0.0",
+    "tree_density_upper_right_per_m2": "0.0",
+    "canopy_density_lower_left": "0.0",
+    "canopy_density_lower_right": "0.0",
+    "canopy_density_upper_left": "0.0",
+    "canopy_density_upper_right": "0.0",
+    "terminal_wall_enabled": "false",
+    "corridor_walls_enabled": "true",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "2.0",
+    "corridor_wall_z_min_m": "0.0",
+    "corridor_wall_z_max_m": "3.0",
+    "corridor_wall_thickness_y_m": "0.10",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.10",
+}
+
+
+DEFAULT_ROUTE_PRESET = {
+    "init_x": "-12.0",
+    "init_y": "0.0",
+    "init_z": "1.2",
+    "goal_x": "12.0",
+    "goal_y": "0.0",
+    "goal_z": "1.2",
+    "point_num": "1",
+}
+
+
+GNSS_OPEN_SKY_PRESET = {
+    "gnss_ephemeris_source": "rinex",
+    "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
+    "gnss_scenario_file": "config/gnss_sim/demo7_open_sky.yaml",
+    "gnss_pr_noise_base": "1.0",
+    "gnss_dop_noise_base": "0.03",
+    "gnss_enable_map_occlusion": "false",
+    "gnss_enable_skymask": "false",
+    "gnss_enable_nlos": "false",
+    "gnss_enable_multipath": "false",
+    "gnss_enable_fault_injection": "false",
+}
+
+
+GNSS_DEGRADED_PRESET = {
+    "gnss_ephemeris_source": "rinex",
+    "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
+    "gnss_scenario_file": "config/gnss_sim/demo7_skymask_nlos.yaml",
+    "gnss_pr_noise_base": "5.0",
+    "gnss_dop_noise_base": "0.5",
+    "gnss_enable_map_occlusion": "true",
+    "gnss_enable_skymask": "true",
+    "gnss_enable_nlos": "true",
+    "gnss_enable_multipath": "true",
+    "gnss_enable_fault_injection": "false",
+}
+
+
+P1_FORK_MAP_PRESET = {
+    **DEFAULT_ROUTE_PRESET,
+    "init_z": "1.5",
+    "goal_z": "1.5",
+    "forest_size_x_m": "28.0",
+    "forest_size_y_m": "10.0",
+    "tree_density_lower_left_per_m2": "0.0",
+    "tree_density_lower_right_per_m2": "0.0",
+    "tree_density_upper_left_per_m2": "0.0",
+    "tree_density_upper_right_per_m2": "0.0",
+    "canopy_density_lower_left": "0.0",
+    "canopy_density_lower_right": "0.0",
+    "canopy_density_upper_left": "0.0",
+    "canopy_density_upper_right": "0.0",
+    "forest_random_seed": "41021",
+    "terminal_wall_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "5.0",
+    "p1_fixture_mirror_y": "false",
+    "p1_fixture_central_obstacle_enabled": "true",
+    "p1_fixture_central_x_min_m": "-8.0",
+    "p1_fixture_central_x_max_m": "-3.0",
+    "p1_fixture_central_y_half_width_m": "0.65",
+    "grid_map/local_update_range_x": "11.0",
+    "p1_fixture_central_z_max_m": "2.8",
+    "p1_fixture_lane_center_m": "2.0",
+    "p1_fixture_lane_half_width_m": "0.75",
+    "p1_fixture_safe_tree_density_per_m2": "0.25",
+    "p1_fixture_risky_tree_density_per_m2": "0.75",
+    "p1_fixture_safe_canopy_probability": "0.05",
+    "p1_fixture_risky_canopy_probability": "0.85",
+}
+
+
+P1_FUSED_SENSOR_PRESET = {
+    **GNSS_DEGRADED_PRESET,
+    "use_gnss": "true", "use_araim": "true",
+    "gnss_time_source": "odom_stamp",
+    "enable_gnss_integrity": "true", "enable_gnss_araim": "true",
+    "enable_lidar_integrity": "true", "integrity_fusion_mode": "max_pl",
+    "validator_require_gnss_valid": "true",
+    "validator_require_lidar_valid": "true",
+    "validator_required_final_source": "",
+}
+
+
+P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET = {
+    **DEFAULT_ROUTE_PRESET,
+    **OPEN_MAP_PRESET,
+    **GNSS_OPEN_SKY_PRESET,
+    "init_z": "1.5",
+    "goal_z": "1.5",
+    "use_gnss": "true",
+    "use_araim": "true",
+    "gnss_time_source": "odom_stamp",
+    "enable_gnss_integrity": "true",
+    "enable_gnss_araim": "true",
+    "enable_lidar_integrity": "false",
+    "integrity_fusion_mode": "gnss_only",
+    "validator_require_gnss_valid": "true",
+    "validator_require_lidar_valid": "false",
+    "validator_required_final_source": "GNSS",
+    "p0.skip_occupied_voxels": "true",
+    "p0_6.fixture.enabled": "true",
+    "p0_6.fixture.name": "occupied_overlap_box_v1",
+    "p0_6.fixture.x_min": "-1.5",
+    "p0_6.fixture.x_max": "1.5",
+    "p0_6.fixture.y_min": "-0.75",
+    "p0_6.fixture.y_max": "0.75",
+    "p0_6.fixture.z_min": "1.0",
+    "p0_6.fixture.z_max": "2.0",
+    "p0_6.fixture.raw_hpl_m": "1.0",
+    "p0_6.fixture.raw_vpl_m": "1.2",
+    "p0_6.fixture.raw_c_pi": "1.2",
+    "p0_6.fixture.low_raw_cost_threshold": "2.0",
+}
+
+
+COMBO_PRESETS = {
+    ("icra_p0_p4_v2_p5_dev", "icra_dense_forest_four_fork_v2"): {
+        **{
+            key: value
+            for key, value in DENSE_FOUR_FORK_FOREST_ONLINE_PRESET.items()
+            if key.startswith("p0.") or key.startswith("grid_map/") or
+            key == "manager/planning_horizon" or
+            key == "p4.fallback_to_original_when_risk_not_ready" or
+            key.startswith("integrity_") or
+            key.startswith("p5.pred_alert_limit_") or
+            key == "forked_forest.start_canopy_clearance_radius_m"
+        },
+        **DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET,
+    },
+    ("p0_open_sky", "manual"): P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET,
+    ("p5_corridor", "manual"): {
+        **DEFAULT_ROUTE_PRESET,
+        **CORRIDOR_DEGENERATE_MAP_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "planner_start_delay_s": "10.0",
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "odom_stamp",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "false",
+        "integrity_fusion_mode": "gnss_only",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "false",
+        "validator_required_final_source": "GNSS",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p0.predictor.source_mode": "fusion",
+        "p0.predictor.gnss_epoch_policy": "auto",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "p0.predictor.conservative_max_with_gnss": "false",
+        "p5.debug_metrics_enable": "true",
+        "p5.pred_alert_limit_mode": "current_msg_constant",
+        "p5_7.fixture.enabled": "true",
+    },
+}
+
+
+SCENARIO_PRESETS = {
+    "manual": {},
+    "gnss_open_sky": {
+        **DEFAULT_ROUTE_PRESET,
+        **OPEN_MAP_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "init_z": "1.5",
+        "goal_z": "1.5",
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "odom_stamp",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "false",
+        "integrity_fusion_mode": "gnss_only",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "false",
+        "validator_required_final_source": "GNSS",
+    },
+    "lidar_feature_rich": {
+        **DEFAULT_ROUTE_PRESET,
+        **FEATURE_RICH_MAP_PRESET,
+        "use_gnss": "false",
+        "use_araim": "true",
+        "enable_gnss_integrity": "false",
+        "enable_gnss_araim": "false",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "lidar_only",
+        "validator_require_gnss_valid": "false",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "LIDAR",
+    },
+    "lidar_corridor_degenerate": {
+        **DEFAULT_ROUTE_PRESET,
+        **CORRIDOR_DEGENERATE_MAP_PRESET,
+        "use_gnss": "false",
+        "use_araim": "true",
+        "enable_gnss_integrity": "false",
+        "enable_gnss_araim": "false",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "lidar_only",
+        "integrity_require_valid_gnss": "false",
+        "integrity_require_valid_lidar": "true",
+        "validator_require_gnss_valid": "false",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "LIDAR",
+    },
+    "fallback_only": {
+        **DEFAULT_ROUTE_PRESET,
+        **OPEN_MAP_PRESET,
+        "use_gnss": "false",
+        "use_araim": "true",
+        "enable_gnss_integrity": "false",
+        "enable_gnss_araim": "false",
+        "enable_lidar_integrity": "false",
+        "integrity_fusion_mode": "fallback_only",
+        "validator_require_gnss_valid": "false",
+        "validator_require_lidar_valid": "false",
+        "validator_required_final_source": "FALLBACK",
+    },
+    "fused_nominal": {
+        **DEFAULT_ROUTE_PRESET,
+        **FEATURE_RICH_MAP_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+    },
+    "gnss_degraded_lidar_good": {
+        **DEFAULT_ROUTE_PRESET,
+        **FEATURE_RICH_MAP_PRESET,
+        **GNSS_DEGRADED_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+    },
+    "icra_dense_forest_four_fork_v1": {
+        **DENSE_FOUR_FORK_FOREST_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "odom_stamp",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+        "gnss_enable_map_occlusion": "true",
+        # BDS is part of the production/default geometry. Execution-risk
+        # snapshots keep dense RiskGrid construction off the authorization
+        # path while retaining BDS in the direct curve check.
+        "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
+        "gnss_enable_skymask": "false",
+        "gnss_enable_nlos": "true",
+        "gnss_enable_multipath": "true",
+        "gnss_enable_fault_injection": "false",
+        "p0.skip_occupied_voxels": "true",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "p0.predictor.conservative_max_with_gnss": "true",
+        "fsm.thresh_replan_time": "0.2",
+        "manager/max_vel": "0.5",
+        "optimization/max_vel": "0.5",
+        "bspline/limit_vel": "0.5",
+        "lidar_sensing_rate_hz": "10.0",
+    },
+    "icra_dense_forest_four_fork_v2": {
+        **DENSE_FOUR_FORK_FOREST_ONLINE_PRESET,
+        **DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "odom_stamp",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+        "gnss_enable_map_occlusion": "true",
+        "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
+        "gnss_enable_skymask": "false",
+        "gnss_enable_nlos": "true",
+        "gnss_enable_multipath": "true",
+        "gnss_enable_fault_injection": "false",
+        "p0.skip_occupied_voxels": "true",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "p0.predictor.conservative_max_with_gnss": "true",
+        "fsm.thresh_replan_time": "0.2",
+        "manager/max_vel": "0.5",
+        "optimization/max_vel": "0.5",
+        "bspline/limit_vel": "0.5",
+        "lidar_sensing_rate_hz": "10.0",
+    },
+    "icra_p0_p5_fused_degraded_corridor_v1": {
+        **DEFAULT_ROUTE_PRESET,
+        **CORRIDOR_DEGENERATE_MAP_PRESET,
+        **GNSS_DEGRADED_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "trigger_topic",
+        "gnss_scenario_file": "config/gnss_sim/demo7_skymask_nlos.yaml",
+        "gnss_trigger_topic": "/sim/drone_0/lidar",
+        "gnss_rinex_nav_file": (
+            "/home/dev/ws_iap/src/LIGO./Data/"
+            "BRDM00DLR_S_20221870000_01D_MN.rnx"
+        ),
+        "gnss_fallback_to_synthetic_on_rinex_error": "false",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+    },
+    "p1_fork_fused_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_fused_v1",
+    },
+    "p1_fork_fused_mirror_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_fused_mirror_v1",
+        "p1_fixture_mirror_y": "true",
+    },
+    "p1_fork_symmetric_null_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_symmetric_null_v1",
+        "p1_fixture_risky_tree_density_per_m2": "0.25",
+        "p1_fixture_risky_canopy_probability": "0.05",
+    },
+    "p1_soft_risk_island_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_soft_risk_island_v1",
+        "p1_fixture_central_obstacle_enabled": "true",
+    },
+    "p4_g0c_free_corridor_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_fused_v1",
+        "p1_fixture_central_obstacle_enabled": "true",
+    },
+    "icra_p0_p4_v2_p5_dev_fixture_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "icra_p0_p4_v2_p5_dev_fixture_v1",
+        "p1_fixture_central_obstacle_enabled": "true",
+        "p1_fixture_central_x_min_m": "-9.0",
+        "p1_fixture_central_x_max_m": "-7.0",
+    },
+    "icra072_p4_selection_trigger_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "p1_map_fixture": "icra072_p4_selection_trigger_v1",
+        "integrity_fusion_mode": "max_pl",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "fsm.thresh_replan_time": "0.2",
+        "manager/max_vel": "0.5",
+        "optimization/max_vel": "0.5",
+        "bspline/limit_vel": "0.5",
+        "p1_fixture_central_obstacle_enabled": "true",
+        "p1_fixture_central_x_min_m": "-9.0",
+        "p1_fixture_central_x_max_m": "-7.0",
+        "p1_fixture_central_y_half_width_m": "0.4",
+        # Development-only P4 flow trigger: provider values are projected at
+        # every P0 lattice corner. P4 still rejects live occupied positions
+        # before querying provider risk.
+        "p0.skip_occupied_voxels": "false",
+        # Keep the live occupancy epoch stable long enough for one complete
+        # development planning transaction; occupancy remains authoritative.
+        "lidar_sensing_rate_hz": "2.0",
+    },
+}
+
+SCENARIO_PRESETS["icra072_p4_selection_trigger_mirror_v1"] = {
+    **SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"],
+    "p1_map_fixture": "icra072_p4_selection_trigger_mirror_v1",
+    "p1_fixture_mirror_y": "true",
+}
+
+
+EXPERIMENT_PRESETS = {
+    # Canonical non-test simulation profile. iap_sim.launch.py fixes this
+    # profile and keeps validators, recorders, paper gates and fault fixtures
+    # outside the public runtime graph.
+    "canonical_full_stack_sim": {
+        "planner_safety_profile": "icra_p0_p4_v2_p5_dev",
+        "planner_enable_p1": "false",
+        "planner_enable_p2": "false",
+        "planner_enable_p3_local": "false",
+        "planner_enable_p3_global": "false",
+        "planner_enable_p4": "true",
+        "planner_enable_p5_runtime": "true",
+        "planner_enable_p5_final": "true",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p4.enable_risk_aware_astar": "true",
+        # RiskGrid is advisory ordering only; missing/stale data cannot become
+        # an independent motion-admission gate.
+        "p4.require_risk_grid_ready_before_planning": "false",
+        "p4.fallback_to_original_when_risk_not_ready": "false",
+        "p4.metrics_only": "false",
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "p4.debug_csv_enable": "true",
+        "p5.enable_runtime_gate": "true",
+        "p5.enable_final_gate": "true",
+        "p5.debug_metrics_enable": "true",
+        "planner_frame_mode": "glim_world",
+        "planner_local_map_enable": "true",
+        "allow_truth_alignment": "false",
+        "p0.online_mapping_mode": "true",
+        "p0.fit_grid_to_map_cloud": "false",
+        "p0.map_topic": "",
+        "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
+        "run_validator": "false",
+        "record_bag": "false",
+        "sim_time_enable": "false",
+    },
+    "baseline_fused_nominal_off": {
+        "scenario": "fused_nominal",
+        "planner_safety_profile": "off",
+        "p0.debug_metrics_enable": "false",
+        "p1.debug_csv_enable": "false",
+        "p2.debug_csv_enable": "false",
+        "p3.debug_csv_enable": "false",
+        "p4.debug_csv_enable": "false",
+        "p5.debug_metrics_enable": "false",
+    },
+    "baseline_corridor_off": {
+        "scenario": "lidar_corridor_degenerate",
+        "planner_safety_profile": "off",
+    },
+    "p0_open_sky": {
+        "scenario": "gnss_open_sky",
+        "planner_safety_profile": "off",
+        "planner_start_delay_s": "10.0",
+        "corridor_floor_enabled": "true",
+        "corridor_x_min_m": "-14.0",
+        "corridor_x_max_m": "13.0",
+        "corridor_half_width_y_m": "2.0",
+        "corridor_floor_thickness_z_m": "0.05",
+        "terminal_wall_enabled": "true",
+        "terminal_wall_x_m": "12.8",
+        "terminal_wall_y_m": "0.0",
+        "terminal_wall_width_y_m": "5.0",
+        "terminal_wall_z_min_m": "0.0",
+        "terminal_wall_z_max_m": "3.2",
+        "terminal_wall_thickness_x_m": "0.20",
+        "terminal_wall_resolution_m": "0.10",
+        "terminal_wall_feature_depth_x_m": "0.35",
+        "terminal_wall_feature_count": "24",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p1.debug_csv_enable": "false",
+        "p2.debug_csv_enable": "false",
+        "p3.debug_csv_enable": "false",
+        "p4.debug_csv_enable": "false",
+        "p5.debug_metrics_enable": "false",
+    },
+    "p0_degraded_lidar_good": {
+        "scenario": "gnss_degraded_lidar_good",
+        "planner_safety_profile": "off",
+        "planner_start_delay_s": "10.0",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p1.debug_csv_enable": "false",
+        "p2.debug_csv_enable": "false",
+        "p3.debug_csv_enable": "false",
+        "p4.debug_csv_enable": "false",
+        "p5.debug_metrics_enable": "false",
+    },
+    "p0_corridor_degenerate": {
+        "scenario": "lidar_corridor_degenerate",
+        "planner_safety_profile": "off",
+        "planner_start_delay_s": "10.0",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p1.debug_csv_enable": "false",
+        "p2.debug_csv_enable": "false",
+        "p3.debug_csv_enable": "false",
+        "p4.debug_csv_enable": "false",
+        "p5.debug_metrics_enable": "false",
+    },
+    "p0_fallback_only": {
+        "scenario": "fallback_only",
+        "planner_safety_profile": "off",
+        "planner_start_delay_s": "10.0",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p1.debug_csv_enable": "false",
+        "p2.debug_csv_enable": "false",
+        "p3.debug_csv_enable": "false",
+        "p4.debug_csv_enable": "false",
+        "p5.debug_metrics_enable": "false",
+    },
+    "p5_corridor": {
+        "scenario": "lidar_corridor_degenerate",
+        "planner_safety_profile": "p5",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p5.debug_metrics_enable": "true",
+    },
+    "p5_fallback_unknown": {
+        "scenario": "fallback_only",
+        "planner_safety_profile": "p5",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p5.debug_metrics_enable": "true",
+        "p5_3.fixture.enabled": "false",
+        "p5_4.fixture.enabled": "false",
+        "p5_6.fixture.enabled": "true",
+        "p5_6.fixture.name": "future_unknown_zone_v1",
+        "p5_6.fixture.x_min": "-1.0",
+        "p5_6.fixture.x_max": "12.5",
+        "p5_6.fixture.y_min": "-15.0",
+        "p5_6.fixture.y_max": "15.0",
+        "p5_6.fixture.z_min": "-3.0",
+        "p5_6.fixture.z_max": "3.0",
+        "p5_6.fixture.tau_min": "0.2",
+        "p5_6.fixture.tau_max": "2.0",
+    },
+    "icra_p0_p5_qualification_safe_normal": {
+        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
+        "planner_safety_profile": "icra_p0_p5",
+    },
+    "icra_p0_p5_qualification_final_reject": {
+        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
+        "planner_safety_profile": "icra_p0_p5",
+    },
+    "icra_p0_p5_qualification_runtime_fail": {
+        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
+        "planner_safety_profile": "icra_p0_p5",
+    },
+    "p1_degraded_lidar_good": {
+        "scenario": "gnss_degraded_lidar_good",
+        "planner_safety_profile": "p1",
+        "p0.size_x_m": "42.0",
+        # P1-2 keeps the existing 1 s stale timeout and grid geometry. Four
+        # deterministic worker-local predictors address the measured refresh
+        # bottleneck without changing P0 acceptance semantics.
+        "p0.predictor.worker_count": "4",
+        "p1.debug_csv_enable": "true",
+        "safety_viz.enable_p1_viz": "true",
+    },
+    "p1_fork_formal": {
+        "scenario": "p1_fork_fused_v1",
+        "planner_safety_profile": "p1",
+        "p0.size_x_m": "42.0",
+        "p0.predictor.worker_count": "4",
+        # Cover the complete fixed-200 local trajectory at the 1 m/s formal
+        # checkpoint. The original 0--2.5 s prefix is unchanged; sparse future
+        # layers through 16 s extend only this experiment's immutable
+        # prediction contract.
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0",
+        "p0.size_y_m": "12.0",
+        "planner_start_delay_s": "10.0",
+        # The deterministic simulator starts stationary. Use its measured
+        # gravity vector instead of solving an underconstrained loose GICP/IMU
+        # problem over the repeated startup scene.
+        "odometry_initialization_mode": "NAIVE",
+        # Accumulate a full IMU window before the first LiDAR frame.
+        "lidar_start_delay_s": "2.0",
+        "fsm.thresh_replan_time": "0.9",
+        # Observe the entire central fork and put the local target beyond its
+        # terminal face before the first formal decision checkpoint.
+        "manager/planning_horizon": "10.5",
+        "manager/p1_collision_fanout_clearance_m": "2.5",
+        "manager/p1_collision_fanout_preserve_homotopies": "true",
+        "p1_fixture_lane_center_m": "2.5",
+        "grid_map/local_update_range_x": "11.0",
+        # At 1 m/s, one 0.9 s planning event intersects the fixed 0.8 m window.
+        # This is configuration identity, not an analyzer relaxation.
+        "manager/max_vel": "1.0",
+        "optimization/max_vel": "1.0",
+        "bspline/limit_vel": "1.0",
+        "p1.debug_csv_enable": "true",
+        "p1.lambda_integrity": "0.00001",
+        "p1.normalization_budget_fraction": "0.30",
+        "safety_viz.enable_p1_viz": "true",
+    },
+    "p2_degraded_lidar_good": {
+        "scenario": "gnss_degraded_lidar_good",
+        "planner_safety_profile": "p2",
+        "manager/use_distinctive_trajs": "true",
+        "p2.debug_csv_enable": "true",
+        "safety_viz.enable_p2_viz": "true",
+    },
+    "p3_corridor": {
+        "scenario": "lidar_corridor_degenerate",
+        "planner_safety_profile": "p3",
+        "p3.debug_csv_enable": "true",
+        "safety_viz.enable_p3_viz": "true",
+    },
+    "p4_manual_collision_guide": {
+        "scenario": "manual",
+        "planner_safety_profile": "p4",
+        "p4.debug_csv_enable": "true",
+        "safety_viz.enable_p4_viz": "true",
+    },
+    "icra_p0_p4_v2_p5_dev": {
+        "scenario": "icra072_p4_selection_trigger_v1",
+        "planner_safety_profile": "icra_p0_p4_v2_p5_dev",
+        "planner_start_delay_s": "10.0",
+        "planner_enable_p1": "false",
+        "planner_enable_p2": "false",
+        "planner_enable_p3_local": "false",
+        "planner_enable_p3_global": "false",
+        "planner_enable_p4": "true",
+        "planner_enable_p5_runtime": "true",
+        "planner_enable_p5_final": "true",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        # Online P0 consumes GridMap's immutable occupancy epoch.  Bind both
+        # grids to the same fixed geofence and the required five-to-one risk
+        # overlay ratio for the default 30 m scenario; scenario-specific
+        # combo presets (for example forest-v2) replace the whole tuple.
+        "grid_map/origin_x": "-15.0",
+        "grid_map/origin_y": "-15.0",
+        "grid_map/origin_z": "0.0",
+        "p0.resolution_m": "0.5",
+        "p0.size_x_m": "30.0",
+        "p0.size_y_m": "30.0",
+        "p0.size_z_m": "3.5",
+        "p0.origin_x_m": "-15.0",
+        "p0.origin_y_m": "-15.0",
+        "p0.origin_z_m": "0.0",
+        # BDS is the production default for this dense forest profile. Eight
+        # worker-local predictors preserve the formula and keep the growing
+        # exact forest geometry batch inside the fixed 500 ms grid budget.
+        "p0.predictor.worker_count": "8",
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0,4.0,5.0,6.0",
+        "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
+        "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+        "p4.require_risk_grid_ready_before_planning": "true",
+        "p4.enable_risk_aware_astar": "true",
+        "p4.metrics_only": "false",
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "p4.debug_csv_enable": "true",
+        "p4.profile_trace_enable": "false",
+        "p5.debug_metrics_enable": "true",
+        "p5_3.fixture.enabled": "false",
+        "p5_4.fixture.enabled": "false",
+        "p5_5.fixture.enabled": "false",
+        "p5_6.fixture.enabled": "false",
+        "p5_7.fixture.enabled": "false",
+        "manager/use_distinctive_trajs": "false",
+        "record_bag": "false",
+        "start_rviz": "false",
+        "run_validator": "true",
+    },
+    "p4_g0c_metrics_calibration_v1": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_ARTIFACT_PRESET,
+        "scenario": "p4_g0c_free_corridor_v1",
+    },
+    "p4_g0c_metrics_calibration_v2": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V2,
+        "scenario": "p4_g0c_free_corridor_v1",
+    },
+    "p4_g0c_metrics_calibration_v3": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V3,
+        "scenario": "p4_g0c_free_corridor_v1",
+    },
+    "p4_g0c_metrics_calibration_v4": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_V4_P0_PROFILE_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V4,
+        "scenario": "p4_g0c_free_corridor_v1",
+    },
+    "p4_g0c_metrics_calibration_v5": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_V5_P0_PROFILE_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V5,
+        "scenario": "p4_g0c_free_corridor_v1",
+        "p1_fixture_central_x_min_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]),
+        "p1_fixture_central_x_max_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[1]),
+    },
+    "p4_g0c_metrics_calibration_v6": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_V6_P0_PROFILE_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V6,
+        "scenario": "p4_g0c_free_corridor_v1",
+        "p1_fixture_central_x_min_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]),
+        "p1_fixture_central_x_max_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[1]),
+    },
+    "all_degraded_lidar_good": {
+        "scenario": "gnss_degraded_lidar_good",
+        "planner_safety_profile": "all",
+        "p0.debug_metrics_enable": "true",
+        "p1.debug_csv_enable": "true",
+        "p2.debug_csv_enable": "true",
+        "p3.debug_csv_enable": "true",
+        "p4.debug_csv_enable": "true",
+        "p5.debug_metrics_enable": "true",
+        "safety_viz.enable_p1_viz": "true",
+        "safety_viz.enable_p2_viz": "true",
+        "safety_viz.enable_p3_viz": "true",
+        "safety_viz.enable_p4_viz": "true",
+    },
+}
+
+
+ARG_DEFAULTS = [
+    ("experiment", "baseline_fused_nominal_off"),
+    ("scenario", "fused_nominal"),
+    ("config_subdir", "sim_demo11"),
+    ("iap_mapping_backend", "gpu"),
+    ("start_rviz", "true"),
+    ("start_planner", "true"),
+    ("record_bag", "false"),
+    ("run_validator", "true"),
+    ("bag_output_dir", "/home/dev/ws_iap/src/iap/results/planner_validation/bags"),
+    ("runtime_root_dir", ""),
+    ("export_root_dir", ""),
+    ("iap_log_root", ""),
+    ("run_duration_s", "90"),
+    ("sim_time_enable", "true"),
+    ("validation_duration_s", "85"),
+    ("allow_truth_alignment", "true"),
+    ("planner_frame_mode", "legacy_truth_aligned"),
+    ("planner_local_map_enable", "false"),
+    ("planner_local_map_current_topic", "/iap/local_map/current_frame"),
+    ("planner_local_map_current_hits_map_topic", "/iap/local_map/current_hits_map"),
+    ("planner_local_map_delta_topic", "/iap/local_map/window_delta"),
+    ("planner_local_map_recovery_service", "/iap/local_map/get_active_window"),
+    ("planner_local_map_window_rate_hz", "2.0"),
+    ("odometry_acc_scale", "1.0"),
+    ("planner_executor_thread_count", "4"),
+    ("planner_start_delay_s", "0.0"),
+    ("lidar_start_delay_s", "0.0"),
+    ("odometry_initialization_mode", ""),
+    ("rviz_config", "config/sim_demo11/demo11_integrity_corridor.rviz"),
+    ("corridor_map_stamp_authority_topic", "/sim/drone_0/truth_odom"),
+    ("fsm.thresh_replan_time", "1.0"),
+    ("enable_preflight_takeoff", "false"),
+    ("preflight_ground_z", "0.0"),
+    ("preflight_ground_hold_s", "10.0"),
+    ("preflight_takeoff_duration_s", "5.0"),
+    ("preflight_hover_s", "30.0"),
+    ("preflight_cmd_rate_hz", "50.0"),
+    ("use_gnss", "true"),
+    ("use_araim", "true"),
+    ("enable_gnss_integrity", "true"),
+    ("enable_gnss_araim", "true"),
+    ("enable_lidar_integrity", "true"),
+    ("enable_araim_pl_decomp_csv", "false"),
+    ("integrity_fusion_mode", "max_pl"),
+    ("integrity_require_valid_gnss", "false"),
+    ("integrity_require_valid_lidar", "false"),
+    ("integrity_conservative_hpl_m", "999.0"),
+    ("integrity_conservative_vpl_m", "999.0"),
+    ("validator_require_gnss_valid", "true"),
+    ("validator_require_lidar_valid", "true"),
+    ("validator_require_fallback_valid", "true"),
+    ("validator_required_final_source", ""),
+    ("validator_allowed_final_sources", "GNSS,LIDAR,FALLBACK,CONSERVATIVE"),
+    ("init_x", "-12.0"),
+    ("init_y", "0.0"),
+    ("init_z", "1.2"),
+    ("goal_x", "12.0"),
+    ("goal_y", "0.0"),
+    ("goal_z", "1.2"),
+    ("point_num", "1"),
+    ("point1_x", "9.5"),
+    ("point1_y", "0.0"),
+    ("point1_z", "1.2"),
+    ("point2_x", "16.0"),
+    ("point2_y", "0.0"),
+    ("point2_z", "1.2"),
+    ("point3_x", "16.0"),
+    ("point3_y", "0.0"),
+    ("point3_z", "1.2"),
+    ("point4_x", "16.0"),
+    ("point4_y", "0.0"),
+    ("point4_z", "1.2"),
+    ("point5_x", "16.0"),
+    ("point5_y", "0.0"),
+    ("point5_z", "1.2"),
+    ("point6_x", "16.0"),
+    ("point6_y", "0.0"),
+    ("point6_z", "1.2"),
+    ("drone_id", "0"),
+    ("map_size_x", "30.0"),
+    ("map_size_y", "30.0"),
+    ("map_size_z", "3.5"),
+    ("corridor_map_resolution_m", "0.1"),
+    ("corridor_map_publish_rate_hz", "2.0"),
+    ("lidar_sensing_rate_hz", "10.0"),
+    ("lidar_renderer_mode", "legacy_radius_crop_v1"),
+    ("lidar_horizontal_samples", "512"),
+    ("lidar_vertical_samples", "40"),
+    ("lidar_horizontal_fov_deg", "360.0"),
+    ("lidar_vertical_min_deg", "-7.0"),
+    ("lidar_vertical_max_deg", "52.0"),
+    ("lidar_min_range_m", "0.1"),
+    ("lidar_max_range_m", "10.0"),
+    ("lidar_world_voxel_resolution_m", "0.1"),
+    ("trusted_local_map_support_enabled", "true"),
+    ("forest_size_x_m", "20.0"),
+    ("forest_size_y_m", "20.0"),
+    ("tree_density_lower_left_per_m2", "0.5"),
+    ("tree_density_lower_right_per_m2", "0.5"),
+    ("tree_density_upper_left_per_m2", "0.5"),
+    ("tree_density_upper_right_per_m2", "0.5"),
+    ("stratified_cell_size_m", "1.0"),
+    ("clear_corridor_enabled", "false"),
+    ("clear_corridor_center_y_m", "0.0"),
+    ("clear_corridor_half_width_y_m", "0.0"),
+    ("clear_corridor_x_min_m", "-1000000000.0"),
+    ("clear_corridor_x_max_m", "1000000000.0"),
+    ("forest_layout_mode", "random_forest"),
+    ("forked_forest.fork_count", "4"),
+    ("forked_forest.fork_x_min_m", "-16.0"),
+    ("forked_forest.fork_length_m", "8.0"),
+    ("forked_forest.low_risk_amplitude_m", "4.0"),
+    ("forked_forest.high_risk_amplitude_m", "2.8"),
+    ("forked_forest.corridor_width_m", "2.4"),
+    ("forked_forest.junction_clearance_radius_m", "2.0"),
+    ("forked_forest.start_canopy_clearance_radius_m", "2.0"),
+    ("forked_forest.start_x_m", "-18.0"),
+    ("forked_forest.goal_x_m", "18.0"),
+    ("forked_forest.risk_seed", "21"),
+    ("forked_forest.flight_clearance_z_m", "2.8"),
+    ("forked_forest.edge_tree_spacing_m", "1.0"),
+    ("forked_forest.edge_tree_height_m", "3.2"),
+    ("forked_forest.edge_canopy_radius_m", "1.5"),
+    ("forked_forest.side_boundary_tree_spacing_m", "0.0"),
+    ("canopy_density_lower_left", "0.1"),
+    ("canopy_density_lower_right", "0.1"),
+    ("canopy_density_upper_left", "0.6"),
+    ("canopy_density_upper_right", "0.6"),
+    ("canopy_hemisphere_radius_min_m", "0.5"),
+    ("canopy_hemisphere_radius_max_m", "1.5"),
+    ("canopy_leaf_ball_radius_m", "0.22"),
+    ("canopy_ball_spacing_ratio", "1.2"),
+    ("canopy_resolution_m", "0.15"),
+    ("forest_random_seed", "11"),
+    ("trunk_radius_m", "0.14"),
+    ("trunk_min_height_m", "1.5"),
+    ("trunk_max_height_m", "3.0"),
+    ("terminal_wall_enabled", "true"),
+    ("terminal_wall_x_m", "13.5"),
+    ("terminal_wall_y_m", "0.0"),
+    ("terminal_wall_width_y_m", "10.0"),
+    ("terminal_wall_z_min_m", "0.0"),
+    ("terminal_wall_z_max_m", "3.2"),
+    ("terminal_wall_thickness_x_m", "0.20"),
+    ("terminal_wall_resolution_m", "0.10"),
+    ("terminal_wall_feature_depth_x_m", "0.65"),
+    ("terminal_wall_feature_count", "48"),
+    ("terminal_wall_feature_seed", "11022"),
+    ("corridor_walls_enabled", "false"),
+    ("corridor_floor_enabled", "false"),
+    ("corridor_x_min_m", "-14.0"),
+    ("corridor_x_max_m", "14.0"),
+    ("corridor_half_width_y_m", "2.0"),
+    ("corridor_wall_z_min_m", "0.0"),
+    ("corridor_wall_z_max_m", "3.0"),
+    ("corridor_wall_thickness_y_m", "0.10"),
+    ("corridor_floor_thickness_z_m", "0.05"),
+    ("corridor_surface_resolution_m", "0.10"),
+    ("p1_map_fixture", ""),
+    ("p1_fixture_mirror_y", "false"),
+    ("p1_fixture_central_obstacle_enabled", "false"),
+    ("p1_fixture_central_x_min_m", "-7.0"),
+    ("p1_fixture_central_x_max_m", "-2.0"),
+    ("p1_fixture_central_y_half_width_m", "0.65"),
+    ("p1_fixture_central_z_max_m", "2.8"),
+    ("p1_fixture_lane_center_m", "2.0"),
+    ("p1_fixture_lane_half_width_m", "0.75"),
+    ("p1_fixture_safe_tree_density_per_m2", "0.25"),
+    ("p1_fixture_risky_tree_density_per_m2", "0.75"),
+    ("p1_fixture_safe_canopy_probability", "0.05"),
+    ("p1_fixture_risky_canopy_probability", "0.85"),
+    ("grid_map/resolution", "0.1"),
+    ("grid_map/local_update_range_x", "5.5"),
+    ("grid_map/local_update_range_y", "5.5"),
+    ("grid_map/local_update_range_z", "4.5"),
+    ("grid_map/origin_x", "nan"),
+    ("grid_map/origin_y", "nan"),
+    ("grid_map/origin_z", "nan"),
+    ("grid_map/unknown_as_occupied", "false"),
+    ("grid_map/independent_cloud_min_interval_s", "0.0"),
+    ("grid_map/independent_cloud_clock_guard_s", "0.0"),
+    ("planner_occupancy_cloud_topic", "/map_generator/global_cloud"),
+    ("gnss_pr_noise_base", "5.0"),
+    ("gnss_dop_noise_base", "0.5"),
+    ("gnss_random_seed", "20260429"),
+    ("gnss_ephemeris_source", "rinex"),
+    ("gnss_time_source", "trigger_topic"),
+    ("gnss_trigger_topic", "/sim/drone_0/lidar"),
+    ("gnss_enabled_constellations", "GPS,BDS,GAL,GLO"),
+    ("gnss_scenario_file", "config/gnss_sim/demo7_skymask_nlos.yaml"),
+    ("gnss_rinex_nav_file", "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"),
+    ("gnss_rinex_ephem_max_age_s", "7200.0"),
+    ("gnss_fallback_to_synthetic_on_rinex_error", "false"),
+    ("gnss_enable_map_occlusion", "true"),
+    ("gnss_enable_skymask", "true"),
+    ("gnss_enable_nlos", "true"),
+    ("gnss_enable_multipath", "true"),
+    ("gnss_enable_fault_injection", "true"),
+    ("gnss_enable_visualization", "true"),
+    ("gnss_enable_sky_dome_visualization", "true"),
+    ("gnss_sky_dome_show_cardinal_labels", "true"),
+    ("gnss_sky_dome_follow_receiver", "false"),
+    ("gnss_sky_dome_center_x", "0.0"),
+    ("gnss_sky_dome_center_y", "0.0"),
+    ("gnss_sky_dome_center_z", "0.0"),
+    ("gnss_skyplot_origin_x", "0.0"),
+    ("gnss_skyplot_origin_y", "22.0"),
+    ("gnss_skyplot_origin_z", "5.0"),
+    ("viz_status_text_use_fixed_position", "true"),
+    ("viz_status_text_x", "15.0"),
+    ("viz_status_text_y", "0.0"),
+    ("viz_status_text_z", "5.0"),
+    ("planner_safety_profile", "off"),
+    ("planner_enable_all_safety", "false"),
+    ("planner_enable_p1", "false"),
+    ("planner_enable_p2", "false"),
+    ("planner_enable_p3_local", "false"),
+    ("planner_enable_p3_global", "false"),
+    ("planner_enable_p4", "false"),
+    ("planner_enable_p5_runtime", "false"),
+    ("planner_enable_p5_final", "false"),
+    ("planner_enable_safety_viz", "true"),
+    ("safety_viz.selected_horizon_s", "1.0"),
+    ("safety_viz.z_slice_mode", "current_altitude"),
+    ("safety_viz.z_slice_half_thickness_m", "0.75"),
+    ("safety_viz.publish_rate_hz", "2.0"),
+    ("safety_viz.max_cloud_points", "20000"),
+    ("safety_viz.enable_im_bars", "true"),
+    ("safety_viz.enable_validity_cloud", "true"),
+    ("safety_viz.enable_p1_viz", "false"),
+    ("safety_viz.enable_p2_viz", "false"),
+    ("safety_viz.enable_p3_viz", "false"),
+    ("safety_viz.enable_p4_viz", "false"),
+    ("p0.enable_risk_grid", "false"),
+    ("p0.online_mapping_mode", "false"),
+    ("p0.fit_grid_to_map_cloud", "false"),
+    ("p0.map_topic", "/map_generator/global_cloud"),
+    ("p0.resolution_m", "0.75"),
+    ("p0.size_x_m", "30.0"),
+    ("p0.size_y_m", "30.0"),
+    ("p0.size_z_m", "6.0"),
+    ("p0.origin_x_m", "nan"),
+    ("p0.origin_y_m", "nan"),
+    ("p0.origin_z_m", "nan"),
+    ("p0.provider_cost_source", "legacy_safety_pl"),
+    ("p0.require_safety_ratio_below_one_for_cost", "false"),
+    ("p0.alert_limit_policy_id", "legacy_unspecified"),
+    ("p0.alert_limit_h_m", "10.0"),
+    ("p0.alert_limit_v_m", "20.0"),
+    ("integrity_dynamic_alert_limits", "true"),
+    ("integrity_hal_m", "10.0"),
+    ("integrity_val_m", "20.0"),
+    # The fixed P1 lattice must cover every sample of the initial
+    # degraded-LiDAR B-spline (about 2.1 s) before P1 can be admitted.
+    ("p0.horizons_s", "0.0,0.5,1.0,1.5,2.0,2.5"),
+    ("p0.refresh_period_s", "0.5"),
+    ("p0.refresh_start_delay_s", "0.0"),
+    ("p0.stale_timeout_s", "1.0"),
+    ("p0.skip_occupied_voxels", "true"),
+    ("p0.debug_metrics_enable", "false"),
+    ("p0.health_topic", "planning/risk_grid_health"),
+    ("p0.gnss_epoch_max_age_s", "2.0"),
+    ("p0.predictor.source_mode", "fusion"),
+    ("p0.predictor.gnss_epoch_policy", "auto"),
+    ("p0.predictor.gnss_measured_epoch_support_radius_m", "0.0"),
+    ("p0.predictor.gnss_measured_epoch_integrity_max_delta_s", "0.25"),
+    ("p0.predictor.gnss.clearance_transition_m", "0.0"),
+    ("p0.predictor.use_current_integrity_prior", "true"),
+    ("p0.predictor.conservative_max_with_gnss", "false"),
+    ("p0.predictor.lidar_legacy_observability", "true"),
+    ("p0.predictor.lidar_fim_radius_m", "12.0"),
+    ("p0.predictor.worker_count", "1"),
+    ("p0.predictor.sigma_grow_m_sqrt_s", "nan"),
+    ("p0.predictor.sigma_growth_profile", "unconfigured_fail_closed"),
+    ("p0_6.fixture.enabled", "false"),
+    ("p0_6.fixture.name", ""),
+    ("p0_6.fixture.x_min", "-1.5"),
+    ("p0_6.fixture.x_max", "1.5"),
+    ("p0_6.fixture.y_min", "-0.75"),
+    ("p0_6.fixture.y_max", "0.75"),
+    ("p0_6.fixture.z_min", "1.0"),
+    ("p0_6.fixture.z_max", "2.0"),
+    ("p0_6.fixture.raw_hpl_m", "1.0"),
+    ("p0_6.fixture.raw_vpl_m", "1.2"),
+    ("p0_6.fixture.raw_c_pi", "1.2"),
+    ("p0_6.fixture.low_raw_cost_threshold", "2.0"),
+    ("p5_3.fixture.enabled", "false"),
+    ("p5_3.fixture.name", "future_high_risk_zone_v1"),
+    ("p5_3.fixture.x_min", "-10.8"),
+    ("p5_3.fixture.x_max", "-8.7"),
+    ("p5_3.fixture.y_min", "-0.75"),
+    ("p5_3.fixture.y_max", "0.75"),
+    ("p5_3.fixture.z_min", "1.0"),
+    ("p5_3.fixture.z_max", "1.35"),
+    ("p5_3.fixture.tau_min", "1.2"),
+    ("p5_3.fixture.tau_max", "2.0"),
+    ("p5_3.fixture.hpl_pred_m", "10.2"),
+    ("p5_3.fixture.vpl_pred_m", "10.2"),
+    ("p5_4.fixture.enabled", "false"),
+    ("p5_4.fixture.name", "near_risk_zone_v1"),
+    ("p5_4.fixture.x_min", "-11.7"),
+    ("p5_4.fixture.x_max", "-11.1"),
+    ("p5_4.fixture.y_min", "-0.75"),
+    ("p5_4.fixture.y_max", "0.75"),
+    ("p5_4.fixture.z_min", "1.0"),
+    ("p5_4.fixture.z_max", "1.35"),
+    ("p5_4.fixture.tau_min", "0.6"),
+    ("p5_4.fixture.tau_max", "0.95"),
+    ("p5_4.fixture.hpl_pred_m", "10.2"),
+    ("p5_4.fixture.vpl_pred_m", "10.2"),
+    ("p5_5.fixture.enabled", "false"),
+    ("p5_5.fixture.name", "current_integrity_stamp_freeze_v1"),
+    ("p5_5.fixture.start_s", "30.0"),
+    ("p5_5.fixture.duration_s", "12.0"),
+    ("p5_6.fixture.enabled", "false"),
+    ("p5_6.fixture.name", "future_unknown_zone_v1"),
+    ("p5_6.fixture.x_min", "-1.0"),
+    ("p5_6.fixture.x_max", "12.5"),
+    ("p5_6.fixture.y_min", "-15.0"),
+    ("p5_6.fixture.y_max", "15.0"),
+    ("p5_6.fixture.z_min", "-3.0"),
+    ("p5_6.fixture.z_max", "3.0"),
+    ("p5_6.fixture.tau_min", "0.2"),
+    ("p5_6.fixture.tau_max", "2.0"),
+    ("p5_7.fixture.enabled", "false"),
+    ("p5_7.fixture.effective_enabled", "false"),
+    ("p5_7.fixture.name", "rejected_trajectory_zone_v1"),
+    ("p5_7.fixture.x_min", "-11.7"),
+    ("p5_7.fixture.x_max", "-8.7"),
+    ("p5_7.fixture.y_min", "-0.75"),
+    ("p5_7.fixture.y_max", "0.75"),
+    ("p5_7.fixture.z_min", "1.0"),
+    ("p5_7.fixture.z_max", "1.35"),
+    ("p5_7.fixture.tau_min", "0.6"),
+    ("p5_7.fixture.tau_max", "2.0"),
+    ("p5_7.fixture.hpl_pred_m", "10.2"),
+    ("p5_7.fixture.vpl_pred_m", "10.2"),
+    ("p1.use_integrity_cost", "false"),
+    ("p1.metrics_only", "true"),
+    ("p1.lambda_integrity", "0.0"),
+    ("p1.sample_dt_min_s", "0.1"),
+    ("p1.sample_dt_scale", "1.0"),
+    ("p1.max_samples_per_eval", "30"),
+    ("p1.integrity_cost_max", "100.0"),
+    ("p1.integrity_grad_norm_max", "0.1"),
+    ("p1.unknown_policy", "skip"),
+    ("p1.unknown_soft_penalty", "1.0"),
+    ("p1.debug_csv_enable", "false"),
+    ("p1.debug_csv_path", ""),
+    ("p1.max_candidates_per_attempt", "8"),
+    ("p1.objective_aggregation_mode", "fixed_200_smooth_cvar"),
+    ("p1.smooth_max_temperature", "0.01"),
+    ("p1.smooth_cvar_alpha", "0.90"),
+    ("p1.normalization_budget_fraction", "0.30"),
+    ("p1.formal_calibration_manifest", ""),
+    ("p2.enable_candidate_ranking", "false"),
+    ("p2.metrics_only", "true"),
+    ("p2.sample_dt_s", "0.2"),
+    ("p2.lambda_candidate_integrity", "1.0"),
+    ("p2.w_max_cost", "0.25"),
+    ("p2.w_unknown", "5.0"),
+    ("p2.w_stale", "2.0"),
+    ("p2.min_valid_ratio", "0.3"),
+    ("p2.debug_csv_enable", "false"),
+    ("p2.debug_csv_path", ""),
+    ("p3.enable_local_reference_bias", "false"),
+    ("p3.enable_global_reference_bias", "false"),
+    ("p3.local_bias_radius_m", "1.5"),
+    ("p3.min_improvement_ratio", "0.05"),
+    ("p3.w_risk", "1.0"),
+    ("p3.w_detour", "0.25"),
+    ("p3.w_unknown", "5.0"),
+    ("p3.min_corridor_valid_ratio", "0.8"),
+    ("p3.station_spacing_m", "2.0"),
+    ("p3.lateral_sample_step_m", "1.0"),
+    ("p3.lateral_sample_count_each_side", "3"),
+    ("p3.beam_width", "5"),
+    ("p3.max_detour_ratio", "1.5"),
+    ("p3.debug_csv_enable", "false"),
+    ("p3.debug_csv_path", ""),
+    ("p4.enable_risk_aware_astar", "false"),
+    ("p4.metrics_only", "false"),
+    ("p4.objective", "LEGACY_INTEGRAL_V1"),
+    ("p4.lambda_p4_risk", "0.05"),
+    ("p4.risk_cost_max", "100.0"),
+    ("p4.unknown_edge_penalty", "1.0"),
+    ("p4.max_extra_path_ratio", "1.3"),
+    ("p4.fallback_to_original_when_risk_not_ready", "true"),
+    ("p4.debug_csv_enable", "false"),
+    ("p4.require_risk_grid_ready_before_planning", "false"),
+    ("p4.debug_csv_path", ""),
+    ("p4.raw_detail_enable", "false"),
+    ("p4.runtime_window_satellite_detail_max_rows", "5000"),
+    ("p4.debug_generation_probe_enable", "false"),
+    ("p4.profile_trace_enable", "false"),
+    ("p4.profile_trace_path", ""),
+    ("p4.cost_query_policy", "LEGACY_STRICT"),
+    ("p4.forward.reaction_time_s", "1.2"),
+    ("p4.assurance.task_mode", "mission_best_effort"),
+    ("p4.assurance.maximum_continuous_exceedance_s", "2.3"),
+    ("p4.assurance.maximum_exceedance_integral_ratio_s", "0.115"),
+    ("p4.forward.braking_accel_mps2", "1.5"),
+    ("p4.forward.vehicle_radius_m", "0.35"),
+    ("p4.forward.safety_margin_m", "0.5"),
+    ("p4.forward.max_lookahead_m", "8.0"),
+    ("p4.forward.sensing_range_m", "10.0"),
+    ("p4.forward.topology_resolution_m", "0.5"),
+    ("p4.forward.nominal_query_speed_mps", "1.5"),
+    ("p4.forward.route_compute_budget_ms", "500.0"),
+    ("p4.forward.compute_budget_ms", "150.0"),
+    ("p4.forward.window_transition_overlap_s", "0.4"),
+    ("p4.execution.successor_prepare_wcet_s", "0.8"),
+    ("p4.execution.successor_control_switch_margin_s", "0.2"),
+    ("p4.execution.successor_scheduler_guard_s", "0.2"),
+    ("p4.execution.successor_max_parent_execution_s", "2.5"),
+    ("p4.execution.successor_progress_jitter_floor_m", "0.10"),
+    ("p4.execution.successor_progress_stability_margin_m", "0.05"),
+    ("p4.forward.min_creep_progress_m", "0.25"),
+    ("p4.forward.max_limited_prefix_progress_m", "8.0"),
+    ("p4.forward.max_creep_progress_m", "-1.0"),
+    ("p4.forward.max_observe_speed_mps", "0.5"),
+    ("p4.forward.max_raw_paths", "8"),
+    ("p4.forward.max_channels", "4"),
+    ("p4.forward.max_channel_searches", "32"),
+    ("p4.forward.channel_enumeration_budget_ms", "60.0"),
+    ("p4.forward.advisory_min_relative_improvement", "0.10"),
+    ("p4.execution.max_tracking_error_m", "0.15"),
+    ("p4.execution.marginal_unsafe_ratio_max", "1.005"),
+    ("p4.execution.marginal_confirm_distinct_evidence", "3"),
+    ("p4.execution.marginal_confirm_max_s", "0.35"),
+    ("p4.g0c.protocol_path", ""),
+    ("p4.g0c.protocol_sha256", ""),
+    ("p4.g0c.registry_path", ""),
+    ("p4.g0c.registry_sha256", ""),
+    ("p4.g0c.fixture_path", ""),
+    ("p4.g0c.fixture_sha256", ""),
+    ("p4.g0c.run_id", ""),
+    ("p4.g0c.readiness_mode", "false"),
+    ("p4.g0c.seed", "0"),
+    ("p4.g0c.repetition", "0"),
+    ("p4.g0c.run_manifest_path", ""),
+    ("p4.g0c.csv_path", ""),
+    ("p4.g0c.child_home", ""),
+    ("p4.g0c.child_ros_home", ""),
+    ("p4.g0c.child_ros_log_dir", ""),
+    ("p4.g0c.child_tmpdir", ""),
+    ("p4.g0c.child_xdg_runtime_dir", ""),
+    ("p5.enable_runtime_gate", "false"),
+    ("p5.enable_final_gate", "false"),
+    ("p5.horizon_s", "2.0"),
+    ("p5.sample_dt_s", "0.2"),
+    ("p5.current_stale_to_replan_s", "0.5"),
+    ("p5.current_stale_to_emergency_s", "2.0"),
+    ("p5.current_low_margin_to_emergency_s", "2.0"),
+    ("p5.future_unknown_to_emergency_s", "2.0"),
+    ("p5.final_gate_max_consecutive_failures", "3"),
+    ("p5.final_gate_max_failure_duration_s", "1.0"),
+    ("p5.current_replan_margin_m", "0.3"),
+    ("p5.current_emergency_margin_m", "-0.2"),
+    ("p5.future_replan_margin_m", "0.3"),
+    ("p5.future_emergency_margin_m", "-0.5"),
+    ("p5.max_bad_ratio", "0.25"),
+    ("p5.max_unknown_ratio", "0.30"),
+    ("p5.bad_tick_to_replan", "2"),
+    ("p5.good_tick_to_clear", "2"),
+    ("p5.pred_alert_limit_mode", "current_msg_constant"),
+    ("p5.pred_alert_limit_constant_hal_m", "10.0"),
+    ("p5.pred_alert_limit_constant_val_m", "10.0"),
+    ("p5.pred_alert_limit_min_hal_m", "0.1"),
+    ("p5.pred_alert_limit_max_hal_m", "50.0"),
+    ("p5.pred_alert_limit_min_val_m", "0.1"),
+    ("p5.pred_alert_limit_max_val_m", "50.0"),
+    ("p5.pred_alert_limit_clearance_search_radius_m", "5.0"),
+    ("p5.pred_alert_limit_clearance_step_m", "0.25"),
+    ("p5.pred_alert_limit_drone_radius_m", "0.35"),
+    ("p5.pred_alert_limit_clearance_scale", "1.0"),
+    ("p5.pred_alert_limit_vertical_scale", "1.0"),
+    ("p5.status_topic", "planning/integrity_gate_status"),
+    ("p5.debug_metrics_enable", "false"),
+    ("manager/max_vel", "2.0"),
+    ("manager/max_acc", "3.0"),
+    ("manager/max_jerk", "4.0"),
+    ("manager/control_points_distance", "0.4"),
+    ("manager/feasibility_tolerance", "0.05"),
+    ("manager/planning_horizon", "7.5"),
+    ("manager/p1_collision_fanout_clearance_m", "0.0"),
+    ("manager/p1_collision_fanout_preserve_homotopies", "false"),
+    ("manager/p1_collision_fanout_mirror_y", "false"),
+    ("manager/use_distinctive_trajs", "true"),
+    ("gate0.qualification_evidence_enable", "false"),
+    ("gate0.candidate_events_path", ""),
+    ("gate0.control_points_path", ""),
+    ("gate0.evidence_run_id", ""),
+    ("gate0.evidence_manifest_path", ""),
+    ("optimization/lambda_smooth", "1.0"),
+    ("optimization/lambda_collision", "0.5"),
+    ("optimization/lambda_feasibility", "0.1"),
+    ("optimization/lambda_fitness", "1.0"),
+    ("optimization/dist0", "0.5"),
+    ("optimization/swarm_clearance", "0.5"),
+    ("optimization/max_vel", "2.0"),
+    ("optimization/max_acc", "3.0"),
+    ("bspline/limit_vel", "2.0"),
+    ("bspline/limit_acc", "3.0"),
+    ("bspline/limit_ratio", "1.1"),
+]
+
+
+def _maybe_resolve_iap_config_path(key, value, iap_share):
+    if (
+        key == "gnss_scenario_file" or key in {
+            "p4.g0c.protocol_path",
+            "p4.g0c.registry_path",
+            "p4.g0c.fixture_path",
+        }
+    ) and str(value).startswith("config/"):
+        return str(Path(iap_share) / str(value))
+    return value
+
+
+def _apply_preset_values(context, preset, user_overrides, iap_share, applied_keys):
+    for key, value in preset.items():
+        if key in user_overrides:
+            continue
+        value = _maybe_resolve_iap_config_path(key, value, iap_share)
+        context.launch_configurations[key] = _launch_value(value)
+        applied_keys.add(key)
+
+
+def _typed_contract_override(raw, expected):
+    if isinstance(expected, bool):
+        normalized = str(raw).strip().lower()
+        if normalized not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+            return raw
+        return _as_bool(raw)
+    if isinstance(expected, int) and not isinstance(expected, bool):
+        try:
+            return int(str(raw).strip())
+        except ValueError:
+            return raw
+    if isinstance(expected, float):
+        try:
+            return float(str(raw).strip())
+        except ValueError:
+            return raw
+    return str(raw)
+
+
+def _resolve_icra_p0_p5_context(context, experiment, iap_share, overrides):
+    profile = LaunchConfiguration("planner_safety_profile").perform(context).strip()
+    case_id = ICRA_P0_P5_CASE_BY_EXPERIMENT.get(experiment)
+    if case_id is None and profile != "icra_p0_p5":
+        return None
+    contract_path = Path(iap_share) / ICRA_P0_P5_CONTRACT_PATH
+    contract = load_icra_p0_p5_contract(contract_path)
+    values = (
+        resolve_icra_p0_p5_launch_values(contract, case_id, overrides)
+        if case_id is not None
+        else resolve_icra_p0_p5_profile_values(contract, overrides)
+    )
+    return {
+        "case_id": case_id,
+        "contract": contract,
+        "contract_path": contract_path,
+        "fixture_alias": (
+            contract["cases"][case_id]["fixture_alias"]
+            if case_id is not None else "none_v1"
+        ),
+        "values": values,
+    }
+
+
+def _apply_icra_p0_p5_profile(
+    context, experiment, iap_share, user_overrides, applied_keys
+):
+    resolved = _resolve_icra_p0_p5_context(context, experiment, iap_share, {})
+    if resolved is None:
+        return None
+    expected = resolved["values"]
+    explicit_values = {}
+    for key in user_overrides:
+        if key not in context.launch_configurations:
+            continue
+        raw = context.launch_configurations[key]
+        explicit_values[key] = _typed_contract_override(raw, expected.get(key, raw))
+    try:
+        _resolve_icra_p0_p5_context(
+            context, experiment, iap_share, explicit_values
+        )
+    except IcraP0P5ContractError as exc:
+        raise RuntimeError(str(exc)) from exc
+    for key in applied_keys & set(expected):
+        actual = _typed_contract_override(context.launch_configurations[key], expected[key])
+        if actual != expected[key]:
+            raise RuntimeError(
+                f"conflicting preset value for {key}: {actual!r} != {expected[key]!r}"
+            )
+    for key, value in expected.items():
+        context.launch_configurations[key] = _launch_value(value)
+        applied_keys.add(key)
+    contract = resolved["contract"]
+    contract_path = resolved["contract_path"]
+    return {
+        "schema_version": contract["schema_version"],
+        "route_id": contract["route_id"],
+        "profile_name": contract["profile_name"],
+        "qualification_family": contract["qualification_family"],
+        "case_id": resolved["case_id"],
+        "fixture_alias": resolved["fixture_alias"],
+        "analyzer_version": contract["analyzer_version"],
+        "contract_path": str(contract_path.resolve()),
+        "contract_sha256": _sha256_file(contract_path),
+    }
+
+
+def _icra_p0_p5_launch_binding(context, experiment, iap_share, evidence):
+    resolved = _resolve_icra_p0_p5_context(context, experiment, iap_share, {})
+    if resolved is None:
+        return None
+    contract = resolved["contract"]
+    contract_path = resolved["contract_path"]
+    expected = resolved["values"]
+    effective = {
+        key: _typed_contract_override(
+            LaunchConfiguration(key).perform(context), expected_value
+        )
+        for key, expected_value in expected.items()
+    }
+    _resolve_icra_p0_p5_context(context, experiment, iap_share, effective)
+    return build_icra_p0_p5_launch_binding(
+        contract, contract_path, resolved["case_id"], evidence["git_commit"],
+        evidence["run_id"], effective,
+    )
+
+
+def _apply_presets(context, iap_share):
+    user_overrides = _launch_arg_overrides()
+
+    experiment = LaunchConfiguration("experiment").perform(context).strip()
+    if not experiment:
+        experiment = "baseline_fused_nominal_off"
+    if experiment not in EXPERIMENT_PRESETS:
+        valid = ", ".join(sorted(EXPERIMENT_PRESETS.keys()))
+        raise RuntimeError(
+            f"unknown test_planner experiment '{experiment}'. Valid: {valid}"
+        )
+    if experiment == "canonical_full_stack_sim":
+        # The canonical wrapper owns the complete private runtime surface.
+        # Raw argv may contain undeclared legacy keys; none may suppress a
+        # canonical preset. Public profile controls are applied by the wrapper
+        # outside this preset machinery.
+        user_overrides = set()
+
+    experiment_preset = EXPERIMENT_PRESETS[experiment]
+    experiment_scenario = str(experiment_preset.get("scenario", "")).strip()
+    if experiment_scenario and experiment_scenario not in SCENARIO_PRESETS:
+        valid = ", ".join(sorted(SCENARIO_PRESETS.keys()))
+        raise RuntimeError(
+            f"test_planner experiment '{experiment}' references unknown "
+            f"scenario '{experiment_scenario}'. Valid: {valid}"
+        )
+
+    if experiment_scenario and "scenario" not in user_overrides:
+        context.launch_configurations["scenario"] = experiment_scenario
+
+    scenario = LaunchConfiguration("scenario").perform(context).strip() or "manual"
+    if scenario not in SCENARIO_PRESETS:
+        valid = ", ".join(sorted(SCENARIO_PRESETS.keys()))
+        raise RuntimeError(f"unknown test_planner scenario '{scenario}'. Valid: {valid}")
+
+    applied_keys = set()
+    _apply_preset_values(
+        context, SCENARIO_PRESETS[scenario], user_overrides, iap_share, applied_keys
+    )
+    _apply_preset_values(context, experiment_preset, user_overrides, iap_share, applied_keys)
+    combo_preset = COMBO_PRESETS.get((experiment, scenario))
+    if combo_preset:
+        _apply_preset_values(context, combo_preset, user_overrides, iap_share, applied_keys)
+    _apply_icra_p0_p5_profile(
+        context, experiment, iap_share, user_overrides, applied_keys
+    )
+    if experiment == "canonical_full_stack_sim":
+        catalog_path = Path(iap_share) / "config" / "scenarios" / "catalog.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        entry = catalog.get(scenario)
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"canonical scenario is absent from {catalog_path}: {scenario}")
+        task_mode = str(entry.get("task_mode", "")).strip()
+        if task_mode not in {"strict_global", "mission_best_effort"}:
+            raise RuntimeError(
+                f"canonical scenario '{scenario}' has invalid task_mode '{task_mode}'"
+            )
+        context.launch_configurations["p4.assurance.task_mode"] = task_mode
+        applied_keys.add("p4.assurance.task_mode")
+    context.launch_configurations["experiment"] = experiment
+    context.launch_configurations["scenario"] = scenario
+    return scenario, experiment, applied_keys
+
+
+def _validate_online_truth_isolation(context, scenario):
+    """Reject simulator-world subscriptions from an online planner profile."""
+    if not _param_bool(context, "p0.online_mapping_mode"):
+        return
+    forbidden_prefixes = ("/map_generator/", "/sim/world/")
+    planner_topics = {
+        "p0.map_topic": LaunchConfiguration("p0.map_topic").perform(context),
+        "planner_occupancy_cloud_topic": LaunchConfiguration(
+            "planner_occupancy_cloud_topic").perform(context),
+        "planner_local_map_current_topic": LaunchConfiguration(
+            "planner_local_map_current_topic").perform(context),
+        "planner_local_map_current_hits_map_topic": LaunchConfiguration(
+            "planner_local_map_current_hits_map_topic").perform(context),
+        "planner_local_map_delta_topic": LaunchConfiguration(
+            "planner_local_map_delta_topic").perform(context),
+    }
+    for binding, raw_topic in planner_topics.items():
+        topic = str(raw_topic).strip()
+        if topic.startswith(forbidden_prefixes):
+            raise RuntimeError(
+                f"online scenario '{scenario}' binds planner truth topic "
+                f"{binding}={topic}"
+            )
+    if _param_bool(context, "p0.fit_grid_to_map_cloud"):
+        raise RuntimeError(
+            f"online scenario '{scenario}' cannot fit RiskMap to a map cloud"
+        )
+    if scenario == "icra_dense_forest_four_fork_v2":
+        if not _param_bool(context, "planner_local_map_enable"):
+            raise RuntimeError(
+                "forest v2 requires the GLIM planner local-map interface"
+            )
+        if LaunchConfiguration("planner_frame_mode").perform(context) != "glim_world":
+            raise RuntimeError(
+                "forest v2 requires planner_frame_mode=glim_world"
+            )
+        if _param_bool(context, "allow_truth_alignment"):
+            raise RuntimeError(
+                "forest v2 forbids runtime truth odometry alignment"
+            )
+
+
+def _planner_local_map_contract(context):
+    """Return the canonical immutable planner/GLIM frame contract."""
+    payload = {
+        "schema": "planner_local_map_frame_contract_v1",
+        "mode": LaunchConfiguration("planner_frame_mode").perform(context).strip(),
+        "planner_frame": "map",
+        "static_planner_from_glim_translation_m": [
+            _param_float(context, "init_x"),
+            _param_float(context, "init_y"),
+            _param_float(context, "init_z"),
+        ],
+        "ego_resolution_m": _param_float(context, "grid_map/resolution"),
+        "geofence_origin_m": [
+            _param_float(context, "grid_map/origin_x"),
+            _param_float(context, "grid_map/origin_y"),
+            _param_float(context, "grid_map/origin_z"),
+        ],
+        "geofence_extent_m": [
+            _param_float(context, "map_size_x"),
+            _param_float(context, "map_size_y"),
+            _param_float(context, "map_size_z"),
+        ],
+    }
+    contract_id = "sha256:" + hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return payload, contract_id
+
+
+def _generated_gnss_scenario(name):
+    header = """anchor:
+  lat_deg: 31.2304
+  lon_deg: 121.4737
+  alt_m: 25.0
+
+"""
+    if name == "gnss_outage":
+        faults = "\n".join(
+            [
+                f"  - {{constellation: GPS, sat: {prn}, start_time_s: 35.0, duration_s: 25.0, drop: true}}"
+                for prn in range(1, 25)
+            ]
+        )
+        return header + """skymask:
+  enabled: false
+  default_min_elevation_deg: 10.0
+  az_el_deg: []
+
+faults:
+""" + faults + "\n"
+    raise RuntimeError(f"unknown generated GNSS scenario '{name}'")
+
+
+def _materialize_gnss_scenario(scenario_file, export_dir):
+    if not str(scenario_file).startswith("generated:"):
+        return scenario_file
+    scenario_name = str(scenario_file).split(":", 1)[1]
+    path = Path(export_dir) / f"{scenario_name}.yaml"
+    path.write_text(_generated_gnss_scenario(scenario_name))
+    return str(path)
+
+
+def _resolve_run_roots(config_name, experiment_name, scenario_name, run_token,
+                       *, runtime_root_dir="", export_root_dir=""):
+    runtime_base = Path(runtime_root_dir).expanduser() if runtime_root_dir else Path("/tmp")
+    export_base = (
+        Path(export_root_dir).expanduser()
+        if export_root_dir
+        else Path("/home/dev/ws_iap/src/iap/results/planner_validation/exports")
+    )
+    runtime_root = runtime_base / f"iap_{config_name}_test_planner_{run_token}"
+    export_dir = export_base / (
+        f"test_planner_{experiment_name}_{scenario_name}_{run_token}"
+    )
+    return runtime_root, export_dir
+
+
+def _resolve_runtime_logging_roots(runtime_root, runtime_root_dir="",
+                                   iap_log_root=""):
+    runtime_root = Path(runtime_root).expanduser().resolve()
+    runtime_base = (
+        Path(runtime_root_dir).expanduser().resolve()
+        if str(runtime_root_dir).strip()
+        else runtime_root
+    )
+    requested_log_root = str(iap_log_root).strip() or str(
+        runtime_root / "iap_logs"
+    )
+    return runtime_base, requested_log_root
+
+
+def _override_odometry_initialization_mode(config_path, mode):
+    """Patch GLIM's JSON-with-comments config without discarding its comments."""
+    path = Path(config_path)
+    source = path.read_text()
+    pattern = r'("initialization_mode"\s*:\s*")[^"]+("\s*,)'
+    updated, count = re.subn(pattern, rf'\g<1>{mode}\g<2>', source, count=1)
+    if count != 1:
+        raise RuntimeError(
+            f"expected exactly one initialization_mode in {path}; found {count}"
+        )
+    path.write_text(updated)
+
+
+def _redirect_odometry_icp_csv(config_path, export_dir):
+    """Keep GLIM's JSON-with-comments format while containing ICP evidence."""
+    path = Path(config_path)
+    source = path.read_text()
+    replacement = str(Path(export_dir) / "iap_icp.csv")
+    pattern = r'("icp_csv_path"\s*:\s*")[^"]+("\s*,)'
+    updated, count = re.subn(pattern, rf'\g<1>{replacement}\g<2>', source, count=1)
+    if count != 1:
+        raise RuntimeError(f"expected exactly one icp_csv_path in {path}; found {count}")
+    path.write_text(updated)
+
+
+def _strict_descendant(path, root):
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return path != root
+
+
+def _materialize_iap_logging_config(config_path, runtime_base, iap_log_root):
+    """Bind every IAP log/timing path to one validated run-local root."""
+    config_path = Path(config_path).resolve()
+    runtime_base = Path(runtime_base).expanduser()
+    requested_raw = str(iap_log_root).strip()
+    if not requested_raw:
+        raise RuntimeError("iap_log_root is required")
+    requested = Path(requested_raw).expanduser()
+    if not requested.is_absolute():
+        raise RuntimeError("iap_log_root must be absolute")
+    runtime_base = runtime_base.resolve()
+    requested = requested.resolve()
+    if not _strict_descendant(requested, runtime_base):
+        raise RuntimeError(
+            f"iap_log_root must be below runtime_root_dir: {requested}"
+        )
+    if not _strict_descendant(config_path, runtime_base):
+        raise RuntimeError("effective config.json must be below runtime_root_dir")
+
+    root_config = json.loads(config_path.read_text())
+    global_config = root_config.get("global")
+    logging_config = root_config.get("logging")
+    if not isinstance(global_config, dict) or not isinstance(logging_config, dict):
+        raise RuntimeError("effective config.json lacks global/logging blocks")
+    logging_reference = str(global_config.get("config_logging", "")).strip()
+    if not logging_reference:
+        raise RuntimeError("effective config.json lacks global.config_logging")
+    referenced_path = (config_path.parent / logging_reference).resolve()
+    if not _strict_descendant(referenced_path, runtime_base):
+        raise RuntimeError("referenced config_logging must be below runtime_root_dir")
+    referenced = json.loads(referenced_path.read_text())
+    referenced_logging = referenced.get("logging")
+    if not isinstance(referenced_logging, dict):
+        raise RuntimeError("referenced config_logging lacks logging block")
+
+    timing_path = (requested / "profiling" / "iap_timing.csv").resolve()
+    if not _strict_descendant(timing_path, runtime_base):
+        raise RuntimeError("derived IAP timing path escapes runtime_root_dir")
+
+    logging_config["log_dir"] = str(requested)
+    referenced_logging["log_dir"] = str(requested)
+    global_config["timing_csv_path"] = str(timing_path)
+    config_path.write_text(json.dumps(root_config, indent=2) + "\n")
+    referenced_path.write_text(json.dumps(referenced, indent=2) + "\n")
+    return {
+        "log_root": str(requested),
+        "timing_csv_path": str(timing_path),
+        "root_config_path": str(config_path),
+        "referenced_logging_config_path": str(referenced_path),
+    }
+
+
+def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
+    iap_share = Path(get_package_share_directory("iap"))
+    base_config = iap_share / "config"
+    config_subdir = LaunchConfiguration("config_subdir").perform(context)
+    config_name = config_subdir.replace("/", "_").replace("\\", "_")
+    run_stamp = int(time.time() * 1000)
+    experiment_name = _safe_path_component(
+        LaunchConfiguration("experiment").perform(context), "experiment"
+    )
+    scenario_name = _safe_path_component(
+        LaunchConfiguration("scenario").perform(context), "scenario"
+    )
+    runtime_root, export_dir = _resolve_run_roots(
+        config_name, experiment_name, scenario_name,
+        f"{os.getpid()}_{run_stamp}",
+        runtime_root_dir=LaunchConfiguration("runtime_root_dir").perform(context).strip(),
+        export_root_dir=LaunchConfiguration("export_root_dir").perform(context).strip(),
+    )
+    runtime_config_dir = runtime_root / config_subdir
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copytree(base_config / config_subdir, runtime_config_dir, ignore_dangling_symlinks=True)
+    shutil.copytree(base_config / "sim_ego", runtime_root / "sim_ego", ignore_dangling_symlinks=True)
+
+    config_ros_path = runtime_config_dir / "config_ros.json"
+    config_gnss_path = runtime_config_dir / "config_gnss.json"
+    runtime_base, requested_log_root = _resolve_runtime_logging_roots(
+        runtime_root,
+        LaunchConfiguration("runtime_root_dir").perform(context),
+        LaunchConfiguration("iap_log_root").perform(context),
+    )
+    logging_effective = _materialize_iap_logging_config(
+        runtime_config_dir / "config.json", runtime_base, requested_log_root
+    )
+
+    mapping_backend = _normalize_mapping_backend(
+        LaunchConfiguration("iap_mapping_backend").perform(context)
+    )
+
+    config_odometry_source = (
+        base_config / "config_odometry_cpu.json"
+        if mapping_backend == "cpu"
+        else base_config / "config_odometry_gpu.json"
+    )
+    config_odometry_filename = f"config_odometry_{mapping_backend}.json"
+    config_odometry_path = runtime_config_dir / config_odometry_filename
+    shutil.copy2(config_odometry_source, config_odometry_path)
+    _redirect_odometry_icp_csv(config_odometry_path, export_dir)
+
+    sub_mapping_filename = f"config_sub_mapping_{mapping_backend}.json"
+    global_mapping_filename = f"config_global_mapping_{mapping_backend}.json"
+    sub_mapping_path = runtime_root / "sim_ego" / sub_mapping_filename
+    global_mapping_path = runtime_root / "sim_ego" / global_mapping_filename
+    if not sub_mapping_path.is_file() or not global_mapping_path.is_file():
+        raise RuntimeError(
+            "mapping backend configuration is incomplete for "
+            f"backend '{mapping_backend}'"
+        )
+
+    config_path = runtime_config_dir / "config.json"
+    with config_path.open() as f:
+        root_config = json.load(f)
+    root_config.setdefault("global", {})
+    root_config["global"]["config_odometry"] = config_odometry_filename
+    root_config["global"]["config_sub_mapping"] = (
+        f"../sim_ego/{sub_mapping_filename}"
+    )
+    root_config["global"]["config_global_mapping"] = (
+        f"../sim_ego/{global_mapping_filename}"
+    )
+    with config_path.open("w") as f:
+        json.dump(root_config, f, indent=2)
+        f.write("\n")
+
+    odometry_initialization_mode = LaunchConfiguration(
+        "odometry_initialization_mode"
+    ).perform(context).strip().upper()
+    if odometry_initialization_mode:
+        if odometry_initialization_mode not in {"LOOSE", "NAIVE"}:
+            raise RuntimeError(
+                "odometry_initialization_mode must be LOOSE, NAIVE, or empty; "
+                f"got '{odometry_initialization_mode}'"
+            )
+        _override_odometry_initialization_mode(
+            config_odometry_path, odometry_initialization_mode
+        )
+
+    mapping_effective = {
+        "selected": mapping_backend,
+        "odometry_config": _mapping_backend_config_provenance(
+            config_odometry_path
+        ),
+        "sub_mapping_config": _mapping_backend_config_provenance(
+            sub_mapping_path
+        ),
+        "global_mapping_config": _mapping_backend_config_provenance(
+            global_mapping_path
+        ),
+    }
+
+    with config_ros_path.open() as f:
+        config_ros = json.load(f)
+    odometry_acc_scale = float(
+        LaunchConfiguration("odometry_acc_scale").perform(context)
+    )
+    if not math.isfinite(odometry_acc_scale) or odometry_acc_scale < 0.0:
+        raise RuntimeError(
+            "odometry_acc_scale must be finite and nonnegative; "
+            f"got {odometry_acc_scale}"
+        )
+    modules = ["libsim_extension.so"]
+    if use_gnss:
+        modules.insert(0, "libgnss_extension.so")
+    if use_araim:
+        modules.insert(1 if use_gnss else 0, "libintegrity_extension.so")
+    planner_local_map_enable = _param_bool(
+        context, "planner_local_map_enable")
+    planner_frame_mode = LaunchConfiguration(
+        "planner_frame_mode").perform(context).strip()
+    if planner_local_map_enable:
+        modules.append("libplanner_local_map_extension.so")
+    frame_contract_payload, frame_contract_id = (
+        _planner_local_map_contract(context)
+    )
+    init_xyz = frame_contract_payload[
+        "static_planner_from_glim_translation_m"
+    ]
+    config_ros["glim_ros"]["extension_modules"] = modules
+    config_ros["glim_ros"]["imu_topic"] = "/sim/drone_0/imu_iap"
+    config_ros["glim_ros"]["acc_scale"] = odometry_acc_scale
+    config_ros["glim_ros"]["points_topic"] = "/sim/drone_0/lidar_body"
+    config_ros["glim_ros"]["dump_path"] = str(runtime_root / "dump")
+    config_ros["glim_ros"]["sim"]["align_planner_odom_to_truth"] = allow_truth_alignment
+    config_ros["glim_ros"]["sim"]["static_planner_alignment_enabled"] = bool(
+        planner_frame_mode == "glim_world")
+    config_ros["glim_ros"]["sim"]["static_planner_translation_m"] = init_xyz
+    if planner_local_map_enable:
+        config_ros["glim_ros"]["planner_local_map"] = {
+            "current_topic": LaunchConfiguration(
+                "planner_local_map_current_topic").perform(context),
+            "current_hits_map_topic": LaunchConfiguration(
+                "planner_local_map_current_hits_map_topic").perform(context),
+            "publish_current_hits_map": _param_bool(context, "start_rviz"),
+            "delta_topic": LaunchConfiguration(
+                "planner_local_map_delta_topic").perform(context),
+            "recovery_service": LaunchConfiguration(
+                "planner_local_map_recovery_service").perform(context),
+            "planner_frame_id": "map",
+            "lidar_reference_frame_id": "iap_lidar_reference",
+            "frame_contract_id": frame_contract_id,
+            "window_rate_hz": _param_float(
+                context, "planner_local_map_window_rate_hz"),
+            "max_active_keyframes": 15,
+            "static_planner_translation_m": init_xyz,
+            "planning_lattice_resolution_m": frame_contract_payload[
+                "ego_resolution_m"],
+            "planning_lattice_origin_m": frame_contract_payload[
+                "geofence_origin_m"],
+            "planning_lattice_extent_m": frame_contract_payload[
+                "geofence_extent_m"],
+        }
+        config_ros["glim_ros"]["sim"]["enable_metrics_csv"] = False
+    config_ros["glim_ros"]["sim"]["metrics_csv_path"] = str(export_dir / "iap_sim_truth_vs_est.csv")
+    with config_ros_path.open("w") as f:
+        json.dump(config_ros, f, indent=2)
+        f.write("\n")
+
+    with config_gnss_path.open() as f:
+        config_gnss = json.load(f)
+    gnss = config_gnss["gnss"]
+    gnss["pr_noise_base"] = float(LaunchConfiguration("gnss_pr_noise_base").perform(context))
+    gnss["dop_noise_base"] = float(LaunchConfiguration("gnss_dop_noise_base").perform(context))
+    gnss["debug_csv_path"] = str(export_dir / "iap_gnss_factor_debug.csv")
+
+    integrity = config_gnss["integrity"]
+    enable_gnss_integrity = _as_bool(LaunchConfiguration("enable_gnss_integrity").perform(context))
+    enable_gnss_araim = _as_bool(LaunchConfiguration("enable_gnss_araim").perform(context))
+    enable_lidar_integrity = _as_bool(LaunchConfiguration("enable_lidar_integrity").perform(context))
+    enable_pl_decomp_csv = _as_bool(LaunchConfiguration("enable_araim_pl_decomp_csv").perform(context))
+    fusion_mode = LaunchConfiguration("integrity_fusion_mode").perform(context)
+    integrity["enable"] = bool(use_araim)
+    integrity["enable_araim"] = bool(use_araim and use_gnss and enable_gnss_araim)
+    integrity["enable_araim_csv"] = bool(use_araim and use_gnss and enable_gnss_araim)
+    integrity["enable_araim_pl_decomp_csv"] = bool(
+        use_araim and use_gnss and enable_gnss_araim and enable_pl_decomp_csv
+    )
+    integrity["publish_topic"] = "/iap/integrity"
+    integrity["araim_csv_path"] = str(export_dir / "iap_araim.csv")
+    integrity["araim_pl_decomp_csv_path"] = str(export_dir / "iap_araim_pl_decomp.csv")
+    integrity["traj_csv_path"] = str(export_dir / "traj_with_gnss.csv")
+    integrity["enable_lidar_araim_stage0_csv"] = bool(use_araim and enable_lidar_integrity and enable_pl_decomp_csv)
+    integrity["lidar_araim_stage0_csv_path"] = str(export_dir / "iap_lidar_araim_stage0.csv")
+    integrity["enable_gnss_integrity"] = bool(use_gnss and enable_gnss_integrity)
+    integrity["enable_gnss_araim"] = bool(use_araim and use_gnss and enable_gnss_araim)
+    integrity["enable_lidar_integrity"] = bool(use_araim and enable_lidar_integrity)
+    integrity["integrity_fusion_mode"] = fusion_mode
+    integrity["integrity_require_valid_gnss"] = _as_bool(LaunchConfiguration("integrity_require_valid_gnss").perform(context))
+    integrity["integrity_require_valid_lidar"] = _as_bool(LaunchConfiguration("integrity_require_valid_lidar").perform(context))
+    integrity["integrity_conservative_hpl_m"] = float(LaunchConfiguration("integrity_conservative_hpl_m").perform(context))
+    integrity["integrity_conservative_vpl_m"] = float(LaunchConfiguration("integrity_conservative_vpl_m").perform(context))
+    integrity["enable_dynamic_al"] = _param_bool(
+        context, "integrity_dynamic_alert_limits")
+    integrity["HAL_trunk_default"] = _param_float(context, "integrity_hal_m")
+    integrity["VAL_default"] = _param_float(context, "integrity_val_m")
+    integrity["p5_5.fixture.enabled"] = _as_bool(LaunchConfiguration("p5_5.fixture.enabled").perform(context))
+    integrity["p5_5.fixture.name"] = LaunchConfiguration("p5_5.fixture.name").perform(context)
+    integrity["p5_5.fixture.start_s"] = float(LaunchConfiguration("p5_5.fixture.start_s").perform(context))
+    integrity["p5_5.fixture.duration_s"] = float(LaunchConfiguration("p5_5.fixture.duration_s").perform(context))
+    with config_gnss_path.open("w") as f:
+        json.dump(config_gnss, f, indent=2)
+        f.write("\n")
+
+    return (
+        str(runtime_config_dir),
+        str(runtime_root),
+        str(export_dir),
+        mapping_effective,
+        logging_effective,
+    )
+
+
+def _resolve_safety_switches(context, preset_keys=None):
+    preset_keys = preset_keys or set()
+    overrides = _launch_arg_overrides()
+    profile = LaunchConfiguration("planner_safety_profile").perform(context).strip().lower() or "off"
+    if _as_bool(LaunchConfiguration("planner_enable_all_safety").perform(context)):
+        profile = "all"
+    valid_profiles = {"off", "p1", "p2", "p3", "p4", "p5", "all", "icra_p0_p5", "icra_p0_p4_v2_p5_dev"}
+    if profile not in valid_profiles:
+        raise RuntimeError(f"unknown planner_safety_profile '{profile}'. Valid: {', '.join(sorted(valid_profiles))}")
+
+    profile_defaults = {
+        "p1": profile in ("p1", "all"),
+        "p2": profile in ("p2", "all"),
+        "p3_local": profile in ("p3", "all"),
+        "p3_global": profile in ("p3", "all"),
+        "p4": profile in ("p4", "all", "icra_p0_p4_v2_p5_dev"),
+        "p5_runtime": profile in ("p5", "all", "icra_p0_p5", "icra_p0_p4_v2_p5_dev"),
+        "p5_final": profile in ("p5", "all", "icra_p0_p5", "icra_p0_p4_v2_p5_dev"),
+    }
+    arg_names = {
+        "p1": "planner_enable_p1",
+        "p2": "planner_enable_p2",
+        "p3_local": "planner_enable_p3_local",
+        "p3_global": "planner_enable_p3_global",
+        "p4": "planner_enable_p4",
+        "p5_runtime": "planner_enable_p5_runtime",
+        "p5_final": "planner_enable_p5_final",
+    }
+    enabled = {}
+    for key, arg_name in arg_names.items():
+        if arg_name in overrides or arg_name in preset_keys:
+            enabled[key] = _as_bool(LaunchConfiguration(arg_name).perform(context))
+        else:
+            enabled[key] = profile_defaults[key]
+
+    needs_p0 = any(enabled.values())
+    requested_p0 = _as_bool(LaunchConfiguration("p0.enable_risk_grid").perform(context))
+    p0_explicit = "p0.enable_risk_grid" in overrides or "p0.enable_risk_grid" in preset_keys
+    p0_enabled = requested_p0
+    p0_conflict = False
+    if needs_p0 and not p0_explicit:
+        p0_enabled = True
+    elif needs_p0 and p0_explicit and not requested_p0:
+        p0_conflict = True
+
+    return profile, enabled, p0_enabled, p0_conflict, overrides
+
+
+def _param_bool(context, name):
+    return _as_bool(LaunchConfiguration(name).perform(context))
+
+
+def _param_float(context, name):
+    return float(LaunchConfiguration(name).perform(context))
+
+
+def _param_int(context, name):
+    return int(LaunchConfiguration(name).perform(context))
+
+
+def _effective_metrics_only(context, name, enabled, overrides):
+    experiment = LaunchConfiguration("experiment").perform(context).strip()
+    profile = LaunchConfiguration("planner_safety_profile").perform(context).strip()
+    if name in overrides or experiment in P4_G0C_EXPERIMENTS or profile == "icra_p0_p5":
+        return _param_bool(context, name)
+    return not enabled
+
+
+def _p0_covariance_growth_launch_contract(context):
+    return {
+        "sigma_grow_m_sqrt_s": float(
+            LaunchConfiguration(
+                "p0.predictor.sigma_grow_m_sqrt_s"
+            ).perform(context).strip()
+        ),
+        "profile": LaunchConfiguration(
+            "p0.predictor.sigma_growth_profile"
+        ).perform(context),
+    }
+
+
+def _fixed_lattice_no_replan_threshold(safety_enabled):
+    # P1 formal evidence needs one last receding-horizon plan after the
+    # trajectory fits the 2.5 s snapshot horizon.  Match the manager's own
+    # 0.2 m "Close to goal" boundary so timing cannot end the fixture first.
+    return 0.2 if safety_enabled.get("p1", False) else 1.0
+
+
+def _p5_6_fixture_effective_enabled(context):
+    return _param_bool(context, "p5_6.fixture.enabled") and not _param_bool(context, "p5_5.fixture.enabled")
+
+
+def _p5_7_fixture_effective_enabled(context, p5_final_enabled):
+    p5_6_effective = _p5_6_fixture_effective_enabled(context)
+    return (
+        _param_bool(context, "p5_7.fixture.enabled")
+        and bool(p5_final_enabled)
+        and not _param_bool(context, "p5_3.fixture.enabled")
+        and not _param_bool(context, "p5_4.fixture.enabled")
+        and not _param_bool(context, "p5_5.fixture.enabled")
+        and not p5_6_effective
+    )
+
+
+def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, drone_id, fixed_text=False, fixed_position=(0.0, 0.0, 14.0)):
+    r, g, b = color
+    text_x, text_y, text_z = fixed_position
+    return Node(
+        package="odom_visualization",
+        executable="odom_visualization",
+        name=name,
+        output="screen",
+        remappings=[
+            ("odom", odom_topic),
+            ("cmd", cmd_topic),
+            ("pose", f"{topic_prefix}/pose"),
+            ("path", f"{topic_prefix}/path"),
+            ("robot", f"{topic_prefix}/robot"),
+            ("velocity", f"{topic_prefix}/velocity"),
+            ("sensor", f"{topic_prefix}/sensor_status"),
+            ("time_gap", f"{topic_prefix}/time_gap"),
+        ],
+        parameters=[
+            {"frame_id": "map"},
+            {"robot_scale": 1.0},
+            {"color/r": r},
+            {"color/g": g},
+            {"color/b": b},
+            {"color/a": 1.0},
+            {"tf45": False},
+            {"drone_id": drone_id},
+            {"sensor_text_use_fixed_position": bool(fixed_text)},
+            {"sensor_text_fixed_x": float(text_x)},
+            {"sensor_text_fixed_y": float(text_y)},
+            {"sensor_text_fixed_z": float(text_z)},
+        ],
+    )
+
+
+def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, p0_covariance_growth, export_dir, evidence):
+    p1_enabled = safety_enabled["p1"]
+    p2_enabled = safety_enabled["p2"]
+    p3_local_enabled = safety_enabled["p3_local"]
+    p3_global_enabled = safety_enabled["p3_global"]
+    p4_enabled = safety_enabled["p4"]
+    p5_runtime_enabled = safety_enabled["p5_runtime"]
+    p5_final_enabled = safety_enabled["p5_final"]
+    overrides = _launch_arg_overrides()
+
+    p1_use = _param_bool(context, "p1.use_integrity_cost") if "p1.use_integrity_cost" in overrides else p1_enabled
+    p1_metrics_only = _effective_metrics_only(
+        context, "p1.metrics_only", p1_enabled, overrides
+    )
+    p2_use = _param_bool(context, "p2.enable_candidate_ranking") if "p2.enable_candidate_ranking" in overrides else p2_enabled
+    p2_metrics_only = _effective_metrics_only(
+        context, "p2.metrics_only", p2_enabled, overrides
+    )
+    p3_local = _param_bool(context, "p3.enable_local_reference_bias") if "p3.enable_local_reference_bias" in overrides else p3_local_enabled
+    p3_global = _param_bool(context, "p3.enable_global_reference_bias") if "p3.enable_global_reference_bias" in overrides else p3_global_enabled
+    p4_use = _param_bool(context, "p4.enable_risk_aware_astar") if "p4.enable_risk_aware_astar" in overrides else p4_enabled
+    p4_metrics_only = _param_bool(context, "p4.metrics_only")
+    p5_runtime = _param_bool(context, "p5.enable_runtime_gate") if "p5.enable_runtime_gate" in overrides else p5_runtime_enabled
+    p5_final = _param_bool(context, "p5.enable_final_gate") if "p5.enable_final_gate" in overrides else p5_final_enabled
+    p5_6_fixture_effective_enabled = _p5_6_fixture_effective_enabled(context)
+    p5_7_fixture_requested = _param_bool(context, "p5_7.fixture.enabled")
+    p5_7_fixture_effective_enabled = _p5_7_fixture_effective_enabled(context, p5_final)
+    planner_local_map_enable = _param_bool(
+        context, "planner_local_map_enable")
+    _, planner_local_map_contract_id = _planner_local_map_contract(context)
+
+    p1_debug_path = LaunchConfiguration("p1.debug_csv_path").perform(context)
+    if not p1_debug_path:
+        p1_debug_path = str(Path(export_dir) / "planner_p1_integrity_cost_debug.csv")
+    p2_debug_path = LaunchConfiguration("p2.debug_csv_path").perform(context)
+    if not p2_debug_path:
+        p2_debug_path = str(Path(export_dir) / "planner_p2_candidate_ranking_debug.csv")
+    p3_debug_path = LaunchConfiguration("p3.debug_csv_path").perform(context)
+    if not p3_debug_path:
+        p3_debug_path = str(Path(export_dir) / "planner_p3_reference_bias_debug.csv")
+    p4_debug_path = LaunchConfiguration("p4.debug_csv_path").perform(context)
+    if not p4_debug_path:
+        p4_debug_path = str(Path(export_dir) / "planner_p4_risk_astar_debug.csv")
+    p4_profile_trace_enable = _param_bool(context, "p4.profile_trace_enable")
+    p4_profile_trace_path = LaunchConfiguration(
+        "p4.profile_trace_path").perform(context)
+    p4_cost_query_policy = LaunchConfiguration(
+        "p4.cost_query_policy").perform(context)
+    p4_objective = LaunchConfiguration("p4.objective").perform(context)
+
+    map_size_x, map_size_y, map_size_z = map_size
+    goal_x, goal_y, goal_z = goal
+    waypoint_values = [(float(goal_x), float(goal_y), float(goal_z))]
+    for i in range(1, max(1, min(int(point_num), 7))):
+        waypoint_values.append(
+            (
+                float(LaunchConfiguration(f"point{i}_x").perform(context)),
+                float(LaunchConfiguration(f"point{i}_y").perform(context)),
+                float(LaunchConfiguration(f"point{i}_z").perform(context)),
+            )
+        )
+    if _param_bool(context, "p5_5.fixture.enabled"):
+        waypoint_values = list(P5_5_FIXTURE_ROUTE_WAYPOINTS)
+
+    return Node(
+        package="ego_planner",
+        executable="ego_planner_node",
+        name=f"drone_{drone_id}_ego_planner_node",
+        output="screen",
+        remappings=[
+            ("odom_world", planner_odom_topic),
+            ("imu", imu_topic),
+            ("planning/bspline", bspline_topic),
+            ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
+            ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
+            # The watchdog consumes traj_server's identity-bound command and
+            # zero-based execution progress; keep it on the same per-drone
+            # wire as the controller and capture process.
+            ("/position_cmd", f"/drone_{drone_id}_planning/pos_cmd"),
+            ("planning/data_display", f"/drone_{drone_id}_planning/data_display"),
+            ("planning/broadcast_bspline_from_planner", "/broadcast_bspline"),
+            ("planning/broadcast_bspline_to_planner", "/broadcast_bspline"),
+            ("goal_point", f"/drone_{drone_id}_plan_vis/goal_point"),
+            ("global_list", f"/drone_{drone_id}_plan_vis/global_list"),
+            ("init_list", f"/drone_{drone_id}_plan_vis/init_list"),
+            ("optimal_list", f"/drone_{drone_id}_plan_vis/optimal_list"),
+            ("a_star_list", f"/drone_{drone_id}_plan_vis/a_star_list"),
+            ("grid_map/odom", planner_odom_topic),
+            ("grid_map/cloud", cloud_topic),
+            ("grid_map/pose", camera_pose_topic),
+            ("grid_map/depth", depth_topic),
+            ("grid_map/occupancy_inflate", f"/drone_{drone_id}_grid/grid_map/occupancy_inflate"),
+        ],
+        parameters=[
+            {"executor_thread_count": int(LaunchConfiguration(
+                "planner_executor_thread_count").perform(context))},
+            {"fsm/flight_type": 2},
+            {"fsm/thresh_replan_time": _param_float(context, "fsm.thresh_replan_time")},
+            {"fsm/thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled)},
+            {"fsm/planning_horizon": _param_float(context, "manager/planning_horizon")},
+            {"fsm/planning_horizen_time": 3.0},
+            {"fsm/emergency_time": 1.0},
+            {"fsm/realworld_experiment": False},
+            {"fsm/fail_safe": True},
+            {"fsm/waypoint_num": len(waypoint_values)},
+            *[
+                {f"fsm/waypoint{i}_{axis}": value}
+                for i, waypoint in enumerate(waypoint_values)
+                for axis, value in zip(("x", "y", "z"), waypoint)
+            ],
+            {"grid_map/resolution": _param_float(
+                context, "grid_map/resolution")},
+            {"grid_map/map_size_x": map_size_x},
+            {"grid_map/map_size_y": map_size_y},
+            {"grid_map/map_size_z": map_size_z},
+            {"grid_map/origin_x": _param_float(context, "grid_map/origin_x")},
+            {"grid_map/origin_y": _param_float(context, "grid_map/origin_y")},
+            {"grid_map/origin_z": _param_float(context, "grid_map/origin_z")},
+            {"grid_map/unknown_as_occupied": _param_bool(
+                context, "grid_map/unknown_as_occupied")},
+            {"grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x")},
+            {"grid_map/local_update_range_y": _param_float(context, "grid_map/local_update_range_y")},
+            {"grid_map/local_update_range_z": _param_float(context, "grid_map/local_update_range_z")},
+            {"grid_map/independent_cloud_min_interval_s": _param_float(
+                context, "grid_map/independent_cloud_min_interval_s")},
+            {"grid_map/independent_cloud_clock_guard_s": _param_float(
+                context, "grid_map/independent_cloud_clock_guard_s")},
+            {"grid_map/obstacles_inflation": 0.099},
+            {"grid_map/local_map_margin": 10},
+            {"grid_map/ground_height": -0.01},
+            {"grid_map/cx": 321.04638671875},
+            {"grid_map/cy": 243.44969177246094},
+            {"grid_map/fx": 387.229248046875},
+            {"grid_map/fy": 387.229248046875},
+            {"grid_map/use_depth_filter": True},
+            {"grid_map/depth_filter_tolerance": 0.15},
+            {"grid_map/depth_filter_maxdist": 5.0},
+            {"grid_map/depth_filter_mindist": 0.2},
+            {"grid_map/depth_filter_margin": 2},
+            {"grid_map/k_depth_scaling_factor": 1000.0},
+            {"grid_map/skip_pixel": 2},
+            {"grid_map/p_hit": 0.65},
+            {"grid_map/p_miss": 0.35},
+            {"grid_map/p_min": 0.12},
+            {"grid_map/p_max": 0.90},
+            {"grid_map/p_occ": 0.80},
+            {"grid_map/min_ray_length": 0.1},
+            {"grid_map/max_ray_length": 4.5},
+            {"grid_map/virtual_ceil_height": 2.9},
+            {"grid_map/visualization_truncate_height": 1.8},
+            {"grid_map/show_occ_time": False},
+            {"grid_map/pose_type": 1},
+            {"grid_map/frame_id": "map"},
+            {"grid_map/registered_lidar_window_enabled":
+                planner_local_map_enable},
+            {"grid_map/registered_frame_contract_id":
+                planner_local_map_contract_id},
+            {"grid_map/registered_current_topic": LaunchConfiguration(
+                "planner_local_map_current_topic").perform(context)},
+            {"grid_map/registered_delta_topic": LaunchConfiguration(
+                "planner_local_map_delta_topic").perform(context)},
+            {"grid_map/registered_recovery_service": LaunchConfiguration(
+                "planner_local_map_recovery_service").perform(context)},
+            {"grid_map/registered_lidar_reference_frame_id":
+                "iap_lidar_reference"},
+            {"grid_map/trusted_local_map_support_enabled": _param_bool(
+                context, "trusted_local_map_support_enabled")},
+            {"grid_map/trusted_support_min_range_m": _param_float(
+                context, "lidar_min_range_m")},
+            {"grid_map/trusted_support_max_range_m": _param_float(
+                context, "lidar_max_range_m")},
+            {"grid_map/trusted_support_horizontal_fov_deg": _param_float(
+                context, "lidar_horizontal_fov_deg")},
+            {"grid_map/trusted_support_vertical_min_deg": _param_float(
+                context, "lidar_vertical_min_deg")},
+            {"grid_map/trusted_support_vertical_max_deg": _param_float(
+                context, "lidar_vertical_max_deg")},
+            {"grid_map/trusted_support_validity_s": _param_float(
+                context, "p0.stale_timeout_s")},
+            {"grid_map/trusted_support_model_version":
+                "trusted_local_map_v1"},
+            {"p0.enable_risk_grid": p0_enabled},
+            {"p0.online_mapping_mode": _param_bool(
+                context, "p0.online_mapping_mode")},
+            {"p0.fit_grid_to_map_cloud": _param_bool(
+                context, "p0.fit_grid_to_map_cloud")},
+            {"p4.require_risk_grid_ready_before_planning": _param_bool(
+                context, "p4.require_risk_grid_ready_before_planning")},
+            {"p0.resolution_m": _param_float(context, "p0.resolution_m")},
+            {"p0.size_x_m": _param_float(context, "p0.size_x_m")},
+            {"p0.size_y_m": _param_float(context, "p0.size_y_m")},
+            {"p0.size_z_m": _param_float(context, "p0.size_z_m")},
+            {"p0.origin_x_m": _param_float(context, "p0.origin_x_m")},
+            {"p0.origin_y_m": _param_float(context, "p0.origin_y_m")},
+            {"p0.origin_z_m": _param_float(context, "p0.origin_z_m")},
+            {"p0.provider_cost_source": LaunchConfiguration(
+                "p0.provider_cost_source").perform(context)},
+            {"p0.require_safety_ratio_below_one_for_cost": _param_bool(
+                context, "p0.require_safety_ratio_below_one_for_cost")},
+            {"p0.alert_limit_policy_id": LaunchConfiguration(
+                "p0.alert_limit_policy_id").perform(context)},
+            {"p0.alert_limit_h_m": _param_float(
+                context, "p0.alert_limit_h_m")},
+            {"p0.alert_limit_v_m": _param_float(
+                context, "p0.alert_limit_v_m")},
+            {"p0.horizons_s": _csv_floats(LaunchConfiguration("p0.horizons_s").perform(context))},
+            {"p0.refresh_period_s": _param_float(context, "p0.refresh_period_s")},
+            {"p0.refresh_start_delay_s": _param_float(
+                context, "p0.refresh_start_delay_s")},
+            {"p0.stale_timeout_s": _param_float(context, "p0.stale_timeout_s")},
+            {"p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels")},
+            {"p0.debug_metrics_enable": _param_bool(context, "p0.debug_metrics_enable")},
+            {"p0.odom_topic": planner_odom_topic},
+            {"p0.integrity_topic": "/iap/integrity"},
+            {"p0.range_meas_topic": "/ublox_driver/range_meas"},
+            {"p0.ephem_topic": "/ublox_driver/ephem"},
+            {"p0.glo_ephem_topic": "/ublox_driver/glo_ephem"},
+            {"p0.receiver_lla_topic": "/ublox_driver/receiver_lla"},
+            {"p0.iono_topic": "/ublox_driver/iono_params"},
+            {"p0.map_topic": LaunchConfiguration("p0.map_topic").perform(context)},
+            {"p0.health_topic": LaunchConfiguration("p0.health_topic").perform(context)},
+            {"p0.gnss_epoch_max_age_s": _param_float(context, "p0.gnss_epoch_max_age_s")},
+            {"p0.gnss_pr_noise_base_m": _param_float(context, "gnss_pr_noise_base")},
+            {"p0.gnss_dop_noise_base_mps": _param_float(context, "gnss_dop_noise_base")},
+            {"p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context)},
+            {"p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context)},
+            {"p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m")},
+            {"p0.predictor.gnss_measured_epoch_integrity_max_delta_s": _param_float(context, "p0.predictor.gnss_measured_epoch_integrity_max_delta_s")},
+            {"p0.predictor.gnss.clearance_transition_m": _param_float(context, "p0.predictor.gnss.clearance_transition_m")},
+            {"p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior")},
+            {"p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss")},
+            {"p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability")},
+            {"p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m")},
+            {"p0.predictor.worker_count": _param_int(context, "p0.predictor.worker_count")},
+            {"p0.predictor.sigma_grow_m_sqrt_s": p0_covariance_growth["sigma_grow_m_sqrt_s"]},
+            {"p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled")},
+            {"p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context)},
+            {"p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min")},
+            {"p0_6.fixture.x_max": _param_float(context, "p0_6.fixture.x_max")},
+            {"p0_6.fixture.y_min": _param_float(context, "p0_6.fixture.y_min")},
+            {"p0_6.fixture.y_max": _param_float(context, "p0_6.fixture.y_max")},
+            {"p0_6.fixture.z_min": _param_float(context, "p0_6.fixture.z_min")},
+            {"p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max")},
+            {"p0_6.fixture.raw_hpl_m": _param_float(context, "p0_6.fixture.raw_hpl_m")},
+            {"p0_6.fixture.raw_vpl_m": _param_float(context, "p0_6.fixture.raw_vpl_m")},
+            {"p0_6.fixture.raw_c_pi": _param_float(context, "p0_6.fixture.raw_c_pi")},
+            {"p0_6.fixture.low_raw_cost_threshold": _param_float(context, "p0_6.fixture.low_raw_cost_threshold")},
+            {"p5_3.fixture.enabled": _param_bool(context, "p5_3.fixture.enabled")},
+            {"p5_3.fixture.name": LaunchConfiguration("p5_3.fixture.name").perform(context)},
+            {"p5_3.fixture.x_min": _param_float(context, "p5_3.fixture.x_min")},
+            {"p5_3.fixture.x_max": _param_float(context, "p5_3.fixture.x_max")},
+            {"p5_3.fixture.y_min": _param_float(context, "p5_3.fixture.y_min")},
+            {"p5_3.fixture.y_max": _param_float(context, "p5_3.fixture.y_max")},
+            {"p5_3.fixture.z_min": _param_float(context, "p5_3.fixture.z_min")},
+            {"p5_3.fixture.z_max": _param_float(context, "p5_3.fixture.z_max")},
+            {"p5_3.fixture.tau_min": _param_float(context, "p5_3.fixture.tau_min")},
+            {"p5_3.fixture.tau_max": _param_float(context, "p5_3.fixture.tau_max")},
+            {"p5_3.fixture.hpl_pred_m": _param_float(context, "p5_3.fixture.hpl_pred_m")},
+            {"p5_3.fixture.vpl_pred_m": _param_float(context, "p5_3.fixture.vpl_pred_m")},
+            {"p5_4.fixture.enabled": _param_bool(context, "p5_4.fixture.enabled")},
+            {"p5_4.fixture.name": LaunchConfiguration("p5_4.fixture.name").perform(context)},
+            {"p5_4.fixture.x_min": _param_float(context, "p5_4.fixture.x_min")},
+            {"p5_4.fixture.x_max": _param_float(context, "p5_4.fixture.x_max")},
+            {"p5_4.fixture.y_min": _param_float(context, "p5_4.fixture.y_min")},
+            {"p5_4.fixture.y_max": _param_float(context, "p5_4.fixture.y_max")},
+            {"p5_4.fixture.z_min": _param_float(context, "p5_4.fixture.z_min")},
+            {"p5_4.fixture.z_max": _param_float(context, "p5_4.fixture.z_max")},
+            {"p5_4.fixture.tau_min": _param_float(context, "p5_4.fixture.tau_min")},
+            {"p5_4.fixture.tau_max": _param_float(context, "p5_4.fixture.tau_max")},
+            {"p5_4.fixture.hpl_pred_m": _param_float(context, "p5_4.fixture.hpl_pred_m")},
+            {"p5_4.fixture.vpl_pred_m": _param_float(context, "p5_4.fixture.vpl_pred_m")},
+            {"p5_6.fixture.enabled": p5_6_fixture_effective_enabled},
+            {"p5_6.fixture.name": LaunchConfiguration("p5_6.fixture.name").perform(context)},
+            {"p5_6.fixture.x_min": _param_float(context, "p5_6.fixture.x_min")},
+            {"p5_6.fixture.x_max": _param_float(context, "p5_6.fixture.x_max")},
+            {"p5_6.fixture.y_min": _param_float(context, "p5_6.fixture.y_min")},
+            {"p5_6.fixture.y_max": _param_float(context, "p5_6.fixture.y_max")},
+            {"p5_6.fixture.z_min": _param_float(context, "p5_6.fixture.z_min")},
+            {"p5_6.fixture.z_max": _param_float(context, "p5_6.fixture.z_max")},
+            {"p5_6.fixture.tau_min": _param_float(context, "p5_6.fixture.tau_min")},
+            {"p5_6.fixture.tau_max": _param_float(context, "p5_6.fixture.tau_max")},
+            {"p5_7.fixture.enabled": p5_7_fixture_requested},
+            {"p5_7.fixture.effective_enabled": p5_7_fixture_effective_enabled},
+            {"p5_7.fixture.name": LaunchConfiguration("p5_7.fixture.name").perform(context)},
+            {"p5_7.fixture.x_min": _param_float(context, "p5_7.fixture.x_min")},
+            {"p5_7.fixture.x_max": _param_float(context, "p5_7.fixture.x_max")},
+            {"p5_7.fixture.y_min": _param_float(context, "p5_7.fixture.y_min")},
+            {"p5_7.fixture.y_max": _param_float(context, "p5_7.fixture.y_max")},
+            {"p5_7.fixture.z_min": _param_float(context, "p5_7.fixture.z_min")},
+            {"p5_7.fixture.z_max": _param_float(context, "p5_7.fixture.z_max")},
+            {"p5_7.fixture.tau_min": _param_float(context, "p5_7.fixture.tau_min")},
+            {"p5_7.fixture.tau_max": _param_float(context, "p5_7.fixture.tau_max")},
+            {"p5_7.fixture.hpl_pred_m": _param_float(context, "p5_7.fixture.hpl_pred_m")},
+            {"p5_7.fixture.vpl_pred_m": _param_float(context, "p5_7.fixture.vpl_pred_m")},
+            {"p1.use_integrity_cost": p1_use},
+            {"p1.metrics_only": p1_metrics_only},
+            {"p1.lambda_integrity": _param_float(context, "p1.lambda_integrity")},
+            {"p1.sample_dt_min_s": _param_float(context, "p1.sample_dt_min_s")},
+            {"p1.sample_dt_scale": _param_float(context, "p1.sample_dt_scale")},
+            {"p1.max_samples_per_eval": _param_int(context, "p1.max_samples_per_eval")},
+            {"p1.integrity_cost_max": _param_float(context, "p1.integrity_cost_max")},
+            {"p1.integrity_grad_norm_max": _param_float(context, "p1.integrity_grad_norm_max")},
+            {"p1.unknown_policy": LaunchConfiguration("p1.unknown_policy").perform(context)},
+            {"p1.unknown_soft_penalty": _param_float(context, "p1.unknown_soft_penalty")},
+            {"p1.debug_csv_enable": _param_bool(context, "p1.debug_csv_enable")},
+            {"p1.debug_csv_path": p1_debug_path},
+            {"p1.evidence_schema_version": evidence["schema_version"]},
+            {"p1.evidence_run_id": evidence["run_id"]},
+            {"p1.evidence_manifest_path": evidence["manifest_path"]},
+            {"p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt")))},
+            {"p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context)},
+            {"p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature")},
+            {"p1.smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha")},
+            {"p1.normalization_budget_fraction": _param_float(context, "p1.normalization_budget_fraction")},
+            {"p2.enable_candidate_ranking": p2_use},
+            {"p2.metrics_only": p2_metrics_only},
+            {"p2.sample_dt_s": _param_float(context, "p2.sample_dt_s")},
+            {"p2.lambda_candidate_integrity": _param_float(context, "p2.lambda_candidate_integrity")},
+            {"p2.w_max_cost": _param_float(context, "p2.w_max_cost")},
+            {"p2.w_unknown": _param_float(context, "p2.w_unknown")},
+            {"p2.w_stale": _param_float(context, "p2.w_stale")},
+            {"p2.min_valid_ratio": _param_float(context, "p2.min_valid_ratio")},
+            {"p2.debug_csv_enable": _param_bool(context, "p2.debug_csv_enable")},
+            {"p2.debug_csv_path": p2_debug_path},
+            {"p3.enable_local_reference_bias": p3_local},
+            {"p3.enable_global_reference_bias": p3_global},
+            {"p3.local_bias_radius_m": _param_float(context, "p3.local_bias_radius_m")},
+            {"p3.min_improvement_ratio": _param_float(context, "p3.min_improvement_ratio")},
+            {"p3.w_risk": _param_float(context, "p3.w_risk")},
+            {"p3.w_detour": _param_float(context, "p3.w_detour")},
+            {"p3.w_unknown": _param_float(context, "p3.w_unknown")},
+            {"p3.min_corridor_valid_ratio": _param_float(context, "p3.min_corridor_valid_ratio")},
+            {"p3.station_spacing_m": _param_float(context, "p3.station_spacing_m")},
+            {"p3.lateral_sample_step_m": _param_float(context, "p3.lateral_sample_step_m")},
+            {"p3.lateral_sample_count_each_side": _param_int(context, "p3.lateral_sample_count_each_side")},
+            {"p3.beam_width": _param_int(context, "p3.beam_width")},
+            {"p3.max_detour_ratio": _param_float(context, "p3.max_detour_ratio")},
+            {"p3.debug_csv_enable": _param_bool(context, "p3.debug_csv_enable")},
+            {"p3.debug_csv_path": p3_debug_path},
+            {"p4.enable_risk_aware_astar": p4_use},
+            {"p4.metrics_only": p4_metrics_only},
+            {"p4.objective": p4_objective},
+            {"p4.lambda_p4_risk": _param_float(context, "p4.lambda_p4_risk")},
+            {"p4.risk_cost_max": _param_float(context, "p4.risk_cost_max")},
+            {"p4.unknown_edge_penalty": _param_float(context, "p4.unknown_edge_penalty")},
+            {"p4.max_extra_path_ratio": _param_float(context, "p4.max_extra_path_ratio")},
+            {"p4.fallback_to_original_when_risk_not_ready": _param_bool(context, "p4.fallback_to_original_when_risk_not_ready")},
+            {"p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable")},
+            {"p4.debug_csv_path": p4_debug_path},
+            {"p4.raw_detail_enable": _param_bool(
+                context, "p4.raw_detail_enable")},
+            {"p4.runtime_window_satellite_detail_max_rows": _param_int(
+                context, "p4.runtime_window_satellite_detail_max_rows")},
+            {"p4.debug_generation_probe_enable": _param_bool(
+                context, "p4.debug_generation_probe_enable")},
+            {"p4.profile_trace_enable": p4_profile_trace_enable},
+            {"p4.profile_trace_path": p4_profile_trace_path},
+            {"p4.cost_query_policy": p4_cost_query_policy},
+            {"p4.forward.reaction_time_s": _param_float(context, "p4.forward.reaction_time_s")},
+            {"p4.assurance.task_mode": LaunchConfiguration("p4.assurance.task_mode")},
+            {"p4.assurance.maximum_continuous_exceedance_s": _param_float(
+                context, "p4.assurance.maximum_continuous_exceedance_s")},
+            {"p4.assurance.maximum_exceedance_integral_ratio_s": _param_float(
+                context, "p4.assurance.maximum_exceedance_integral_ratio_s")},
+            {"p4.forward.braking_accel_mps2": _param_float(context, "p4.forward.braking_accel_mps2")},
+            {"p4.forward.vehicle_radius_m": _param_float(context, "p4.forward.vehicle_radius_m")},
+            {"p4.forward.safety_margin_m": _param_float(context, "p4.forward.safety_margin_m")},
+            {"p4.forward.max_lookahead_m": _param_float(context, "p4.forward.max_lookahead_m")},
+            {"p4.forward.sensing_range_m": _param_float(context, "p4.forward.sensing_range_m")},
+            {"p4.forward.topology_resolution_m": _param_float(context, "p4.forward.topology_resolution_m")},
+            {"p4.forward.nominal_query_speed_mps": _param_float(context, "p4.forward.nominal_query_speed_mps")},
+            {"p4.forward.route_compute_budget_ms": _param_float(context, "p4.forward.route_compute_budget_ms")},
+            {"p4.forward.compute_budget_ms": _param_float(context, "p4.forward.compute_budget_ms")},
+            # Production authorization has one implementation. Legacy
+            # whole-curve cores remain available only in focused C++ tests.
+            {"p4.forward.gnss_core_policy": "braking_window_pointwise"},
+            {"p4.forward.window_transition_overlap_s": _param_float(context, "p4.forward.window_transition_overlap_s")},
+            {"p4.execution.successor_prepare_wcet_s": _param_float(context, "p4.execution.successor_prepare_wcet_s")},
+            {"p4.execution.successor_control_switch_margin_s": _param_float(context, "p4.execution.successor_control_switch_margin_s")},
+            {"p4.execution.successor_scheduler_guard_s": _param_float(context, "p4.execution.successor_scheduler_guard_s")},
+            {"p4.execution.successor_max_parent_execution_s": _param_float(context, "p4.execution.successor_max_parent_execution_s")},
+            {"p4.execution.successor_progress_jitter_floor_m": _param_float(context, "p4.execution.successor_progress_jitter_floor_m")},
+            {"p4.execution.successor_progress_stability_margin_m": _param_float(context, "p4.execution.successor_progress_stability_margin_m")},
+            {"p4.forward.min_creep_progress_m": _param_float(context, "p4.forward.min_creep_progress_m")},
+            {"p4.forward.max_limited_prefix_progress_m": _param_float(context, "p4.forward.max_limited_prefix_progress_m")},
+            {"p4.forward.max_creep_progress_m": _param_float(context, "p4.forward.max_creep_progress_m")},
+            {"p4.forward.max_observe_speed_mps": _param_float(context, "p4.forward.max_observe_speed_mps")},
+            {"p4.forward.max_raw_paths": _param_int(context, "p4.forward.max_raw_paths")},
+            {"p4.forward.max_channels": _param_int(context, "p4.forward.max_channels")},
+            {"p4.forward.max_channel_searches": _param_int(context, "p4.forward.max_channel_searches")},
+            {"p4.forward.channel_enumeration_budget_ms": _param_float(context, "p4.forward.channel_enumeration_budget_ms")},
+            {"p4.forward.advisory_min_relative_improvement": _param_float(context, "p4.forward.advisory_min_relative_improvement")},
+            {"p4.execution.max_tracking_error_m": _param_float(context, "p4.execution.max_tracking_error_m")},
+            {"p4.execution.marginal_unsafe_ratio_max": _param_float(context, "p4.execution.marginal_unsafe_ratio_max")},
+            {"p4.execution.marginal_confirm_distinct_evidence": _param_int(context, "p4.execution.marginal_confirm_distinct_evidence")},
+            {"p4.execution.marginal_confirm_max_s": _param_float(context, "p4.execution.marginal_confirm_max_s")},
+            {"p5.enable_runtime_gate": p5_runtime},
+            {"p5.enable_final_gate": p5_final},
+            {"p5.horizon_s": _param_float(context, "p5.horizon_s")},
+            {"p5.sample_dt_s": _param_float(context, "p5.sample_dt_s")},
+            {"p5.current_stale_to_replan_s": _param_float(context, "p5.current_stale_to_replan_s")},
+            {"p5.current_stale_to_emergency_s": _param_float(context, "p5.current_stale_to_emergency_s")},
+            {"p5.current_low_margin_to_emergency_s": _param_float(context, "p5.current_low_margin_to_emergency_s")},
+            {"p5.future_unknown_to_emergency_s": _param_float(context, "p5.future_unknown_to_emergency_s")},
+            {"p5.final_gate_max_consecutive_failures": _param_int(context, "p5.final_gate_max_consecutive_failures")},
+            {"p5.final_gate_max_failure_duration_s": _param_float(context, "p5.final_gate_max_failure_duration_s")},
+            {"p5.current_replan_margin_m": _param_float(context, "p5.current_replan_margin_m")},
+            {"p5.current_emergency_margin_m": _param_float(context, "p5.current_emergency_margin_m")},
+            {"p5.future_replan_margin_m": _param_float(context, "p5.future_replan_margin_m")},
+            {"p5.future_emergency_margin_m": _param_float(context, "p5.future_emergency_margin_m")},
+            {"p5.max_bad_ratio": _param_float(context, "p5.max_bad_ratio")},
+            {"p5.max_unknown_ratio": _param_float(context, "p5.max_unknown_ratio")},
+            {"p5.bad_tick_to_replan": _param_int(context, "p5.bad_tick_to_replan")},
+            {"p5.good_tick_to_clear": _param_int(context, "p5.good_tick_to_clear")},
+            {"p5.pred_alert_limit_mode": LaunchConfiguration("p5.pred_alert_limit_mode").perform(context)},
+            {"p5.pred_alert_limit_constant_hal_m": _param_float(context, "p5.pred_alert_limit_constant_hal_m")},
+            {"p5.pred_alert_limit_constant_val_m": _param_float(context, "p5.pred_alert_limit_constant_val_m")},
+            {"p5.pred_alert_limit_min_hal_m": _param_float(context, "p5.pred_alert_limit_min_hal_m")},
+            {"p5.pred_alert_limit_max_hal_m": _param_float(context, "p5.pred_alert_limit_max_hal_m")},
+            {"p5.pred_alert_limit_min_val_m": _param_float(context, "p5.pred_alert_limit_min_val_m")},
+            {"p5.pred_alert_limit_max_val_m": _param_float(context, "p5.pred_alert_limit_max_val_m")},
+            {"p5.pred_alert_limit_clearance_search_radius_m": _param_float(context, "p5.pred_alert_limit_clearance_search_radius_m")},
+            {"p5.pred_alert_limit_clearance_step_m": _param_float(context, "p5.pred_alert_limit_clearance_step_m")},
+            {"p5.pred_alert_limit_drone_radius_m": _param_float(context, "p5.pred_alert_limit_drone_radius_m")},
+            {"p5.pred_alert_limit_clearance_scale": _param_float(context, "p5.pred_alert_limit_clearance_scale")},
+            {"p5.pred_alert_limit_vertical_scale": _param_float(context, "p5.pred_alert_limit_vertical_scale")},
+            {"p5.integrity_topic": "/iap/integrity"},
+            {"p5.status_topic": LaunchConfiguration("p5.status_topic").perform(context)},
+            {"p5.debug_metrics_enable": _param_bool(context, "p5.debug_metrics_enable")},
+            {"risk_overlay/enable": False},
+            {"risk_overlay/use_for_astar": False},
+            {"risk_overlay/use_for_bspline": False},
+            {"risk_overlay/topic": ""},
+            {"manager/max_vel": _param_float(context, "manager/max_vel")},
+            {"manager/max_acc": _param_float(context, "manager/max_acc")},
+            {"manager/max_jerk": _param_float(context, "manager/max_jerk")},
+            {"manager/control_points_distance": _param_float(context, "manager/control_points_distance")},
+            {"manager/feasibility_tolerance": _param_float(context, "manager/feasibility_tolerance")},
+            {"manager/planning_horizon": _param_float(context, "manager/planning_horizon")},
+            {"manager/p1_collision_fanout_clearance_m": _param_float(
+                context, "manager/p1_collision_fanout_clearance_m")},
+            {"manager/p1_collision_fanout_preserve_homotopies": _param_bool(
+                context, "manager/p1_collision_fanout_preserve_homotopies")},
+            {"manager/p1_collision_fanout_mirror_y":
+                _manager_fanout_mirror_y(context, overrides)},
+            {"manager/use_distinctive_trajs": _param_bool(context, "manager/use_distinctive_trajs")},
+            {"manager/drone_id": int(drone_id)},
+            {"gate0.qualification_evidence_enable": _param_bool(
+                context, "gate0.qualification_evidence_enable")},
+            {"gate0.candidate_events_path": LaunchConfiguration(
+                "gate0.candidate_events_path").perform(context)},
+            {"gate0.control_points_path": LaunchConfiguration(
+                "gate0.control_points_path").perform(context)},
+            {"gate0.evidence_run_id": LaunchConfiguration(
+                "gate0.evidence_run_id").perform(context)},
+            {"gate0.evidence_manifest_path": LaunchConfiguration(
+                "gate0.evidence_manifest_path").perform(context)},
+            {"manager/use_integrity_global_search": False},
+            {"optimization/lambda_smooth": _param_float(context, "optimization/lambda_smooth")},
+            {"optimization/lambda_collision": _param_float(context, "optimization/lambda_collision")},
+            {"optimization/lambda_feasibility": _param_float(context, "optimization/lambda_feasibility")},
+            {"optimization/lambda_fitness": _param_float(context, "optimization/lambda_fitness")},
+            {"optimization/dist0": _param_float(context, "optimization/dist0")},
+            {"optimization/swarm_clearance": _param_float(context, "optimization/swarm_clearance")},
+            {"optimization/max_vel": _param_float(context, "optimization/max_vel")},
+            {"optimization/max_acc": _param_float(context, "optimization/max_acc")},
+            {"optimization/use_integrity_cost": False},
+            {"optimization/use_integrity_front_search": False},
+            {"optimization/use_integrity_global_search": False},
+            {"bspline/limit_vel": _param_float(context, "bspline/limit_vel")},
+            {"bspline/limit_acc": _param_float(context, "bspline/limit_acc")},
+            {"bspline/limit_ratio": _param_float(context, "bspline/limit_ratio")},
+            {"prediction/obj_num": 0},
+            {"prediction/lambda": 1.0},
+            {"prediction/predict_rate": 1.0},
+            {"test_planner/safety_profile": safety_profile},
+            {"planner_enable_safety_viz": _param_bool(context, "planner_enable_safety_viz")},
+            {"safety_viz.selected_horizon_s": _param_float(context, "safety_viz.selected_horizon_s")},
+            {"safety_viz.z_slice_mode": LaunchConfiguration("safety_viz.z_slice_mode").perform(context)},
+            {"safety_viz.z_slice_half_thickness_m": _param_float(context, "safety_viz.z_slice_half_thickness_m")},
+            {"safety_viz.publish_rate_hz": _param_float(context, "safety_viz.publish_rate_hz")},
+            {"safety_viz.max_cloud_points": _param_int(context, "safety_viz.max_cloud_points")},
+            {"safety_viz.enable_im_bars": _param_bool(context, "safety_viz.enable_im_bars")},
+            {"safety_viz.enable_validity_cloud": _param_bool(context, "safety_viz.enable_validity_cloud")},
+            {"safety_viz.enable_p1_viz": _param_bool(context, "safety_viz.enable_p1_viz")},
+            {"safety_viz.enable_p2_viz": _param_bool(context, "safety_viz.enable_p2_viz")},
+            {"safety_viz.enable_p3_viz": _param_bool(context, "safety_viz.enable_p3_viz")},
+            {"safety_viz.enable_p4_viz": _param_bool(context, "safety_viz.enable_p4_viz")},
+        ],
+    )
+
+
+def _launch_setup(context):
+    iap_share = get_package_share_directory("iap")
+    so3_control_share = get_package_share_directory("so3_control")
+    local_sensing_share = get_package_share_directory("local_sensing")
+    scenario, experiment, preset_keys = _apply_presets(context, iap_share)
+    _validate_online_truth_isolation(context, scenario)
+    p4_g0c_binding = _prepare_p4_g0c_context(
+        context, experiment, iap_share
+    )
+    safety_profile, safety_enabled, p0_enabled, p0_conflict, _ = _resolve_safety_switches(context, preset_keys)
+    p0_covariance_growth = _p0_covariance_growth_launch_contract(context)
+
+    start_rviz = _as_bool(LaunchConfiguration("start_rviz").perform(context))
+    record_bag = _as_bool(LaunchConfiguration("record_bag").perform(context))
+    run_validator = _as_bool(LaunchConfiguration("run_validator").perform(context))
+    start_planner = _as_bool(LaunchConfiguration("start_planner").perform(context))
+    use_gnss = _as_bool(LaunchConfiguration("use_gnss").perform(context))
+    use_araim = _as_bool(LaunchConfiguration("use_araim").perform(context))
+    allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
+    enable_preflight_takeoff = _as_bool(LaunchConfiguration("enable_preflight_takeoff").perform(context))
+    lidar_start_delay_s = max(
+        0.0, float(LaunchConfiguration("lidar_start_delay_s").perform(context))
+    )
+    odometry_initialization_mode = (
+        LaunchConfiguration("odometry_initialization_mode")
+        .perform(context).strip().upper() or "LOOSE"
+    )
+
+    drone_id = LaunchConfiguration("drone_id").perform(context)
+    init_x = float(LaunchConfiguration("init_x").perform(context))
+    init_y = float(LaunchConfiguration("init_y").perform(context))
+    init_z = float(LaunchConfiguration("init_z").perform(context))
+    goal = (
+        LaunchConfiguration("goal_x").perform(context),
+        LaunchConfiguration("goal_y").perform(context),
+        LaunchConfiguration("goal_z").perform(context),
+    )
+    point_num = LaunchConfiguration("point_num").perform(context)
+    map_size = (
+        float(LaunchConfiguration("map_size_x").perform(context)),
+        float(LaunchConfiguration("map_size_y").perform(context)),
+        float(LaunchConfiguration("map_size_z").perform(context)),
+    )
+    preflight_ground_z = float(LaunchConfiguration("preflight_ground_z").perform(context))
+    plant_init_z = preflight_ground_z if enable_preflight_takeoff else init_z
+    run_duration_s = float(LaunchConfiguration("run_duration_s").perform(context))
+    validation_duration_s = float(LaunchConfiguration("validation_duration_s").perform(context))
+    fixed_status_text = _as_bool(LaunchConfiguration("viz_status_text_use_fixed_position").perform(context))
+    status_text_position = (
+        float(LaunchConfiguration("viz_status_text_x").perform(context)),
+        float(LaunchConfiguration("viz_status_text_y").perform(context)),
+        float(LaunchConfiguration("viz_status_text_z").perform(context)),
+    )
+
+    gnss_ephemeris_source = LaunchConfiguration("gnss_ephemeris_source").perform(context)
+    gnss_time_source = LaunchConfiguration("gnss_time_source").perform(context)
+    gnss_trigger_topic = LaunchConfiguration("gnss_trigger_topic").perform(context)
+    gnss_enabled_constellations = LaunchConfiguration("gnss_enabled_constellations").perform(context)
+    gnss_scenario_file = LaunchConfiguration("gnss_scenario_file").perform(context)
+    gnss_rinex_nav_file = LaunchConfiguration("gnss_rinex_nav_file").perform(context)
+    gnss_rinex_ephem_max_age_s = LaunchConfiguration("gnss_rinex_ephem_max_age_s").perform(context)
+    gnss_fallback_to_synthetic = _as_bool(LaunchConfiguration("gnss_fallback_to_synthetic_on_rinex_error").perform(context))
+    gnss_sky_dome_center_enu = [
+        float(LaunchConfiguration("gnss_sky_dome_center_x").perform(context)),
+        float(LaunchConfiguration("gnss_sky_dome_center_y").perform(context)),
+        float(LaunchConfiguration("gnss_sky_dome_center_z").perform(context)),
+    ]
+    gnss_skyplot_origin_enu = [
+        float(LaunchConfiguration("gnss_skyplot_origin_x").perform(context)),
+        float(LaunchConfiguration("gnss_skyplot_origin_y").perform(context)),
+        float(LaunchConfiguration("gnss_skyplot_origin_z").perform(context)),
+    ]
+
+    if use_gnss and gnss_ephemeris_source.strip().lower() == "rinex" and not gnss_fallback_to_synthetic and not Path(gnss_rinex_nav_file).expanduser().is_file():
+        raise RuntimeError(
+            "gnss_ephemeris_source:=rinex requires an existing gnss_rinex_nav_file "
+            "when gnss_fallback_to_synthetic_on_rinex_error:=false; "
+            f"got '{gnss_rinex_nav_file}'"
+        )
+
+    (
+        runtime_config_path,
+        runtime_root,
+        export_dir,
+        mapping_effective,
+        logging_effective,
+    ) = _runtime_config(context, use_gnss, use_araim, allow_truth_alignment)
+    gnss_scenario_file = _materialize_gnss_scenario(gnss_scenario_file, export_dir)
+
+    bag_root_dir = LaunchConfiguration("bag_output_dir").perform(context).strip()
+    if not bag_root_dir:
+        bag_root_dir = str(Path(runtime_root) / "bag")
+    if experiment in {
+        P4_G0C_EXPERIMENT_V3, P4_G0C_EXPERIMENT_V4,
+        P4_G0C_EXPERIMENT_V5, P4_G0C_EXPERIMENT_V6,
+    }:
+        bag_output_dir = bag_root_dir
+    else:
+        bag_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        bag_scenario = _safe_path_component(scenario, "manual")
+        bag_experiment = _safe_path_component(experiment, "experiment")
+        bag_output_dir = str(
+            Path(bag_root_dir)
+            / f"test_planner_{bag_experiment}_{bag_scenario}_{bag_stamp}"
+        )
+    if record_bag:
+        os.makedirs(bag_root_dir, exist_ok=True)
+    evidence = _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario)
+    evidence["manifest_path"] = str((Path(export_dir) / "test_planner_manifest.json").resolve())
+    formal_calibration = _formal_calibration_provenance(
+        LaunchConfiguration("p1.formal_calibration_manifest").perform(context)
+    )
+
+    truth_odom_topic = "/sim/drone_0/truth_odom"
+    iap_odom_topic = "/drone_0_visual_slam/odom"
+    planner_frame_mode = LaunchConfiguration(
+        "planner_frame_mode").perform(context).strip()
+    planner_local_map_enable = _param_bool(context, "planner_local_map_enable")
+    simulator_world_frame = (
+        "sim_world" if planner_local_map_enable else "map"
+    )
+    planner_odom_topic = (
+        iap_odom_topic if planner_frame_mode == "glim_world"
+        else truth_odom_topic
+    )
+    sim_imu_topic = "/sim/drone_0/imu"
+    iap_imu_topic = "/sim/drone_0/imu_iap"
+    so3_feedback_imu_topic = _so3_feedback_imu_topic(
+        sim_imu_topic, iap_imu_topic
+    )
+    sim_lidar_topic = "/sim/drone_0/lidar"
+    iap_lidar_topic = "/sim/drone_0/lidar_body"
+    sim_depth_topic = "/sim/drone_0/depth"
+    pos_cmd_topic = "/drone_0_planning/pos_cmd"
+    desired_odom_topic = "/test_planner/desired/odom"
+    bspline_topic = "/drone_0_planning/bspline"
+    so3_cmd_topic = "/test_planner/so3_cmd"
+    camera_pose_topic = "/drone_0_pcl_render_node/camera_pose"
+
+    camera_file = os.path.join(local_sensing_share, "config", "camera.yaml")
+    gains_file = os.path.join(so3_control_share, "config", "gains_hummingbird.yaml")
+    corrections_file = os.path.join(so3_control_share, "config", "corrections_hummingbird.yaml")
+
+    preflight_delay = 0.0
+    if enable_preflight_takeoff:
+        preflight_delay = (
+            float(LaunchConfiguration("preflight_ground_hold_s").perform(context))
+            + float(LaunchConfiguration("preflight_takeoff_duration_s").perform(context))
+            + float(LaunchConfiguration("preflight_hover_s").perform(context))
+        )
+    planner_start_delay_s = preflight_delay + max(0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context)))
+    simulator_hold_until_cmd = planner_start_delay_s > 0.0
+
+    planner_nodes = [
+        _ego_planner_node(
+            context,
+            drone_id,
+            planner_odom_topic,
+            iap_imu_topic,
+            LaunchConfiguration("planner_occupancy_cloud_topic").perform(
+                context
+            ),
+            camera_pose_topic,
+            sim_depth_topic,
+            bspline_topic,
+            map_size,
+            goal,
+            point_num,
+            safety_profile,
+            safety_enabled,
+            p0_enabled,
+            p0_covariance_growth,
+            export_dir,
+            evidence,
+        ),
+        Node(
+            package="ego_planner",
+            executable="traj_server",
+            name=f"drone_{drone_id}_traj_server",
+            output="screen",
+            remappings=[
+                ("planning/bspline", bspline_topic),
+                ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
+                ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
+                ("odometry", planner_odom_topic),
+                ("position_cmd", pos_cmd_topic),
+                ("/position_cmd", pos_cmd_topic),
+            ],
+            parameters=[{"traj_server/time_forward": 1.0}],
+        ),
+    ]
+    if not start_planner:
+        planner_actions = [LogInfo(msg="[test_planner] EGO planner/traj_server disabled by start_planner:=false")]
+    elif planner_start_delay_s > 0.0:
+        planner_actions = [
+            LogInfo(msg=f"[test_planner] delaying EGO planner/traj_server by {planner_start_delay_s:.2f}s"),
+            TimerAction(period=planner_start_delay_s, actions=planner_nodes),
+        ]
+    else:
+        planner_actions = planner_nodes
+
+    p5_3_fixture_hpl = _param_float(context, "p5_3.fixture.hpl_pred_m")
+    p5_3_fixture_vpl = _param_float(context, "p5_3.fixture.vpl_pred_m")
+    p5_4_fixture_hpl = _param_float(context, "p5_4.fixture.hpl_pred_m")
+    p5_4_fixture_vpl = _param_float(context, "p5_4.fixture.vpl_pred_m")
+    p5_7_fixture_hpl = _param_float(context, "p5_7.fixture.hpl_pred_m")
+    p5_7_fixture_vpl = _param_float(context, "p5_7.fixture.vpl_pred_m")
+    p5_pred_al_mode = LaunchConfiguration("p5.pred_alert_limit_mode").perform(context)
+    if p5_pred_al_mode == "config_constant":
+        p5_expected_hal = _param_float(context, "p5.pred_alert_limit_constant_hal_m")
+        p5_expected_val = _param_float(context, "p5.pred_alert_limit_constant_val_m")
+    elif p5_pred_al_mode == "current_msg_constant":
+        p5_expected_hal = 10.0
+        p5_expected_val = 10.0
+    else:
+        p5_expected_hal = None
+        p5_expected_val = None
+    p5_3_expected_hal = p5_expected_hal
+    p5_3_expected_val = p5_expected_val
+    p5_3_expected_im = (
+        min(p5_3_expected_hal - p5_3_fixture_hpl, p5_3_expected_val - p5_3_fixture_vpl)
+        if p5_3_expected_hal is not None and p5_3_expected_val is not None
+        else None
+    )
+    p5_4_expected_hal = p5_expected_hal
+    p5_4_expected_val = p5_expected_val
+    p5_4_expected_im = (
+        min(p5_4_expected_hal - p5_4_fixture_hpl, p5_4_expected_val - p5_4_fixture_vpl)
+        if p5_4_expected_hal is not None and p5_4_expected_val is not None
+        else None
+    )
+    p5_7_expected_hal = p5_expected_hal
+    p5_7_expected_val = p5_expected_val
+    p5_7_expected_im = (
+        min(p5_7_expected_hal - p5_7_fixture_hpl, p5_7_expected_val - p5_7_fixture_vpl)
+        if p5_7_expected_hal is not None and p5_7_expected_val is not None
+        else None
+    )
+    p5_6_fixture_requested = _param_bool(context, "p5_6.fixture.enabled")
+    p5_6_fixture_effective = _p5_6_fixture_effective_enabled(context)
+    overrides = _launch_arg_overrides()
+    p1_enabled_for_manifest = bool(safety_enabled.get("p1"))
+    p1_use_for_manifest = (
+        _param_bool(context, "p1.use_integrity_cost")
+        if "p1.use_integrity_cost" in overrides
+        else p1_enabled_for_manifest
+    )
+    p1_metrics_only_for_manifest = _effective_metrics_only(
+        context, "p1.metrics_only", p1_enabled_for_manifest, overrides
+    )
+    p2_use_for_manifest = (
+        _param_bool(context, "p2.enable_candidate_ranking")
+        if "p2.enable_candidate_ranking" in overrides
+        else bool(safety_enabled.get("p2"))
+    )
+    p2_metrics_only_for_manifest = _effective_metrics_only(
+        context,
+        "p2.metrics_only",
+        bool(safety_enabled.get("p2")),
+        overrides,
+    )
+    p3_local_for_manifest = (
+        _param_bool(context, "p3.enable_local_reference_bias")
+        if "p3.enable_local_reference_bias" in overrides
+        else bool(safety_enabled.get("p3_local"))
+    )
+    p3_global_for_manifest = (
+        _param_bool(context, "p3.enable_global_reference_bias")
+        if "p3.enable_global_reference_bias" in overrides
+        else bool(safety_enabled.get("p3_global"))
+    )
+    p4_use_for_manifest = (
+        _param_bool(context, "p4.enable_risk_aware_astar")
+        if "p4.enable_risk_aware_astar" in overrides
+        else bool(safety_enabled.get("p4"))
+    )
+    p4_metrics_only_for_manifest = _param_bool(context, "p4.metrics_only")
+    p5_runtime_for_manifest = (
+        _param_bool(context, "p5.enable_runtime_gate")
+        if "p5.enable_runtime_gate" in overrides
+        else bool(safety_enabled.get("p5_runtime"))
+    )
+    p5_final_for_manifest = (
+        _param_bool(context, "p5.enable_final_gate")
+        if "p5.enable_final_gate" in overrides
+        else bool(safety_enabled.get("p5_final"))
+    )
+    p1_debug_path_for_manifest = LaunchConfiguration("p1.debug_csv_path").perform(context)
+    if not p1_debug_path_for_manifest:
+        p1_debug_path_for_manifest = str(Path(export_dir) / "planner_p1_integrity_cost_debug.csv")
+    p4_debug_path_for_manifest = LaunchConfiguration("p4.debug_csv_path").perform(context)
+    if not p4_debug_path_for_manifest:
+        p4_debug_path_for_manifest = str(Path(export_dir) / "planner_p4_risk_astar_debug.csv")
+    p1_accepted_profile_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile.csv")
+    )
+    p1_candidate_optimization_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_optimization.csv")
+    )
+    p1_candidate_control_points_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_control_points.csv")
+    )
+    p1_candidate_profile_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_profile.csv")
+    )
+    p1_candidate_pairwise_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_pairwise.csv")
+    )
+    p1_prequalification_candidate_profile_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name(
+            "planner_p1_prequalification_candidate_profile.csv")
+    )
+    p1_optimizer_checkpoint_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_optimizer_checkpoint.csv")
+    )
+    p0_occupancy_query_evidence_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p0_occupancy_query_evidence.csv")
+    )
+    p1_accepted_profile_context_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile_context.csv")
+    )
+    p1_planning_context_timeline_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_planning_context_timeline.csv")
+    )
+    p1_pre_admission_attempt_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_pre_admission_attempt.csv")
+    )
+    p5_final_for_fixture = (
+        _param_bool(context, "p5.enable_final_gate")
+        if "p5.enable_final_gate" in overrides
+        else bool(safety_enabled.get("p5_final"))
+    )
+    p5_7_fixture_requested = _param_bool(context, "p5_7.fixture.enabled")
+    p5_7_fixture_effective = _p5_7_fixture_effective_enabled(
+        context, p5_final_for_fixture
+    )
+
+    scenario_contract = {
+        "scene_map": {
+            "layout_mode": LaunchConfiguration("forest_layout_mode").perform(context),
+            "map_size_m": [
+                _param_float(context, "map_size_x"),
+                _param_float(context, "map_size_y"),
+                _param_float(context, "map_size_z"),
+            ],
+            "forest_size_m": [
+                _param_float(context, "forest_size_x_m"),
+                _param_float(context, "forest_size_y_m"),
+            ],
+            "forest_seed": _param_int(context, "forest_random_seed"),
+            "fork_risk_seed": _param_int(context, "forked_forest.risk_seed"),
+            "fork_count": _param_int(context, "forked_forest.fork_count"),
+            "fork_x_min_m": _param_float(context, "forked_forest.fork_x_min_m"),
+            "fork_length_m": _param_float(context, "forked_forest.fork_length_m"),
+            "low_risk_amplitude_m": _param_float(
+                context, "forked_forest.low_risk_amplitude_m"),
+            "high_risk_amplitude_m": _param_float(
+                context, "forked_forest.high_risk_amplitude_m"),
+            "corridor_width_m": _param_float(
+                context, "forked_forest.corridor_width_m"),
+            "junction_clearance_radius_m": _param_float(
+                context, "forked_forest.junction_clearance_radius_m"),
+            "flight_clearance_z_m": _param_float(
+                context, "forked_forest.flight_clearance_z_m"),
+            "side_boundary_tree_spacing_m": _param_float(
+                context, "forked_forest.side_boundary_tree_spacing_m"),
+            "start_canopy_clearance_radius_m": _param_float(
+                context, "forked_forest.start_canopy_clearance_radius_m"),
+            "expanded_low_risk_sides": (
+                ["right", "left", "right", "left"]
+                if (LaunchConfiguration("forest_layout_mode").perform(context)
+                    in ("forked_s_forest_v1", "forked_s_forest_v2")
+                    and _param_int(context, "forked_forest.risk_seed") == 21)
+                else []
+            ),
+        },
+        "geometry": {
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v13",
+            "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
+            "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
+            "start_m": [init_x, init_y, init_z],
+            "goal_m": [float(goal[0]), float(goal[1]), float(goal[2])],
+            "central_obstacle": {
+                "enabled": _param_bool(context, "p1_fixture_central_obstacle_enabled"),
+                "x_m": [_param_float(context, "p1_fixture_central_x_min_m"),
+                        _param_float(context, "p1_fixture_central_x_max_m")],
+                "y_half_width_m": _param_float(context, "p1_fixture_central_y_half_width_m"),
+                "z_m": [0.0, _param_float(context, "p1_fixture_central_z_max_m")],
+            },
+            "lanes": {
+                "center_abs_y_m": _param_float(context, "p1_fixture_lane_center_m"),
+                "half_width_m": _param_float(context, "p1_fixture_lane_half_width_m"),
+                "safe_tree_density_per_m2": _param_float(context, "p1_fixture_safe_tree_density_per_m2"),
+                "risky_tree_density_per_m2": _param_float(context, "p1_fixture_risky_tree_density_per_m2"),
+                "safe_canopy_probability": _param_float(context, "p1_fixture_safe_canopy_probability"),
+                "risky_canopy_probability": _param_float(context, "p1_fixture_risky_canopy_probability"),
+            },
+            "forest_seed": _param_int(context, "forest_random_seed"),
+            "map_resolution_m": _param_float(context, "corridor_map_resolution_m"),
+            "trunk_radius_m": _param_float(context, "trunk_radius_m"),
+            "canopy_resolution_m": _param_float(context, "canopy_resolution_m"),
+            "fixture_short_trunk_height_m": 0.55,
+            "fixture_risky_trunk_height_m": 2.85,
+            "fixture_canopy_base_z_m": 2.85,
+            "fixture_canopy_ball_center_z_m": 3.25,
+            "fixture_canopy_ball_radius_m": 0.42,
+            "fixture_canopy_clip_radius_m": 1.10,
+            "formal_arm_roles": {
+                "canonical_metrics_only_reference": {
+                    "primary": "upper", "mirror": "lower",
+                },
+                "dense_lidar_trunks": {
+                    "primary": "lower", "mirror": "upper",
+                },
+                "gnss_occluding_risky_canopies": {
+                    "primary": "upper", "mirror": "lower",
+                },
+                "continuous_overhead_gnss_mask": {
+                    "primary": "upper", "mirror": "lower",
+                    "x_m": [-11.5, 2.5],
+                    "half_width_y_m": 1.25,
+                    "z_m": [7.30, 7.55],
+                    "lidar_exclusion_contract": {
+                        "flight_z_m": 1.5,
+                        "sensing_horizon_m": 10.0,
+                        "vertical_half_fov_deg": 30.0,
+                    },
+                },
+                "soft_island": "y=-2.0_m",
+                "null": "symmetric",
+            },
+            "lidar_observability_landmarks": {
+                "kind": "symmetric_survey_pylons",
+                "x_m": [-12.0, -10.0, -8.0, -6.0, -4.0, -2.0, 0.0],
+                "center_abs_y_m": 4.5,
+                "half_width_m": 0.25,
+                "z_m": [0.0, 3.0],
+            },
+            "boundary_tree_layout": {
+                "mode": "alternating_external_and_central-box-bounded_inner",
+                "inner_x_m": [-8.0, -3.0],
+                "formal_min_lane_center_clearance_m": 1.70,
+            },
+            "collision_neutral_rafters": {
+                "fixtures": ["p1_soft_risk_island_v1"],
+                "x_m": [-10.0, -8.0, -6.0, -4.0, -2.0],
+                "half_width_m": 0.30,
+                "z_m": [2.85, 3.35],
+            },
+            "fixture_lane_x_start_m": -7.8,
+            "fixture_lane_x_span_m": 16.0,
+            "fixture_lane_boundary_offset_m": 0.75,
+            "fixture_lane_density_area_m2": 32.0,
+            "fixture_soft_island_density_area_m2": 24.0,
+            "fixture_soft_island_x_m": [-6.0, 2.0],
+            "fixture_soft_island_center_y_m": -2.0,
+            "terminal_wall_enabled": _param_bool(context, "terminal_wall_enabled"),
+        },
+        "risk_sources": ["gnss_map_occlusion", "lidar_observability"],
+        "sensor_startup": {
+            "lidar_start_delay_s": lidar_start_delay_s,
+            "odometry_initialization_mode": odometry_initialization_mode,
+            "odometry_acc_scale": _param_float(
+                context, "odometry_acc_scale"),
+            "odometry_initialization_window_s": 1.0,
+            "required_strict_margin_s": lidar_start_delay_s - 1.0,
+            "gnss_epoch_frame_binding": "nearest_single_epoch",
+            "so3_feedback_imu_semantics": "world_linear_acceleration",
+        },
+        "gnss": {
+            "scenario_file": str(gnss_scenario_file),
+            "scenario_file_sha256": _sha256_file(gnss_scenario_file),
+            "random_seed": _param_int(context, "gnss_random_seed"),
+            "ephemeris_source": gnss_ephemeris_source,
+            "enabled_constellations": gnss_enabled_constellations,
+            "pseudorange_noise_std_m": _param_float(context, "gnss_pr_noise_base"),
+            "doppler_noise_std_mps": _param_float(context, "gnss_dop_noise_base"),
+            "map_occlusion": _param_bool(context, "gnss_enable_map_occlusion"),
+            "skymask": _param_bool(context, "gnss_enable_skymask"),
+            "nlos": _param_bool(context, "gnss_enable_nlos"),
+            "multipath": _param_bool(context, "gnss_enable_multipath"),
+        },
+        "p1": {
+            "lambda_integrity": _param_float(context, "p1.lambda_integrity"),
+            "normalization_budget_fraction": _param_float(context, "p1.normalization_budget_fraction"),
+            "aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context),
+            "smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha"),
+            "smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
+        },
+        "planner_dynamics": {
+            "manager_max_velocity_mps": _param_float(context, "manager/max_vel"),
+            "optimizer_max_velocity_mps": _param_float(context, "optimization/max_vel"),
+            "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
+            "replan_period_s": _param_float(context, "fsm.thresh_replan_time"),
+            "planning_horizon_m": _param_float(context, "manager/planning_horizon"),
+            "collision_fanout_clearance_m": _param_float(
+                context, "manager/p1_collision_fanout_clearance_m"),
+            "collision_fanout_preserve_homotopies": _param_bool(
+                context, "manager/p1_collision_fanout_preserve_homotopies"),
+            "collision_fanout_mirror_y":
+                _manager_fanout_mirror_y(context, overrides),
+            "local_update_range_x_m": _param_float(context, "grid_map/local_update_range_x"),
+        },
+        "p0_prediction": {
+            "horizons_s": _csv_floats(
+                LaunchConfiguration("p0.horizons_s").perform(context)
+            ),
+            "fit_grid_to_map_cloud": _param_bool(
+                context, "p0.fit_grid_to_map_cloud"),
+            "online_mapping_mode": _param_bool(
+                context, "p0.online_mapping_mode"),
+            "map_topic": LaunchConfiguration("p0.map_topic").perform(context),
+            "frame_id": "map",
+            "origin_m": [
+                _param_float(context, "p0.origin_x_m"),
+                _param_float(context, "p0.origin_y_m"),
+                _param_float(context, "p0.origin_z_m"),
+            ],
+            "extent_m": [
+                _param_float(context, "p0.size_x_m"),
+                _param_float(context, "p0.size_y_m"),
+                _param_float(context, "p0.size_z_m"),
+            ],
+            "risk_resolution_m": _param_float(context, "p0.resolution_m"),
+            "ego_resolution_m": _param_float(context, "grid_map/resolution"),
+            "ego_origin_m": [
+                _param_float(context, "grid_map/origin_x"),
+                _param_float(context, "grid_map/origin_y"),
+                _param_float(context, "grid_map/origin_z"),
+            ],
+            "unknown_as_occupied": _param_bool(
+                context, "grid_map/unknown_as_occupied"),
+            "current_vehicle_clearance_radius_m": _param_float(
+                context, "p4.forward.vehicle_radius_m"),
+            "provider_cost_source": LaunchConfiguration(
+                "p0.provider_cost_source").perform(context),
+            "require_safety_ratio_below_one_for_cost": _param_bool(
+                context, "p0.require_safety_ratio_below_one_for_cost"),
+            "alert_limit_policy_id": LaunchConfiguration(
+                "p0.alert_limit_policy_id").perform(context),
+            "alert_limit_h_m": _param_float(context, "p0.alert_limit_h_m"),
+            "alert_limit_v_m": _param_float(context, "p0.alert_limit_v_m"),
+            "skip_occupied_voxels": _param_bool(
+                context, "p0.skip_occupied_voxels"),
+            "use_current_integrity_prior": _param_bool(
+                context, "p0.predictor.use_current_integrity_prior"),
+            "conservative_max_with_gnss": _param_bool(
+                context, "p0.predictor.conservative_max_with_gnss"),
+            "gnss_clearance_transition_m": _param_float(
+                context, "p0.predictor.gnss.clearance_transition_m"),
+            "predictor_worker_count": _param_int(
+                context, "p0.predictor.worker_count"),
+            "executor_thread_count": _param_int(
+                context, "planner_executor_thread_count"),
+        },
+        "integrity_alert_limits": {
+            "dynamic": _param_bool(
+                context, "integrity_dynamic_alert_limits"),
+            "hal_m": _param_float(context, "integrity_hal_m"),
+            "val_m": _param_float(context, "integrity_val_m"),
+        },
+        "p5_alert_limits": {
+            "mode": LaunchConfiguration(
+                "p5.pred_alert_limit_mode").perform(context),
+            "hal_m": _param_float(
+                context, "p5.pred_alert_limit_constant_hal_m"),
+            "val_m": _param_float(
+                context, "p5.pred_alert_limit_constant_val_m"),
+        },
+        "decision_checkpoint": {
+            "truth_x_m": -9.5, "truth_x_tolerance_m": 0.4,
+            "truth_source_topic": truth_odom_topic,
+            "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+            "localization_error_limit_m": 0.5,
+            "pair_error_delta_limit_m": 0.25,
+        },
+    }
+    scenario_fingerprint = _scenario_fingerprint(scenario, scenario_contract)
+    icra_p0_p5_binding = _icra_p0_p5_launch_binding(
+        context, experiment, iap_share, evidence
+    )
+
+    lidar_renderer_mode = LaunchConfiguration(
+        "lidar_renderer_mode").perform(context)
+    planner_local_map_contract, planner_local_map_contract_id = (
+        _planner_local_map_contract(context)
+    )
+    manifest = {
+        "artifact_provenance": evidence,
+        "experiment": experiment,
+        "scenario": scenario,
+        "iap_mapping_backend": mapping_effective["selected"],
+        "mapping_effective_config": mapping_effective,
+        "scenario_contract": scenario_contract,
+        "scenario_fingerprint": scenario_fingerprint,
+        "icra_p0_p5_qualification": icra_p0_p5_binding,
+        "runtime_config_path": runtime_config_path,
+        "iap_logging_effective_config": logging_effective,
+        "corridor_map_stamp_authority_topic": LaunchConfiguration(
+            "corridor_map_stamp_authority_topic").perform(context),
+        "export_dir": export_dir,
+        "run_duration_s": run_duration_s,
+        "validation_duration_s": validation_duration_s,
+        "planner_start_delay_s": max(
+            0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
+        ),
+        "lidar_start_delay_s": lidar_start_delay_s,
+        "lidar_renderer": {
+            "mode": lidar_renderer_mode,
+            "horizontal_samples": _param_int(context, "lidar_horizontal_samples"),
+            "vertical_samples": _param_int(context, "lidar_vertical_samples"),
+            "ray_count": (
+                _param_int(context, "lidar_horizontal_samples")
+                * _param_int(context, "lidar_vertical_samples")
+            ),
+            "horizontal_fov_deg": _param_float(
+                context, "lidar_horizontal_fov_deg"),
+            "vertical_min_deg": _param_float(context, "lidar_vertical_min_deg"),
+            "vertical_max_deg": _param_float(context, "lidar_vertical_max_deg"),
+            "min_range_m": _param_float(context, "lidar_min_range_m"),
+            "max_range_m": _param_float(context, "lidar_max_range_m"),
+            "world_voxel_resolution_m": _param_float(
+                context, "lidar_world_voxel_resolution_m"),
+            "output_semantics": _lidar_output_semantics(lidar_renderer_mode),
+        },
+        "odometry_acc_scale": _param_float(context, "odometry_acc_scale"),
+        "planner_executor_thread_count": int(LaunchConfiguration(
+            "planner_executor_thread_count").perform(context)),
+        "planner_occupancy_cloud_topic": LaunchConfiguration(
+            "planner_occupancy_cloud_topic").perform(context),
+        "planner_occupancy_min_interval_s": _param_float(
+            context, "grid_map/independent_cloud_min_interval_s"),
+        "planner_occupancy_clock_guard_s": _param_float(
+            context, "grid_map/independent_cloud_clock_guard_s"),
+        "planner_local_map": {
+            "enabled": _param_bool(context, "planner_local_map_enable"),
+            "planner_frame_mode": planner_frame_mode,
+            "planner_odom_topic": planner_odom_topic,
+            "runtime_truth_alignment_enabled": allow_truth_alignment,
+            "simulator_world_frame": simulator_world_frame,
+            "current_topic": LaunchConfiguration(
+                "planner_local_map_current_topic").perform(context),
+            "current_hits_map_topic": LaunchConfiguration(
+                "planner_local_map_current_hits_map_topic").perform(context),
+            "current_hits_map_enabled": start_rviz,
+            "delta_topic": LaunchConfiguration(
+                "planner_local_map_delta_topic").perform(context),
+            "recovery_service": LaunchConfiguration(
+                "planner_local_map_recovery_service").perform(context),
+            "window_rate_hz": _param_float(
+                context, "planner_local_map_window_rate_hz"),
+            "frame_contract_id": planner_local_map_contract_id,
+            "frame_contract": planner_local_map_contract,
+            "current_queue_policy": "latest_wins",
+            "active_window_limit": 15,
+            "geometry_source": "glim_registered_first_hit_lidar",
+            "risk_evidence_source": "successful_return_rays",
+        },
+        "manager/max_vel": _param_float(context, "manager/max_vel"),
+        "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
+        "manager/p1_collision_fanout_clearance_m": _param_float(
+            context, "manager/p1_collision_fanout_clearance_m"),
+        "manager/p1_collision_fanout_preserve_homotopies": _param_bool(
+            context, "manager/p1_collision_fanout_preserve_homotopies"),
+        "manager/p1_collision_fanout_mirror_y":
+            _manager_fanout_mirror_y(context, overrides),
+        "manager/use_distinctive_trajs": _param_bool(
+            context, "manager/use_distinctive_trajs"),
+        "p1_fixture_mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
+        "gate0.qualification_evidence_enable": _param_bool(
+            context, "gate0.qualification_evidence_enable"),
+        "gate0.candidate_events_path": LaunchConfiguration(
+            "gate0.candidate_events_path").perform(context),
+        "gate0.control_points_path": LaunchConfiguration(
+            "gate0.control_points_path").perform(context),
+        "gate0.evidence_run_id": LaunchConfiguration(
+            "gate0.evidence_run_id").perform(context),
+        "gate0.evidence_manifest_path": LaunchConfiguration(
+            "gate0.evidence_manifest_path").perform(context),
+        "optimization/max_vel": _param_float(context, "optimization/max_vel"),
+        "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
+        "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),
+        "grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x"),
+        "record_bag": record_bag,
+        "start_rviz": start_rviz,
+        "run_validator": run_validator,
+        "timebase": {
+            "planning_timeline": {"domain": "sim_message", "field": "stamp_s"},
+            "p0_health_payload": {
+                "domain": "sim_message",
+                "field": "health_callback_stamp_s",
+            },
+            "bag_receive": {"domain": "system_receive", "field": "stamp"},
+        },
+        "planner_safety_profile": safety_profile,
+        "planner_enable_all_safety": _param_bool(
+            context, "planner_enable_all_safety"),
+        "fsm.thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled),
+        "p0.enable_risk_grid": p0_enabled,
+        "p4.require_risk_grid_ready_before_planning": _param_bool(
+            context, "p4.require_risk_grid_ready_before_planning"),
+        "p1.use_integrity_cost": p1_use_for_manifest,
+        "p1.metrics_only": p1_metrics_only_for_manifest,
+        "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),
+        "p1.debug_csv_enable": _param_bool(context, "p1.debug_csv_enable"),
+        "p1.debug_csv_path": p1_debug_path_for_manifest,
+        "p2.enable_candidate_ranking": p2_use_for_manifest,
+        "p2.metrics_only": p2_metrics_only_for_manifest,
+        "p2.debug_csv_enable": _param_bool(context, "p2.debug_csv_enable"),
+        "p3.enable_local_reference_bias": p3_local_for_manifest,
+        "p3.enable_global_reference_bias": p3_global_for_manifest,
+        "p3.debug_csv_enable": _param_bool(context, "p3.debug_csv_enable"),
+        "p4.enable_risk_aware_astar": p4_use_for_manifest,
+        "p4.metrics_only": p4_metrics_only_for_manifest,
+        "p4.objective": LaunchConfiguration("p4.objective").perform(context),
+        "p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable"),
+        "p4.debug_csv_path": p4_debug_path_for_manifest,
+        "p4.profile_trace_enable": _param_bool(
+            context, "p4.profile_trace_enable"),
+        "p4.profile_trace_path": LaunchConfiguration(
+            "p4.profile_trace_path").perform(context),
+        "p4.cost_query_policy": LaunchConfiguration(
+            "p4.cost_query_policy").perform(context),
+        "p4.g0c": p4_g0c_binding,
+        "p5.enable_runtime_gate": p5_runtime_for_manifest,
+        "p5.enable_final_gate": p5_final_for_manifest,
+        "forest_random_seed": _param_int(context, "forest_random_seed"),
+        "gnss_random_seed": _param_int(context, "gnss_random_seed"),
+        "terminal_wall_feature_seed": _param_int(
+            context, "terminal_wall_feature_seed"),
+        "p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt"))),
+        "p1.candidate_optimization_path": p1_candidate_optimization_path_for_manifest,
+        "p1.candidate_control_points_path": p1_candidate_control_points_path_for_manifest,
+        "p1.candidate_profile_path": p1_candidate_profile_path_for_manifest,
+        "p1.candidate_pairwise_path": p1_candidate_pairwise_path_for_manifest,
+        "p1.optimizer_checkpoint_path": p1_optimizer_checkpoint_path_for_manifest,
+        "p0.occupancy_query_evidence_path": p0_occupancy_query_evidence_path_for_manifest,
+        "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
+        "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
+        "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,
+        "p1.pre_admission_attempt_path": p1_pre_admission_attempt_path_for_manifest,
+        "p1.candidate_route_precheck_path": str(
+            Path(export_dir) / "metadata" / "p1_candidate_route_precheck.json"),
+        "p1.prequalification_candidate_profile_path":
+            p1_prequalification_candidate_profile_path_for_manifest,
+        "p1.replacement_decision_path": str(
+            Path(p1_debug_path_for_manifest).with_name("planner_p1_replacement_decision.csv")),
+        "p1.candidate_retained_profile_path": str(
+            Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_retained_profile.csv")),
+        "p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context),
+        "p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
+        "p1.smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha"),
+        "p1.normalization_budget_fraction": _param_float(context, "p1.normalization_budget_fraction"),
+        "p1.formal_calibration": formal_calibration,
+        "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
+        "p0.raw_health_topic": "/planning/risk_grid_health",
+        "p0.fit_grid_to_map_cloud": _param_bool(
+            context, "p0.fit_grid_to_map_cloud"),
+        "p0.size_source": (
+            "first_map_cloud_span" if _param_bool(
+                context, "p0.fit_grid_to_map_cloud") else "launch_parameters"
+        ),
+        "p0.resolution_m": _param_float(context, "p0.resolution_m"),
+        "p0.size_x_m": _param_float(context, "p0.size_x_m"),
+        "p0.size_y_m": _param_float(context, "p0.size_y_m"),
+        "p0.size_z_m": _param_float(context, "p0.size_z_m"),
+        "p0.horizons_s": _csv_floats(LaunchConfiguration("p0.horizons_s").perform(context)),
+        "p0.refresh_period_s": _param_float(context, "p0.refresh_period_s"),
+        "p0.refresh_start_delay_s": _param_float(
+            context, "p0.refresh_start_delay_s"),
+        "p0.stale_timeout_s": _param_float(context, "p0.stale_timeout_s"),
+        "p0.batch_worker_count": 1,
+        "p0.predictor.requested_worker_count": _param_int(context, "p0.predictor.worker_count"),
+        "p0.predictor.effective_worker_count": _param_int(context, "p0.predictor.worker_count"),
+        "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
+        "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
+        "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),
+        "p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m"),
+        "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": _param_float(context, "p0.predictor.gnss_measured_epoch_integrity_max_delta_s"),
+        "p0.predictor.gnss.clearance_transition_m": _param_float(context, "p0.predictor.gnss.clearance_transition_m"),
+        "p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior"),
+        "p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss"),
+        "p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability"),
+        "p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m"),
+        "p0.predictor.sigma_grow_m_sqrt_s": p0_covariance_growth["sigma_grow_m_sqrt_s"],
+        "p0.predictor.sigma_growth_profile": p0_covariance_growth["profile"],
+        "p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled"),
+        "p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context),
+        "p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min"),
+        "p0_6.fixture.x_max": _param_float(context, "p0_6.fixture.x_max"),
+        "p0_6.fixture.y_min": _param_float(context, "p0_6.fixture.y_min"),
+        "p0_6.fixture.y_max": _param_float(context, "p0_6.fixture.y_max"),
+        "p0_6.fixture.z_min": _param_float(context, "p0_6.fixture.z_min"),
+        "p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max"),
+        "p0_6.fixture.raw_hpl_m": _param_float(context, "p0_6.fixture.raw_hpl_m"),
+        "p0_6.fixture.raw_vpl_m": _param_float(context, "p0_6.fixture.raw_vpl_m"),
+        "p0_6.fixture.raw_c_pi": _param_float(context, "p0_6.fixture.raw_c_pi"),
+        "p0_6.fixture.low_raw_cost_threshold": _param_float(context, "p0_6.fixture.low_raw_cost_threshold"),
+        "p5_3.fixture.enabled": _param_bool(context, "p5_3.fixture.enabled"),
+        "p5_3.fixture.name": LaunchConfiguration("p5_3.fixture.name").perform(context),
+        "p5_3.fixture.x_min": _param_float(context, "p5_3.fixture.x_min"),
+        "p5_3.fixture.x_max": _param_float(context, "p5_3.fixture.x_max"),
+        "p5_3.fixture.y_min": _param_float(context, "p5_3.fixture.y_min"),
+        "p5_3.fixture.y_max": _param_float(context, "p5_3.fixture.y_max"),
+        "p5_3.fixture.z_min": _param_float(context, "p5_3.fixture.z_min"),
+        "p5_3.fixture.z_max": _param_float(context, "p5_3.fixture.z_max"),
+        "p5_3.fixture.tau_min": _param_float(context, "p5_3.fixture.tau_min"),
+        "p5_3.fixture.tau_max": _param_float(context, "p5_3.fixture.tau_max"),
+        "p5_3.fixture.hpl_pred_m": p5_3_fixture_hpl,
+        "p5_3.fixture.vpl_pred_m": p5_3_fixture_vpl,
+        "p5_3.fixture.expected_hal_m": p5_3_expected_hal,
+        "p5_3.fixture.expected_val_m": p5_3_expected_val,
+        "p5_3.fixture.expected_im_m": p5_3_expected_im,
+        "p5_4.fixture.enabled": _param_bool(context, "p5_4.fixture.enabled"),
+        "p5_4.fixture.name": LaunchConfiguration("p5_4.fixture.name").perform(context),
+        "p5_4.fixture.x_min": _param_float(context, "p5_4.fixture.x_min"),
+        "p5_4.fixture.x_max": _param_float(context, "p5_4.fixture.x_max"),
+        "p5_4.fixture.y_min": _param_float(context, "p5_4.fixture.y_min"),
+        "p5_4.fixture.y_max": _param_float(context, "p5_4.fixture.y_max"),
+        "p5_4.fixture.z_min": _param_float(context, "p5_4.fixture.z_min"),
+        "p5_4.fixture.z_max": _param_float(context, "p5_4.fixture.z_max"),
+        "p5_4.fixture.tau_min": _param_float(context, "p5_4.fixture.tau_min"),
+        "p5_4.fixture.tau_max": _param_float(context, "p5_4.fixture.tau_max"),
+        "p5_4.fixture.hpl_pred_m": p5_4_fixture_hpl,
+        "p5_4.fixture.vpl_pred_m": p5_4_fixture_vpl,
+        "p5_4.fixture.expected_hal_m": p5_4_expected_hal,
+        "p5_4.fixture.expected_val_m": p5_4_expected_val,
+        "p5_4.fixture.expected_im_m": p5_4_expected_im,
+        "p5_5.fixture.enabled": _param_bool(context, "p5_5.fixture.enabled"),
+        "p5_5.fixture.name": LaunchConfiguration("p5_5.fixture.name").perform(context),
+        "p5_5.fixture.start_s": _param_float(context, "p5_5.fixture.start_s"),
+        "p5_5.fixture.duration_s": _param_float(context, "p5_5.fixture.duration_s"),
+        "p5_6.fixture.enabled": p5_6_fixture_requested,
+        "p5_6.fixture.effective_enabled": p5_6_fixture_effective,
+        "p5_6.fixture.name": LaunchConfiguration("p5_6.fixture.name").perform(context),
+        "p5_6.fixture.x_min": _param_float(context, "p5_6.fixture.x_min"),
+        "p5_6.fixture.x_max": _param_float(context, "p5_6.fixture.x_max"),
+        "p5_6.fixture.y_min": _param_float(context, "p5_6.fixture.y_min"),
+        "p5_6.fixture.y_max": _param_float(context, "p5_6.fixture.y_max"),
+        "p5_6.fixture.z_min": _param_float(context, "p5_6.fixture.z_min"),
+        "p5_6.fixture.z_max": _param_float(context, "p5_6.fixture.z_max"),
+        "p5_6.fixture.tau_min": _param_float(context, "p5_6.fixture.tau_min"),
+        "p5_6.fixture.tau_max": _param_float(context, "p5_6.fixture.tau_max"),
+        "p5_7.fixture.enabled": p5_7_fixture_requested,
+        "p5_7.fixture.effective_enabled": p5_7_fixture_effective,
+        "p5_7.fixture.name": LaunchConfiguration("p5_7.fixture.name").perform(context),
+        "p5_7.fixture.x_min": _param_float(context, "p5_7.fixture.x_min"),
+        "p5_7.fixture.x_max": _param_float(context, "p5_7.fixture.x_max"),
+        "p5_7.fixture.y_min": _param_float(context, "p5_7.fixture.y_min"),
+        "p5_7.fixture.y_max": _param_float(context, "p5_7.fixture.y_max"),
+        "p5_7.fixture.z_min": _param_float(context, "p5_7.fixture.z_min"),
+        "p5_7.fixture.z_max": _param_float(context, "p5_7.fixture.z_max"),
+        "p5_7.fixture.tau_min": _param_float(context, "p5_7.fixture.tau_min"),
+        "p5_7.fixture.tau_max": _param_float(context, "p5_7.fixture.tau_max"),
+        "p5_7.fixture.hpl_pred_m": p5_7_fixture_hpl,
+        "p5_7.fixture.vpl_pred_m": p5_7_fixture_vpl,
+        "p5_7.fixture.expected_hal_m": p5_7_expected_hal,
+        "p5_7.fixture.expected_val_m": p5_7_expected_val,
+        "p5_7.fixture.expected_im_m": p5_7_expected_im,
+        "p5.current_stale_to_replan_s": _param_float(context, "p5.current_stale_to_replan_s"),
+        "p5.current_stale_to_emergency_s": _param_float(context, "p5.current_stale_to_emergency_s"),
+        "p5.future_unknown_to_emergency_s": _param_float(context, "p5.future_unknown_to_emergency_s"),
+        "p5.pred_alert_limit_mode": p5_pred_al_mode,
+        "p5.future_replan_margin_m": _param_float(context, "p5.future_replan_margin_m"),
+        "p5.future_emergency_margin_m": _param_float(context, "p5.future_emergency_margin_m"),
+        "p5.max_bad_ratio": _param_float(context, "p5.max_bad_ratio"),
+        "p0_6": {
+            "fixture": {
+                "enabled": _param_bool(context, "p0_6.fixture.enabled"),
+                "name": LaunchConfiguration("p0_6.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p0_6.fixture.x_min"),
+                        _param_float(context, "p0_6.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p0_6.fixture.y_min"),
+                        _param_float(context, "p0_6.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p0_6.fixture.z_min"),
+                        _param_float(context, "p0_6.fixture.z_max"),
+                    ],
+                },
+                "expected_raw": {
+                    "raw_hpl_m": _param_float(context, "p0_6.fixture.raw_hpl_m"),
+                    "raw_vpl_m": _param_float(context, "p0_6.fixture.raw_vpl_m"),
+                    "raw_c_pi": _param_float(context, "p0_6.fixture.raw_c_pi"),
+                    "low_raw_cost_threshold": _param_float(context, "p0_6.fixture.low_raw_cost_threshold"),
+                },
+            },
+        },
+        "p5_3": {
+            "fixture": {
+                "enabled": _param_bool(context, "p5_3.fixture.enabled"),
+                "name": LaunchConfiguration("p5_3.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p5_3.fixture.x_min"),
+                        _param_float(context, "p5_3.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p5_3.fixture.y_min"),
+                        _param_float(context, "p5_3.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p5_3.fixture.z_min"),
+                        _param_float(context, "p5_3.fixture.z_max"),
+                    ],
+                },
+                "tau_window_s": [
+                    _param_float(context, "p5_3.fixture.tau_min"),
+                    _param_float(context, "p5_3.fixture.tau_max"),
+                ],
+                "injected_pl_m": {
+                    "hpl_pred": p5_3_fixture_hpl,
+                    "vpl_pred": p5_3_fixture_vpl,
+                },
+                "expected_alert_limit_m": {
+                    "mode": p5_pred_al_mode,
+                    "hal": p5_3_expected_hal,
+                    "val": p5_3_expected_val,
+                },
+                "expected_im_m": p5_3_expected_im,
+                "expected_reason": "p5_3_high_risk_zone",
+            },
+        },
+        "p5_4": {
+            "fixture": {
+                "enabled": _param_bool(context, "p5_4.fixture.enabled"),
+                "name": LaunchConfiguration("p5_4.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p5_4.fixture.x_min"),
+                        _param_float(context, "p5_4.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p5_4.fixture.y_min"),
+                        _param_float(context, "p5_4.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p5_4.fixture.z_min"),
+                        _param_float(context, "p5_4.fixture.z_max"),
+                    ],
+                },
+                "tau_window_s": [
+                    _param_float(context, "p5_4.fixture.tau_min"),
+                    _param_float(context, "p5_4.fixture.tau_max"),
+                ],
+                "injected_pl_m": {
+                    "hpl_pred": p5_4_fixture_hpl,
+                    "vpl_pred": p5_4_fixture_vpl,
+                },
+                "expected_alert_limit_m": {
+                    "mode": p5_pred_al_mode,
+                    "hal": p5_4_expected_hal,
+                    "val": p5_4_expected_val,
+                },
+                "expected_im_m": p5_4_expected_im,
+                "expected_reason": "p5_4_near_risk_zone",
+                "expected_first_bad_tau_s": _param_float(context, "p5_4.fixture.tau_min"),
+                "expected_emergency_time_s": 1.0,
+            },
+        },
+        "p5_5": {
+            "fixture": {
+                "enabled": _param_bool(context, "p5_5.fixture.enabled"),
+                "name": LaunchConfiguration("p5_5.fixture.name").perform(context),
+                "window_s": [
+                    _param_float(context, "p5_5.fixture.start_s"),
+                    _param_float(context, "p5_5.fixture.start_s")
+                    + _param_float(context, "p5_5.fixture.duration_s"),
+                ],
+                "start_s": _param_float(context, "p5_5.fixture.start_s"),
+                "duration_s": _param_float(context, "p5_5.fixture.duration_s"),
+                "expected_thresholds_s": {
+                    "replan": _param_float(context, "p5.current_stale_to_replan_s"),
+                    "emergency": _param_float(context, "p5.current_stale_to_emergency_s"),
+                },
+                "expected_reason": "current_stale",
+                "route": {
+                    "enabled": _param_bool(context, "p5_5.fixture.enabled"),
+                    "waypoints": [list(waypoint) for waypoint in P5_5_FIXTURE_ROUTE_WAYPOINTS],
+                    "reason": "keep P5 runtime gate active through the stale fixture window",
+                },
+            },
+        },
+        "p5_6": {
+            "fixture": {
+                "enabled": p5_6_fixture_requested,
+                "effective_enabled": p5_6_fixture_effective,
+                "name": LaunchConfiguration("p5_6.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p5_6.fixture.x_min"),
+                        _param_float(context, "p5_6.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p5_6.fixture.y_min"),
+                        _param_float(context, "p5_6.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p5_6.fixture.z_min"),
+                        _param_float(context, "p5_6.fixture.z_max"),
+                    ],
+                },
+                "tau_window_s": [
+                    _param_float(context, "p5_6.fixture.tau_min"),
+                    _param_float(context, "p5_6.fixture.tau_max"),
+                ],
+                "expected_reason": "future_unknown",
+                "expected_unknown": {
+                    "available": True,
+                    "valid": False,
+                    "stale": False,
+                    "finite_pl": False,
+                },
+            },
+        },
+        "p5_7": {
+            "fixture": {
+                "enabled": p5_7_fixture_requested,
+                "effective_enabled": p5_7_fixture_effective,
+                "name": LaunchConfiguration("p5_7.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p5_7.fixture.x_min"),
+                        _param_float(context, "p5_7.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p5_7.fixture.y_min"),
+                        _param_float(context, "p5_7.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p5_7.fixture.z_min"),
+                        _param_float(context, "p5_7.fixture.z_max"),
+                    ],
+                },
+                "tau_window_s": [
+                    _param_float(context, "p5_7.fixture.tau_min"),
+                    _param_float(context, "p5_7.fixture.tau_max"),
+                ],
+                "injected_pl_m": {
+                    "hpl_pred": p5_7_fixture_hpl,
+                    "vpl_pred": p5_7_fixture_vpl,
+                },
+                "expected_alert_limit_m": {
+                    "mode": p5_pred_al_mode,
+                    "hal": p5_7_expected_hal,
+                    "val": p5_7_expected_val,
+                },
+                "expected_im_m": p5_7_expected_im,
+                "expected_reason": "p5_7_rejected_trajectory",
+                "sample_source": "final_candidate",
+            },
+        },
+        **{f"planner_enable_{key}": value for key, value in safety_enabled.items()},
+    }
+    manifest_path = Path(export_dir) / "test_planner_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    if p4_g0c_binding:
+        g0c_manifest = {
+            **p4_g0c_binding,
+            "experiment": experiment,
+            "scenario": scenario,
+            "decision_schema_version": "p4_collision_guide_decision_v1",
+            "test_planner_manifest_path": str(manifest_path.resolve()),
+            "runner_state": "RUNNING",
+            "required_processes_ok": None,
+            "required_processes": {},
+            "process_failures": [],
+        }
+        g0c_path = Path(
+            LaunchConfiguration("p4.g0c.run_manifest_path").perform(context)
+        ).expanduser().resolve()
+        g0c_path.parent.mkdir(parents=True, exist_ok=True)
+        g0c_path.write_text(json.dumps(g0c_manifest, indent=2, sort_keys=True) + "\n")
+
+    lidar_renderer_node = Node(
+        package="local_sensing",
+        executable="pcl_render_node",
+        name="drone_0_pcl_render_node",
+        output="screen",
+        remappings=[
+            ("global_map", "/map_generator/global_cloud"),
+            ("local_map", "/map_generator/local_cloud"),
+            ("odometry", truth_odom_topic),
+            ("pcl_render_node/cloud", sim_lidar_topic),
+            ("depth", sim_depth_topic),
+            ("camera_pose", camera_pose_topic),
+        ],
+        parameters=[
+            {"sensing_horizon": 10.0},
+            {"sensing_rate": _param_float(context, "lidar_sensing_rate_hz")},
+            {"estimation_rate": 15.0},
+            {"renderer_mode": LaunchConfiguration(
+                "lidar_renderer_mode").perform(context)},
+            {"lidar.horizontal_samples": _param_int(
+                context, "lidar_horizontal_samples")},
+            {"lidar.vertical_samples": _param_int(
+                context, "lidar_vertical_samples")},
+            {"lidar.horizontal_fov_deg": _param_float(
+                context, "lidar_horizontal_fov_deg")},
+            {"lidar.vertical_min_deg": _param_float(
+                context, "lidar_vertical_min_deg")},
+            {"lidar.vertical_max_deg": _param_float(
+                context, "lidar_vertical_max_deg")},
+            {"lidar.min_range_m": _param_float(
+                context, "lidar_min_range_m")},
+            {"lidar.max_range_m": _param_float(
+                context, "lidar_max_range_m")},
+            {"lidar.world_voxel_resolution_m": _param_float(
+                context, "lidar_world_voxel_resolution_m")},
+            {"map/x_size": map_size[0]},
+            {"map/y_size": map_size[1]},
+            {"map/z_size": map_size[2]},
+            {"map/resolution": 0.1},
+            camera_file,
+        ],
+    )
+    lidar_renderer_action = (
+        TimerAction(period=lidar_start_delay_s, actions=[lidar_renderer_node])
+        if lidar_start_delay_s > 0.0 else lidar_renderer_node
+    )
+
+    actions = [
+        LogInfo(msg="[test_planner] self-contained planner closed-loop demo"),
+        LogInfo(msg=f"[test_planner] experiment: {experiment}"),
+        LogInfo(msg=f"[test_planner] scenario: {scenario}"),
+        LogInfo(msg=f"[test_planner] runtime IAP config: {runtime_config_path}"),
+        LogInfo(msg=f"[test_planner] export dir: {export_dir}"),
+        LogInfo(msg=f"[test_planner] evidence run_id: {evidence['run_id']} schema: {evidence['schema_version']}"),
+        LogInfo(msg=f"[test_planner] planner_safety_profile: {safety_profile}"),
+        LogInfo(msg=f"[test_planner] safety switches: {safety_enabled}, p0={p0_enabled}"),
+        LogInfo(msg=f"[test_planner] GNSS scenario: {gnss_scenario_file}"),
+        LogInfo(msg=f"[test_planner] rosbag output: {bag_output_dir}"),
+    ]
+    if planner_local_map_enable:
+        # The truth cloud gets an explicit simulator-only frame. This identity
+        # transform is for sensor simulation and RViz; planner nodes consume
+        # registered GLIM data in `map`, never the truth topic.
+        actions.append(Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="test_planner_sim_world_tf",
+            arguments=[
+                "--x", "0", "--y", "0", "--z", "0",
+                "--roll", "0", "--pitch", "0", "--yaw", "0",
+                "--frame-id", "map", "--child-frame-id", "sim_world",
+            ],
+            output="screen",
+        ))
+    if p0_conflict:
+        actions.append(LogInfo(msg="[test_planner] WARNING: safety feature enabled but p0.enable_risk_grid:=false was explicit; fallback paths will be used"))
+
+    actions.extend([
+        Node(
+            package="iap",
+            executable="demo11_corridor_map_publisher",
+            name="test_planner_corridor_map_publisher",
+            output="screen",
+            parameters=[
+                {"resolution_m": _param_float(context, "corridor_map_resolution_m")},
+                {"publish_rate_hz": _param_float(context, "corridor_map_publish_rate_hz")},
+                {"frame_id": simulator_world_frame},
+                {"stamp_authority_topic": LaunchConfiguration(
+                    "corridor_map_stamp_authority_topic").perform(context)},
+                {"forest_size_x_m": _param_float(context, "forest_size_x_m")},
+                {"forest_size_y_m": _param_float(context, "forest_size_y_m")},
+                {"tree_density_lower_left_per_m2": _param_float(context, "tree_density_lower_left_per_m2")},
+                {"tree_density_lower_right_per_m2": _param_float(context, "tree_density_lower_right_per_m2")},
+                {"tree_density_upper_left_per_m2": _param_float(context, "tree_density_upper_left_per_m2")},
+                {"tree_density_upper_right_per_m2": _param_float(context, "tree_density_upper_right_per_m2")},
+                {"stratified_cell_size_m": _param_float(context, "stratified_cell_size_m")},
+                {"clear_corridor_enabled": _param_bool(context, "clear_corridor_enabled")},
+                {"clear_corridor_center_y_m": _param_float(context, "clear_corridor_center_y_m")},
+                {"clear_corridor_half_width_y_m": _param_float(context, "clear_corridor_half_width_y_m")},
+                {"clear_corridor_x_min_m": _param_float(context, "clear_corridor_x_min_m")},
+                {"clear_corridor_x_max_m": _param_float(context, "clear_corridor_x_max_m")},
+                {"forest_layout_mode": LaunchConfiguration("forest_layout_mode").perform(context)},
+                {"forked_forest.fork_count": _param_int(context, "forked_forest.fork_count")},
+                {"forked_forest.fork_x_min_m": _param_float(context, "forked_forest.fork_x_min_m")},
+                {"forked_forest.fork_length_m": _param_float(context, "forked_forest.fork_length_m")},
+                {"forked_forest.low_risk_amplitude_m": _param_float(context, "forked_forest.low_risk_amplitude_m")},
+                {"forked_forest.high_risk_amplitude_m": _param_float(context, "forked_forest.high_risk_amplitude_m")},
+                {"forked_forest.corridor_width_m": _param_float(context, "forked_forest.corridor_width_m")},
+                {"forked_forest.junction_clearance_radius_m": _param_float(context, "forked_forest.junction_clearance_radius_m")},
+                {"forked_forest.start_canopy_clearance_radius_m": _param_float(
+                    context, "forked_forest.start_canopy_clearance_radius_m")},
+                {"forked_forest.start_x_m": _param_float(context, "forked_forest.start_x_m")},
+                {"forked_forest.goal_x_m": _param_float(context, "forked_forest.goal_x_m")},
+                {"forked_forest.risk_seed": _param_int(context, "forked_forest.risk_seed")},
+                {"forked_forest.flight_clearance_z_m": _param_float(context, "forked_forest.flight_clearance_z_m")},
+                {"forked_forest.edge_tree_spacing_m": _param_float(context, "forked_forest.edge_tree_spacing_m")},
+                {"forked_forest.edge_tree_height_m": _param_float(context, "forked_forest.edge_tree_height_m")},
+                {"forked_forest.edge_canopy_radius_m": _param_float(context, "forked_forest.edge_canopy_radius_m")},
+                {"forked_forest.side_boundary_tree_spacing_m": _param_float(context, "forked_forest.side_boundary_tree_spacing_m")},
+                {"canopy_density_lower_left": _param_float(context, "canopy_density_lower_left")},
+                {"canopy_density_lower_right": _param_float(context, "canopy_density_lower_right")},
+                {"canopy_density_upper_left": _param_float(context, "canopy_density_upper_left")},
+                {"canopy_density_upper_right": _param_float(context, "canopy_density_upper_right")},
+                {"canopy_hemisphere_radius_min_m": _param_float(context, "canopy_hemisphere_radius_min_m")},
+                {"canopy_hemisphere_radius_max_m": _param_float(context, "canopy_hemisphere_radius_max_m")},
+                {"canopy_leaf_ball_radius_m": _param_float(context, "canopy_leaf_ball_radius_m")},
+                {"canopy_ball_spacing_ratio": _param_float(context, "canopy_ball_spacing_ratio")},
+                {"canopy_resolution_m": _param_float(context, "canopy_resolution_m")},
+                {"random_seed": _param_int(context, "forest_random_seed")},
+                {"trunk_radius_m": _param_float(context, "trunk_radius_m")},
+                {"trunk_min_height_m": _param_float(context, "trunk_min_height_m")},
+                {"trunk_max_height_m": _param_float(context, "trunk_max_height_m")},
+                {"terminal_wall_enabled": _param_bool(context, "terminal_wall_enabled")},
+                {"terminal_wall_x_m": _param_float(context, "terminal_wall_x_m")},
+                {"terminal_wall_y_m": _param_float(context, "terminal_wall_y_m")},
+                {"terminal_wall_width_y_m": _param_float(context, "terminal_wall_width_y_m")},
+                {"terminal_wall_z_min_m": _param_float(context, "terminal_wall_z_min_m")},
+                {"terminal_wall_z_max_m": _param_float(context, "terminal_wall_z_max_m")},
+                {"terminal_wall_thickness_x_m": _param_float(context, "terminal_wall_thickness_x_m")},
+                {"terminal_wall_resolution_m": _param_float(context, "terminal_wall_resolution_m")},
+                {"terminal_wall_feature_depth_x_m": _param_float(context, "terminal_wall_feature_depth_x_m")},
+                {"terminal_wall_feature_count": _param_int(context, "terminal_wall_feature_count")},
+                {"terminal_wall_feature_seed": _param_int(context, "terminal_wall_feature_seed")},
+                {"corridor_walls_enabled": _param_bool(context, "corridor_walls_enabled")},
+                {"corridor_floor_enabled": _param_bool(context, "corridor_floor_enabled")},
+                {"corridor_x_min_m": _param_float(context, "corridor_x_min_m")},
+                {"corridor_x_max_m": _param_float(context, "corridor_x_max_m")},
+                {"corridor_half_width_y_m": _param_float(context, "corridor_half_width_y_m")},
+                {"corridor_wall_z_min_m": _param_float(context, "corridor_wall_z_min_m")},
+                {"corridor_wall_z_max_m": _param_float(context, "corridor_wall_z_max_m")},
+                {"corridor_wall_thickness_y_m": _param_float(context, "corridor_wall_thickness_y_m")},
+                {"corridor_floor_thickness_z_m": _param_float(context, "corridor_floor_thickness_z_m")},
+                {"corridor_surface_resolution_m": _param_float(context, "corridor_surface_resolution_m")},
+                {"p1_map_fixture": LaunchConfiguration("p1_map_fixture").perform(context)},
+                {"p1_fixture_mirror_y": _param_bool(context, "p1_fixture_mirror_y")},
+                {"p1_fixture_central_obstacle_enabled": _param_bool(context, "p1_fixture_central_obstacle_enabled")},
+                {"p1_fixture_central_x_min_m": _param_float(context, "p1_fixture_central_x_min_m")},
+                {"p1_fixture_central_x_max_m": _param_float(context, "p1_fixture_central_x_max_m")},
+                {"p1_fixture_central_y_half_width_m": _param_float(context, "p1_fixture_central_y_half_width_m")},
+                {"p1_fixture_central_z_max_m": _param_float(context, "p1_fixture_central_z_max_m")},
+                {"p1_fixture_lane_center_m": _param_float(context, "p1_fixture_lane_center_m")},
+                {"p1_fixture_lane_half_width_m": _param_float(context, "p1_fixture_lane_half_width_m")},
+                {"p1_fixture_safe_tree_density_per_m2": _param_float(context, "p1_fixture_safe_tree_density_per_m2")},
+                {"p1_fixture_risky_tree_density_per_m2": _param_float(context, "p1_fixture_risky_tree_density_per_m2")},
+                {"p1_fixture_safe_canopy_probability": _param_float(context, "p1_fixture_safe_canopy_probability")},
+                {"p1_fixture_risky_canopy_probability": _param_float(context, "p1_fixture_risky_canopy_probability")},
+                {"p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled")},
+                {"p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context)},
+                {"p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min")},
+                {"p0_6.fixture.x_max": _param_float(context, "p0_6.fixture.x_max")},
+                {"p0_6.fixture.y_min": _param_float(context, "p0_6.fixture.y_min")},
+                {"p0_6.fixture.y_max": _param_float(context, "p0_6.fixture.y_max")},
+                {"p0_6.fixture.z_min": _param_float(context, "p0_6.fixture.z_min")},
+                {"p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max")},
+            ],
+        ),
+        lidar_renderer_action,
+        Node(
+            package="iap",
+            executable="demo4_lidar_body_bridge",
+            name="test_planner_lidar_body_bridge",
+            output="screen",
+            parameters=[
+                {"input_cloud_topic": sim_lidar_topic},
+                {"input_odom_topic": truth_odom_topic},
+                {"output_cloud_topic": iap_lidar_topic},
+                {"output_frame_id": "lidar"},
+                {"max_odom_lookup_dt": 0.05},
+            ],
+        ),
+        Node(
+            package="iap",
+            executable="iap_rosnode",
+            name="test_planner_iap_rosnode",
+            output="screen",
+            parameters=[
+                {"config_path": runtime_config_path},
+                {"imu_topic": iap_imu_topic},
+                {"points_topic": iap_lidar_topic},
+            ],
+        ),
+        Node(
+            package="iap",
+            executable="demo_takeoff_cmd_publisher",
+            name="test_planner_preflight_takeoff_cmd_publisher",
+            output="screen",
+            condition=IfCondition("true" if enable_preflight_takeoff else "false"),
+            remappings=[("position_cmd", pos_cmd_topic)],
+            parameters=[
+                {"ground_x": init_x},
+                {"ground_y": init_y},
+                {"ground_z": preflight_ground_z},
+                {"hover_x": init_x},
+                {"hover_y": init_y},
+                {"hover_z": init_z},
+                {"ground_hold_duration_s": _param_float(context, "preflight_ground_hold_s")},
+                {"takeoff_duration_s": _param_float(context, "preflight_takeoff_duration_s")},
+                {"hover_duration_s": _param_float(context, "preflight_hover_s")},
+                {"publish_rate_hz": _param_float(context, "preflight_cmd_rate_hz")},
+                {"trajectory_id": 12001},
+                {"frame_id": "map"},
+                {"stop_after_sequence": True},
+            ],
+        ),
+        Node(
+            package="poscmd_2_odom",
+            executable="poscmd_2_odom",
+            name="test_planner_desired_poscmd_to_odom",
+            output="screen",
+            remappings=[("command", pos_cmd_topic), ("odometry", desired_odom_topic)],
+            parameters=[{"init_x": init_x}, {"init_y": init_y}, {"init_z": plant_init_z}],
+        ),
+        _odom_visualization_node("test_planner_iap_odom_visualization", iap_odom_topic, pos_cmd_topic, "/test_planner/drone", (0.2, 1.0, 0.4), int(drone_id), fixed_status_text, status_text_position),
+        _odom_visualization_node("test_planner_truth_odom_visualization", truth_odom_topic, pos_cmd_topic, "/test_planner/truth", (1.0, 0.15, 0.1), 10),
+        _odom_visualization_node("test_planner_desired_odom_visualization", desired_odom_topic, pos_cmd_topic, "/test_planner/desired", (1.0, 0.86, 0.05), 20),
+        Node(
+            package="gnss_sim",
+            executable="gnss_sim_node",
+            name="test_planner_gnss_sim_node",
+            output="screen",
+            condition=IfCondition("true" if use_gnss else "false"),
+            parameters=[
+                {"truth_odom_topic": truth_odom_topic},
+                {"origin_lat_deg": 31.2304},
+                {"origin_lon_deg": 121.4737},
+                {"origin_alt_m": 25.0},
+                {"pseudorange_noise_std_m": _param_float(context, "gnss_pr_noise_base")},
+                {"doppler_noise_std_mps": _param_float(context, "gnss_dop_noise_base")},
+                {"random_seed": _param_int(context, "gnss_random_seed")},
+                {"time_source": gnss_time_source},
+                {"trigger_topic": gnss_trigger_topic},
+                {"scenario_file": gnss_scenario_file},
+                {"num_gps_sats": 24},
+                {"gps_prn_min": 1},
+                {"gps_prn_max": 24},
+                {"ephemeris_source": gnss_ephemeris_source},
+                {"rinex_nav_file": gnss_rinex_nav_file},
+                {"rinex_ephem_max_age_s": float(gnss_rinex_ephem_max_age_s)},
+                {"rinex_gps_only": False},
+                {"fallback_to_synthetic_on_rinex_error": gnss_fallback_to_synthetic},
+                {"enabled_constellations_csv": gnss_enabled_constellations},
+                {"enable_visualization": _param_bool(context, "gnss_enable_visualization")},
+                {"signal_ray_width_m": 0.025},
+                {"signal_ray_alpha": 0.3},
+                {"nlos_path_width_m": 0.04},
+                {"nlos_path_alpha": 0.3},
+                {"enable_sky_dome_visualization": _param_bool(context, "gnss_enable_sky_dome_visualization")},
+                {"sky_dome_show_cardinal_labels": _param_bool(context, "gnss_sky_dome_show_cardinal_labels")},
+                {"sky_dome_ring_count": 3},
+                {"sky_dome_meridian_count": 12},
+                {"sky_dome_follow_receiver": _param_bool(context, "gnss_sky_dome_follow_receiver")},
+                {"sky_dome_center_enu": gnss_sky_dome_center_enu},
+                {"skyplot_origin_enu": gnss_skyplot_origin_enu},
+                {"status_text_use_fixed_position": fixed_status_text},
+                {"status_text_position_enu": list(status_text_position)},
+                {"enable_map_occlusion": _param_bool(context, "gnss_enable_map_occlusion")},
+                {"enable_skymask": _param_bool(context, "gnss_enable_skymask")},
+                {"enable_nlos": _param_bool(context, "gnss_enable_nlos")},
+                {"enable_multipath": _param_bool(context, "gnss_enable_multipath")},
+                {"enable_fault_injection": _param_bool(context, "gnss_enable_fault_injection")},
+                {"map_cloud_topic": "/map_generator/global_cloud"},
+                {"multipath_amp_m": 0.5},
+            ],
+        ),
+        Node(
+            package="so3_quadrotor_simulator",
+            executable="so3_quadrotor_simulator",
+            name=f"drone_{drone_id}_quadrotor_simulator_so3",
+            output="screen",
+            remappings=[
+                ("odom", truth_odom_topic),
+                ("imu", sim_imu_topic),
+                ("cmd", so3_cmd_topic),
+                ("force_disturbance", "/test_planner/force_disturbance"),
+                ("moment_disturbance", "/test_planner/moment_disturbance"),
+            ],
+            parameters=[
+                {"quadrotor_name": f"drone_{drone_id}"},
+                {"rate/simulation": 1000.0},
+                {"rate/odom": 100.0},
+                {"simulator/init_state_x": init_x},
+                {"simulator/init_state_y": init_y},
+                {"simulator/init_state_z": plant_init_z},
+                {"simulator/hold_until_cmd": simulator_hold_until_cmd},
+                {"sim_time/enable": _param_bool(context, "sim_time_enable")},
+                {"sim_time/start_utc": "2022-07-06T00:00:00Z"},
+                {"iap_imu/enable": True},
+                {"iap_imu/topic": iap_imu_topic},
+            ],
+        ),
+        ComposableNodeContainer(
+            package="rclcpp_components",
+            executable="component_container",
+            name="test_planner_so3_control_container",
+            namespace="",
+            output="screen",
+            composable_node_descriptions=[
+                ComposableNode(
+                    package="so3_control",
+                    plugin="SO3ControlComponent",
+                    name="test_planner_so3_control_component",
+                    parameters=[
+                        {"quadrotor_name": f"drone_{drone_id}"},
+                        {"so3_control/init_state_x": init_x},
+                        {"so3_control/init_state_y": init_y},
+                        {"so3_control/init_state_z": plant_init_z},
+                        {"mass": 0.98},
+                        {"use_angle_corrections": False},
+                        {"use_external_yaw": False},
+                        {"gains/rot/z": 1.0},
+                        {"gains/ang/z": 0.1},
+                        gains_file,
+                        corrections_file,
+                    ],
+                    remappings=[
+                        ("odom", truth_odom_topic),
+                        ("position_cmd", pos_cmd_topic),
+                        ("motors", "/test_planner/motors"),
+                        ("corrections", "/test_planner/corrections"),
+                        ("so3_cmd", so3_cmd_topic),
+                        ("controller_trace",
+                         f"/drone_{drone_id}_controller_trace"),
+                        ("imu", so3_feedback_imu_topic),
+                    ],
+                )
+            ],
+        ),
+        *planner_actions,
+        Node(
+            package="iap",
+            executable="planner_evidence_provenance_publisher.py",
+            name="test_planner_evidence_provenance",
+            output="screen",
+            parameters=[{"manifest_path": evidence["manifest_path"]}],
+        ),
+        Node(
+            package="iap",
+            executable="test_araim_validator.py",
+            name="test_planner_integrity_validator",
+            output="screen",
+            condition=IfCondition("true" if run_validator else "false"),
+            parameters=[
+                {"integrity_topic": "/iap/integrity"},
+                {"duration_s": validation_duration_s},
+                {"min_messages": 10},
+                {"csv_path": str(Path(export_dir) / "test_planner_integrity_validation.csv")},
+                {"summary_path": str(Path(export_dir) / "test_planner_validation_summary.json")},
+                {"schema_version": evidence["schema_version"]},
+                {"run_id": evidence["run_id"]},
+                {"manifest_path": evidence["manifest_path"]},
+                {"required_fusion_mode": LaunchConfiguration("integrity_fusion_mode").perform(context)},
+                {"require_gnss_valid": _param_bool(context, "validator_require_gnss_valid")},
+                {"require_lidar_valid": _param_bool(context, "validator_require_lidar_valid")},
+                {"require_fallback_valid": _param_bool(context, "validator_require_fallback_valid")},
+                {"required_final_source": LaunchConfiguration("validator_required_final_source").perform(context)},
+                {"allowed_final_sources_csv": LaunchConfiguration("validator_allowed_final_sources").perform(context)},
+            ],
+        ),
+    ])
+
+    if record_bag:
+        bag_recorder = ExecuteProcess(
+                cmd=[
+                    sys.executable,
+                    str(Path(get_package_prefix("iap")) / "lib" / "iap" /
+                        "planner_bag_recorder_with_finalizer.py"),
+                    "--manifest", evidence["manifest_path"],
+                    "--bag-output", bag_output_dir,
+                    "--",
+                    "/iap/integrity",
+                    "/gnss_sim/diagnostics",
+                    truth_odom_topic,
+                    iap_odom_topic,
+                    desired_odom_topic,
+                    sim_imu_topic,
+                    iap_imu_topic,
+                    sim_lidar_topic,
+                    iap_lidar_topic,
+                    sim_depth_topic,
+                    "/map_generator/global_cloud",
+                    "/map_generator/local_cloud",
+                    # The planner and P0 both consult this exact inflated map.
+                    # Record it so a strict-support rejection near the start can
+                    # be checked against the source occupancy rather than
+                    # inferred from a risk-profile reason alone.
+                    f"/drone_{drone_id}_grid/grid_map/occupancy_inflate",
+                    camera_pose_topic,
+                    pos_cmd_topic,
+                    bspline_topic,
+                    so3_cmd_topic,
+                    "/test_planner/truth/path",
+                    "/test_planner/drone/path",
+                    "/test_planner/desired/path",
+                    "/test_planner/truth/robot",
+                    "/test_planner/drone/robot",
+                    "/test_planner/desired/robot",
+                    "/ublox_driver/range_meas",
+                    "/ublox_driver/ephem",
+                    "/ublox_driver/glo_ephem",
+                    "/ublox_driver/receiver_lla",
+                    "/ublox_driver/iono_params",
+                    "/tf",
+                    "/planning/risk_grid_health",
+                    "/planning/evidence_provenance",
+                    "/planning/integrity_gate_status",
+                    "/iap/rviz/risk_grid_health",
+                    "/iap/rviz/predicted_pl_cloud",
+                    "/iap/rviz/risk_validity_cloud",
+                    "/iap/rviz/trajectory_integrity_samples",
+                    "/iap/rviz/current_traj_integrity_colored",
+                    "/iap/rviz/p5_gate_status",
+                    "/iap/rviz/p5_current_im_bars",
+                    "/iap/rviz/p1_integrity_samples",
+                    "/iap/rviz/p1_integrity_push_vectors",
+                    "/iap/rviz/p1_integrity_metrics",
+                    "/iap/rviz/p2_candidate_trajectories",
+                    "/iap/rviz/p3_reference_bias",
+                    "/iap/rviz/p4_astar_guides",
+                    "/iap/rviz/p4_topology_channels",
+                ],
+                output="screen",
+        )
+        actions.append(bag_recorder)
+
+    if start_rviz:
+        requested_rviz_config = LaunchConfiguration("rviz_config").perform(
+            context
+        ).strip()
+        rviz_config_path = Path(requested_rviz_config).expanduser()
+        if not rviz_config_path.is_absolute():
+            rviz_config_path = Path(iap_share) / rviz_config_path
+        # Keep the lexical installed-package path in RViz's argv.  Resolving a
+        # symlink-install path here makes runtime provenance falsely look like
+        # RViz loaded the source-tree config directly.
+        rviz_config_path = rviz_config_path.absolute()
+        if not rviz_config_path.is_file():
+            raise RuntimeError(
+                f"rviz_config does not exist: {rviz_config_path}"
+            )
+        actions.append(
+            Node(
+                package="rviz2",
+                executable="rviz2",
+                name="test_planner_rviz",
+                output="screen",
+                arguments=[
+                    "-d",
+                    str(rviz_config_path),
+                ],
+            )
+        )
+
+    if run_duration_s > 0.0:
+        actions.append(
+            TimerAction(
+                period=run_duration_s,
+                actions=[EmitEvent(event=Shutdown(reason="test_planner run_duration_s elapsed"))],
+            )
+        )
+
+    return actions
+
+
+def generate_launch_description():
+    iap_share = get_package_share_directory("iap")
+    fastdds_profile = os.path.join(iap_share, "config", "sim_ego", "fastdds_udp_only.xml")
+    return LaunchDescription(
+        [
+            *[DeclareLaunchArgument(name, default_value=default) for name, default in ARG_DEFAULTS],
+            SetEnvironmentVariable("QT_X11_NO_MITSHM", "1"),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
+                condition=IfCondition(EqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V3,
+                )),
+            ),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                "/tmp/runtime-root",
+                condition=IfCondition(NotEqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V3,
+                )),
+            ),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
+                condition=IfCondition(EqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V4,
+                )),
+            ),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
+                condition=IfCondition(EqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V5,
+                )),
+            ),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
+                condition=IfCondition(EqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V6,
+                )),
+            ),
+            SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile),
+            OpaqueFunction(function=_launch_setup),
+        ]
+    )

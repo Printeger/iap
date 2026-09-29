@@ -641,6 +641,7 @@ if(DEFINED ENV{ROS_VERSION})
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap
+      PATTERN "bp" EXCLUDE
       PATTERN "__pycache__" EXCLUDE
       PATTERN "*.pyc" EXCLUDE
       PATTERN "*.pyo" EXCLUDE
@@ -823,6 +824,11 @@ if(DEFINED ENV{ROS_VERSION})
           ${CMAKE_CURRENT_SOURCE_DIR}/results/icra27/icra072/test_icra_launch_ctest
           unittest -- discover -s ${CMAKE_CURRENT_SOURCE_DIR}/test
           -p test_test_icra_launch.py
+      )
+      add_test(
+        NAME test_canonical_launch_contracts
+        COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/test/test_canonical_launch_contracts.py
       )
       add_test(
         NAME test_icra_interface_integration

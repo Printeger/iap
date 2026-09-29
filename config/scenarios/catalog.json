@@ -1,0 +1,182 @@
+{
+  "manual": {
+    "map_profile": "feature_rich",
+    "gnss_profile": "open_sky",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 20.0, 4.0],
+    "max_velocity_mps": 1.0,
+    "task_mode": "mission_best_effort"
+  },
+  "gnss_open_sky": {
+    "map_profile": "open",
+    "gnss_profile": "open_sky",
+    "integrity_profile": "gnss_only",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 20.0, 4.0],
+    "max_velocity_mps": 1.0,
+    "task_mode": "strict_global"
+  },
+  "lidar_feature_rich": {
+    "map_profile": "feature_rich",
+    "gnss_profile": "disabled",
+    "integrity_profile": "lidar_only",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 20.0, 4.0],
+    "max_velocity_mps": 1.0,
+    "task_mode": "mission_best_effort"
+  },
+  "lidar_corridor_degenerate": {
+    "map_profile": "corridor",
+    "gnss_profile": "disabled",
+    "integrity_profile": "lidar_only",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 8.0, 4.0],
+    "max_velocity_mps": 0.75,
+    "task_mode": "mission_best_effort"
+  },
+  "fallback_only": {
+    "map_profile": "open",
+    "gnss_profile": "disabled",
+    "integrity_profile": "fallback_only",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 20.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "fused_nominal": {
+    "map_profile": "feature_rich",
+    "gnss_profile": "open_sky",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 20.0, 4.0],
+    "max_velocity_mps": 1.0,
+    "task_mode": "strict_global"
+  },
+  "gnss_degraded_lidar_good": {
+    "map_profile": "feature_rich",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 20.0, 4.0],
+    "max_velocity_mps": 0.75,
+    "task_mode": "mission_best_effort"
+  },
+  "icra_dense_forest_four_fork_v1": {
+    "map_profile": "dense_forest_v1",
+    "gnss_profile": "open_sky_occlusion",
+    "integrity_profile": "fused",
+    "initial": [-18.0, 0.0, 1.5],
+    "goal": [18.0, 0.0, 1.5],
+    "map_size": [42.0, 22.0, 8.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "icra_dense_forest_four_fork_v2": {
+    "map_profile": "dense_forest_v2",
+    "gnss_profile": "open_sky_occlusion",
+    "integrity_profile": "fused",
+    "initial": [-18.0, 0.0, 1.5],
+    "goal": [18.0, 0.0, 1.5],
+    "map_size": [42.0, 22.0, 8.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "icra_p0_p5_fused_degraded_corridor_v1": {
+    "map_profile": "corridor",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.2],
+    "goal": [12.0, 0.0, 1.2],
+    "map_size": [30.0, 8.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "strict_global"
+  },
+  "p1_fork_fused_v1": {
+    "map_profile": "p1_fork_fused_v1",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "p1_fork_fused_mirror_v1": {
+    "map_profile": "p1_fork_fused_mirror_v1",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "p1_fork_symmetric_null_v1": {
+    "map_profile": "p1_fork_symmetric_null_v1",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "p1_soft_risk_island_v1": {
+    "map_profile": "p1_soft_risk_island_v1",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "p4_g0c_free_corridor_v1": {
+    "map_profile": "p4_g0c_free_corridor_v1",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "icra_p0_p4_v2_p5_dev_fixture_v1": {
+    "map_profile": "icra_p0_p4_v2_p5_dev_fixture_v1",
+    "gnss_profile": "degraded",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "icra072_p4_selection_trigger_v1": {
+    "map_profile": "icra072_p4_selection_trigger_v1",
+    "gnss_profile": "open_sky",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  },
+  "icra072_p4_selection_trigger_mirror_v1": {
+    "map_profile": "icra072_p4_selection_trigger_mirror_v1",
+    "gnss_profile": "open_sky",
+    "integrity_profile": "fused",
+    "initial": [-12.0, 0.0, 1.5],
+    "goal": [12.0, 0.0, 1.5],
+    "map_size": [30.0, 12.0, 4.0],
+    "max_velocity_mps": 0.5,
+    "task_mode": "mission_best_effort"
+  }
+}

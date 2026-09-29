@@ -1,0 +1,58 @@
+{
+  "glim_ros": {
+    "enable_local_mapping": true,
+    "enable_global_mapping": true,
+    "keep_raw_points": true,
+    "imu_time_offset": 0.0,
+    "points_time_offset": 0.0,
+    "acc_scale": 0.0,
+    "imu_frame_id": "",
+    "lidar_frame_id": "",
+    "base_frame_id": "",
+    "odom_frame_id": "odom",
+    "map_frame_id": "map",
+    "publish_imu2lidar": true,
+    "tf_time_offset": 0.000001,
+    "dump_path": "/tmp/iap_full_stack_flight_dump",
+    "extension_modules": [
+      "libgnss_extension.so",
+      "libintegrity_extension.so",
+      "libplanner_local_map_extension.so"
+    ],
+    "imu_topic": "/livox/imu",
+    "points_topic": "/livox/lidar",
+    "image_topic": "/camera/infra1/image_rect_raw",
+    "planner_local_map": {
+      "current_topic": "/iap/local_map/current_frame",
+      "current_hits_map_topic": "/iap/local_map/current_hits_map",
+      "publish_current_hits_map": false,
+      "delta_topic": "/iap/local_map/window_delta",
+      "recovery_service": "/iap/local_map/get_active_window",
+      "integrity_topic": "/iap/integrity",
+      "beam_evidence_topic": "/vehicle/lidar/beam_evidence",
+      "planner_frame_id": "map",
+      "lidar_reference_frame_id": "iap_lidar_reference",
+      "frame_contract_id": "iap_flight_registered_map_v1",
+      "window_rate_hz": 2.0,
+      "max_active_keyframes": 15,
+      "static_planner_translation_m": [0.0, 0.0, 0.0],
+      "planning_lattice_resolution_m": 0.1,
+      "planning_lattice_origin_m": [-21.0, -15.0, 0.0],
+      "planning_lattice_extent_m": [42.0, 30.0, 8.0]
+    },
+    "imu_qos": {
+      "profile": "sensor_data",
+      "depth": 1000,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
+    },
+    "points_qos": {
+      "profile": "sensor_data",
+      "depth": 10,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
+    }
+  }
+}

@@ -9,11 +9,28 @@ def generate_launch_description():
     map_size_x = LaunchConfiguration('map_size_x_', default=42.0)
     map_size_y = LaunchConfiguration('map_size_y_', default=30.0)
     map_size_z = LaunchConfiguration('map_size_z_', default=5.0)
+    grid_map_origin_x = LaunchConfiguration('grid_map_origin_x', default='nan')
+    grid_map_origin_y = LaunchConfiguration('grid_map_origin_y', default='nan')
+    grid_map_origin_z = LaunchConfiguration('grid_map_origin_z', default='nan')
     
     odometry_topic = LaunchConfiguration('odometry_topic', default='odom')
     camera_pose_topic = LaunchConfiguration('camera_pose_topic', default='camera_pose')
     depth_topic = LaunchConfiguration('depth_topic', default='depth_image')
     cloud_topic = LaunchConfiguration('cloud_topic', default='cloud')
+    registered_lidar_window_enabled = LaunchConfiguration(
+        'registered_lidar_window_enabled', default=False)
+    registered_frame_contract_id = LaunchConfiguration(
+        'registered_frame_contract_id', default='')
+    registered_current_topic = LaunchConfiguration(
+        'registered_current_topic', default='/iap/local_map/current_frame')
+    registered_delta_topic = LaunchConfiguration(
+        'registered_delta_topic', default='/iap/local_map/window_delta')
+    registered_recovery_service = LaunchConfiguration(
+        'registered_recovery_service', default='/iap/local_map/get_active_window')
+    registered_lidar_reference_frame_id = LaunchConfiguration(
+        'registered_lidar_reference_frame_id', default='iap_lidar_reference')
+    trusted_local_map_support_enabled = LaunchConfiguration(
+        'trusted_local_map_support_enabled', default=False)
     
     cx = LaunchConfiguration('cx', default=321.04638671875)
     cy = LaunchConfiguration('cy', default=243.44969177246094)
@@ -48,6 +65,7 @@ def generate_launch_description():
     point6_z = LaunchConfiguration('point6_z', default=1.0)
 
     flight_type = LaunchConfiguration('flight_type', default=2)
+    realworld_experiment = LaunchConfiguration('realworld_experiment', default=False)
     use_distinctive_trajs = LaunchConfiguration('use_distinctive_trajs', default=True)
     use_integrity_cost = LaunchConfiguration('use_integrity_cost', default=False)
     integrity_debug_csv_path = LaunchConfiguration(
@@ -100,6 +118,8 @@ def generate_launch_description():
     p4_debug_csv_enable = LaunchConfiguration('p4_debug_csv_enable', default=False)
     p4_debug_csv_path = LaunchConfiguration('p4_debug_csv_path', default='')
     p4_debug_generation_probe_enable = LaunchConfiguration('p4_debug_generation_probe_enable', default=False)
+    p4_require_risk_grid_ready_before_planning = LaunchConfiguration(
+        'p4_require_risk_grid_ready_before_planning', default=False)
     integrity_field_stale_timeout_s = LaunchConfiguration('integrity_field_stale_timeout_s', default=0.5)
     integrity_nearest_radius_m = LaunchConfiguration('integrity_nearest_radius_m', default=1.0)
     integrity_cost_max = LaunchConfiguration('integrity_cost_max', default=1000.0)
@@ -144,11 +164,17 @@ def generate_launch_description():
     p0_size_x_m = LaunchConfiguration('p0_size_x_m', default=30.0)
     p0_size_y_m = LaunchConfiguration('p0_size_y_m', default=30.0)
     p0_size_z_m = LaunchConfiguration('p0_size_z_m', default=6.0)
+    p0_origin_x_m = LaunchConfiguration('p0_origin_x_m', default='nan')
+    p0_origin_y_m = LaunchConfiguration('p0_origin_y_m', default='nan')
+    p0_origin_z_m = LaunchConfiguration('p0_origin_z_m', default='nan')
+    p0_online_mapping_mode = LaunchConfiguration('p0_online_mapping_mode', default=False)
+    p0_fit_grid_to_map_cloud = LaunchConfiguration('p0_fit_grid_to_map_cloud', default=False)
     p0_refresh_period_s = LaunchConfiguration('p0_refresh_period_s', default=0.5)
     p0_stale_timeout_s = LaunchConfiguration('p0_stale_timeout_s', default=1.0)
     p0_skip_occupied_voxels = LaunchConfiguration('p0_skip_occupied_voxels', default=True)
     p0_debug_metrics_enable = LaunchConfiguration('p0_debug_metrics_enable', default=False)
     p0_health_topic = LaunchConfiguration('p0_health_topic', default='planning/risk_grid_health')
+    p0_map_topic = LaunchConfiguration('p0_map_topic', default='/map_generator/global_cloud')
     p4_assurance_task_mode = LaunchConfiguration(
         'p4_assurance_task_mode', default='mission_best_effort')
     p4_assurance_maximum_global_ratio = LaunchConfiguration('p4_assurance_maximum_global_ratio', default=1.05)
@@ -205,10 +231,30 @@ def generate_launch_description():
     map_size_x_arg = DeclareLaunchArgument('map_size_x_', default_value=map_size_x, description='Map size along X')
     map_size_y_arg = DeclareLaunchArgument('map_size_y_', default_value=map_size_y, description='Map size along Y')
     map_size_z_arg = DeclareLaunchArgument('map_size_z_', default_value=map_size_z, description='Map size along Z')
+    grid_map_origin_x_arg = DeclareLaunchArgument('grid_map_origin_x', default_value=grid_map_origin_x)
+    grid_map_origin_y_arg = DeclareLaunchArgument('grid_map_origin_y', default_value=grid_map_origin_y)
+    grid_map_origin_z_arg = DeclareLaunchArgument('grid_map_origin_z', default_value=grid_map_origin_z)
     odometry_topic_arg = DeclareLaunchArgument('odometry_topic', default_value=odometry_topic, description='Odometry topic')
     camera_pose_topic_arg = DeclareLaunchArgument('camera_pose_topic', default_value=camera_pose_topic, description='Camera pose topic')
     depth_topic_arg = DeclareLaunchArgument('depth_topic', default_value=depth_topic, description='Depth topic')
     cloud_topic_arg = DeclareLaunchArgument('cloud_topic', default_value=cloud_topic, description='Point cloud topic')
+    registered_lidar_window_enabled_arg = DeclareLaunchArgument(
+        'registered_lidar_window_enabled',
+        default_value=registered_lidar_window_enabled)
+    registered_frame_contract_id_arg = DeclareLaunchArgument(
+        'registered_frame_contract_id', default_value=registered_frame_contract_id)
+    registered_current_topic_arg = DeclareLaunchArgument(
+        'registered_current_topic', default_value=registered_current_topic)
+    registered_delta_topic_arg = DeclareLaunchArgument(
+        'registered_delta_topic', default_value=registered_delta_topic)
+    registered_recovery_service_arg = DeclareLaunchArgument(
+        'registered_recovery_service', default_value=registered_recovery_service)
+    registered_lidar_reference_frame_id_arg = DeclareLaunchArgument(
+        'registered_lidar_reference_frame_id',
+        default_value=registered_lidar_reference_frame_id)
+    trusted_local_map_support_enabled_arg = DeclareLaunchArgument(
+        'trusted_local_map_support_enabled',
+        default_value=trusted_local_map_support_enabled)
     cx_arg = DeclareLaunchArgument('cx', default_value=cx, description='Camera intrinsic cx')
     cy_arg = DeclareLaunchArgument('cy', default_value=cy, description='Camera intrinsic cy')
     fx_arg = DeclareLaunchArgument('fx', default_value=fx, description='Camera intrinsic fx')
@@ -241,6 +287,9 @@ def generate_launch_description():
     point6_z_arg = DeclareLaunchArgument('point6_z', default_value=point6_z, description='Waypoint 6 Z coordinate')
     
     flight_type_arg = DeclareLaunchArgument('flight_type', default_value=flight_type, description='flight_type')
+    realworld_experiment_arg = DeclareLaunchArgument(
+        'realworld_experiment', default_value=realworld_experiment,
+        description='Use real-flight planner timing and command semantics')
     use_distinctive_trajs_arg = DeclareLaunchArgument('use_distinctive_trajs', default_value=use_distinctive_trajs, description='Use distinctive trajectories')
     use_integrity_cost_arg = DeclareLaunchArgument('use_integrity_cost', default_value=use_integrity_cost, description='Enable optional integrity soft cost')
     integrity_debug_csv_path_arg = DeclareLaunchArgument('integrity_debug_csv_path', default_value=integrity_debug_csv_path, description='Planner integrity cost debug CSV path')
@@ -291,6 +340,9 @@ def generate_launch_description():
     p4_debug_csv_enable_arg = DeclareLaunchArgument('p4_debug_csv_enable', default_value=p4_debug_csv_enable, description='Enable P4 debug CSV output')
     p4_debug_csv_path_arg = DeclareLaunchArgument('p4_debug_csv_path', default_value=p4_debug_csv_path, description='P4 debug CSV path')
     p4_debug_generation_probe_enable_arg = DeclareLaunchArgument('p4_debug_generation_probe_enable', default_value=p4_debug_generation_probe_enable, description='Enable diagnostic-only P4 map/GNSS generation cross probe')
+    p4_require_risk_grid_ready_before_planning_arg = DeclareLaunchArgument(
+        'p4_require_risk_grid_ready_before_planning',
+        default_value=p4_require_risk_grid_ready_before_planning)
     integrity_field_stale_timeout_s_arg = DeclareLaunchArgument('integrity_field_stale_timeout_s', default_value=integrity_field_stale_timeout_s, description='Planner integrity field stale timeout in seconds')
     integrity_nearest_radius_m_arg = DeclareLaunchArgument('integrity_nearest_radius_m', default_value=integrity_nearest_radius_m, description='Planner integrity nearest sample search radius')
     integrity_cost_max_arg = DeclareLaunchArgument('integrity_cost_max', default_value=integrity_cost_max, description='Planner integrity sample cost clamp')
@@ -335,11 +387,17 @@ def generate_launch_description():
     p0_size_x_m_arg = DeclareLaunchArgument('p0_size_x_m', default_value=p0_size_x_m)
     p0_size_y_m_arg = DeclareLaunchArgument('p0_size_y_m', default_value=p0_size_y_m)
     p0_size_z_m_arg = DeclareLaunchArgument('p0_size_z_m', default_value=p0_size_z_m)
+    p0_origin_x_m_arg = DeclareLaunchArgument('p0_origin_x_m', default_value=p0_origin_x_m)
+    p0_origin_y_m_arg = DeclareLaunchArgument('p0_origin_y_m', default_value=p0_origin_y_m)
+    p0_origin_z_m_arg = DeclareLaunchArgument('p0_origin_z_m', default_value=p0_origin_z_m)
+    p0_online_mapping_mode_arg = DeclareLaunchArgument('p0_online_mapping_mode', default_value=p0_online_mapping_mode)
+    p0_fit_grid_to_map_cloud_arg = DeclareLaunchArgument('p0_fit_grid_to_map_cloud', default_value=p0_fit_grid_to_map_cloud)
     p0_refresh_period_s_arg = DeclareLaunchArgument('p0_refresh_period_s', default_value=p0_refresh_period_s)
     p0_stale_timeout_s_arg = DeclareLaunchArgument('p0_stale_timeout_s', default_value=p0_stale_timeout_s)
     p0_skip_occupied_voxels_arg = DeclareLaunchArgument('p0_skip_occupied_voxels', default_value=p0_skip_occupied_voxels)
     p0_debug_metrics_enable_arg = DeclareLaunchArgument('p0_debug_metrics_enable', default_value=p0_debug_metrics_enable)
     p0_health_topic_arg = DeclareLaunchArgument('p0_health_topic', default_value=p0_health_topic)
+    p0_map_topic_arg = DeclareLaunchArgument('p0_map_topic', default_value=p0_map_topic)
     p4_assurance_task_mode_arg = DeclareLaunchArgument(
         'p4_assurance_task_mode', default_value=p4_assurance_task_mode)
     p4_assurance_maximum_global_ratio_arg = DeclareLaunchArgument('p4_assurance_maximum_global_ratio', default_value=p4_assurance_maximum_global_ratio)
@@ -424,7 +482,7 @@ def generate_launch_description():
             {'fsm/planning_horizon': planning_horizon},
             {'fsm/planning_horizen_time': 3.0},
             {'fsm/emergency_time': 1.0},
-            {'fsm/realworld_experiment': False},
+            {'fsm/realworld_experiment': realworld_experiment},
             {'fsm/fail_safe': True},
             
             {'fsm/waypoint_num': point_num},
@@ -454,6 +512,9 @@ def generate_launch_description():
             {'grid_map/map_size_x': map_size_x},
             {'grid_map/map_size_y': map_size_y},
             {'grid_map/map_size_z': map_size_z},
+            {'grid_map/origin_x': grid_map_origin_x},
+            {'grid_map/origin_y': grid_map_origin_y},
+            {'grid_map/origin_z': grid_map_origin_z},
             {'grid_map/local_update_range_x': 5.5},
             {'grid_map/local_update_range_y': 5.5},
             {'grid_map/local_update_range_z': 4.5},
@@ -487,11 +548,23 @@ def generate_launch_description():
             {'grid_map/show_occ_time': False},
             {'grid_map/pose_type': 1},
             {'grid_map/frame_id': "map"},
+            {'grid_map/registered_lidar_window_enabled': registered_lidar_window_enabled},
+            {'grid_map/registered_frame_contract_id': registered_frame_contract_id},
+            {'grid_map/registered_current_topic': registered_current_topic},
+            {'grid_map/registered_delta_topic': registered_delta_topic},
+            {'grid_map/registered_recovery_service': registered_recovery_service},
+            {'grid_map/registered_lidar_reference_frame_id': registered_lidar_reference_frame_id},
+            {'grid_map/trusted_local_map_support_enabled': trusted_local_map_support_enabled},
             {'p0.enable_risk_grid': p0_enable_risk_grid},
             {'p0.resolution_m': p0_resolution_m},
             {'p0.size_x_m': p0_size_x_m},
             {'p0.size_y_m': p0_size_y_m},
             {'p0.size_z_m': p0_size_z_m},
+            {'p0.origin_x_m': p0_origin_x_m},
+            {'p0.origin_y_m': p0_origin_y_m},
+            {'p0.origin_z_m': p0_origin_z_m},
+            {'p0.online_mapping_mode': p0_online_mapping_mode},
+            {'p0.fit_grid_to_map_cloud': p0_fit_grid_to_map_cloud},
             {'p0.horizons_s': [0.0, 0.5, 1.0, 1.5, 2.0]},
             {'p0.refresh_period_s': p0_refresh_period_s},
             {'p0.stale_timeout_s': p0_stale_timeout_s},
@@ -504,8 +577,9 @@ def generate_launch_description():
             {'p0.glo_ephem_topic': '/ublox_driver/glo_ephem'},
             {'p0.receiver_lla_topic': '/ublox_driver/receiver_lla'},
             {'p0.iono_topic': '/ublox_driver/iono_params'},
-            {'p0.map_topic': '/map_generator/global_cloud'},
+            {'p0.map_topic': p0_map_topic},
             {'p0.health_topic': p0_health_topic},
+            {'p4.require_risk_grid_ready_before_planning': p4_require_risk_grid_ready_before_planning},
             {'p4.assurance.task_mode': p4_assurance_task_mode},
             {'p4.assurance.maximum_global_ratio': p4_assurance_maximum_global_ratio},
             {'p4.assurance.maximum_continuous_exceedance_s': p4_assurance_maximum_continuous_exceedance_s},
@@ -682,10 +756,20 @@ def generate_launch_description():
     ld.add_action(map_size_x_arg)
     ld.add_action(map_size_y_arg)
     ld.add_action(map_size_z_arg)
+    ld.add_action(grid_map_origin_x_arg)
+    ld.add_action(grid_map_origin_y_arg)
+    ld.add_action(grid_map_origin_z_arg)
     ld.add_action(odometry_topic_arg)
     ld.add_action(camera_pose_topic_arg)
     ld.add_action(depth_topic_arg)
     ld.add_action(cloud_topic_arg)
+    ld.add_action(registered_lidar_window_enabled_arg)
+    ld.add_action(registered_frame_contract_id_arg)
+    ld.add_action(registered_current_topic_arg)
+    ld.add_action(registered_delta_topic_arg)
+    ld.add_action(registered_recovery_service_arg)
+    ld.add_action(registered_lidar_reference_frame_id_arg)
+    ld.add_action(trusted_local_map_support_enabled_arg)
     ld.add_action(cx_arg)
     ld.add_action(cy_arg)
     ld.add_action(fx_arg)
@@ -718,6 +802,7 @@ def generate_launch_description():
     ld.add_action(point6_z_arg)
     
     ld.add_action(flight_type_arg)
+    ld.add_action(realworld_experiment_arg)
     ld.add_action(use_distinctive_trajs_arg)
     ld.add_action(use_integrity_cost_arg)
     ld.add_action(integrity_debug_csv_path_arg)
@@ -768,6 +853,7 @@ def generate_launch_description():
     ld.add_action(p4_debug_csv_enable_arg)
     ld.add_action(p4_debug_csv_path_arg)
     ld.add_action(p4_debug_generation_probe_enable_arg)
+    ld.add_action(p4_require_risk_grid_ready_before_planning_arg)
     ld.add_action(integrity_field_stale_timeout_s_arg)
     ld.add_action(integrity_nearest_radius_m_arg)
     ld.add_action(integrity_cost_max_arg)
@@ -812,11 +898,17 @@ def generate_launch_description():
     ld.add_action(p0_size_x_m_arg)
     ld.add_action(p0_size_y_m_arg)
     ld.add_action(p0_size_z_m_arg)
+    ld.add_action(p0_origin_x_m_arg)
+    ld.add_action(p0_origin_y_m_arg)
+    ld.add_action(p0_origin_z_m_arg)
+    ld.add_action(p0_online_mapping_mode_arg)
+    ld.add_action(p0_fit_grid_to_map_cloud_arg)
     ld.add_action(p0_refresh_period_s_arg)
     ld.add_action(p0_stale_timeout_s_arg)
     ld.add_action(p0_skip_occupied_voxels_arg)
     ld.add_action(p0_debug_metrics_enable_arg)
     ld.add_action(p0_health_topic_arg)
+    ld.add_action(p0_map_topic_arg)
     ld.add_action(p4_assurance_task_mode_arg)
     ld.add_action(p4_assurance_maximum_global_ratio_arg)
     ld.add_action(p4_assurance_maximum_continuous_exceedance_s_arg)

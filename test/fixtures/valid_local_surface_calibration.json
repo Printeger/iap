@@ -1,0 +1,9 @@
+{
+  "schema_version": "iap_local_surface_calibration_v1",
+  "calibration_id": "test_vehicle_heldout_v1",
+  "local_surface_error_bound_m": 0.04,
+  "calibration_run_count": 3,
+  "held_out_run_count": 1,
+  "held_out_passed": true,
+  "test_fixture_only": true
+}
