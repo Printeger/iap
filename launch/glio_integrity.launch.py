@@ -21,7 +21,7 @@ _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
 from profile_runtime import materialize_profile  # noqa: E402
-from run_directory import resolve_run_directory  # noqa: E402
+from run_directory import adopt_run_directory, resolve_run_directory  # noqa: E402
 
 
 def _as_bool(value: str) -> bool:
@@ -30,9 +30,14 @@ def _as_bool(value: str) -> bool:
 
 def _setup(context):
     config_path = LaunchConfiguration("config_path").perform(context)
-    output_dir = resolve_run_directory(
-        LaunchConfiguration("output_dir").perform(context),
-        entrypoint="glio_integrity",
+    internal_run = str(context.launch_configurations.get("run_dir", "")).strip()
+    output_dir = (
+        adopt_run_directory(internal_run)
+        if internal_run
+        else resolve_run_directory(
+            LaunchConfiguration("output_dir").perform(context),
+            entrypoint="glio_integrity",
+        )
     )
     integrity_profile = LaunchConfiguration("integrity_profile").perform(context)
     forbid_sim = _as_bool(
@@ -63,6 +68,10 @@ def _setup(context):
             executable="iap_rosnode",
             name="glio_integrity",
             output="screen",
+            additional_env={
+                "IAP_RUN_DIR": str(output_dir),
+                "ROS_LOG_DIR": str(output_dir / "runtime" / "ros"),
+            },
             parameters=[
                 {"config_path": runtime_config},
                 {"imu_topic": imu_topic},
@@ -91,6 +100,11 @@ def generate_launch_description():
                 "output_dir",
                 default_value="",
                 description="Optional absolute override; empty creates a timestamped integrity run.",
+            ),
+            DeclareLaunchArgument(
+                "run_dir",
+                default_value="",
+                description="Internal outer-run adoption; not a user-facing override.",
             ),
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("points_topic", default_value="/livox/lidar"),

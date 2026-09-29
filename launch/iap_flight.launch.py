@@ -15,6 +15,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     LogInfo,
     OpaqueFunction,
+    SetEnvironmentVariable,
     TimerAction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -159,7 +160,7 @@ def _setup(context):
         math.isfinite(value) for value in local_map_origin
     ):
         raise RuntimeError("flight profile has an invalid planner-local-map origin")
-    planner_output = output_dir / "planner"
+    planner_output = output_dir / "export" / "planner"
     planner_output.mkdir(parents=True, exist_ok=True)
     (output_dir / "flight_launch_manifest.json").write_text(
         json.dumps(
@@ -197,7 +198,7 @@ def _setup(context):
         PythonLaunchDescriptionSource(str(iap_share / "launch" / "glio_integrity.launch.py")),
         launch_arguments={
             "config_path": LaunchConfiguration("config_path").perform(context),
-            "output_dir": str(output_dir / "estimator"),
+            "run_dir": str(output_dir),
             "imu_topic": LaunchConfiguration("imu_topic").perform(context),
             "points_topic": LaunchConfiguration("points_topic").perform(context),
             "use_sim_time": "false",
@@ -305,6 +306,10 @@ def _setup(context):
         0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
     )
     return [
+        SetEnvironmentVariable("IAP_RUN_DIR", str(output_dir)),
+        SetEnvironmentVariable(
+            "ROS_LOG_DIR", str(output_dir / "runtime" / "ros")
+        ),
         LogInfo(
             msg=(
                 f"[iap_flight] strict-global goal={goal} output={output_dir}; "

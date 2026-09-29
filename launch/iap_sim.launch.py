@@ -16,7 +16,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    SetEnvironmentVariable,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -73,6 +78,10 @@ def _setup(context):
     )
 
     return [
+        SetEnvironmentVariable("IAP_RUN_DIR", str(output_dir)),
+        SetEnvironmentVariable(
+            "ROS_LOG_DIR", str(output_dir / "runtime" / "ros")
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 str(
@@ -85,10 +94,10 @@ def _setup(context):
             launch_arguments={
                 "scenario": scenario,
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
-                "runtime_root_dir": str(output_dir / "runtime"),
-                "export_root_dir": str(output_dir / "export"),
-                "iap_log_root": str(output_dir / "runtime" / "iap_logs"),
-                "bag_output_dir": str(output_dir / "bags"),
+                "runtime_root_dir": str(output_dir / "metadata" / "config" / "full_stack"),
+                "export_root_dir": str(output_dir / "export" / "planner"),
+                "iap_log_root": str(output_dir),
+                "bag_output_dir": str(output_dir / "export" / "capture"),
                 "run_duration_s": LaunchConfiguration("run_duration_s").perform(context),
                 "planner_start_delay_s": LaunchConfiguration(
                     "planner_start_delay_s"

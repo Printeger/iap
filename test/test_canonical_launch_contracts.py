@@ -175,11 +175,23 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertTrue(
                 Path(root["global"]["timing_csv_path"]).is_relative_to(output)
             )
+            self.assertEqual(
+                Path(root["global"]["timing_csv_path"]),
+                output / "profiling/iap_timing.csv",
+            )
             self.assertTrue(
                 Path(ros["glim_ros"]["dump_path"]).is_relative_to(output)
             )
+            self.assertEqual(
+                Path(ros["glim_ros"]["dump_path"]),
+                output / "export/glio/dump",
+            )
             self.assertTrue(
                 Path(gnss["gnss"]["debug_csv_path"]).is_relative_to(output)
+            )
+            self.assertEqual(
+                Path(gnss["integrity"]["araim_csv_path"]),
+                output / "export/current_integrity/iap_araim.csv",
             )
             self.assertEqual(manifest["contract"], "glio_integrity")
             for key, path in manifest["materialized_secondary_configs"].items():
@@ -313,11 +325,15 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         ), mock.patch.object(helper, "_new_run_id", return_value="20260929T120000Z_000"):
             first = helper.resolve_run_directory("", entrypoint="glio")
             second = helper.resolve_run_directory("", entrypoint="glio")
-            self.assertEqual(first, Path(temporary) / "glio/20260929T120000Z_000")
-            self.assertEqual(second, Path(temporary) / "glio/20260929T120000Z_000_01")
+            self.assertEqual(first, Path(temporary) / "20260929T120000Z_000")
+            self.assertEqual(second, Path(temporary) / "20260929T120000Z_000_01")
             self.assertTrue(first.is_dir())
             self.assertTrue(second.is_dir())
-            self.assertEqual((Path(temporary) / "glio/latest").resolve(), second)
+            self.assertEqual((Path(temporary) / "latest").resolve(), second)
+            self.assertEqual(
+                {path.name for path in second.iterdir() if path.is_dir()},
+                {"runtime", "profiling", "export", "metadata"},
+            )
 
     def test_automatic_sim_run_directory_is_grouped_by_scenario(self):
         helper = self._load_launch("_includes/run_directory.py")
@@ -327,13 +343,13 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             run_dir = helper.resolve_run_directory(
                 "", entrypoint="iap_sim", scenario="fused_nominal"
             )
-            self.assertEqual(run_dir.parent, Path(temporary) / "iap_sim/fused_nominal")
+            self.assertEqual(run_dir.parent, Path(temporary))
 
     def test_source_workspace_automatic_root_uses_repository_log_tree(self):
         helper = self._load_launch("_includes/run_directory.py")
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("IAP_RUN_ROOT", None)
-            self.assertEqual(helper._default_run_root(), REPO / "log/runs")
+            self.assertEqual(helper._default_run_root(), REPO / "log")
 
     def test_explicit_run_directory_remains_an_absolute_override(self):
         helper = self._load_launch("_includes/run_directory.py")
@@ -375,14 +391,14 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                     "use_sim_time": "false",
                 }
             )
-            self.assertEqual(len(glio._setup(context)), 2)
+            self.assertGreaterEqual(len(glio._setup(context)), 2)
             runs = [
                 path
-                for path in (Path(temporary) / "glio").iterdir()
-                if path.is_dir() and not path.is_symlink()
+                for path in Path(temporary).iterdir()
+                if path.is_dir() and not path.is_symlink() and path.name[0].isdigit()
             ]
             self.assertEqual(len(runs), 1)
-            self.assertTrue((runs[0] / "runtime_config/config.json").is_file())
+            self.assertTrue((runs[0] / "metadata/config/iap/config.json").is_file())
 
     def test_each_canonical_entrypoint_constructs_a_graph(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -431,7 +447,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             with mock.patch.object(
                 simulation, "get_package_share_directory", return_value=str(REPO)
             ):
-                self.assertEqual(len(simulation._setup(context)), 1)
+                self.assertEqual(len(simulation._setup(context)), 3)
 
             flight = self._load_launch("iap_flight.launch.py")
             context = LaunchContext()
@@ -474,7 +490,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             with mock.patch.object(
                 flight, "get_package_share_directory", side_effect=package_share
             ):
-                self.assertEqual(len(flight._setup(context)), 3)
+                self.assertEqual(len(flight._setup(context)), 5)
 
     def test_historical_launches_exist_only_in_backup(self):
         canonical = {

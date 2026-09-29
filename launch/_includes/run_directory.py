@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,11 +42,11 @@ def _default_run_root() -> Path:
     # has package.xml, so require source-only build files before selecting it.
     package_root = Path(__file__).resolve().parents[2]
     if (package_root / "CMakeLists.txt").is_file() and (package_root / "src").is_dir():
-        return package_root / "log" / "runs"
+        return package_root / "log"
 
     state_root = os.environ.get("XDG_STATE_HOME", "").strip()
     state_base = Path(state_root).expanduser() if state_root else Path.home() / ".local/state"
-    return _validated_absolute(state_base / "iap" / "runs", "automatic run root")
+    return _validated_absolute(state_base / "iap" / "log", "automatic run root")
 
 
 def _new_run_id() -> str:
@@ -85,6 +86,11 @@ def resolve_run_directory(
 
     requested = str(requested_output_dir).strip()
     if requested:
+        warnings.warn(
+            "output_dir is deprecated; configure IAP_RUN_ROOT instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         run_dir = _validated_absolute(Path(requested), "output_dir")
         run_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -93,11 +99,13 @@ def resolve_run_directory(
             raise RuntimeError(
                 f"output_dir already exists; choose a new directory: {run_dir}"
             ) from error
-        return run_dir
+        _create_layout(run_dir)
+        return run_dir.resolve()
 
-    parent = _default_run_root() / _component(entrypoint, "entrypoint")
+    _component(entrypoint, "entrypoint")
     if str(scenario).strip():
-        parent /= _component(scenario, "scenario")
+        _component(scenario, "scenario")
+    parent = _default_run_root()
     parent.mkdir(parents=True, exist_ok=True)
 
     run_id = _new_run_id()
@@ -109,6 +117,35 @@ def resolve_run_directory(
         except FileExistsError:
             continue
         run_dir = run_dir.resolve()
+        _create_layout(run_dir)
         _update_latest(parent, run_dir)
         return run_dir
     raise RuntimeError(f"could not allocate a unique run directory below {parent}")
+
+
+def _create_layout(run_dir: Path) -> None:
+    for category in ("runtime", "profiling", "export", "metadata"):
+        (run_dir / category).mkdir(parents=False, exist_ok=True)
+    (run_dir / "runtime" / "ros").mkdir(exist_ok=True)
+    for namespace in (
+        "glio",
+        "current_integrity",
+        "advisory",
+        "planner",
+        "simulation",
+        "capture",
+        "analysis",
+    ):
+        (run_dir / "export" / namespace).mkdir(exist_ok=True)
+    for namespace in ("config", "processes", "manifests"):
+        (run_dir / "metadata" / namespace).mkdir(exist_ok=True)
+
+
+def adopt_run_directory(requested_run_dir: str) -> Path:
+    """Validate and adopt a run allocated by an outer canonical launch."""
+
+    run_dir = _validated_absolute(Path(str(requested_run_dir).strip()), "run_dir")
+    if not run_dir.is_dir():
+        raise RuntimeError(f"run_dir must name an existing directory: {run_dir}")
+    _create_layout(run_dir)
+    return run_dir

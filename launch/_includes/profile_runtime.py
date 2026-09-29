@@ -100,11 +100,23 @@ def materialize_profile(
     if not source.is_dir():
         raise RuntimeError(f"config_path is not a directory: {source}")
 
-    runtime_dir = run_root / "runtime_config"
-    export_dir = run_root / "export"
-    log_dir = run_root / "logs"
-    dump_dir = run_root / "dump"
-    for directory in (runtime_dir, export_dir, log_dir, dump_dir):
+    runtime_dir = run_root / "metadata" / "config" / "iap"
+    export_dir = run_root / "export" / "glio"
+    integrity_export_dir = run_root / "export" / "current_integrity"
+    simulation_export_dir = run_root / "export" / "simulation"
+    log_dir = run_root
+    dump_dir = export_dir / "dump"
+    profiling_dir = run_root / "profiling"
+    manifest_dir = run_root / "metadata" / "manifests"
+    for directory in (
+        runtime_dir,
+        export_dir,
+        integrity_export_dir,
+        simulation_export_dir,
+        dump_dir,
+        profiling_dir,
+        manifest_dir,
+    ):
         directory.mkdir(parents=True, exist_ok=True)
 
     root_path = source / "config.json"
@@ -180,13 +192,21 @@ def materialize_profile(
     gnss = gnss_config.setdefault("gnss", {})
     if isinstance(gnss, dict):
         gnss["debug_csv_path"] = str(export_dir / "iap_gnss_factor_debug.csv")
-    integrity["araim_csv_path"] = str(export_dir / "iap_araim.csv")
-    integrity["traj_csv_path"] = str(export_dir / "traj_with_gnss.csv")
+    integrity["araim_csv_path"] = str(integrity_export_dir / "iap_araim.csv")
+    integrity["araim_pl_decomp_csv_path"] = str(
+        integrity_export_dir / "iap_araim_pl_decomp.csv"
+    )
+    integrity["lidar_araim_stage0_csv_path"] = str(
+        integrity_export_dir / "iap_lidar_araim_stage0.csv"
+    )
+    integrity["traj_csv_path"] = str(integrity_export_dir / "traj_with_gnss.csv")
 
     glim_ros["dump_path"] = str(dump_dir)
     sim_config = glim_ros.get("sim")
     if isinstance(sim_config, dict):
-        sim_config["metrics_csv_path"] = str(export_dir / "iap_sim_truth_vs_est.csv")
+        sim_config["metrics_csv_path"] = str(
+            simulation_export_dir / "iap_sim_truth_vs_est.csv"
+        )
 
     logging_section = logging_config.setdefault("logging", {})
     if isinstance(logging_section, dict):
@@ -194,7 +214,7 @@ def materialize_profile(
     root_logging = root_config.setdefault("logging", {})
     if isinstance(root_logging, dict):
         root_logging["log_dir"] = str(log_dir)
-    global_config["timing_csv_path"] = str(export_dir / "iap_timing.csv")
+    global_config["timing_csv_path"] = str(profiling_dir / "iap_timing.csv")
 
     runtime_ros = runtime_dir / "config_ros.json"
     runtime_gnss = runtime_dir / "config_gnss.json"
@@ -241,5 +261,5 @@ def materialize_profile(
         "points_topic": glim_ros.get("points_topic", ""),
         "materialized_secondary_configs": materialized_secondary_configs,
     }
-    _write_json(run_root / "launch_profile_manifest.json", manifest)
+    _write_json(manifest_dir / "launch_profile_manifest.json", manifest)
     return str(runtime_dir), manifest
