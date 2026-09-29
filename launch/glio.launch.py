@@ -20,7 +20,11 @@ _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
 from profile_runtime import materialize_profile  # noqa: E402
-from run_directory import adopt_run_directory, resolve_run_directory  # noqa: E402
+from run_directory import (  # noqa: E402
+    adopt_run_directory,
+    register_subordinate_manifest,
+    resolve_run_directory,
+)
 
 
 def _setup(context):
@@ -38,6 +42,10 @@ def _setup(context):
         output_dir=output_dir,
         contract="glio",
         integrity_profile="fallback_only",
+    )
+    register_subordinate_manifest(
+        output_dir,
+        output_dir / "metadata" / "manifests" / "launch_profile_manifest.json",
     )
     imu_topic = LaunchConfiguration("imu_topic").perform(context)
     points_topic = LaunchConfiguration("points_topic").perform(context)

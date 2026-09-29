@@ -32,6 +32,7 @@ private:
   void allocate_run_directory();
   void create_layout();
   void update_latest_symlink() const;
+  void write_owner_manifest() const;
   std::map<std::string, std::string> collect_run_info_fields() const;
 
   std::string process_name_;

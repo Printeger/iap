@@ -29,7 +29,7 @@ from launch.substitutions import LaunchConfiguration
 _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
-from run_directory import resolve_run_directory  # noqa: E402
+from run_directory import resolve_run_directory, write_subordinate_manifest  # noqa: E402
 
 
 def _catalog(iap_share: Path) -> dict:
@@ -73,9 +73,7 @@ def _setup(context):
         "phase2_planner_integrity_evaluator_enabled": False,
         "clock_contract": "system_clock_for_ros_and_simulated_sensor_stamps",
     }
-    (output_dir / "full_stack_manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    write_subordinate_manifest(output_dir, "full_stack", manifest)
 
     return [
         SetEnvironmentVariable("IAP_RUN_DIR", str(output_dir)),

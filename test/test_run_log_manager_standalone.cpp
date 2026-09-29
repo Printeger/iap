@@ -31,6 +31,9 @@ TEST(RunLogManagerStandaloneTest, AllocatesDirectlyBelowConfiguredRoot) {
   EXPECT_TRUE(std::filesystem::exists(logs.run_dir() / "profiling"));
   EXPECT_TRUE(std::filesystem::exists(logs.run_dir() / "export"));
   EXPECT_TRUE(std::filesystem::exists(logs.run_dir() / "metadata"));
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      logs.run_dir() / "metadata" / "run_manifest.json"));
+  EXPECT_FALSE(std::filesystem::exists(logs.run_dir() / "metadata" / "run_info.json"));
   ASSERT_TRUE(std::filesystem::is_symlink(root / "latest"));
   EXPECT_EQ(std::filesystem::canonical(root / "latest"), logs.run_dir());
 }

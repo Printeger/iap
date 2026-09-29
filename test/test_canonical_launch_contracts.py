@@ -334,6 +334,13 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 {path.name for path in second.iterdir() if path.is_dir()},
                 {"runtime", "profiling", "export", "metadata"},
             )
+            manifest = json.loads(
+                (second / "metadata/run_manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["schema_version"], "iap_run_artifact_v1")
+            self.assertEqual(manifest["run_id"], second.name)
+            self.assertEqual(manifest["entrypoint"], "glio")
+            self.assertEqual(manifest["lifecycle"], "active")
 
     def test_automatic_sim_run_directory_is_grouped_by_scenario(self):
         helper = self._load_launch("_includes/run_directory.py")

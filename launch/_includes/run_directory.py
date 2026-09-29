@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import socket
+import subprocess
 import uuid
 import warnings
 from datetime import datetime, timezone
@@ -13,6 +16,22 @@ import fcntl
 
 
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_MODULES = {
+    "glio": ["GLIO"],
+    "glio_integrity": ["GLIO", "Current Integrity Monitor"],
+    "iap_sim": [
+        "GLIO",
+        "Current Integrity Monitor",
+        "Advisory Integrity Evaluator",
+        "Safety-aware planner",
+    ],
+    "iap_flight": [
+        "GLIO",
+        "Current Integrity Monitor",
+        "Advisory Integrity Evaluator",
+        "Safety-aware planner",
+    ],
+}
 
 
 def _validated_absolute(path: Path, label: str) -> Path:
@@ -100,7 +119,9 @@ def resolve_run_directory(
                 f"output_dir already exists; choose a new directory: {run_dir}"
             ) from error
         _create_layout(run_dir)
-        return run_dir.resolve()
+        run_dir = run_dir.resolve()
+        _write_run_manifest(run_dir, entrypoint=entrypoint, scenario=scenario)
+        return run_dir
 
     _component(entrypoint, "entrypoint")
     if str(scenario).strip():
@@ -118,6 +139,7 @@ def resolve_run_directory(
             continue
         run_dir = run_dir.resolve()
         _create_layout(run_dir)
+        _write_run_manifest(run_dir, entrypoint=entrypoint, scenario=scenario)
         _update_latest(parent, run_dir)
         return run_dir
     raise RuntimeError(f"could not allocate a unique run directory below {parent}")
@@ -149,3 +171,73 @@ def adopt_run_directory(requested_run_dir: str) -> Path:
         raise RuntimeError(f"run_dir must name an existing directory: {run_dir}")
     _create_layout(run_dir)
     return run_dir
+
+
+def _git_value(*arguments: str) -> str:
+    package_root = Path(__file__).resolve().parents[2]
+    try:
+        return subprocess.run(
+            ["git", "-C", str(package_root), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def _atomic_write_json(path: Path, value: dict) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    os.replace(temporary, path)
+
+
+def _write_run_manifest(run_dir: Path, *, entrypoint: str, scenario: str) -> None:
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    commit = _git_value("rev-parse", "HEAD")
+    dirty = bool(_git_value("status", "--porcelain"))
+    manifest = {
+        "schema_version": "iap_run_artifact_v1",
+        "run_id": run_dir.name,
+        "run_root": str(run_dir.parent),
+        "run_dir": str(run_dir),
+        "entrypoint": entrypoint,
+        "scenario": str(scenario).strip() or None,
+        "modules": _MODULES.get(entrypoint, []),
+        "started_at_utc": now,
+        "ended_at_utc": None,
+        "lifecycle": "active",
+        "safety_outcome": "not_applicable" if entrypoint.startswith("glio") else "unknown",
+        "run_class": "development",
+        "retention_class": "ordinary",
+        "source": {"git_commit": commit or None, "git_worktree_clean": not dirty},
+        "build": {},
+        "host": {"hostname": socket.gethostname()},
+        "config_snapshots": [],
+        "subordinate_manifests": [],
+        "external_exports": [],
+    }
+    _atomic_write_json(run_dir / "metadata" / "run_manifest.json", manifest)
+
+
+def write_subordinate_manifest(run_dir: Path, name: str, value: dict) -> Path:
+    safe_name = _component(name, "manifest name")
+    path = run_dir / "metadata" / "manifests" / f"{safe_name}.json"
+    _atomic_write_json(path, value)
+    register_subordinate_manifest(run_dir, path)
+    return path
+
+
+def register_subordinate_manifest(run_dir: Path, path: Path) -> None:
+    manifest_path = run_dir / "metadata" / "run_manifest.json"
+    if not manifest_path.is_file():
+        return
+    relative = path.resolve().relative_to(run_dir.resolve()).as_posix()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    references = manifest.setdefault("subordinate_manifests", [])
+    if relative not in references:
+        references.append(relative)
+        references.sort()
+        _atomic_write_json(manifest_path, manifest)

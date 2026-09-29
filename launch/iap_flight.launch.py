@@ -26,7 +26,7 @@ from launch_ros.actions import Node
 _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
-from run_directory import resolve_run_directory  # noqa: E402
+from run_directory import resolve_run_directory, write_subordinate_manifest  # noqa: E402
 
 
 def _as_bool(value: str) -> bool:
@@ -162,9 +162,10 @@ def _setup(context):
         raise RuntimeError("flight profile has an invalid planner-local-map origin")
     planner_output = output_dir / "export" / "planner"
     planner_output.mkdir(parents=True, exist_ok=True)
-    (output_dir / "flight_launch_manifest.json").write_text(
-        json.dumps(
-            {
+    write_subordinate_manifest(
+        output_dir,
+        "flight_launch",
+        {
                 "schema_version": "iap_canonical_flight_v1",
                 "modules": [
                     "GLIO",
@@ -186,12 +187,7 @@ def _setup(context):
                 "simulation_nodes_allowed": False,
                 "rosbag_play_allowed": False,
                 "phase2_planner_integrity_evaluator_enabled": False,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+        },
     )
 
     estimator = IncludeLaunchDescription(

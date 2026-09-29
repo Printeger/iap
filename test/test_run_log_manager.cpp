@@ -40,7 +40,10 @@ TEST(RunLogManagerTest, AdoptsOwnerRunWithoutAllocatingNestedTimestamp) {
   EXPECT_EQ(first.runtime_path("iap_main.log").parent_path(), first.run_dir() / "runtime");
   EXPECT_EQ(first.profiling_path("iap_timing.csv").parent_path(), first.run_dir() / "profiling");
   EXPECT_EQ(first.export_path("iap_icp.csv").parent_path(), first.run_dir() / "export");
-  EXPECT_EQ(first.metadata_path("run_info.json").parent_path(), first.run_dir() / "metadata");
+  first.write_run_info({{"status", "running"}});
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      first.metadata_path("processes/test_run_log_manager.json")));
+  EXPECT_FALSE(std::filesystem::exists(first.metadata_path("run_info.json")));
   EXPECT_FALSE(std::filesystem::exists(run_dir / "20260929T120000Z_001"));
   EXPECT_FALSE(std::filesystem::exists(temp_root / "latest"));
   EXPECT_THROW(first.export_path("../escape.csv"), std::invalid_argument);

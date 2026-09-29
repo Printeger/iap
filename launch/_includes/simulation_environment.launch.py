@@ -211,7 +211,9 @@ def _setup(context):
     if not output_dir.is_absolute():
         raise RuntimeError("output_dir must be an absolute path")
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "scenario_manifest.json").write_text(
+    manifest_dir = output_dir / "metadata" / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "scenario.json").write_text(
         json.dumps(
             {
                 "schema_version": "iap_simulation_scenario_v1",

@@ -3631,7 +3631,20 @@ def _launch_setup(context):
     if record_bag:
         os.makedirs(bag_root_dir, exist_ok=True)
     evidence = _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario)
-    evidence["manifest_path"] = str((Path(export_dir) / "test_planner_manifest.json").resolve())
+    adopted_run = str(context.environment.get("IAP_RUN_DIR", "")).strip()
+    if adopted_run and experiment == "canonical_full_stack_sim":
+        evidence["manifest_path"] = str(
+            (
+                Path(adopted_run)
+                / "metadata"
+                / "manifests"
+                / "full_stack_runtime.json"
+            ).resolve()
+        )
+    else:
+        evidence["manifest_path"] = str(
+            (Path(export_dir) / "test_planner_manifest.json").resolve()
+        )
     formal_calibration = _formal_calibration_provenance(
         LaunchConfiguration("p1.formal_calibration_manifest").perform(context)
     )
@@ -4577,8 +4590,27 @@ def _launch_setup(context):
         },
         **{f"planner_enable_{key}": value for key, value in safety_enabled.items()},
     }
-    manifest_path = Path(export_dir) / "test_planner_manifest.json"
+    manifest_path = Path(evidence["manifest_path"])
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    if adopted_run and experiment == "canonical_full_stack_sim":
+        run_manifest_path = Path(adopted_run) / "metadata" / "run_manifest.json"
+        run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+        relative_manifest = manifest_path.resolve().relative_to(
+            Path(adopted_run).resolve()
+        ).as_posix()
+        subordinate = run_manifest.setdefault("subordinate_manifests", [])
+        if relative_manifest not in subordinate:
+            subordinate.append(relative_manifest)
+            subordinate.sort()
+            temporary_manifest = run_manifest_path.with_name(
+                f".{run_manifest_path.name}.{os.getpid()}.{uuid.uuid4().hex}"
+            )
+            temporary_manifest.write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary_manifest, run_manifest_path)
     if p4_g0c_binding:
         g0c_manifest = {
             **p4_g0c_binding,

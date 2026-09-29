@@ -86,6 +86,36 @@ std::string getenv_or_empty(const char* name) {
   return value ? std::string(value) : std::string();
 }
 
+std::string safe_filename(std::string value) {
+  for (char& ch : value) {
+    const bool safe = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                      (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+    if (!safe) {
+      ch = '_';
+    }
+  }
+  return value.empty() ? "process" : value;
+}
+
+void atomic_write_json(const std::filesystem::path& path, const nlohmann::json& value) {
+  const auto temporary = path.parent_path() /
+      ("." + path.filename().string() + "." + std::to_string(::getpid()) + ".tmp");
+  {
+    std::ofstream ofs(temporary);
+    if (!ofs.is_open()) {
+      throw std::runtime_error("failed to open artifact manifest: " + temporary.string());
+    }
+    ofs << std::setw(2) << value << std::endl;
+  }
+  std::error_code ec;
+  std::filesystem::rename(temporary, path, ec);
+  if (ec) {
+    std::filesystem::remove(temporary);
+    throw std::runtime_error("failed to publish artifact manifest '" +
+                             path.string() + "': " + ec.message());
+  }
+}
+
 }  // namespace
 
 RunLogManager& RunLogManager::initialize(const std::string& process_name,
@@ -135,6 +165,7 @@ RunLogManager::RunLogManager(std::string process_name, std::string config_dir_or
   }
   create_layout();
   if (owns_run_) {
+    write_owner_manifest();
     update_latest_symlink();
   }
 }
@@ -250,6 +281,20 @@ void RunLogManager::create_layout() {
                                directory.string() + "': " + ec.message());
     }
   }
+  for (const auto& directory : {
+           runtime_path("ros"), export_path("glio"),
+           export_path("current_integrity"), export_path("advisory"),
+           export_path("planner"), export_path("simulation"),
+           export_path("capture"), export_path("analysis"),
+           metadata_path("config"), metadata_path("processes"),
+           metadata_path("manifests")}) {
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) {
+      throw std::runtime_error("failed to create run artifact namespace '" +
+                               directory.string() + "': " + ec.message());
+    }
+  }
 }
 
 void RunLogManager::update_latest_symlink() const {
@@ -312,6 +357,48 @@ std::map<std::string, std::string> RunLogManager::collect_run_info_fields() cons
   return fields;
 }
 
+void RunLogManager::write_owner_manifest() const {
+  nlohmann::json manifest = {
+      {"schema_version", "iap_run_artifact_v1"},
+      {"run_id", run_dir_.filename().string()},
+      {"run_root", log_root_.string()},
+      {"run_dir", run_dir_.string()},
+      {"entrypoint", process_name_},
+      {"scenario", nullptr},
+      {"modules", nlohmann::json::array()},
+      {"started_at_utc", start_timestamp_iso_},
+      {"ended_at_utc", nullptr},
+      {"lifecycle", "active"},
+      {"safety_outcome", "not_applicable"},
+      {"run_class", "development"},
+      {"retention_class", "ordinary"},
+      {"build", {{"build_type", IAP_BUILD_TYPE}}},
+      {"host", nlohmann::json::object()},
+      {"config_snapshots", nlohmann::json::array()},
+      {"subordinate_manifests", nlohmann::json::array()},
+      {"external_exports", nlohmann::json::array()},
+  };
+  if (const auto fields = collect_run_info_fields(); fields.count("hostname")) {
+    manifest["host"]["hostname"] = fields.at("hostname");
+  }
+  nlohmann::json source = {
+      {"git_commit", nullptr},
+      {"git_worktree_clean", nullptr},
+  };
+  if (const auto commit = read_command_output(
+          "git -C \"" + std::string(IAP_SOURCE_ROOT) + "\" rev-parse HEAD 2>/dev/null")) {
+    source["git_commit"] = *commit;
+  }
+  if (const auto status = read_command_output(
+          "git -C \"" + std::string(IAP_SOURCE_ROOT) + "\" status --porcelain 2>/dev/null")) {
+    source["git_worktree_clean"] = status->empty();
+  } else {
+    source["git_worktree_clean"] = true;
+  }
+  manifest["source"] = source;
+  atomic_write_json(metadata_path("run_manifest.json"), manifest);
+}
+
 void RunLogManager::write_run_info(const std::map<std::string, std::string>& extra_fields) const {
   nlohmann::json json;
   for (const auto& field : collect_run_info_fields()) {
@@ -331,15 +418,13 @@ void RunLogManager::write_run_info(const std::map<std::string, std::string>& ext
   }
 
   std::error_code ec;
-  std::filesystem::create_directories(metadata_path(""), ec);
-
-  std::ofstream ofs(metadata_path("run_info.json"));
-  if (!ofs.is_open()) {
-    spdlog::warn("[RunLogManager] failed to open run_info.json for writing");
-    return;
+  std::filesystem::create_directories(metadata_path("processes"), ec);
+  try {
+    atomic_write_json(
+        metadata_path("processes") / (safe_filename(process_name_) + ".json"), json);
+  } catch (const std::exception& error) {
+    spdlog::warn("[RunLogManager] failed to write process metadata: {}", error.what());
   }
-
-  ofs << std::setw(2) << json << std::endl;
 }
 
 }  // namespace glim
