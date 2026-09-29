@@ -5,6 +5,21 @@
 
 Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md and docs/spec/talk_spec.pdf. Any durable specification deviation must be documented in docs/CHANGES.md.
 
+## Run artifact 强制边界
+
+唯一权威规范是 `docs/spec/run_artifact_contract.md`。
+
+- 每次运行 MUST 只有一个 `<IAP_RUN_ROOT>/<timestamp>`，所有模块 MUST
+  采用同一个 `IAP_RUN_DIR`。
+- run 根下 MUST 只有 `runtime/`、`profiling/`、`export/`、`metadata/`
+  四类目录；自动产物 MUST 位于其中。
+- 新代码 MUST 通过统一 artifact resolver 获取路径；MUST NOT 自建时间戳、
+  写 `/tmp`、写机器绝对输出路径或在 run 根散落 CSV/manifest。
+- `ROS_LOG_DIR` MUST 位于 `<run>/runtime/ros`；主 manifest MUST 位于
+  `<run>/metadata/run_manifest.json`。
+- 显式用户导出可以位于 run 外，但 MUST 登记；普通 retention MUST NOT
+  删除 active、formal、protected、无有效 manifest 或仓库外未授权的目录。
+
 ## 0. 仓库边界（强约束）
 
 - ✅ 允许修改：**本仓库内**（src/iap）的一切源码和文档
