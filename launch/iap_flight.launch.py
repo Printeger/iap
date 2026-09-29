@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import sys
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -19,6 +20,12 @@ from launch.actions import (
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+_INCLUDES = Path(__file__).resolve().parent / "_includes"
+if str(_INCLUDES) not in sys.path:
+    sys.path.insert(0, str(_INCLUDES))
+from run_directory import resolve_run_directory  # noqa: E402
 
 
 def _as_bool(value: str) -> bool:
@@ -87,10 +94,9 @@ def _setup(context):
             "iap_flight requires controller_handshake_confirmed:=true after the "
             "vehicle-side command/feedback handshake has passed"
         )
-    output_dir = Path(LaunchConfiguration("output_dir").perform(context)).expanduser()
-    if not output_dir.is_absolute():
-        raise RuntimeError("output_dir must be an absolute path")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = resolve_run_directory(
+        LaunchConfiguration("output_dir").perform(context), entrypoint="iap_flight"
+    )
     calibration_id = LaunchConfiguration(
         "local_surface_error_calibration_id"
     ).perform(context).strip()
@@ -321,7 +327,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "output_dir",
-                description="Required absolute directory for all runtime artifacts.",
+                default_value="",
+                description="Optional absolute override; empty creates a timestamped flight run.",
             ),
             DeclareLaunchArgument("config_path", default_value=default_config),
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),

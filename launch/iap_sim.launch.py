@@ -11,6 +11,7 @@ large runtime is split into private includes incrementally.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -18,6 +19,12 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+
+
+_INCLUDES = Path(__file__).resolve().parent / "_includes"
+if str(_INCLUDES) not in sys.path:
+    sys.path.insert(0, str(_INCLUDES))
+from run_directory import resolve_run_directory  # noqa: E402
 
 
 def _catalog(iap_share: Path) -> dict:
@@ -38,13 +45,11 @@ def _setup(context):
         valid = ", ".join(sorted(catalog))
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario}'; valid: {valid}")
 
-    output_dir = Path(LaunchConfiguration("output_dir").perform(context)).expanduser()
-    if not output_dir.is_absolute():
-        raise RuntimeError("output_dir must be an absolute path")
-    output_dir = output_dir.resolve()
-    if output_dir == Path("/"):
-        raise RuntimeError("output_dir cannot be filesystem root")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = resolve_run_directory(
+        LaunchConfiguration("output_dir").perform(context),
+        entrypoint="iap_sim",
+        scenario=scenario,
+    )
 
     manifest = {
         "schema_version": "iap_canonical_sim_v2",
@@ -99,7 +104,8 @@ def generate_launch_description():
             DeclareLaunchArgument("scenario", default_value="fused_nominal"),
             DeclareLaunchArgument(
                 "output_dir",
-                description="Required absolute directory for all runtime artifacts.",
+                default_value="",
+                description="Optional absolute override; empty creates a timestamped scenario run.",
             ),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),

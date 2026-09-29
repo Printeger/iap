@@ -21,6 +21,7 @@ _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
 from profile_runtime import materialize_profile  # noqa: E402
+from run_directory import resolve_run_directory  # noqa: E402
 
 
 def _as_bool(value: str) -> bool:
@@ -29,7 +30,10 @@ def _as_bool(value: str) -> bool:
 
 def _setup(context):
     config_path = LaunchConfiguration("config_path").perform(context)
-    output_dir = LaunchConfiguration("output_dir").perform(context).strip()
+    output_dir = resolve_run_directory(
+        LaunchConfiguration("output_dir").perform(context),
+        entrypoint="glio_integrity",
+    )
     integrity_profile = LaunchConfiguration("integrity_profile").perform(context)
     forbid_sim = _as_bool(
         LaunchConfiguration("forbid_sim_extensions").perform(context)
@@ -85,7 +89,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "output_dir",
-                description="Required absolute directory for this run's logs and CSVs.",
+                default_value="",
+                description="Optional absolute override; empty creates a timestamped integrity run.",
             ),
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("points_topic", default_value="/livox/lidar"),

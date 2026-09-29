@@ -11,28 +11,32 @@ directories documented below.
 | `iap_sim.launch.py` | all four IAP modules | selected simulation scenario |
 | `iap_flight.launch.py` | all four IAP modules | real vehicle IO only |
 
-Every entrypoint requires an absolute `output_dir`. Canonical launches write no
-CSV to the repository root. The deprecated
+Every entrypoint automatically allocates a collision-safe timestamped run
+directory. In a source or `--symlink-install` workspace the default is
+`src/iap/log/runs/<entrypoint>/...`; simulation adds the scenario as another
+directory level. Set `IAP_RUN_ROOT` once to change the common base, or pass an
+absolute `output_dir` to override one run. Canonical launches write no CSV to
+the repository root. Each automatic profile/scenario directory also maintains
+a concurrency-safe `latest` symlink to its newest run. An explicit
+`output_dir` must not already exist, so separate runs cannot mix artifacts or
+overwrite each other. The deprecated
 `phase2_planner_integrity_evaluator` is forbidden from all four graphs.
 
 ## Commands
 
 ```bash
 # GLIO with live input, or with a rosbag played separately on the same topics
-ros2 launch iap glio.launch.py \
-  output_dir:=/tmp/iap_runs/glio_001
+ros2 launch iap glio.launch.py
 
 # GLIO + current integrity
-ros2 launch iap glio_integrity.launch.py \
-  output_dir:=/tmp/iap_runs/integrity_001
+ros2 launch iap glio_integrity.launch.py
 
 # Full simulation
 python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
   --output-root /tmp/iap_runs/sim_001/preflight \
   --gpu-preflight-only
 ros2 launch iap iap_sim.launch.py \
-  scenario:=fused_nominal \
-  output_dir:=/tmp/iap_runs/sim_001
+  scenario:=fused_nominal
 
 # Full flight is deliberately fail-closed and requires deployment calibration
 python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
@@ -45,8 +49,20 @@ ros2 launch iap iap_flight.launch.py \
   goal_x:=10.0 goal_y:=0.0 goal_z:=2.0 \
   local_surface_error_bound_m:=0.04 \
   local_surface_error_calibration_id:=vehicle_01_heldout_2026_09 \
-  local_surface_error_calibration_manifest:=/data/iap/calibration/vehicle_01.json \
-  output_dir:=/data/iap_runs/flight_001
+  local_surface_error_calibration_manifest:=/data/iap/calibration/vehicle_01.json
+```
+
+For a deployed vehicle, configure its persistent root once in the service
+environment rather than changing every command:
+
+```bash
+export IAP_RUN_ROOT=/data/iap_runs
+```
+
+An explicit one-run override remains available when needed:
+
+```bash
+ros2 launch iap glio.launch.py output_dir:=/data/iap_runs/manual/glio_check
 ```
 
 The two full-stack profiles use GPU odometry by default. Do not run either ROS
@@ -85,7 +101,7 @@ is:
 - Failure/HOLD: this profile has no planner; invalid or stale input must not be
   represented as navigation authorization.
 - Config: `config/profiles/glio` by default.
-- Results: `<output_dir>/{logs,export,dump,runtime_config}`.
+- Results: `<run_dir>/{logs,export,dump,runtime_config}`.
 
 ### `glio_integrity.launch.py`
 
@@ -98,7 +114,7 @@ is:
 - HOLD: downstream motion must remain disabled while current integrity is
   missing, stale, invalid, or above its alert limit.
 - Config: `config/profiles/glio_integrity` by default.
-- Results: `<output_dir>/{logs,export,dump,runtime_config}`.
+- Results: `<run_dir>/{logs,export,dump,runtime_config}`.
 
 ### `iap_sim.launch.py`
 
@@ -118,7 +134,7 @@ is:
   below the run directory. Scenario names come from
   `config/scenarios/catalog.json`; their exact established parameters are
   resolved by the private `_includes/full_stack_runtime.py` implementation.
-- Results: everything is rooted below `output_dir`.
+- Results: everything is rooted below the allocated run directory.
 
 ### `iap_flight.launch.py`
 
@@ -143,7 +159,7 @@ is:
   calibration; runtime failures follow the P4/P5 fail-closed contract.
 - Config: `config/profiles/full_stack_flight` unless an equivalent deployment
   profile with GNSS, integrity, and planner-local-map extensions is supplied.
-- Results: everything is rooted below `output_dir`.
+- Results: everything is rooted below the allocated run directory.
 
 ## Internal and retained files
 

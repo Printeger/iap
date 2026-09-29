@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -304,6 +305,84 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
     def test_bp_is_installed_for_frozen_script_compatibility(self):
         cmake = (REPO / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertNotIn('PATTERN "bp" EXCLUDE', cmake)
+
+    def test_automatic_run_directories_are_timestamped_and_collision_safe(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ), mock.patch.object(helper, "_new_run_id", return_value="20260929T120000Z_000"):
+            first = helper.resolve_run_directory("", entrypoint="glio")
+            second = helper.resolve_run_directory("", entrypoint="glio")
+            self.assertEqual(first, Path(temporary) / "glio/20260929T120000Z_000")
+            self.assertEqual(second, Path(temporary) / "glio/20260929T120000Z_000_01")
+            self.assertTrue(first.is_dir())
+            self.assertTrue(second.is_dir())
+            self.assertEqual((Path(temporary) / "glio/latest").resolve(), second)
+
+    def test_automatic_sim_run_directory_is_grouped_by_scenario(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ):
+            run_dir = helper.resolve_run_directory(
+                "", entrypoint="iap_sim", scenario="fused_nominal"
+            )
+            self.assertEqual(run_dir.parent, Path(temporary) / "iap_sim/fused_nominal")
+
+    def test_source_workspace_automatic_root_uses_repository_log_tree(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("IAP_RUN_ROOT", None)
+            self.assertEqual(helper._default_run_root(), REPO / "log/runs")
+
+    def test_explicit_run_directory_remains_an_absolute_override(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            requested = Path(temporary) / "chosen"
+            self.assertEqual(
+                helper.resolve_run_directory(str(requested), entrypoint="glio"),
+                requested.resolve(),
+            )
+            with self.assertRaisesRegex(RuntimeError, "must be an absolute path"):
+                helper.resolve_run_directory("relative/run", entrypoint="glio")
+            with self.assertRaisesRegex(RuntimeError, "already exists"):
+                helper.resolve_run_directory(str(requested), entrypoint="glio")
+
+    def test_latest_never_regresses_to_an_older_automatic_run(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            older = parent / "20260929T010101Z_001"
+            newer = parent / "20260929T010101Z_002"
+            older.mkdir()
+            newer.mkdir()
+            helper._update_latest(parent, newer)
+            helper._update_latest(parent, older)
+            self.assertEqual((parent / "latest").resolve(), newer)
+
+    def test_glio_omitted_output_uses_automatic_run_directory(self):
+        glio = self._load_launch("glio.launch.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ):
+            context = LaunchContext()
+            context.launch_configurations.update(
+                {
+                    "config_path": str(REPO / "config/profiles/glio"),
+                    "output_dir": "",
+                    "imu_topic": "/imu",
+                    "points_topic": "/points",
+                    "use_sim_time": "false",
+                }
+            )
+            self.assertEqual(len(glio._setup(context)), 2)
+            runs = [
+                path
+                for path in (Path(temporary) / "glio").iterdir()
+                if path.is_dir() and not path.is_symlink()
+            ]
+            self.assertEqual(len(runs), 1)
+            self.assertTrue((runs[0] / "runtime_config/config.json").is_file())
 
     def test_each_canonical_entrypoint_constructs_a_graph(self):
         with tempfile.TemporaryDirectory() as temporary:

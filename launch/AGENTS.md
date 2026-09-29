@@ -19,7 +19,10 @@
   script compatibility, but new code must not invoke those launch files.
 - Add scenarios to `config/scenarios/catalog.json`; do not grow one launch
   argument per scenario property.
-- Every run requires an explicit absolute output directory.
+- Canonical launches allocate a timestamped directory automatically below
+  `IAP_RUN_ROOT` or the repository-local `log/runs`. An explicit `output_dir`
+  remains an absolute-path override; never introduce a shared, non-versioned
+  output directory that lets separate runs overwrite one another.
 - Keep `bp/` until all four canonical launches have recorded integration/live
   evidence. Moving a file into `legacy/` or deleting it requires checking all
   scripts, tests, documentation, and frozen evidence references first.

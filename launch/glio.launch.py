@@ -20,11 +20,14 @@ _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
 from profile_runtime import materialize_profile  # noqa: E402
+from run_directory import resolve_run_directory  # noqa: E402
 
 
 def _setup(context):
     config_path = LaunchConfiguration("config_path").perform(context)
-    output_dir = LaunchConfiguration("output_dir").perform(context).strip()
+    output_dir = resolve_run_directory(
+        LaunchConfiguration("output_dir").perform(context), entrypoint="glio"
+    )
     runtime_config, manifest = materialize_profile(
         source_config_dir=config_path,
         output_dir=output_dir,
@@ -68,7 +71,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "output_dir",
-                description="Required absolute directory for this run's logs and CSVs.",
+                default_value="",
+                description="Optional absolute override; empty creates a timestamped GLIO run.",
             ),
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("points_topic", default_value="/livox/lidar"),

@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(automatic-run-directories): IAP-RQ-300 / IAP-RQ-410 — canonical launch
+  entrypoints now allocate collision-safe UTC timestamped run directories when
+  `output_dir` is omitted. Source and symlink-install development defaults to
+  `src/iap/log/runs`, simulation is grouped by scenario, `IAP_RUN_ROOT` provides
+  a deployment-wide persistent base, and an explicit absolute, not-yet-existing
+  `output_dir` remains available as a one-run override. Concurrent automatic
+  launches serialize their `latest` update and never regress it to an older run.
 - refactor(launch-root-cleanup): IAP-RQ-300 / IAP-RQ-410 — remove all
   pre-refactor launch files and the temporary `test_planner.launch.py` link
   from the launch root. Their retained copies remain only under `launch/bp`,
