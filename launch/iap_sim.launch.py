@@ -1,11 +1,10 @@
 """Canonical all-module IAP simulation entrypoint.
 
 The current production planner graph is provided by a private runtime include
-extracted from the maintained validation graph. This profile fixes it to its
-non-test contract: no validator, no automatic bag recording, the maintained
-P0/P4/P5 safety profile, and run-local artifacts only. Keeping this thin
-boundary lets scenarios retain their exact established semantics while the
-large runtime is split into private includes incrementally.
+extracted from the maintained validation graph. The maintained four-fork ICRA
+scene uses the same single-run continuous-flight runtime and visualization
+profile as the development runner. Automatic bag recording, repetition,
+capture, and runner-side PASS/FAIL analysis remain outside this entrypoint.
 """
 
 from __future__ import annotations
@@ -57,27 +56,42 @@ def _setup(context):
         valid = ", ".join(sorted(catalog))
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario}'; valid: {valid}")
 
+    icra_continuous_flight = scenario == "icra_dense_forest_four_fork_v2"
+
     output_dir = resolve_run_directory(entrypoint="iap_sim", scenario=scenario)
     register_config_snapshot(
         output_dir, output_dir / "metadata" / "config" / "full_stack"
     )
 
     manifest = {
-        "schema_version": "iap_canonical_sim_v2",
+        "schema_version": "iap_canonical_sim_v3",
         "scenario": scenario,
         "scenario_runtime_preset": scenario,
         "task_mode": str(catalog[scenario]["task_mode"]),
-        "runtime_profile": "canonical_full_stack_sim",
+        "runtime_profile": (
+            "icra_continuous_flight"
+            if icra_continuous_flight
+            else "canonical_full_stack_sim"
+        ),
         "modules": [
             "GLIO",
             "Current Integrity Monitor",
             "Advisory Integrity Evaluator (P0)",
             "Safety-aware planner (P4/P5)",
         ],
-        "test_validator_enabled": False,
+        "test_validator_enabled": icra_continuous_flight,
+        "rviz_profile": (
+            "config/sim_demo11/test_icra.rviz"
+            if icra_continuous_flight
+            else "config/sim_demo11/demo11_integrity_corridor.rviz"
+        ),
         "rosbag_recording_enabled": False,
         "phase2_planner_integrity_evaluator_enabled": False,
-        "clock_contract": "system_clock_for_ros_and_simulated_sensor_stamps",
+        "clock_contract": (
+            "icra_simulated_sensor_time"
+            if icra_continuous_flight
+            else "system_clock_for_ros_and_simulated_sensor_stamps"
+        ),
     }
     write_subordinate_manifest(output_dir, "full_stack", manifest)
 

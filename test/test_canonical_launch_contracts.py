@@ -318,7 +318,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             )
             self.assertEqual(Path(redirected["log_dir"]), root / "runtime")
 
-    def test_sim_profile_reuses_exact_scenarios_without_test_processes(self):
+    def test_sim_profile_uses_maintained_runtime_without_historical_launches(self):
         canonical = (LAUNCH / "iap_sim.launch.py").read_text(encoding="utf-8")
         internal = (
             LAUNCH / "_includes/full_stack_simulation.launch.py"
@@ -328,18 +328,142 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         )
         self.assertIn("full_stack_simulation.launch.py", canonical)
         self.assertIn('"experiment": "canonical_full_stack_sim"', internal)
-        self.assertIn('"run_validator": "false"', internal)
+        self.assertIn(
+            '"run_validator": "true" if icra_continuous_flight else "false"',
+            internal,
+        )
         self.assertIn('"record_bag": "false"', internal)
         self.assertIn('"planner_local_map_enable": "true"', runtime)
-        self.assertIn('"sim_time_enable": "false"', runtime)
+        self.assertIn("ICRA_CONTINUOUS_FLIGHT_RUNTIME_PRESET", runtime)
+        self.assertIn('"rviz_config": "config/sim_demo11/test_icra.rviz"', runtime)
+        self.assertIn('"sim_time_enable": "true"', runtime)
         self.assertIn(
-            '"p4.require_risk_grid_ready_before_planning": "false"', runtime
+            '"p4.require_risk_grid_ready_before_planning": "true"', runtime
         )
         self.assertIn(
             '{"sim_time/enable": _param_bool(context, "sim_time_enable")}', runtime
         )
         self.assertNotIn(' / "bp" / ', runtime)
         self.assertNotIn("icra_p0_p5_qualification.py", runtime)
+
+    def test_icra_forest_sim_matches_continuous_flight_runtime_contract(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+
+        icra_path = LAUNCH / "bp/test_icra.launch.py"
+        icra_spec = importlib.util.spec_from_file_location(
+            "canonical_contract_test_icra_launch", icra_path
+        )
+        icra = importlib.util.module_from_spec(icra_spec)
+        if icra_spec.loader is None:
+            raise RuntimeError(f"cannot load {icra_path}")
+        icra_spec.loader.exec_module(icra)
+
+        runner_path = REPO / "scripts/dev_planner/run_icra_interface_integration.py"
+        runner_spec = importlib.util.spec_from_file_location(
+            "canonical_contract_icra_runner", runner_path
+        )
+        runner = importlib.util.module_from_spec(runner_spec)
+        if runner_spec.loader is None:
+            raise RuntimeError(f"cannot load {runner_path}")
+        runner_spec.loader.exec_module(runner)
+
+        scenario = "icra_dense_forest_four_fork_v2"
+        runner_args = runner.stage_launch_args(
+            "continuous-flight",
+            scenario,
+            None,
+            "bds",
+            "braking_window_pointwise",
+            "mission_best_effort",
+        )
+        runner_args.update(runner.raw_evidence_launch_args(False, 5_000))
+        runner_args.update(
+            {
+                "start_rviz": "true",
+                "run_duration_s": "180.0",
+                "validation_duration_s": "175.0",
+                "rviz_config": "config/sim_demo11/test_icra.rviz",
+            }
+        )
+        runner_context = LaunchContext()
+        runner_context.launch_configurations.update(dict(icra.ARG_DEFAULTS))
+        runner_context.launch_configurations.update(runner_args)
+        with mock.patch.object(
+            sys,
+            "argv",
+            ["test_icra.launch.py"]
+            + [f"{key}:={value}" for key, value in runner_args.items()],
+        ):
+            _, _, runner_preset_keys = icra._BASE._apply_presets(
+                runner_context, str(REPO)
+            )
+            runner_safety = icra._BASE._resolve_safety_switches(
+                runner_context, runner_preset_keys
+            )
+
+        sim_context = LaunchContext()
+        sim_context.launch_configurations.update(dict(runtime.ARG_DEFAULTS))
+        sim_context.launch_configurations.update(
+            {
+                "experiment": "canonical_full_stack_sim",
+                "scenario": scenario,
+                "start_rviz": "true",
+                "run_duration_s": "180.0",
+                "planner_start_delay_s": "10.0",
+            }
+        )
+        with mock.patch.object(sys, "argv", ["iap_sim.launch.py"]):
+            _, _, sim_preset_keys = runtime._apply_presets(
+                sim_context, str(REPO)
+            )
+            sim_safety = runtime._resolve_safety_switches(
+                sim_context, sim_preset_keys
+            )
+
+        equivalent_keys = {
+            "grid_map/independent_cloud_clock_guard_s",
+            "grid_map/independent_cloud_min_interval_s",
+            "lidar_renderer_mode",
+            "lidar_start_delay_s",
+            "manager/use_distinctive_trajs",
+            "odometry_acc_scale",
+            "odometry_initialization_mode",
+            "p0.horizons_s",
+            "p0.predictor.sigma_grow_m_sqrt_s",
+            "p0.predictor.sigma_growth_profile",
+            "p0.predictor.worker_count",
+            "p0.refresh_start_delay_s",
+            "p4.raw_detail_enable",
+            "p4.require_risk_grid_ready_before_planning",
+            "p4.runtime_window_satellite_detail_max_rows",
+            "planner_enable_p1",
+            "planner_enable_p2",
+            "planner_enable_p3_global",
+            "planner_enable_p3_local",
+            "planner_enable_p4",
+            "planner_enable_p5_final",
+            "planner_enable_p5_runtime",
+            "planner_executor_thread_count",
+            "run_validator",
+            "rviz_config",
+            "safety_viz.enable_p4_viz",
+            "validation_duration_s",
+        }
+        self.assertEqual(
+            {
+                key: str(sim_context.launch_configurations[key])
+                for key in equivalent_keys
+            },
+            {
+                key: str(runner_context.launch_configurations[key])
+                for key in equivalent_keys
+            },
+        )
+        # The historical ICRA graph hard-codes simulated sensor time on the
+        # vehicle plant; the maintained graph exposes the same behavior as a
+        # launch value.
+        self.assertEqual(sim_context.launch_configurations["sim_time_enable"], "true")
+        self.assertEqual(sim_safety[:4], runner_safety[:4])
 
     def test_sim_paths_follow_canonical_run_categories(self):
         simulation = self._load_launch("iap_sim.launch.py")

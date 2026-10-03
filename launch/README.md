@@ -136,7 +136,9 @@ is:
 
 - Required processes: simulation environment, GLIO, Current Integrity Monitor,
   P0 Advisory Integrity, P4/P5 safety-aware planner, trajectory server.
-- Forbidden: test validator, automatic bag recorder, and Phase-2 evaluator.
+- The `icra_dense_forest_four_fork_v2` scene also starts the same current-
+  integrity validator used by the ICRA `continuous-flight` runner. Automatic
+  bag recording and the Phase-2 evaluator remain disabled.
 - Required input: generated IMU/LiDAR/GNSS plus selected scenario map.
 - Output: integrity report, advisory risk grid/health, certified B-spline or a
   typed HOLD, position commands, and scenario/run manifests.
@@ -150,6 +152,11 @@ is:
   below the run directory. Scenario names come from
   `config/scenarios/catalog.json`; their exact established parameters are
   resolved by the private `_includes/full_stack_runtime.py` implementation.
+- ICRA four-fork parity: `icra_dense_forest_four_fork_v2` uses
+  `config/sim_demo11/test_icra.rviz` and the runner's GLIO initialization,
+  LiDAR renderer/start ordering, P0 horizons/workers, planner executor,
+  P4/P5 switches, sensor clock, and validation duration. The runner still adds
+  GPU/disk preflight, topic capture, repetitions, and PASS/FAIL analysis.
 - Results: everything is rooted below the allocated run directory.
 
 ### `iap_flight.launch.py`

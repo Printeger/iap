@@ -1130,6 +1130,44 @@ DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET = {
 }
 
 
+# Canonical IAP simulation uses the same single-run runtime contract as the
+# ICRA continuous-flight runner for the maintained four-fork scene.  The
+# runner still owns repetition, preflight, capture, and PASS/FAIL analysis;
+# every value below changes the ROS graph or its effective node parameters.
+ICRA_CONTINUOUS_FLIGHT_RUNTIME_PRESET = {
+    "odometry_acc_scale": "1.0",
+    "odometry_initialization_mode": "NAIVE",
+    "lidar_start_delay_s": "2.0",
+    "planner_start_delay_s": "10.0",
+    "lidar_renderer_mode": "spherical_first_hit_v1",
+    "rviz_config": "config/sim_demo11/test_icra.rviz",
+    "planner_enable_p1": "false",
+    "planner_enable_p2": "false",
+    "planner_enable_p3_local": "false",
+    "planner_enable_p3_global": "false",
+    "planner_enable_p4": "true",
+    "planner_enable_p5_runtime": "true",
+    "planner_enable_p5_final": "true",
+    "manager/use_distinctive_trajs": "false",
+    "grid_map/independent_cloud_min_interval_s": "0.5",
+    "grid_map/independent_cloud_clock_guard_s": "0.5",
+    "p0.refresh_start_delay_s": "0.05",
+    "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0,4.0,5.0,6.0",
+    "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p0.predictor.worker_count": "8",
+    "p4.require_risk_grid_ready_before_planning": "true",
+    "p4.raw_detail_enable": "false",
+    "p4.runtime_window_satellite_detail_max_rows": "0",
+    "planner_executor_thread_count": "6",
+    "safety_viz.enable_p4_viz": "true",
+    "run_validator": "true",
+    "validation_duration_s": "175.0",
+    "record_bag": "false",
+    "sim_time_enable": "true",
+}
+
+
 CORRIDOR_DEGENERATE_MAP_PRESET = {
     "forest_size_x_m": "30.0",
     "forest_size_y_m": "6.0",
@@ -1287,6 +1325,9 @@ COMBO_PRESETS = {
             key == "forked_forest.start_canopy_clearance_radius_m"
         },
         **DENSE_FOREST_V2_MISSION_EXPOSURE_PRESET,
+    },
+    ("canonical_full_stack_sim", "icra_dense_forest_four_fork_v2"): {
+        **ICRA_CONTINUOUS_FLIGHT_RUNTIME_PRESET,
     },
     ("p0_open_sky", "manual"): P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET,
     ("p5_corridor", "manual"): {

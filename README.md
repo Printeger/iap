@@ -292,6 +292,22 @@ ros2 launch iap iap_sim.launch.py \
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
+最新 ICRA 四分叉完整闭环使用：
+
+```bash
+ros2 launch iap iap_sim.launch.py \
+  scenario:=icra_dense_forest_four_fork_v2 \
+  start_rviz:=true \
+  run_duration_s:=180
+```
+
+这个场景与 `run_icra_interface_integration.py --stage continuous-flight`
+使用相同的单次 ROS 运行配置和 `config/sim_demo11/test_icra.rviz`：包括
+GLIO `NAIVE` 初始化、LiDAR 的 `spherical_first_hit_v1` renderer 和 2 秒延迟、
+P0 预测 horizon/worker、P4/P5、planner executor、仿真传感器时间以及 175 秒
+完整性 validator。runner 额外执行 GPU/磁盘预检、topic 抓取、重复运行和
+PASS/FAIL 分析；这些外层测试工作不属于 `iap_sim.launch.py` 的 ROS 节点图。
+
 常用场景：
 
 | 场景 | 输入与用途 | 任务模式 |
@@ -305,7 +321,7 @@ ros2 launch iap iap_sim.launch.py \
 
 全部名称和参数见 [config/scenarios/catalog.json](config/scenarios/catalog.json)。其中论文、开发和 fixture 场景有各自用途；场景存在不代表已获得正式实验结论。
 
-`strict_global` 要求适用的全局完整性条件成立。`mission_best_effort` 可按明确分类处理部分 GNSS 降级，但仍要求本地运动、碰撞、净空、动力学和制动条件成立。完整仿真使用维护中的 P0/P4/P5 路径，不启动旧 Phase-2 evaluator、测试 validator 或自动 bag recorder。
+`strict_global` 要求适用的全局完整性条件成立。`mission_best_effort` 可按明确分类处理部分 GNSS 降级，但仍要求本地运动、碰撞、净空、动力学和制动条件成立。完整仿真使用维护中的 P0/P4/P5 路径，不启动旧 Phase-2 evaluator 或自动 bag recorder。ICRA 四分叉场景会启动 continuous-flight 使用的完整性 validator；其他 canonical 场景不启动它。
 
 ### 5.4 真实飞行
 

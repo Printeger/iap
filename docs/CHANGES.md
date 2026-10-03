@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-canonical-runtime-parity): IAP-RQ-410 — make
+  `iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2` use the same
+  single-run ROS contract as the ICRA `continuous-flight` runner: GLIO
+  initialization, LiDAR startup and renderer, P0 horizons/workers, GridMap
+  timing, P4/P5 switches and visualization, planner executor, simulated sensor
+  time, validator window, and `test_icra.rviz`. The runner continues to own
+  GPU/disk preflight, capture, repetition, retention, and PASS/FAIL analysis.
+  A cross-entrypoint launch test now compares the two resolved contracts.
 - feat(automatic-run-directories): IAP-RQ-300 / IAP-RQ-410 — canonical launch
   entrypoints now allocate collision-safe UTC timestamped run directories when
   `output_dir` is omitted. Source and symlink-install development defaults to

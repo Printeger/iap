@@ -1,9 +1,10 @@
 """Private stable full-stack simulation graph.
 
 This boundary exposes none of the validation launch's paper/fixture argument
-surface. It initializes the maintained runtime with fixed canonical defaults,
-forces test processes off, and calls only its graph builder. Runtime helpers
-remain shared temporarily so historical experiment behavior does not fork.
+surface. It initializes the maintained runtime with fixed canonical defaults
+and calls only its graph builder.  The maintained four-fork ICRA scene selects
+the same single-run validator and runtime profile as the continuous-flight
+runner; repetition, capture, and analysis remain runner responsibilities.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ def _runtime_module():
 def _setup(context):
     runtime = _runtime_module()
     supplied = dict(context.launch_configurations)
+    scenario = str(supplied.get("scenario", ""))
+    icra_continuous_flight = scenario == "icra_dense_forest_four_fork_v2"
     for name, default in runtime.ARG_DEFAULTS:
         # Reset the entire legacy surface. Undeclared raw CLI values must not
         # leak through the shared runtime into canonical safety settings.
@@ -49,10 +52,13 @@ def _setup(context):
     context.launch_configurations.update(
         {
             "experiment": "canonical_full_stack_sim",
-            "scenario": str(supplied["scenario"]),
+            "scenario": scenario,
             "start_rviz": str(supplied.get("start_rviz", "true")),
             "record_bag": "false",
-            "run_validator": "false",
+            "run_validator": "true" if icra_continuous_flight else "false",
+            "validation_duration_s": (
+                "175.0" if icra_continuous_flight else "85"
+            ),
             "runtime_root_dir": str(supplied["runtime_root_dir"]),
             "export_root_dir": str(supplied["export_root_dir"]),
             "iap_log_root": str(supplied["iap_log_root"]),
