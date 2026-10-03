@@ -1,20 +1,72 @@
 # IAP - Integrity-Aware Positioning
 
-IAP 是一个基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位、完整性评估与安全规划系统。
+# 最新仓库信息：
+一个基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图系统，并进一步把“定位结果有多可信”预测到未来轨迹上，让规划器主动选择更安全、更可观测的飞行路径。
 
-当前公开运行接口只有以下四个 canonical launch：
+几个模块：
+1. GLIO：GNSS（伪距+多普勒）+ IMU + LiDAR（ICP 或特征）的滑窗/因子图估计器
+2. Current Integrity Monitor： ARAIM based GNSS+LiDAR integrity (针对当前位姿的 PL/AL/IM 计算)
+3. Advisory Integrity Evaluator： PL/AL/IM for GNSS + LiDAR（对未来某个点的 PL/AL/IM 预测）
+4. Safety-aware planner： 根据目标、地图、当前完整性和预测完整性，产生一个经过完整认证的可执行轨迹，或者一个明确的 HOLD 原因。
 
-- `glio.launch.py`
-- `glio_integrity.launch.py`
-- `iap_sim.launch.py`
-- `iap_flight.launch.py`
+# 编译和运行 IAP
+```
+cd /home/dev/ws_iap
+
+source /opt/ros/jazzy/setup.bash
+
+colcon --log-base /home/dev/ws_iap/log build \
+  --base-paths /home/dev/ws_iap/src/iap \
+  --packages-select iap \
+  --build-base /home/dev/ws_iap/build \
+  --install-base /home/dev/ws_iap/install \
+  --symlink-install \
+  --cmake-args \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DBUILD_TESTING=ON
+
+source /home/dev/ws_iap/install/setup.bash
+```
+## 运行：
+```
+# GLIO：真实传感器或由用户另行播放、使用相同 topic 契约的 rosbag
+ros2 launch iap glio.launch.py
+
+# GLIO + Current Integrity Monitor；输入 topic 契约与实时模式相同
+ros2 launch iap glio_integrity.launch.py
+
+# 完整系统仿真
+python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
+  --output-root /tmp/iap_runs/sim_001/preflight \
+  --gpu-preflight-only
+ros2 launch iap iap_sim.launch.py \
+  scenario:=lidar_corridor_degenerate
+
+# 真实飞行还必须提供目标、通过的部署校准清单及控制器握手确认；
+# 完整参数见 launch/README.md。
+python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
+  --output-root /data/iap_runs/flight_001/preflight \
+  --gpu-preflight-only
+ros2 launch iap iap_flight.launch.py \
+  flight_authorized:=true \
+  controller_handshake_confirmed:=true \
+  beam_evidence_topic:=/vehicle/lidar/beam_evidence \
+  goal_x:=10.0 goal_y:=0.0 goal_z:=2.0 \
+  local_surface_error_bound_m:=0.04 \
+  local_surface_error_calibration_id:=vehicle_01_heldout_2026_09 \
+  local_surface_error_calibration_manifest:=/data/iap/calibration/vehicle_01.json
+```
+
+以上四个文件是 canonical 入口。运行目录会自动按时间戳创建在
+`src/iap/log/` 下；部署环境可一次性设置 `IAP_RUN_ROOT`，显式
+`output_dir` 仅作为单次覆盖。详细启动契约见 `launch/README.md`。
 
 ---
 
 > **历史资料边界：** 以下 `demo1`–`demo11`、`test_*` 和旧
 > `iap_rosnode.launch.py` 章节只用于理解或复现旧系统，不是当前推荐
 > 入口。新开发和日常运行只能使用上面的四个 canonical launch；旧文件
-> 的唯一源码副本位于 `launch/bp/`。详细启动契约见 `launch/README.md`。
+> 的唯一源码副本位于 `launch/bp/`。
 
 ## 1. 快速开始
 
@@ -439,7 +491,7 @@ ros2 launch iap demo2.launch start_rviz:=false circle_radius:=6.0
 | `demo8` | Demo7 风格的 SO3 + GNSS/ARAIM 真值对照 | 是 | 是 | ARAIM 真值比较、三路轨迹可视化 |
 | `demo9` | EGO planner + IAP odom + SO3 controller 闭环 | 是 | 是 | Phase 1 官方闭环验证 |
 | `demo10` | demo9 + PI-lite 只读轨迹完整性 evaluator | 是 | 是 | Phase 2 AL/PL/IM 预测与离线对齐 |
-| `demo11` | 森林走廊 + IAP + GNSS/ARAIM + integrity-aware EGO planner | 是 | 是 | 最新 IAP 系统闭环验证 |
+| `demo11` | 森林走廊 + IAP + GNSS/ARAIM + integrity-aware EGO planner | 是 | 是 | 历史闭环验证；canonical 入口为 `iap_sim.launch.py` |
 
 ### 4.2 Demo1：基础地图与静态 LiDAR
 
@@ -733,6 +785,9 @@ python3 src/iap/tools/phase1/validate_phase1_closed_loop.py \
 
 ### 4.11 Demo10：PI-lite 只读轨迹完整性评估
 
+> 历史说明：本节仅用于复现旧实验。`phase2_planner_integrity_evaluator`
+> 已废弃，不得出现在 canonical 运行图中；当前 Advisory Integrity 使用 P0。
+
 目的：在 demo9 闭环栈上增加 `phase2_planner_integrity_evaluator`，沿 EGO planner 的未来 B-spline 采样并导出 `AL_pred`、`PL_pred`、`IM_pred`。demo10 只是评估器，不会把 ARAIM/AL/PL/IM 加入 planner cost，也不会修改 planner、ARAIM、IAP estimator、控制器或仿真动力学。
 
 官方 Phase 2 运行命令：
@@ -800,7 +855,10 @@ GNSS 可视化/诊断 topic：
 
 ### 4.12 Demo11：IAP 系统闭环验证
 
-目的：`demo11` 是当前最新的 IAP 系统闭环验证。它在 `demo9` 的 EGO planner + SO3 controller + IAP odom 闭环和 `demo10` 的未来 PL/AL/IM 预测基础上，加入森林走廊地图、GNSS SkyMask/NLOS/多路径/故障注入、PL grid，以及回灌到 EGO 前端 A* 的 integrity cost field。和 `demo10` 不同，`demo11` 不只是记录评估结果，而是让 planner 在搜索阶段主动避开预测低完整性区域。
+> 历史说明：本节保留旧 demo11 的复现方法。当前完整系统入口是
+> `iap_sim.launch.py`，不是 demo11。
+
+目的：`demo11` 是历史 IAP 系统闭环验证。它在 `demo9` 的 EGO planner + SO3 controller + IAP odom 闭环和 `demo10` 的未来 PL/AL/IM 预测基础上，加入森林走廊地图、GNSS SkyMask/NLOS/多路径/故障注入、PL grid，以及回灌到 EGO 前端 A* 的 integrity cost field。和 `demo10` 不同，`demo11` 不只是记录评估结果，而是让 planner 在搜索阶段主动避开预测低完整性区域。
 
 构建 demo11 依赖：
 
@@ -831,7 +889,7 @@ ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
 ```text
 demo11_corridor_map_publisher -> /map_generator/global_cloud
 GNSS sim + IAP -> /iap/integrity
-phase2_planner_integrity_evaluator -> /iap/integrity_front_cost_field
+phase2_planner_integrity_evaluator [DEPRECATED, historical only] -> /iap/integrity_front_cost_field
 EGO planner front-end A* -> integrity-aware global/front search
 traj_server -> SO3 controller -> SO3 plant -> IAP odom feedback
 ```

@@ -1,1 +1,0 @@
-python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra031/runs --smoke

@@ -153,3 +153,26 @@ enumerate stable channels
 - 正式实验产生的冻结证据单独保留，不与日常开发日志混用。
 - one-shot、held-out 隔离、冻结 seed/order/config、禁止重试、完整 artifact retention 和完整 qualification，只在用户明确启动正式实验并指定协议时生效。
 - 日常开发、smoke test、故障诊断和修复不受一次性运行限制。
+
+# 一些新的限制（0928）
+1. 默认只在 dev/iap_refactor 当前 checkout 开发。
+2. 日常运行只使用一套 build/install/log。
+3. ASAN 使用固定的第二套目录，不以任务命名。
+4. 所有运行必须使用独立输出目录：canonical launch 默认自动创建带时间戳的目录，也可显式覆盖；禁止向仓库根目录写 CSV。
+5. 单元测试使用临时目录，测试退出后自动删除。
+6. 普通开发 run 只保留最近若干次，例如最近 3 次或 7 天。
+7. 失败开发 run 默认只保留：- summary.json
+   - manifest
+   - 关键错误片段
+   - 必要图表
+8. 只有明确声明为正式实验的运行，才进入 evidence/frozen。
+9. worktree 必须带到期条件；任务结束立即合并、移除、git worktree prune。
+
+# 最新仓库信息：
+一个基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图系统，并进一步把“定位结果有多可信”预测到未来轨迹上，让规划器主动选择更安全、更可观测的飞行路径。
+
+几个模块：
+1. GLIO：GNSS（伪距+多普勒）+ IMU + LiDAR（ICP 或特征）的滑窗/因子图估计器
+2. Current Integrity Monitor： ARAIM based GNSS+LiDAR integrity (针对当前位姿的 PL/AL/IM 计算)
+3. Advisory Integrity Evaluator： PL/AL/IM for GNSS + LiDAR（对未来某个点的 PL/AL/IM 预测）
+4. Safety-aware planner： 根据目标、地图、当前完整性和预测完整性，产生一个经过完整认证的可执行轨迹，或者一个明确的 HOLD 原因。
