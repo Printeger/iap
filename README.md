@@ -368,7 +368,7 @@ ros2 bag play /absolute/path/to/rosbag --clock --rate 1.0
 
 仅定位时把入口换成 `glio.launch.py`。GNSS 原始观测、星历和初始化信息也需匹配当前接口；必要时在 bag 播放端 remap topic。完整性回放还要包含相应证据。模块 launch 不接收旧 `mode`、`bag_path`、`bag_rate` 参数，也不自动启动 bag 播放器。
 
-#### 使用仓库内置 `data/realsense_ros2` 测试 GLIO 与 RViz
+#### 使用仓库内置 `data/realsense_ros2` 测试 GLIO、完整性监测与 RViz
 
 仓库内的 `data/realsense_ros2` 是约 231 秒、5.3 GiB 的 ROS 2 bag，包含 `/livox/imu`、`/livox/lidar`、GNSS 观测、星历和接收机位置。它也包含旧运行产生的 `/glim_ros/odom`、`/glim_ros/points`、相机及 MAVROS topic；测试当前 GLIO 时只播放下面列出的输入，避免把历史输出误认为当前结果。
 
@@ -383,7 +383,7 @@ export GLIO_BAG=/home/dev/ws_iap/src/iap/data/realsense_ros2
 ros2 bag info "$GLIO_BAG"
 ```
 
-终端 A 先启动 GLIO。bag 播放时必须启用仿真时间；RViz 默认同时启动：
+终端 A 先启动算法。bag 播放时必须启用仿真时间；RViz 默认同时启动。只测试 GLIO 时运行：
 
 ```bash
 cd /home/dev/ws_iap
@@ -394,6 +394,20 @@ ros2 launch iap glio.launch.py \
   use_sim_time:=true \
   imu_topic:=/livox/imu \
   points_topic:=/livox/lidar
+```
+
+测试 GLIO + 当前完整性监测时改用：
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 launch iap glio_integrity.launch.py \
+  use_sim_time:=true \
+  imu_topic:=/livox/imu \
+  points_topic:=/livox/lidar \
+  integrity_profile:=fused
 ```
 
 终端 B 再播放输入。下面的命令从头播放 60 秒，适合第一次检查：
@@ -418,11 +432,11 @@ ros2 bag play "$GLIO_BAG" \
     /ublox_driver/receiver_lla
 ```
 
-删除 `--playback-duration 60` 即可播放完整数据集。不要在同一个测试中播放 bag 内已有的 `/glim_ros/odom` 和 `/glim_ros/points`；当前运行的可视化输出位于 `/glio/*`。
+删除 `--playback-duration 60` 即可播放完整数据集。不要在同一个测试中播放 bag 内已有的 `/glim_ros/odom` 和 `/glim_ros/points`；当前运行的可视化输出位于 `/glio/*` 或 `/glio_integrity/*`。
 
 该 bag 的 `/ublox_driver/iono_params` 类型是旧的 `gnss_comm/msg/StampedFloat64Array`，当前 GLIO 订阅 `gnss_comm/msg/GnssIonosphereParameter`，因此上面的首次测试有意不播放这个 topic。GLIO 仍可运行，但日志会说明没有启用 Klobuchar 电离层修正，伪距误差可能增大。这套命令适合验证数据接入、估计和可视化，不作为完整 GNSS 精度或正式实验验收；做后者前需要先把旧消息转换为当前 schema。
 
-终端 C 检查输入、当前估计输出和 RViz 所用 topic：
+终端 C 检查输入、当前估计输出和 RViz 所用 topic。运行 GLIO 时使用：
 
 ```bash
 cd /home/dev/ws_iap
@@ -437,7 +451,19 @@ ros2 topic hz /glio/aligned_points
 ros2 topic echo /glio/odom --once
 ```
 
-每个 `ros2 topic hz` 检查到稳定频率后按 Ctrl+C，再执行下一条。RViz 的 Fixed Frame 为 `map`，默认显示 `/glio/aligned_points`、`/glio/map`、`/glio/odom` 和 TF；地图需要处理若干帧后才会出现。如果输入有频率而 `/glio/odom` 始终没有数据，查看 launch 终端中的初始化错误和本次运行日志。
+运行 GLIO + 当前完整性监测时使用：
+
+```bash
+ros2 node info /glio_integrity
+ros2 topic hz /livox/imu
+ros2 topic hz /livox/lidar
+ros2 topic hz /glio_integrity/odom
+ros2 topic hz /glio_integrity/aligned_points
+ros2 topic echo /iap/integrity --once
+ros2 topic echo /iap/araim_envelopes --once
+```
+
+每个 `ros2 topic hz` 检查到稳定频率后按 Ctrl+C，再执行下一条。RViz 的 Fixed Frame 为 `map`；地图需要处理若干帧后才会出现。完整性包络只有在监测器产生有效保护级后才会发布。如果输入有频率而当前入口的 odom topic 始终没有数据，查看 launch 终端中的初始化错误和本次运行日志。
 
 播放开始后记录本次 run 的具体路径，避免后续 `latest` 被其他 launch 更新：
 
