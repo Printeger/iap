@@ -19,6 +19,7 @@ from launch.actions import (
     RegisterEventHandler,
 )
 from launch.event_handlers import OnShutdown
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -41,6 +42,7 @@ def _as_bool(value: str) -> bool:
 
 
 def _setup(context):
+    iap_share = Path(get_package_share_directory("iap"))
     config_path = LaunchConfiguration("config_path").perform(context)
     internal_run = str(context.launch_configurations.get("run_dir", "")).strip()
     output_dir = (
@@ -94,6 +96,28 @@ def _setup(context):
                 {"use_sim_time": LaunchConfiguration("use_sim_time")},
             ],
         ),
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            name="glio_integrity_rviz",
+            output="screen",
+            arguments=[
+                "-d",
+                str(
+                    iap_share
+                    / "config"
+                    / "profiles"
+                    / "glio_integrity"
+                    / "glio_integrity.rviz"
+                ),
+            ],
+            condition=IfCondition(LaunchConfiguration("start_rviz")),
+            additional_env={
+                "IAP_RUN_DIR": str(output_dir),
+                "ROS_LOG_DIR": str(output_dir / "runtime" / "ros"),
+            },
+            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+        ),
     ]
     if not internal_run:
         actions.append(
@@ -130,6 +154,14 @@ def generate_launch_description():
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("points_topic", default_value="/livox/lidar"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument(
+                "start_rviz",
+                default_value="true",
+                description=(
+                    "Start RViz with GLIO outputs and current-integrity "
+                    "envelopes."
+                ),
+            ),
             DeclareLaunchArgument(
                 "integrity_profile",
                 default_value="fused",

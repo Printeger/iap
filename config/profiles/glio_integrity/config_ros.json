@@ -16,7 +16,8 @@
     "dump_path": "iap_glio_integrity_dump",
     "extension_modules": [
       "libgnss_extension.so",
-      "libintegrity_extension.so"
+      "libintegrity_extension.so",
+      "librviz_viewer.so"
     ],
     "imu_topic": "/livox/imu",
     "points_topic": "/livox/lidar",

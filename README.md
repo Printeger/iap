@@ -262,9 +262,14 @@ ros2 launch iap glio_integrity.launch.py \
   imu_topic:=/vehicle/imu \
   points_topic:=/vehicle/lidar \
   integrity_profile:=fused
+
+# 远程或无桌面环境
+ros2 launch iap glio_integrity.launch.py start_rviz:=false
 ```
 
-默认 profile 为 `config/profiles/glio_integrity`。IMU、点云、时间和配置参数与 GLIO 入口一致；`integrity_profile` 默认 `fused`，还接受 `gnss_only`、`lidar_only`、`fallback_only`。报告发布到 `/iap/integrity`。
+默认 profile 为 `config/profiles/glio_integrity`。IMU、点云、时间和配置参数与 GLIO 入口一致；`integrity_profile` 默认 `fused`，还接受 `gnss_only`、`lidar_only`、`fallback_only`。`start_rviz` 默认为 `true`。
+
+该 profile 加载 `librviz_viewer.so`，发布 `/glio_integrity/odom`、`/glio_integrity/map`、`/glio_integrity/aligned_points` 和 TF。完整性报告发布到 `/iap/integrity`；可视化包络发布到 `/iap/araim_envelopes`。RViz 使用 `config/profiles/glio_integrity/glio_integrity.rviz`，默认显示地图、配准点云、里程计、TF，以及 GNSS、LiDAR 和融合保护级包络。包络需要有效的完整性结果，传感器尚未初始化或结果无效时可能暂时为空。
 
 该入口不启动未来完整性预测或规划器。报告是否能作为下游证据，需要检查有效性、新鲜度、来源和告警限。
 

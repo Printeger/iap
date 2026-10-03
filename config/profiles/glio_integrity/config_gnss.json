@@ -24,6 +24,8 @@
     "enable_fgo_info": true,
     "enable_dynamic_al": true,
     "publish_topic": "/iap/integrity",
+    "enable_araim_markers": true,
+    "araim_marker_topic": "/iap/araim_envelopes",
     "K_pl": 3.0,
     "gamma_H": 0.5,
     "r_drone": 0.35,

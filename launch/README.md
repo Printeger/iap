@@ -7,7 +7,7 @@ directories documented below.
 | Entrypoint | Runtime composition | Environment |
 |---|---|---|
 | `glio.launch.py` | GLIO + visualization publisher; RViz by default | none; live and rosbag use the same topics |
-| `glio_integrity.launch.py` | GLIO + Current Integrity Monitor | none |
+| `glio_integrity.launch.py` | GLIO + Current Integrity Monitor + visualization publisher; RViz by default | none |
 | `iap_sim.launch.py` | all four IAP modules | selected simulation scenario |
 | `iap_flight.launch.py` | all four IAP modules | real vehicle IO only |
 
@@ -31,6 +31,9 @@ ros2 launch iap glio.launch.py start_rviz:=false
 
 # GLIO + current integrity
 ros2 launch iap glio_integrity.launch.py
+
+# Headless/remote integrity monitoring
+ros2 launch iap glio_integrity.launch.py start_rviz:=false
 
 # Full simulation
 python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
@@ -114,11 +117,15 @@ is:
 
 ### `glio_integrity.launch.py`
 
-- Required process: `iap/iap_rosnode` named `glio_integrity`, loading GNSS and
-  integrity extensions.
+- Required process: `iap/iap_rosnode` named `glio_integrity`, loading GNSS,
+  integrity, and visualization-publisher extensions.
 - Forbidden: planner, simulator, fake odometry, map generator, rosbag player.
 - Required input: GLIO inputs plus integrity-required GNSS/LiDAR evidence.
-- Output: GLIO outputs and `/iap/integrity`.
+- Output: `/glio_integrity/odom`, `/glio_integrity/map`,
+  `/glio_integrity/aligned_points`, TF, `/iap/integrity`, and the current
+  protection-level envelopes on `/iap/araim_envelopes`. RViz starts by default
+  with the maintained integrity config; pass `start_rviz:=false` for headless
+  use.
 - Ready: fresh odometry and a fresh certified current-integrity report.
 - HOLD: downstream motion must remain disabled while current integrity is
   missing, stale, invalid, or above its alert limit.
