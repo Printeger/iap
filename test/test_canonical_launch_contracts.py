@@ -455,18 +455,35 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 }
             )
             context.environment["IAP_RUN_DIR"] = str(run_dir)
+            runtime._apply_presets(context, str(REPO))
 
-            _, _, _, _, logging = runtime._runtime_config(
+            config_path, _, _, _, logging = runtime._runtime_config(
                 context,
                 use_gnss=False,
                 use_araim=True,
                 allow_truth_alignment=False,
             )
 
+            def reject_nonfinite(value):
+                raise ValueError(f"non-finite JSON constant: {value}")
+
+            config_ros = json.loads(
+                (Path(config_path) / "config_ros.json").read_text(
+                    encoding="utf-8"
+                ),
+                parse_constant=reject_nonfinite,
+            )
+
             self.assertEqual(logging["log_root"], str(run_dir / "runtime"))
             self.assertEqual(
                 logging["timing_csv_path"],
                 str(run_dir / "profiling/iap_timing.csv"),
+            )
+            self.assertEqual(
+                config_ros["glim_ros"]["planner_local_map"][
+                    "planning_lattice_origin_m"
+                ],
+                [-15.0, -15.0, -0.01],
             )
 
     def test_catalog_task_mode_is_applied_to_every_canonical_scenario(self):

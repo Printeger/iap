@@ -45,6 +45,7 @@ P4_G0C_EXPERIMENTS = {
 }
 P4_G0C_SCENARIO = "p4_g0c_free_corridor_v1"
 P4_G0C_REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
+GRID_MAP_GROUND_HEIGHT_M = -0.01
 P4_G0C_PROTOCOL_SHA256 = (
     "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d"
 )
@@ -2495,6 +2496,31 @@ def _validate_online_truth_isolation(context, scenario):
 
 def _planner_local_map_contract(context):
     """Return the canonical immutable planner/GLIM frame contract."""
+    geofence_extent = [
+        _param_float(context, "map_size_x"),
+        _param_float(context, "map_size_y"),
+        _param_float(context, "map_size_z"),
+    ]
+    if not all(
+            math.isfinite(value) and value > 0.0
+            for value in geofence_extent):
+        raise RuntimeError(
+            "planner local-map geofence extent must be finite and positive"
+        )
+    geofence_origin = [
+        _param_float(context, "grid_map/origin_x"),
+        _param_float(context, "grid_map/origin_y"),
+        _param_float(context, "grid_map/origin_z"),
+    ]
+    if not all(math.isfinite(value) for value in geofence_origin):
+        # Match GridMap's automatic-origin rule exactly. The frame contract is
+        # serialized as strict JSON, so it must record the finite effective
+        # origin rather than the NaN sentinel accepted by ROS parameters.
+        geofence_origin = [
+            -geofence_extent[0] / 2.0,
+            -geofence_extent[1] / 2.0,
+            GRID_MAP_GROUND_HEIGHT_M,
+        ]
     payload = {
         "schema": "planner_local_map_frame_contract_v1",
         "mode": LaunchConfiguration("planner_frame_mode").perform(context).strip(),
@@ -2505,21 +2531,13 @@ def _planner_local_map_contract(context):
             _param_float(context, "init_z"),
         ],
         "ego_resolution_m": _param_float(context, "grid_map/resolution"),
-        "geofence_origin_m": [
-            _param_float(context, "grid_map/origin_x"),
-            _param_float(context, "grid_map/origin_y"),
-            _param_float(context, "grid_map/origin_z"),
-        ],
-        "geofence_extent_m": [
-            _param_float(context, "map_size_x"),
-            _param_float(context, "map_size_y"),
-            _param_float(context, "map_size_z"),
-        ],
+        "geofence_origin_m": geofence_origin,
+        "geofence_extent_m": geofence_extent,
     }
     contract_id = "sha256:" + hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
     ).hexdigest()
     return payload, contract_id
 
@@ -2879,7 +2897,7 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         config_ros["glim_ros"]["sim"]["enable_metrics_csv"] = False
     config_ros["glim_ros"]["sim"]["metrics_csv_path"] = str(export_dir / "iap_sim_truth_vs_est.csv")
     with config_ros_path.open("w") as f:
-        json.dump(config_ros, f, indent=2)
+        json.dump(config_ros, f, indent=2, allow_nan=False)
         f.write("\n")
 
     with config_gnss_path.open() as f:
@@ -3204,7 +3222,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_to
                 context, "grid_map/independent_cloud_clock_guard_s")},
             {"grid_map/obstacles_inflation": 0.099},
             {"grid_map/local_map_margin": 10},
-            {"grid_map/ground_height": -0.01},
+            {"grid_map/ground_height": GRID_MAP_GROUND_HEIGHT_M},
             {"grid_map/cx": 321.04638671875},
             {"grid_map/cy": 243.44969177246094},
             {"grid_map/fx": 387.229248046875},
