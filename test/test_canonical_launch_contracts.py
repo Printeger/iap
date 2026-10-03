@@ -113,6 +113,13 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             for token in forbidden:
                 self.assertNotIn(token, source, f"{filename} contains {token}")
 
+    def test_glio_starts_maintained_rviz_by_default(self):
+        source = (LAUNCH / "glio.launch.py").read_text(encoding="utf-8")
+        self.assertIn('package="rviz2"', source)
+        self.assertIn('"start_rviz",', source)
+        self.assertIn('default_value="true"', source)
+        self.assertTrue((REPO / "config/profiles/glio/glio.rviz").is_file())
+
     def test_environment_starts_no_iap_algorithm_module(self):
         source = (
             LAUNCH / "_includes/simulation_environment.launch.py"
@@ -184,7 +191,8 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             )
         )
         self.assertEqual(
-            glio["glim_ros"]["extension_modules"], ["libgnss_extension.so"]
+            glio["glim_ros"]["extension_modules"],
+            ["libgnss_extension.so", "librviz_viewer.so"],
         )
         self.assertEqual(
             integrity["glim_ros"]["extension_modules"],
@@ -711,7 +719,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                     "use_sim_time": "false",
                 }
             )
-            self.assertEqual(len(glio._setup(context)), 3)
+            self.assertEqual(len(glio._setup(context)), 4)
 
             integrity = self._load_launch("glio_integrity.launch.py")
             context = LaunchContext()

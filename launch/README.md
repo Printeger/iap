@@ -6,7 +6,7 @@ directories documented below.
 
 | Entrypoint | Runtime composition | Environment |
 |---|---|---|
-| `glio.launch.py` | GLIO only | none; live and rosbag use the same topics |
+| `glio.launch.py` | GLIO + visualization publisher; RViz by default | none; live and rosbag use the same topics |
 | `glio_integrity.launch.py` | GLIO + Current Integrity Monitor | none |
 | `iap_sim.launch.py` | all four IAP modules | selected simulation scenario |
 | `iap_flight.launch.py` | all four IAP modules | real vehicle IO only |
@@ -25,6 +25,9 @@ forbidden from all four graphs.
 ```bash
 # GLIO with live input, or with a rosbag played separately on the same topics
 ros2 launch iap glio.launch.py
+
+# Headless/remote use
+ros2 launch iap glio.launch.py start_rviz:=false
 
 # GLIO + current integrity
 ros2 launch iap glio_integrity.launch.py
@@ -100,7 +103,9 @@ is:
 - Forbidden: integrity extension, planner, simulator, fake odometry, map
   generator, rosbag player, and truth adapter.
 - Required input: configured IMU, LiDAR, GNSS range/ephemeris topics.
-- Output: GLIO odometry/map/TF topics provided by `iap_rosnode`.
+- Output: `/glio/odom`, `/glio/map`, `/glio/aligned_points`, and TF from the
+  GLIO RViz extension. RViz starts by default with the maintained GLIO config;
+  pass `start_rviz:=false` for headless use.
 - Ready: estimator has initialized and publishes fresh odometry.
 - Failure/HOLD: this profile has no planner; invalid or stale input must not be
   represented as navigation authorization.

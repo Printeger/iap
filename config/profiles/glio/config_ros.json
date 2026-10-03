@@ -14,7 +14,10 @@
     "publish_imu2lidar": true,
     "tf_time_offset": 0.000001,
     "dump_path": "iap_glio_dump",
-    "extension_modules": ["libgnss_extension.so"],
+    "extension_modules": [
+      "libgnss_extension.so",
+      "librviz_viewer.so"
+    ],
     "imu_topic": "/livox/imu",
     "points_topic": "/livox/lidar",
     "image_topic": "/camera/infra1/image_rect_raw",

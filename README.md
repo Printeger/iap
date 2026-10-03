@@ -236,6 +236,9 @@ ros2 launch iap glio.launch.py
 ros2 launch iap glio.launch.py \
   imu_topic:=/vehicle/imu \
   points_topic:=/vehicle/lidar
+
+# 远程或无桌面环境
+ros2 launch iap glio.launch.py start_rviz:=false
 ```
 
 默认 profile 为 `config/profiles/glio`，加载 GNSS 扩展，不加载当前完整性监测、规划器或仿真环境。
@@ -246,8 +249,9 @@ ros2 launch iap glio.launch.py \
 | `imu_topic` | `/livox/imu` | IMU 输入 |
 | `points_topic` | `/livox/lidar` | 点云输入 |
 | `use_sim_time` | `false` | 是否使用 `/clock` |
+| `start_rviz` | `true` | 启动 GLIO RViz 可视化 |
 
-定位结果的 ROS 发布由扩展模块配置决定。当前默认模块 profile 没有加载 `librviz_viewer.so`；需要 ROS odometry/map/TF 输出时，应使用包含对应发布扩展的配置。不要把某个旧节点名下的 odom topic 当作所有 profile 的固定输出。
+默认 GLIO profile 加载 `librviz_viewer.so`，发布 `/glio/odom`、`/glio/map`、`/glio/aligned_points` 和 TF；launch 使用 `config/profiles/glio/glio.rviz` 打开这些显示。自定义 profile 仍需自行加载可视化发布扩展并保持 topic 契约。
 
 ### 5.2 GLIO + 当前完整性监测
 
