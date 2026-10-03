@@ -1,1290 +1,643 @@
-# IAP - Integrity-Aware Positioning
+# IAP
 
-# 最新仓库信息：
-一个基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图系统，并进一步把“定位结果有多可信”预测到未来轨迹上，让规划器主动选择更安全、更可观测的飞行路径。
+IAP 是基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图与完整性感知规划系统。它融合传感器观测，评估当前定位结果的可信程度，并预测未来位置的完整性，让规划器选择更安全、更可观测的飞行路径。
 
-几个模块：
-1. GLIO：GNSS（伪距+多普勒）+ IMU + LiDAR（ICP 或特征）的滑窗/因子图估计器
-2. Current Integrity Monitor： ARAIM based GNSS+LiDAR integrity (针对当前位姿的 PL/AL/IM 计算)
-3. Advisory Integrity Evaluator： PL/AL/IM for GNSS + LiDAR（对未来某个点的 PL/AL/IM 预测）
-4. Safety-aware planner： 根据目标、地图、当前完整性和预测完整性，产生一个经过完整认证的可执行轨迹，或者一个明确的 HOLD 原因。
+系统采用因子图估计和优化规划。完整闭环的输出是经过认证的可执行轨迹，或一个明确的 HOLD（保持/停止执行）原因。
 
-# 编译和运行 IAP
+本 README 是当前编译、运行、日志和分析的主要参考。日常运行使用四个正式 launch：`glio.launch.py`、`glio_integrity.launch.py`、`iap_sim.launch.py`、`iap_flight.launch.py`。旧 Demo1–11 和阶段实验入口保留在 `launch/bp/`，用途见[历史入口说明](launch/bp/README.md)。
+
+## 目录
+
+- [1. 系统架构与模块](#1-系统架构与模块)
+- [2. 环境与依赖](#2-环境与依赖)
+- [3. 编译](#3-编译)
+- [4. 快速开始](#4-快速开始)
+- [5. Launch 使用指南](#5-launch-使用指南)
+- [6. 配置与传感器接入](#6-配置与传感器接入)
+- [7. 日志系统与运行产物](#7-日志系统与运行产物)
+- [8. 结果分析](#8-结果分析)
+- [9. 运行检查与常见问题](#9-运行检查与常见问题)
+- [10. 目录与专题文档](#10-目录与专题文档)
+
+## 1. 系统架构与模块
+
+| 模块 | 职责 | 主要输出 |
+|---|---|---|
+| GLIO | GNSS 伪距/多普勒、IMU 与 LiDAR 的滑窗/因子图融合估计 | 位姿、地图及估计诊断 |
+| Current Integrity Monitor | 基于 GNSS/LiDAR 证据监测当前位姿完整性 | 当前 PL、AL、IM、来源与有效性状态 |
+| Advisory Integrity Evaluator | 预测未来位置的 GNSS/LiDAR 完整性与风险 | 预测查询、执行风险快照、风险栅格与健康状态 |
+| Safety-aware planner | 根据目标、地图、当前及预测完整性选择通道、优化并认证轨迹 | 可执行 B-spline、位置指令或明确的 HOLD 原因 |
+
+```mermaid
+flowchart LR
+    Sensors[LiDAR / IMU / GNSS] --> GLIO[GLIO 定位建图]
+    GLIO --> Monitor[当前完整性监测]
+    GLIO --> Map[局部地图与观测证据]
+    Monitor --> Advisory[未来完整性预测]
+    Map --> Advisory
+    Goal[任务目标] --> Planner[安全规划与轨迹认证]
+    GLIO --> Planner
+    Monitor --> Planner
+    Map --> Planner
+    Advisory --> Planner
+    Planner --> Result[可执行轨迹 / HOLD]
 ```
-cd /home/dev/ws_iap
 
+四个模块是逻辑划分。当前完整性监测以 `iap_rosnode` 的扩展运行；未来完整性使用维护中的 P0 路径，完整系统由规划节点、轨迹服务和估计器共同组成。模块数量不等于 ROS 进程数量。
+
+### 完整性指标
+
+| 指标 | 含义 |
+|---|---|
+| PL（Protection Level） | 在所用完整性模型下的位置误差保护界 |
+| AL（Alert Limit） | 任务允许的误差告警限 |
+| HPL / VPL | 水平 / 垂直保护界，单位 m |
+| HAL / VAL | 水平 / 垂直告警限，单位 m |
+| IM（Integrity Margin） | 当前监测中的 `min(HAL - HPL, VAL - VPL)` |
+
+正裕度需要结合报告有效性、来源和新鲜度解释。预测风险帮助选择路径；最终执行还要通过实际轨迹的碰撞、净空、动力学、制动及适用完整性检查。完整消息定义见 [IntegrityReport.msg](msg/IntegrityReport.msg)。
+
+## 2. 环境与依赖
+
+本文命令使用 Bash，以 `/home/dev/ws_iap` 为工作区、`src/iap` 为本仓库。其他位置请替换工作区路径。当前日常环境使用 ROS 2 Jazzy 和 C++17。
+
+| 类别 | 依赖 |
+|---|---|
+| ROS | ROS 2 Jazzy、colcon、ament、ROS 消息生成工具及各包声明的 ROS 依赖 |
+| 核心估计 | GTSAM 4.2+、gtsam_points 1.2.0+、Eigen3、Boost、OpenMP、fmt、spdlog、glog |
+| GPU | NVIDIA 驱动、CUDA，以及启用 CUDA 的 gtsam_points；默认里程计 profile 使用 GPU |
+| 查看器 | Iridescence（`BUILD_WITH_VIEWER=ON` 时） |
+| 规划与仿真 | PCL、OpenCV、cv_bridge、Armadillo、yaml-cpp；LiDAR 渲染还需要 VTK、FLANN、Qhull、libusb |
+| 分析工具 | Python 3；绘图需要 matplotlib，运行诊断脚本需要 psutil |
+
+完整依赖及构建条件以 [CMakeLists.txt](CMakeLists.txt)、[package.xml](package.xml) 和各子包的构建文件为准。colcon 编译命令假定上述系统依赖已经可用；它不会安装 GTSAM、gtsam_points 或 CUDA。
+
+每个新终端都要加载环境：
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+# 首次构建完成后，再加载工作区 overlay
+source install/setup.bash
+```
+
+## 3. 编译
+
+### 3.1 首次完整构建
+
+完整系统需要 IAP、GNSS 通信、规划器和仿真包。使用显式 `--paths`：IAP 包内还有嵌套 ROS 包，工作区中也可能存在同名的其他源码副本。
+
+在同一个终端执行下面的路径声明、包检查和构建：
+
+```bash
+cd /home/dev/ws_iap
 source /opt/ros/jazzy/setup.bash
 
-colcon --log-base /home/dev/ws_iap/log build \
-  --base-paths /home/dev/ws_iap/src/iap \
-  --packages-select iap \
-  --build-base /home/dev/ws_iap/build \
-  --install-base /home/dev/ws_iap/install \
-  --symlink-install \
-  --cmake-args \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DBUILD_TESTING=ON
+iap_source_paths=(
+  src/gnss_comm
+  src/iap
+  src/iap/src/iap/planner/traj_utils
+  src/iap/src/iap/planner/plan_env
+  src/iap/src/iap/planner/path_searching
+  src/iap/src/iap/planner/bspline_opt
+  src/iap/src/iap/planner/plan_manage
+  src/iap/src/uav_simulator/Utils/cmake_utils
+  src/iap/src/uav_simulator/Utils/quadrotor_msgs
+  src/iap/src/uav_simulator/Utils/pose_utils
+  src/iap/src/uav_simulator/Utils/uav_utils
+  src/iap/src/uav_simulator/Utils/odom_visualization
+  src/iap/src/uav_simulator/map_generator
+  src/iap/src/uav_simulator/local_sensing
+  src/iap/src/uav_simulator/so3_quadrotor_simulator
+  src/iap/src/uav_simulator/so3_control
+  src/iap/src/uav_simulator/fake_drone
+  src/iap/src/uav_simulator/gnss_sim
+)
 
-source /home/dev/ws_iap/install/setup.bash
+colcon list --paths "${iap_source_paths[@]}"
+
+colcon --log-base log build \
+  --paths "${iap_source_paths[@]}" \
+  --packages-up-to \
+    ego_planner map_generator local_sensing \
+    so3_quadrotor_simulator so3_control \
+    poscmd_2_odom odom_visualization gnss_sim \
+  --build-base build \
+  --install-base install \
+  --symlink-install \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+source install/setup.bash
 ```
-## 运行：
+
+`--packages-up-to` 会把选定源码中的依赖包一起纳入构建。`plan_manage` 的包名是 `ego_planner`，`fake_drone` 的包名是 `poscmd_2_odom`。`local_sensing` 依赖 IAP 的消息和类型支持库，应由 colcon 按依赖顺序构建。
+
+### 3.2 只重建 IAP
+
+依赖已在 `install/` 中可用时：
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+colcon --log-base log build \
+  --paths src/iap \
+  --packages-select iap \
+  --build-base build \
+  --install-base install \
+  --symlink-install \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+source install/setup.bash
 ```
-# GLIO：真实传感器或由用户另行播放、使用相同 topic 契约的 rosbag
+
+IAP 的公共头文件、消息或链接接口发生变化时，需要同时重建相应依赖包。日常 IAP + 规划器联合构建可使用已有脚本：
+
+```bash
+cd /home/dev/ws_iap
+src/iap/scripts/dev_planner/build_iap_dev.sh
+source install/setup.bash
+```
+
+该脚本使用固定工作区 `/home/dev/ws_iap`，重建 `iap`、`plan_env`、`traj_utils`、`path_searching`、`bspline_opt`、`ego_planner`；它依赖已有 overlay，不是首次完整构建脚本，也不重建仿真包。
+
+### 3.3 常用构建选项
+
+| CMake 选项 | 默认 / 本文设置 | 用途 |
+|---|---|---|
+| `CMAKE_BUILD_TYPE` | `RelWithDebInfo` | IAP 的日常调试构建；部分子包在自己的 CMake 中固定为 Release |
+| `BUILD_TESTING` | 本文设为 `ON` | 编译相关测试 |
+| `BUILD_WITH_CUDA` | `ON` | IAP GPU 支持；需要 gtsam_points 的 CUDA 支持 |
+| `BUILD_WITH_VIEWER` | `ON` | IAP 查看器；关闭时可不依赖 Iridescence |
+| `BUILD_WITH_OPENCV` | `ON` | IAP 的 OpenCV 支持 |
+| `IAP_ENABLE_DETAILED_TIMING` | `ON` | advisory 栅格构建的细粒度计时 |
+
+CPU 构建还需选择 CPU 里程计、子图和全局建图配置。仅设置 `BUILD_WITH_CUDA=OFF` 不会自动切换运行 profile。`start_rviz:=false` 只关闭 RViz，不改变 GPU 后端。
+
+## 4. 快速开始
+
+### 4.1 GPU 检查
+
+使用 GPU 后端的运行，在每次启动 launch 前执行：
+
+```bash
+cd /home/dev/ws_iap
+python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
+  --output-root src/iap/results/preflight/gpu \
+  --gpu-preflight-only
+```
+
+只有输出 `GPU_READY` 且返回码为 0 才继续。检查包括 `nvidia-smi`、CUDA Driver API `cuInit(0)` 和设备数量。`GPU_NOT_READY` 时先修复驱动/容器 GPU 访问。检查摘要保存到显式指定的 preflight 目录；此命令不启动 ROS，也不执行正式实验。
+
+### 4.2 启动完整仿真
+
+完成第 3 节构建，在已加载 ROS 与 overlay 的终端执行：
+
+```bash
+python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
+  --output-root src/iap/results/preflight/gpu \
+  --gpu-preflight-only && \
+ros2 launch iap iap_sim.launch.py scenario:=fused_nominal
+```
+
+远程或无桌面环境加 `start_rviz:=false`。按 Ctrl+C 结束运行，随后分析日志：
+
+```bash
+python3 src/iap/tools/ana_log.py
+```
+
+默认报告在 `src/iap/log/latest/export/analysis/report.md`。使用自定义日志根目录时，分析方法见第 8 节。
+
+## 5. Launch 使用指南
+
+| 入口 | 适用场景 | 启动范围 | 外部输入 |
+|---|---|---|---|
+| `glio.launch.py` | 定位建图 | GLIO | 传感器或单独播放的 bag |
+| `glio_integrity.launch.py` | 定位 + 当前完整性 | GLIO + Current Integrity Monitor | 传感器及完整性证据 |
+| `iap_sim.launch.py` | 完整闭环仿真 | 四模块 + 仿真环境 | scenario 生成的输入 |
+| `iap_flight.launch.py` | 真实车辆部署 | 四模块 + 真实车辆接口 | 车辆传感器、控制反馈及校准 |
+
+完整启动契约见 [launch/README.md](launch/README.md)。先完成环境加载和适用的 GPU 检查。查看参数不启动运行：
+
+```bash
+ros2 launch iap glio.launch.py --show-args
+ros2 launch iap glio_integrity.launch.py --show-args
+ros2 launch iap iap_sim.launch.py --show-args
+ros2 launch iap iap_flight.launch.py --show-args
+```
+
+### 5.1 GLIO 定位建图
+
+```bash
 ros2 launch iap glio.launch.py
 
-# GLIO + Current Integrity Monitor；输入 topic 契约与实时模式相同
+# 接入不同名称的 IMU 和 LiDAR topic
+ros2 launch iap glio.launch.py \
+  imu_topic:=/vehicle/imu \
+  points_topic:=/vehicle/lidar
+```
+
+默认 profile 为 `config/profiles/glio`，加载 GNSS 扩展，不加载当前完整性监测、规划器或仿真环境。
+
+| 参数 | 默认值 | 作用 |
+|---|---|---|
+| `config_path` | 安装目录中的 `config/profiles/glio` | 配置目录 |
+| `imu_topic` | `/livox/imu` | IMU 输入 |
+| `points_topic` | `/livox/lidar` | 点云输入 |
+| `use_sim_time` | `false` | 是否使用 `/clock` |
+
+定位结果的 ROS 发布由扩展模块配置决定。当前默认模块 profile 没有加载 `librviz_viewer.so`；需要 ROS odometry/map/TF 输出时，应使用包含对应发布扩展的配置。不要把某个旧节点名下的 odom topic 当作所有 profile 的固定输出。
+
+### 5.2 GLIO + 当前完整性监测
+
+```bash
 ros2 launch iap glio_integrity.launch.py
 
-# 完整系统仿真
-python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
-  --output-root /tmp/iap_runs/sim_001/preflight \
-  --gpu-preflight-only
-ros2 launch iap iap_sim.launch.py \
-  scenario:=lidar_corridor_degenerate
+ros2 launch iap glio_integrity.launch.py \
+  imu_topic:=/vehicle/imu \
+  points_topic:=/vehicle/lidar \
+  integrity_profile:=fused
+```
 
-# 真实飞行还必须提供目标、通过的部署校准清单及控制器握手确认；
-# 完整参数见 launch/README.md。
-python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
-  --output-root /data/iap_runs/flight_001/preflight \
-  --gpu-preflight-only
+默认 profile 为 `config/profiles/glio_integrity`。IMU、点云、时间和配置参数与 GLIO 入口一致；`integrity_profile` 默认 `fused`，还接受 `gnss_only`、`lidar_only`、`fallback_only`。报告发布到 `/iap/integrity`。
+
+该入口不启动未来完整性预测或规划器。报告是否能作为下游证据，需要检查有效性、新鲜度、来源和告警限。
+
+### 5.3 完整系统仿真
+
+```bash
+ros2 launch iap iap_sim.launch.py scenario:=fused_nominal
+
+# 有限时长、无 RViz 的 LiDAR 退化走廊场景
+ros2 launch iap iap_sim.launch.py \
+  scenario:=lidar_corridor_degenerate \
+  start_rviz:=false \
+  run_duration_s:=60.0
+```
+
+| 参数 | 默认值 | 作用 |
+|---|---|---|
+| `scenario` | `fused_nominal` | 场景目录中的名称 |
+| `start_rviz` | `true` | 启动 RViz |
+| `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
+| `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
+
+常用场景：
+
+| 场景 | 输入与用途 | 任务模式 |
+|---|---|---|
+| `fused_nominal` | GNSS 开阔天空 + LiDAR 丰富特征，融合完整性 | `strict_global` |
+| `gnss_open_sky` | GNSS 开阔天空，GNSS-only 完整性 | `strict_global` |
+| `lidar_feature_rich` | GNSS 禁用，LiDAR 丰富特征 | `mission_best_effort` |
+| `lidar_corridor_degenerate` | GNSS 禁用，LiDAR 走廊退化 | `mission_best_effort` |
+| `gnss_degraded_lidar_good` | GNSS 降级 + LiDAR 丰富特征 | `mission_best_effort` |
+| `fallback_only` | fallback 完整性诊断场景 | `mission_best_effort` |
+
+全部名称和参数见 [config/scenarios/catalog.json](config/scenarios/catalog.json)。其中论文、开发和 fixture 场景有各自用途；场景存在不代表已获得正式实验结论。
+
+`strict_global` 要求适用的全局完整性条件成立。`mission_best_effort` 可按明确分类处理部分 GNSS 降级，但仍要求本地运动、碰撞、净空、动力学和制动条件成立。完整仿真使用维护中的 P0/P4/P5 路径，不启动旧 Phase-2 evaluator、测试 validator 或自动 bag recorder。
+
+### 5.4 真实飞行
+
+真实飞行使用独立入口。启动前需有车辆传感器、统一坐标系下的 odometry、完整硬件射线/回波证据、控制器接口及部署校准。
+
+下面是部署命令模板。topic、目标和校准参数必须替换为车辆的实际值；数值示例不能替代标定结果。先执行第 4.1 节 GPU 检查。
+
+```bash
 ros2 launch iap iap_flight.launch.py \
   flight_authorized:=true \
   controller_handshake_confirmed:=true \
+  imu_topic:=/vehicle/imu \
+  points_topic:=/vehicle/lidar \
+  odometry_topic:=/vehicle/odom \
+  planner_cloud_topic:=/vehicle/lidar \
   beam_evidence_topic:=/vehicle/lidar/beam_evidence \
   goal_x:=10.0 goal_y:=0.0 goal_z:=2.0 \
   local_surface_error_bound_m:=0.04 \
-  local_surface_error_calibration_id:=vehicle_01_heldout_2026_09 \
+  local_surface_error_calibration_id:=vehicle_01_heldout \
   local_surface_error_calibration_manifest:=/data/iap/calibration/vehicle_01.json
 ```
 
-以上四个文件是 canonical 入口。运行目录会自动按时间戳创建在
-`src/iap/log/` 下；部署环境可一次性设置 `IAP_RUN_ROOT`，显式
-`output_dir` 仅作为单次覆盖。详细启动契约见 `launch/README.md`。
+默认配置是 `config/profiles/full_stack_flight`。重要参数：
 
----
-
-> **历史资料边界：** 以下 `demo1`–`demo11`、`test_*` 和旧
-> `iap_rosnode.launch.py` 章节只用于理解或复现旧系统，不是当前推荐
-> 入口。新开发和日常运行只能使用上面的四个 canonical launch；旧文件
-> 的唯一源码副本位于 `launch/bp/`。
-
-## 1. 快速开始
-
-### 1.1 环境准备
-
-进入工作区并加载 ROS2 环境。不同容器里的 ROS2 安装路径可能不同，二选一即可：
-
-```bash
-cd /home/dev/ws_iap
-
-# 常见 ROS2 Jazzy 安装
-source /opt/ros/jazzy/setup.bash
-
-# 如果你的环境使用预构建工作区，则使用这一条
-# source /root/ros2_ws/install/setup.bash
-```
-
-### 1.2 构建 IAP 与仿真包
-
-推荐一次性构建 IAP、GNSS 通信包和仿真包：
-
-```bash
-cd /home/dev/ws_iap
-
-colcon build \
-  --base-paths src/iap src/gnss_comm src/iap/sim/ego_planner_swarm_ws/src \
-  --packages-select \
-    gnss_comm \
-    cmake_utils quadrotor_msgs pose_utils uav_utils \
-    map_generator local_sensing so3_quadrotor_simulator so3_control \
-    poscmd_2_odom odom_visualization gnss_sim \
-    iap \
-  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-
-source install/setup.bash
-```
-
-也可以使用仓库里的构建脚本构建常用仿真链路：
-
-```bash
-cd /home/dev/ws_iap
-src/iap/tools/build_iap_sim.sh
-source install/setup.bash
-```
-
-注意：`build_iap_sim.sh` 主要覆盖基础仿真和 IAP；如果要跑 `demo7` 或单独使用 `gnss_sim`，请确认 `gnss_comm` 和 `gnss_sim` 也已经构建。
-
-### 1.2.1 ICRA Layer 1 共享开发构建与联调
-
-ICRA Layer 1–3 固定复用工作区的 `build/`、`install/`、`log/`，不为 task、attempt 或 run 新建
-build/install。唯一共享开发构建入口为：
-
-```bash
-cd /home/dev/ws_iap/src/iap
-scripts/dev_planner/build_iap_dev.sh
-```
-
-Layer 1 开发联调使用唯一新 run 目录并可在失败修复后递增编号重跑；下面的 `run-NNN` 必须替换为
-下一个尚不存在的三位编号：
-
-```bash
-cd /home/dev/ws_iap/src/iap
-
-python3 scripts/dev_planner/run_icra072_vertical_slice.py \
-  --run-root results/icra27/dev_runs/layer1/run-NNN \
-  --install-root /home/dev/ws_iap/install \
-  --duration-s 45
-```
-
-Runner 会在 GPU、capture、process/cleanup 失败及正常结束路径自动执行一次 analyzer，并写入
-`analysis.json`、`analyzer_invocation.json` 与 `orchestration_outcome.json`；不得再手动重复分析同一 run。
-已有编号不得覆盖；这不是 one-shot 正式实验。完整层级、退出条件和证据
-保留规则见 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`。
-
-### 1.2.2 ICRA-072B Layer 2 离线稳定化回归
-
-Layer 2 不启动 ROS launch graph、GPU preflight 或 live scenario。原始 `final_summary.json` / `final_logs`
-是不可变的失败记录，不得重跑或覆盖。canonical repair 必须先提交并推送代码/测试状态，确认
-`HEAD...origin/dev/icra` 为 `0 0`、tracked state 干净，且 exact 隔离状态只包含下述两个精确保留
-artifact，再执行一次新输出：
-
-```bash
-cd /home/dev/ws_iap/src/iap
-
-python3 scripts/dev_planner/run_icra072b_stabilization.py \
-  --output results/icra27/icra072b/repair-001_summary.json \
-  --log-root results/icra27/icra072b/repair-001_logs
-```
-
-输出和 log root 必须尚不存在。获准 repair 需要验证 pushed source、隔离 HOME 下的精确 command-local
-Git trust，以及恰好两个普通非 symlink artifact：72-byte
-`.claude/settings.local.json`（`local_agent_control_not_runtime_source`）和 243368-byte 受保护 PDF，二者
-均绑定固定路径/大小/SHA-256。缺失、内容或大小变化、symlink、非普通文件、第三个 untracked path，
-以及任一 tracked/staged/rename/delete 状态都会 fail closed。随后五个聚焦 suite 和八行稳定化矩阵在
-任一 required row 缺失、重复、跳过、disabled、计数不符或退出非零时同样 fail closed。该结果仅为
-development stabilization evidence，不是 scientific-effect 或 qualification manifest。
-
-此前的 invocation 在 source binding 阶段以 `SOURCE_BINDING_NOT_READY` / exit 2 停止，且没有创建
-summary/log 或运行 suite，因此没有消耗 result identity。Supervisor 已确认 `repair-001` 仍是获准的
-fresh non-overwriting identity；只有 exact-admission 修复先提交、推送并确认 `0 0` 后才能运行一次。
-不得删除、改写、chmod、移动或暂存上述两个保留 artifact。
-
-当前 repair 因 ignore-blind 审计发现第三个被仓库 `*~` 规则隐藏的未跟踪 source-tree 文件
-`src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~` 而 BLOCKED。任务既不允许通过 ignore 或
-broader allowlist 隐藏它，也未授权修改该文件；因此 runner 尚未切换到双 artifact admission。
-用户决定 `USER-ICRA-ROUTE-20260827-003` 接受该 blocker 并绕过到 ICRA-073，但没有把 ICRA-072B
-改写为 PASS，也没有重新授权上述 canonical 命令。
-
-### 1.2.3 ICRA-073 inverse-corridor 静态 fixture preflight
-
-ICRA-073 必须在任何 GPU/ROS/main-flow diagnostic 前运行冻结 fixture 的 repository-local 静态
-preflight。命令必须绑定已推送且与 `origin/dev/icra` 一致的 tracked HEAD，输出路径不得覆盖：
-
-```bash
-cd /home/dev/ws_iap/src/iap
-
-python3 scripts/dev_planner/icra073_inverse_corridor_fixture.py \
-  --preflight-all \
-  --source-head "$(git rev-parse HEAD)" \
-  --output results/icra27/icra073/preflight-001.json
-```
-
-冻结 PRIMARY/EXACT_MIRROR/FLAT_NULL descriptor 和 hash 可分别用 `--variant` 只读输出。当前冻结中央
-cuboid 与 risky analytic curve 的最小欧氏间距为约 `1.275072535 m`，小于 guard `1.25 m` 加 shared
-occupancy inflation `0.099 m` 所需的 `1.349 m`；preflight 因此应以 exit 2 和 typed fixture failure
-停止。不得移动障碍、缩小 inflation、改变 tube/guard，且在 authority 修订前不得执行 GPU/ROS/live
-paired diagnostics。
-
-### 1.2.4 ICRA-074 V2 geometry 与 offline P4-v2 targeted tests
-
-ICRA-074 只运行离线测试。V2 geometry test 同时保留 V1 regression，并以 1,000,001 个等间隔解析位置
-独立检查 risky curve 到冻结 cuboid 的 clearance：
-
-```bash
-cd /home/dev/ws_iap/src/iap
-python3 test/test_icra074_geometry.py -v
-python3 test/test_icra073_inverse_corridor.py -v
-```
-
-Production P4-v2 targeted fixture 使用共享 build root 编译已有测试目标，不创建 task-local build/install：
-
-```bash
-cd /home/dev/ws_iap/src/iap
-cmake --build /home/dev/ws_iap/build/bspline_opt \
-  --target test_p4_collision_guide test_p4_collision_guide_integration -j2
-
-/home/dev/ws_iap/build/path_searching/test_p4_risk_astar
-/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide
-/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide_integration
-```
-
-这些命令不启动 ROS、GPU 或 live flow。ICRA-073 的 source/output guards、oracle、paired diagnostics 和
-runtime identity 仍是用户接受的 BLOCKED/NOT PASS debt，不得借 ICRA-074 测试改写为 PASS。
-Pushed-source 离线记录为 `results/icra27/icra074/offline-targeted-001.json`，绑定 source HEAD
-`07ca00a6d435b874e0f6b9529975974fd0f51d70`，文件 SHA-256 为
-`79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`；该记录不构成 source-guard、
-effect、qualification 或 campaign claim。
-
-### 1.2.5 ICRA-075 development exploratory matrix
-
-ICRA-075 使用 V2 PRIMARY/EXACT_MIRROR/FLAT_NULL runtime assets、development seeds `75001..75005` 和固定
-40-row matrix。它只产生 exploratory/non-freezing power inputs；这些 seeds 永久排除于 future held-out。
-
-```bash
-cd /home/dev/ws_iap/src/iap
-python3 test/test_icra075_exploratory.py -v
-
-# 新 runtime/config bytes 使用共享 build/install/log；随后执行 canonical 六包构建。
-cd /home/dev/ws_iap
-source /opt/ros/jazzy/setup.bash
-source /home/dev/ws_iap/install/setup.bash
-colcon --log-base /home/dev/ws_iap/log build \
-  --paths /home/dev/ws_iap/src/iap/src/uav_simulator/map_generator \
-          /home/dev/ws_iap/src/iap/src/uav_simulator/gnss_sim \
-  --packages-select map_generator gnss_sim \
-  --build-base /home/dev/ws_iap/build --install-base /home/dev/ws_iap/install \
-  --symlink-install
-/home/dev/ws_iap/src/iap/scripts/dev_planner/build_iap_dev.sh
-
-# 仅在 implementation/test/config bytes 已 push 且 divergence 0 0 后运行；matrix-NNN 必须全新。
-cd /home/dev/ws_iap/src/iap
-scripts/dev_planner/run_icra075_exploratory.py \
-  --matrix-root results/icra27/icra075/matrix-NNN \
-  --duration-s 45
-```
-
-Runner 在任何 ROS/main flow 前只执行一次 GPU preflight；失败时输出 `GPU_NOT_READY`、保留 attempt 并停止。
-成功时严格运行 30 个 formal-arm development rows 与 PRIMARY 的 10 个显式 ablation rows，不增加 seed、
-不重试/排除完成行。独立 analyzer 只从 frozen descriptor 与 committed-final/publication identity 生成 200 个
-equal-arc samples；不会消费 P4 guide/route/objective evidence 作为 oracle 输入。
-
-当前保留结果：`matrix-001` 在 GPU PASS 后因 capture readiness schema 缺陷于 ROS 前停止；修复并推送后的
-`matrix-002` 首个 control 行通过 GPU、15/15 process health、P0 readiness 与 cleanup，但 2,137 条 P5 final-status
-记录（2,117 个唯一 `(traj_id,start_time)` candidate identity）全部因 `current_low_margin` 被拒绝，没有 committed publication/runtime identity。矩阵按 fail-closed
-规则停止，状态为 `BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN`；没有重试、调阈值或生成 power verdict。
-
-后续有界修复已恢复所有 enabled P4（含 metrics-only）的终端 lineage fail-closed，并在每个 analyzer、
-power analyzer 及最终 batch 后重新核验 source。对保留的 `matrix-002` 作 repository-local 离线诊断后，
-结论为 `FROZEN_CONTRACT_INCOMPATIBLE`：预期的 `max_pl` 链路选择 GNSS，实际 HPL/VPL 全部高于冻结的
-HAL/VAL `10/20 m`。因此按 Gate 在 GPU/ROS 和 `matrix-003` 前停止；ICRA-075 仍为 BLOCKED/NOT PASS，
-不得把该诊断称为矩阵或 P5 PASS。
-
-### 1.2.6 ICRA-076 outcome-blind preregistration 与 byte freeze
-
-ICRA-076 只冻结后续 confirmatory protocol，不运行 held-out、ROS、GPU、main flow 或 ICRA-077。协议固定
-PRIMARY/EXACT_MIRROR/FLAT_NULL 每场景 60 个独立 seeds、两臂配对共 360 rows；当前 measured
-`U95=0.0 m`，因此冻结公式给出 `delta_peak=0.3 m`，以及
-单侧 exact-binomial `n=60, p0=0.9, alpha=0.05` 的最低通过数 59。该保守样本量没有经验 power claim；
-ICRA-075 仍是 0/40、BLOCKED/user-bypassed/NOT PASS。
-
-```bash
-cd /home/dev/ws_iap/src/iap
-python3 test/test_icra073_inverse_corridor.py -v
-python3 test/test_icra074_geometry.py -v
-python3 test/test_icra075_exploratory.py -v
-python3 test/test_icra076_preregistration.py -v
-python3 test/test_icra077a_governance_freeze.py -v
-python3 scripts/dev_planner/validate_icra076_preregistration.py
-
-python3 scripts/dev_planner/icra076_repeatability_replay.py \
-  --snapshot config/icra27/icra076_flat_null_snapshot_v1.json \
-  --output-root results/icra27/icra076/repeatability-replay-NNN
-
-# implementation/config/tests push 且 HEAD...origin/dev/icra 为 0 0 后，使用全新 output identity：
-python3 scripts/dev_planner/freeze_icra076_preregistration.py \
-  --verification results/icra27/icra076/verification-NNN.json \
-  --output results/icra27/icra076/preregistration-freeze-NNN.json
-
-python3 scripts/dev_planner/validate_icra076_preregistration.py \
-  --freeze-record results/icra27/icra076/preregistration-freeze-NNN.json
-```
-
-冻结 record 绑定 protocol/registry/order、完整相关 tracked source bytes、共享六包 install bytes、验证命令
-和 pushed source commit。后续任一相关 source/install drift 都会在 ICRA-077 前 fail closed；本节不授权
-ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff…60582`）是首轮 review
-拒绝的历史 attempt，不是 canonical freeze；它因 pre-access/inventory/coverage/replay/command-binding 缺陷
-保留且不得覆盖。第二轮 standards review 又拒绝 `preregistration-freeze-002.json`（`c0b4953a…87631`）：
-父 symlink alias admission 与 measured replay evidence binding 仍不完整，因此它也不是 canonical freeze。
-`preregistration-freeze-003.json` 到 freeze-006 都是历史或 review-rejected attempts；freeze-005 仍保留
-pre-access governance drift blocker，freeze-006 因弱 route JSON admission 与 malformed fourth-entry 缺口被
-Builder 双轴复核拒绝。replay-005、verification-004、freeze-007 随后也因 frozen-route authority 与
-formal evidence identity 歧义被 Supervisor Review 拒绝并保留为 immutable history。用户决定 010
-授权的 bounded repair 已生成 fresh replay-006、verification-005、freeze-008，绑定 pushed source
-`ef94154`；这是待 Supervisor Review 的 Builder candidate，ICRA-077B 仍未授权。
-
-### 1.3 运行一个最小检查
-
-```bash
-cd /home/dev/ws_iap
-source install/setup.bash
-
-ros2 launch iap iap_demo.launch.py
-```
-
-这个 launch 只启动 `iap_status`，用于检查 IAP 库和配置目录是否可读。完整定位/建图运行请使用下一节的 `iap_rosnode` 或后面的仿真 demo。
-
----
-
-## 2. IAP 基础使用
-
-### 2.1 使用 rosbag 运行 IAP
-
-`iap_rosnode` 是当前推荐的 ROS2 运行入口。默认 launch 会启动 IAP，并播放 `bag_path` 指向的 rosbag：
-
-```bash
-cd /home/dev/ws_iap
-source install/setup.bash
-
-ros2 launch iap iap_rosnode.launch.py
-```
-
-常用参数：
-
-```bash
-ros2 launch iap iap_rosnode.launch.py \
-  config_path:=/home/dev/ws_iap/src/iap/config \
-  bag_path:=@src/iap/data/realsense_ros2 \
-  mode:=bag \
-  bag_rate:=1.0
-```
-
-参数说明：
-
-| 参数 | 默认值 | 作用 |
-|---|---|---|
-| `config_path` | `/home/dev/ws_iap/src/iap/config` | IAP 配置目录 |
-| `bag_path` | `@src/iap/data/realsense_ros2` | rosbag2 目录；`@` 表示从当前工作目录解析 |
-| `mode` | `bag` | `bag` 会自动播放 rosbag；`realtime` 只启动 IAP 节点 |
-| `bag_rate` | `1.0` | rosbag 播放倍率 |
-
-### 2.2 实时传感器运行
-
-如果外部已有传感器节点在发布 IMU 和点云：
-
-```bash
-ros2 launch iap iap_rosnode.launch.py \
-  mode:=realtime \
-  config_path:=/home/dev/ws_iap/src/iap/config
-```
-
-IAP 默认从 `config/config_ros.json` 读取输入 topic。也可以直接运行节点并覆盖输入 topic：
-
-```bash
-ros2 run iap iap_rosnode --ros-args \
-  -r __node:=iap_rosnode \
-  -p config_path:=/home/dev/ws_iap/src/iap/config \
-  -p imu_topic:=/your/imu \
-  -p points_topic:=/your/points
-```
-
-### 2.3 常用配置文件
-
-| 文件 | 作用 |
+| 参数 | 要求 |
 |---|---|
-| `config/config.json` | 顶层配置入口，指向各子配置文件 |
-| `config/config_ros.json` | ROS topic、QoS、本地/全局建图开关、扩展模块列表 |
-| `config/config_odometry_gpu.json` | GPU 里程计配置 |
-| `config/config_odometry_cpu.json` | CPU 里程计配置 |
-| `config/config_gnss.json` | GNSS 与 integrity/ARAIM 相关配置 |
-| `config/config_sensors.json` | 点云字段、传感器参数 |
-| `config/sim_*` | 仿真 demo 专用配置目录 |
+| `flight_authorized` | 默认 `false`；部署方显式授权后设为 `true` |
+| `controller_handshake_confirmed` | 默认 `false`；真实控制器握手完成后设为 `true` |
+| `beam_evidence_topic` | 必填，与部署 profile 中的局部地图证据接口一致 |
+| `goal_x/y/z` | 必填，使用规划坐标系，单位 m |
+| `local_surface_error_bound_m` | 必填，与校准清单中的误差界一致 |
+| `local_surface_error_calibration_id` | 必填，与清单 ID 一致 |
+| `local_surface_error_calibration_manifest` | 必填，至少包含 3 次校准和 1 次通过的独立 held-out 验证 |
+| `max_velocity_mps` / `max_acceleration_mps2` | 默认 `1.0` / `1.5`，按车辆控制能力配置 |
 
-`config_ros.json` 里的 `extension_modules` 决定运行时加载哪些扩展。例如 GNSS 与 ARAIM 通常依赖：
+完整参数、清单 schema 和就绪条件见 [launch/README.md](launch/README.md)。缺失校准或混入仿真扩展时 launch 拒绝启动；缺失/过期的运行证据产生 HOLD。布尔确认参数记录部署确认，不能自行完成硬件握手。`--show-args` 成功不等于真实飞行验收。
 
-- `libgnss_extension.so`
-- `libintegrity_extension.so`
-- `libsim_extension.so`
-- `librviz_viewer.so`
+### 5.5 rosbag 回放
 
-只跑 LiDAR-IMU 时，可以使用不加载 GNSS/integrity 的专用配置，例如 `config/sim_demo3`，或复制一份配置后移除上述扩展。
+GLIO 与当前完整性入口使用和实时传感器相同的 topic 契约。先查看 bag 的消息类型和 topic：
 
----
+```bash
+ros2 bag info /absolute/path/to/rosbag
+```
 
-## 3. 仿真系统说明
+两个终端分别加载 ROS 和 overlay。终端 A 在 GPU 检查通过后启动：
 
-仿真源码位于：
+```bash
+ros2 launch iap glio_integrity.launch.py \
+  use_sim_time:=true \
+  imu_topic:=/recorded/imu \
+  points_topic:=/recorded/lidar
+```
+
+终端 B 播放 bag 并发布时钟：
+
+```bash
+ros2 bag play /absolute/path/to/rosbag --clock --rate 1.0
+```
+
+仅定位时把入口换成 `glio.launch.py`。GNSS 原始观测、星历和初始化信息也需匹配当前接口；必要时在 bag 播放端 remap topic。完整性回放还要包含相应证据。模块 launch 不接收旧 `mode`、`bag_path`、`bag_rate` 参数，也不自动启动 bag 播放器。
+
+## 6. 配置与传感器接入
+
+### 6.1 配置选择
+
+| 文件 / 目录 | 用途 |
+|---|---|
+| `config/profiles/glio/` | GLIO 模块配置 |
+| `config/profiles/glio_integrity/` | GLIO + 当前完整性配置 |
+| `config/profiles/full_stack_flight/` | 完整系统部署配置 |
+| `config/scenarios/catalog.json` | 仿真场景选择与任务模式 |
+| `config/sim_demo11/` | 完整仿真运行时使用的基础配置 |
+| profile 的 `config.json` | 子配置引用、日志与 timing 开关 |
+| profile 的 `config_ros.json` | topic、QoS、坐标系、建图和扩展列表 |
+| 引用的 `config_sensors.json` | 点云字段、传感器外参及参数 |
+| 引用的 `config_odometry_*.json` | 估计器后端与诊断 |
+| profile 的 `config_gnss.json` | GNSS、ARAIM、告警限及诊断导出 |
+
+模块/飞行入口可用 `config_path:=/absolute/path/to/profile` 选择自定义配置。保留该目录中 `config.json` 引用的完整文件关系；部分 profile 使用相对路径引用共享配置。仿真通过 `scenario` 选择既定参数。
+
+launch 会在本次 run 中生成运行时配置和快照。修改源配置后重新启动，检查 `metadata/config/` 中的实际配置。新增文件或使用非 symlink 安装时，还需重新构建安装。
+
+### 6.2 关键输入输出
+
+| 接口 | 消息类型 / 含义 |
+|---|---|
+| `imu_topic` | `sensor_msgs/msg/Imu` |
+| `points_topic` | `sensor_msgs/msg/PointCloud2` |
+| `/ublox_driver/range_meas` | `gnss_comm/msg/GnssMeasMsg`，伪距/多普勒 |
+| `/ublox_driver/ephem` | `gnss_comm/msg/GnssEphemMsg`，GPS/Galileo/BeiDou 星历 |
+| `/ublox_driver/glo_ephem` | `gnss_comm/msg/GnssGloEphemMsg`，GLONASS 星历 |
+| `/ublox_driver/iono_params` | `gnss_comm/msg/GnssIonosphereParameter`，电离层参数 |
+| `/ublox_driver/receiver_lla` | `sensor_msgs/msg/NavSatFix`，GNSS 原点初始化 |
+| `/iap/integrity` | `iap/msg/IntegrityReport`，当前完整性 |
+| `odometry_topic`（飞行） | `nav_msgs/msg/Odometry`，规划使用的车辆状态 |
+| `beam_evidence_topic`（飞行） | `iap/msg/LidarBeamEvidence`，硬件射线/回波证据 |
+
+GNSS 扩展使用上表的固定订阅名称；IMU/LiDAR 的 launch 参数不会同时重命名 GNSS 接口。具体证据字段见 [msg/](msg/)。
+
+接入传感器时核对时间戳、点云时间/强度/ring 字段、`T_lidar_imu`、GNSS lever arm、frame/TF 和 QoS。距离使用 m，角速度使用 rad/s；IMU 加速度单位与 `acc_scale` 必须匹配，SI 输入按配置明确使用 `1.0`。bag 回放或仿真使用时钟时，参与处理的节点应采用一致时间源。
+
+仿真常用 topic 包括 `/sim/drone_0/imu_iap`、`/sim/drone_0/lidar_body`、`/sim/drone_0/truth_odom`、`/map_generator/global_cloud`。truth 用于仿真诊断；真实飞行不能依赖 truth 或 simulator adapter。
+
+## 7. 日志系统与运行产物
+
+### 7.1 日志位置与设置
+
+区分两类 `log/`：
+
+| 位置 | 内容 |
+|---|---|
+| 工作区 `/home/dev/ws_iap/log/` | colcon 构建 / 测试日志，由 `--log-base` 指定 |
+| 仓库 `/home/dev/ws_iap/src/iap/log/` | IAP 运行日志和产物，源码 / symlink-install 环境默认使用 |
+
+四个正式 launch 每次自动创建一个独立 run，所有模块共享该目录。部署环境可在启动前设置绝对根路径：
+
+```bash
+export IAP_RUN_ROOT=/data/iap_runs
+```
+
+恢复源码工作区默认位置：
+
+```bash
+unset IAP_RUN_ROOT
+```
+
+复制安装的包默认使用 `${XDG_STATE_HOME:-~/.local/state}/iap/log`。每个 run ID 使用 UTC，格式为 `YYYYMMDDTHHMMSSZ_mmm`，发生碰撞时追加序号。入口名、场景和模块信息记录在 manifest 中。
+
+`output_dir` 已从四个正式入口移除。`IAP_RUN_DIR` 和 launch 的 `run_dir` 用于内部共享本次 run，用户设置持久位置使用 `IAP_RUN_ROOT`。
+
+### 7.2 目录结构
 
 ```text
-src/iap/sim/ego_planner_swarm_ws/src
+<IAP_RUN_ROOT>/
+├── latest -> <run_id>/
+└── <run_id>/
+    ├── runtime/                  # 模块文本日志
+    │   ├── iap_*.log
+    │   └── ros/                  # ROS / launch 日志
+    ├── profiling/                # timing CSV
+    ├── export/
+    │   ├── glio/                 # GNSS/ICP/轨迹/建图 dump
+    │   ├── current_integrity/    # 当前完整性诊断
+    │   ├── advisory/             # 未来完整性与风险证据
+    │   ├── planner/              # 轨迹认证、执行与 HOLD 证据
+    │   ├── simulation/           # 真值与仿真指标
+    │   ├── capture/              # 显式记录的 bag 等
+    │   └── analysis/             # 离线报告与图表
+    └── metadata/
+        ├── run_manifest.json     # run 身份、版本、生命周期
+        ├── config/               # 源配置 / 运行时配置快照
+        ├── processes/            # 进程记录
+        └── manifests/            # 模块 / 场景清单
 ```
 
-顶层旧版 `src/ego-planner-swarm` 在本仓库中被忽略，避免同名 package 冲突。请使用 `src/iap/sim/ego_planner_swarm_ws/src` 下的包。
+子目录及文件是否产生取决于启用的模块和导出开关。`ROS_LOG_DIR` 由 launch 指向 `<run>/runtime/ros`。具体路径和保留规则以 [run artifact contract](docs/spec/run_artifact_contract.md) 为准。
 
-### 3.1 主要仿真组件
+### 7.3 查找和查看日志
 
-| 组件 | Package / 节点 | 作用 |
+从工作区根目录执行：
+
+```bash
+# 把 latest 解析成具体 run，后续命令保持指向同一次运行
+run_root="${IAP_RUN_ROOT:-$PWD/src/iap/log}"
+run_dir="$(readlink -f "$run_root/latest")"
+
+python3 -m json.tool "$run_dir/metadata/run_manifest.json"
+rg --files "$run_dir/runtime" "$run_dir/profiling" "$run_dir/export"
+
+# 实时查看 GLIO 主日志
+# 文件需在估计器日志初始化后存在
+tail -F "$run_dir/runtime/iap_main.log"
+
+# 搜索模块和 ROS 日志中的错误及 HOLD 原因
+rg -n -i 'error|critical|fatal|hold' "$run_dir/runtime"
+```
+
+`latest` 指向最近分配的 run，可能仍在运行；多个 launch 并行时应使用启动输出中的具体路径。离线分析优先选择已结束的 run。
+
+manifest 记录入口、场景、模块、源码 commit/工作区状态、配置、开始/结束时间和生命周期。`active`、`completed`、`failed`、`interrupted` 描述运行状态；`executable`、`hold`、`not_applicable`、`unknown` 描述安全结果。HOLD 是一种安全结果，不能单凭它判断进程失败。
+
+### 7.4 日志与诊断开关
+
+模块文件日志读取所用 profile 的根 `config.json` 中的 `logging` 字段：
+
+```json
+{
+  "logging": {
+    "save_logs": true,
+    "rotate_logs": true,
+    "max_file_size_kb": 8192,
+    "max_files": 10
+  }
+}
+```
+
+这是局部配置示例，合并到现有文件，保留其他字段。`save_logs` 控制模块文件日志，关闭后仍有终端输出；`rotate_logs` 控制单个日志文件轮转，大小和数量由后两项设置。ROS 日志有独立的写入机制。
+
+| 开关 | 配置位置 | 作用 |
 |---|---|---|
-| 随机森林地图 | `map_generator/random_forest` | 生成 `/map_generator/global_cloud` 和局部地图；`demo6/7` 支持 Z 方向锚点柱 |
-| 轨迹/指令生成 | `poscmd_2_odom/*_cmd_publisher` | 发布悬停、圆轨迹、分阶段起飞轨迹的 `PositionCommand` |
-| 假 odom | `poscmd_2_odom/poscmd_2_odom` | 把 `PositionCommand` 转为理想 odom，用于不跑动力学的 demo |
-| SO3 动力学 | `so3_quadrotor_simulator/so3_quadrotor_simulator` | 发布真值 `/sim/drone_0/truth_odom`、仿真 IMU `/sim/drone_0/imu`，可额外发布 IAP 用 IMU |
-| SO3 控制 | `so3_control/SO3ControlComponent` | 把位置指令和 odom 反馈转成 SO3 控制量 |
-| LiDAR 仿真 | `local_sensing/pcl_render_node` | 根据地图和真值 odom 生成 `/sim/drone_0/lidar` |
-| LiDAR frame 桥接 | `iap/demo4_lidar_body_bridge` | 把 map-frame 仿真点云转换成 IAP 可用的 body/lidar-frame 点云 `/sim/drone_0/lidar_body` |
-| IAP 仿真扩展 | `libsim_extension.so` | 发布 `/drone_0_visual_slam/odom`，并记录 truth-vs-est 指标 |
-| GNSS 仿真 | `gnss_sim/gnss_sim_node` | 从真值 odom 生成 `/ublox_driver/*` GNSS 输入和 `/gnss_sim/*` 诊断/可视化 |
-| 可视化 | `rviz2` + `odom_visualization` | 显示地图、点云、无人机模型、truth/IAP/desired 轨迹 |
+| `global.enable_timing_csv` | profile 的 `config.json` | 模块 timing CSV |
+| `gnss.enable_debug_csv` | profile 的 `config_gnss.json` | GNSS factor 诊断 |
+| `integrity.enable_araim_csv` | profile 的 `config_gnss.json` | ARAIM / 当前完整性诊断 |
+| `integrity.enable_traj_csv` | profile 的 `config_gnss.json` | 完整性轨迹导出 |
+| `odometry_estimation.enable_icp_csv` | 所引用的里程计配置 | ICP 诊断 |
 
-### 3.2 通用仿真 topic
+各 profile 默认值不同，完整仿真还会按场景生成配置；以 run 的有效配置快照为准。改变旧 `log_dir` 或 `*_csv_path` 的目录部分不能改变统一 run 的位置。
 
-| Topic | 含义 |
-|---|---|
-| `/sim/drone_0/truth_odom` | 仿真真值 odom |
-| `/sim/drone_0/imu` | SO3 仿真原始 IMU |
-| `/sim/drone_0/imu_iap` | 给 IAP 使用的 IMU，部分 demo 默认开启 |
-| `/sim/drone_0/lidar` | local_sensing 输出的仿真点云 |
-| `/sim/drone_0/lidar_body` | 转到 body/lidar frame 后的 IAP 输入点云 |
-| `/drone_0_visual_slam/odom` | IAP/sim_extension 输出给 planner/controller 的估计 odom |
-| `/map_generator/global_cloud` | 全局障碍物点云 |
-| `/ublox_driver/range_meas` | GNSS 伪距/多普勒观测 |
-| `/ublox_driver/ephem` | GPS/BDS/GAL 星历 |
-| `/ublox_driver/glo_ephem` | GLONASS 星历 |
-| `/ublox_driver/iono_params` | 电离层参数 |
-| `/ublox_driver/receiver_lla` | 接收机经纬高 |
-| `/gnss_sim/diagnostics` | GNSS 仿真状态 |
+当前正式 launch 未提供统一的 `log_level` 参数。模块文本日志、ROS 日志和 CSV 导出是不同通道；调整 ROS 日志级别不能直接控制模块文件或 CSV。日常诊断优先使用已有导出开关。
 
-### 3.3 常用调试命令
+### 7.5 保留策略
+
+源码工作区默认日志根目录自动启用 retention：保留最近 3 次已结束运行，以及最近 7 天内结束的全部运行。只有同时早于 7 天且不在最近 3 次中的普通开发 run 才可能清理。
+
+自定义外部根目录默认不自动清理。确认该根目录用于普通开发运行后，显式启用：
 
 ```bash
-ros2 topic list
-ros2 topic hz /sim/drone_0/lidar
-ros2 topic hz /sim/drone_0/imu_iap
-ros2 topic hz /drone_0_visual_slam/odom
-ros2 topic echo /gnss_sim/diagnostics
+export IAP_RETENTION_ENABLED=1
 ```
 
-无图形界面或远程环境中运行 demo 时，建议加：
+禁用自动清理：
 
 ```bash
-start_rviz:=false
+export IAP_RETENTION_ENABLED=0
 ```
 
----
+运行中、被锁定、正式证据、受保护、manifest 无效和 symlink 目录会跳过。日志文件轮转与整次 run 的 retention 是两套机制。正式证据应按实验协议保留并标记。
 
-## 4. Demo1 到 Demo11
+## 8. 结果分析
 
-`demo1` 到 `demo8` 都可以这样运行：
-
-```bash
-cd /home/dev/ws_iap
-source install/setup.bash
-ros2 launch iap demoN.launch
-```
-
-其中 `N` 为 1 到 8。XML/Python launch 的参数都可以用 `arg:=value` 覆盖，例如：
-
-```bash
-ros2 launch iap demo2.launch start_rviz:=false circle_radius:=6.0
-```
-
-### 4.1 Demo 总览
-
-| Demo | 目的 | 是否启动 IAP | 是否启动 GNSS sim | 适合检查 |
-|---|---|---:|---:|---|
-| `demo1` | 静态悬停真值 + 随机森林 + LiDAR | 否 | 否 | 地图、点云、RViz、基础 topic |
-| `demo2` | 理想圆轨迹 + 随机森林 + LiDAR | 否 | 否 | 动态 LiDAR、轨迹可视化 |
-| `demo3` | SO3 动力学悬停链路 + IMU/LiDAR | 否 | 否 | 动力学、控制、IMU、LiDAR |
-| `demo4` | SO3 悬停 + IAP LiDAR-IMU/GNSS 集成 | 是 | 是 | IAP 输入桥接、GNSS 输入、估计 odom |
-| `demo5` | SO3 圆轨迹 + IAP | 是 | 否 | 运动中的 IAP 跟踪与点云桥接 |
-| `demo6` | 分阶段起飞/悬停/圆轨迹 + IAP 控制反馈 | 是 | 否 | desired/truth/IAP 三路轨迹对照 |
-| `demo7` | Demo6 + GNSS v2 场景、可视化与故障注入 | 是 | 是 | GNSS/ARAIM、遮挡、NLOS、fault 场景 |
-| `demo8` | Demo7 风格的 SO3 + GNSS/ARAIM 真值对照 | 是 | 是 | ARAIM 真值比较、三路轨迹可视化 |
-| `demo9` | EGO planner + IAP odom + SO3 controller 闭环 | 是 | 是 | Phase 1 官方闭环验证 |
-| `demo10` | demo9 + PI-lite 只读轨迹完整性 evaluator | 是 | 是 | Phase 2 AL/PL/IM 预测与离线对齐 |
-| `demo11` | 森林走廊 + IAP + GNSS/ARAIM + integrity-aware EGO planner | 是 | 是 | 历史闭环验证；canonical 入口为 `iap_sim.launch.py` |
-
-### 4.2 Demo1：基础地图与静态 LiDAR
-
-目的：最小仿真烟测。启动随机森林地图、理想悬停 odom、LiDAR 渲染和 RViz，不启动 IAP、不启动真实动力学。
-
-运行：
-
-```bash
-ros2 launch iap demo1.launch
-```
-
-常用参数：
-
-```bash
-ros2 launch iap demo1.launch \
-  start_rviz:=true \
-  hover_x:=0.0 hover_y:=0.0 hover_z:=1.0 \
-  map_size_x:=30.0 map_size_y:=20.0 map_size_z:=4.0
-```
-
-关键输出：
-
-- `/sim/drone_0/truth_odom`
-- `/sim/drone_0/lidar`
-- `/map_generator/global_cloud`
-- `/demo1/drone/path`
-
-适合先确认 RViz 能看到障碍物点云、局部 LiDAR 和无人机位置。
-
-### 4.3 Demo2：理想圆轨迹 LiDAR
-
-目的：在不引入动力学/IAP 的情况下，检查运动轨迹下的地图、LiDAR 和可视化。
-
-运行：
-
-```bash
-ros2 launch iap demo2.launch
-```
-
-常用参数：
-
-```bash
-ros2 launch iap demo2.launch \
-  circle_radius:=4.0 \
-  circle_period:=24.0 \
-  yaw_mode:=tangent
-```
-
-关键输出：
-
-- `/demo2/circle_position_cmd`
-- `/sim/drone_0/truth_odom`
-- `/sim/drone_0/lidar`
-- `/demo2/drone/path`
-
-`yaw_mode` 可设为 `tangent`、`center` 或其他固定朝向模式。
-
-### 4.4 Demo3：SO3 动力学链路
-
-目的：把 `demo1` 的理想 odom 替换为 SO3 四旋翼动力学，生成真值 odom、IMU 和 LiDAR。当前 `demo3.launch` 不启动 `iap_rosnode`，主要用于确认动力学仿真基础链路。
-
-运行：
-
-```bash
-ros2 launch iap demo3.launch
-```
-
-关键输出：
-
-- `/sim/drone_0/truth_odom`
-- `/sim/drone_0/imu`
-- `/sim/drone_0/lidar`
-- `/demo3/drone/path`
-
-如果你只想做 LiDAR-IMU IAP 配置检查，可以参考 `config/sim_demo3`。这个配置只保留 `librviz_viewer.so`，关闭 GNSS、integrity 和 trunk 扩展。
-
-### 4.5 Demo4：SO3 悬停 + IAP + GNSS sim
-
-目的：完整集成悬停动力学、仿真 IMU、LiDAR frame 桥接、IAP、GNSS sim 和 RViz。它是第一个默认启动 IAP 的 demo。
-
-运行：
-
-```bash
-ros2 launch iap demo4.launch
-```
-
-常用参数：
-
-```bash
-ros2 launch iap demo4.launch \
-  start_rviz:=true \
-  start_iap:=true \
-  start_gnss_sim:=true \
-  hover_z:=1.0
-```
-
-关键链路：
-
-```text
-SO3 simulator -> /sim/drone_0/imu_iap
-local_sensing -> /sim/drone_0/lidar
-demo4_lidar_body_bridge -> /sim/drone_0/lidar_body
-gnss_sim_node -> /ublox_driver/*
-iap_rosnode -> /drone_0_visual_slam/odom
-```
-
-关键参数：
-
-| 参数 | 默认值 | 作用 |
-|---|---|---|
-| `start_iap` | `true` | 是否启动 IAP |
-| `start_gnss_sim` | `true` | 是否启动 GNSS 仿真 |
-| `publish_iap_imu` | `true` | SO3 simulator 是否发布 `/sim/drone_0/imu_iap` |
-| `iap_config_path` | `$(find-pkg-share iap)/config/sim_demo4` | IAP 专用配置 |
-
-若只想看仿真，不启动 IAP：
-
-```bash
-ros2 launch iap demo4.launch start_iap:=false
-```
-
-### 4.6 Demo5：圆轨迹动力学 + IAP
-
-目的：在真实 SO3 动力学下执行圆轨迹，用于观察 IAP 在持续运动、转向和点云变化下的表现。
-
-运行：
-
-```bash
-ros2 launch iap demo5.launch
-```
-
-常用参数：
-
-```bash
-ros2 launch iap demo5.launch \
-  circle_radius:=3.0 \
-  circle_period:=40.0 \
-  circle_hover_duration:=20.0 \
-  circle_yaw_mode:=tangent
-```
-
-关键输出：
-
-- `/demo5/circle_position_cmd`
-- `/sim/drone_0/truth_odom`
-- `/sim/drone_0/imu_iap`
-- `/sim/drone_0/lidar_body`
-- `/drone_0_visual_slam/odom`
-
-`demo5` 默认启动 IAP，但不单独启动 `gnss_sim_node`。如果看到 GNSS topic 等待日志，优先使用 `demo7` 进行 GNSS 集成测试。
-
-### 4.7 Demo6：分阶段起飞 + IAP 控制反馈
-
-目的：模拟更接近任务流程的飞行：地面等待、平滑起飞、悬停、移动到圆轨迹起点、绕圈。RViz 中同时显示 desired、truth 和 IAP/control 三路轨迹。
-
-运行：
-
-```bash
-ros2 launch iap demo6.launch
-```
-
-常用参数：
-
-```bash
-ros2 launch iap demo6.launch \
-  takeoff_height:=2.0 \
-  ground_hold_duration:=18.0 \
-  takeoff_duration:=10.0 \
-  hover_duration:=10.0 \
-  circle_radius:=1.0 \
-  circle_period:=20.0
-```
-
-关键输出：
-
-- Desired：`/demo6/desired/odom`、`/demo6/desired/path`
-- Truth：`/sim/drone_0/truth_odom`、`/demo6/truth/path`
-- IAP/control：`/drone_0_visual_slam/odom`、`/demo6/drone/path`
-
-调试控制链路时，可以让控制器直接吃 truth odom，以区分控制问题和 IAP 估计问题：
-
-```bash
-ros2 launch iap demo6.launch control_odom_topic:=/sim/drone_0/truth_odom
-```
-
-`demo6.launch` 默认的 `iap_config_path` 是 `sim_demo4`。仓库中也提供了 `config/sim_demo6`，需要使用 demo6 专用配置时可显式覆盖：
-
-```bash
-ros2 launch iap demo6.launch \
-  iap_config_path:=/home/dev/ws_iap/src/iap/config/sim_demo6
-```
-
-### 4.8 Demo7：GNSS v2 + ARAIM/故障场景
-
-目的：在 `demo6` 分阶段飞行基础上加入 GNSS v2 仿真、卫星可视化、地图遮挡、SkyMask、NLOS、多路径和故障注入。`demo7` 是 GNSS/ARAIM 集成的主示例。
-
-运行默认 open-sky 场景：
-
-```bash
-ros2 launch iap demo7.launch start_rviz:=true start_gnss_sim:=true
-```
-
-只检查 GNSS 仿真和 RViz，不启动 IAP：
-
-```bash
-ros2 launch iap demo7.launch \
-  start_iap:=false \
-  start_gnss_sim:=true
-```
-
-切换 GNSS 场景：
-
-```bash
-# SkyMask + NLOS
-ros2 launch iap demo7.launch \
-  gnss_scenario_file:=/home/dev/ws_iap/src/iap/config/gnss_sim/demo7_skymask_nlos.yaml
-
-# 单星故障注入
-ros2 launch iap demo7.launch \
-  gnss_scenario_file:=/home/dev/ws_iap/src/iap/config/gnss_sim/demo7_fault_injection.yaml
-```
-
-可用场景文件：
-
-| 文件 | 作用 |
-|---|---|
-| `config/gnss_sim/demo7_open_sky.yaml` | 默认开阔天空，无 SkyMask，无故障 |
-| `config/gnss_sim/demo7_skymask_nlos.yaml` | 启用 SkyMask 和 NLOS 退化 |
-| `config/gnss_sim/demo7_fault_injection.yaml` | 启用 SkyMask，并对 GPS PRN 7 注入伪距偏差和 C/N0 退化 |
-
-### 4.9 Demo8：GNSS/ARAIM 真值对照
-
-目的：在 SO3 动力学、分阶段飞行、GNSS 仿真和 IAP 的基础上，额外输出 ARAIM 与仿真真值的对照结果。它适合检查 GNSS/ARAIM 保护级、故障标记和 desired/truth/IAP 三路轨迹。
-
-运行：
-
-```bash
-ros2 launch iap demo8.launch
-```
-
-无图形界面运行：
-
-```bash
-ros2 launch iap demo8.launch start_rviz:=false
-```
-
-关键输出：
-
-- Desired：`/demo8/desired/odom`、`/demo8/desired/path`
-- Truth：`/sim/drone_0/truth_odom`、`/demo8/truth/path`
-- IAP/control：`/drone_0_visual_slam/odom`、`/demo8/drone/path`
-- GNSS/ARAIM：`/ublox_driver/*`、`/iap/integrity`、`export/iap_araim.csv`
-
-### 4.10 Demo9：EGO Planner + IAP Odom 闭环
-
-目的：把普通 `ego_planner` 闭环接到 IAP 估计 odom 上，验证 EGO planner、traj_server、SO3 controller、SO3 plant、local_sensing、GNSS/ARAIM 和 Phase 1 logger 的端到端链路。它不引入 PI-lite 或 integrity-aware planning。
-
-构建 demo9 依赖：
-
-```bash
-cd /home/dev/ws_iap
-bash src/iap/tools/build_phase1_ego_planner_closed_loop.sh
-source install/setup.bash
-```
-
-官方 Phase 1 运行命令：
-
-```bash
-ros2 launch iap demo9_ego_planner_closed_loop.launch.py \
-  start_rviz:=false \
-  run_duration_s:=60 \
-  allow_truth_alignment:=false \
-  use_so3_dynamics:=true
-```
-
-官方验证命令：
-
-```bash
-python3 src/iap/tools/phase1/validate_phase1_closed_loop.py \
-  --run-dir /home/dev/ws_iap/src/iap/log/latest \
-  --official
-```
-
-关键验收点：
-
-- EGO planner 和 SO3 controller feedback 必须使用 `/drone_0_visual_slam/odom`，不能使用 `/sim/drone_0/truth_odom`。
-- `allow_truth_alignment` 官方模式必须为 `false`。
-- 默认 `point_num:=7` 包含 `point0`；`point0` 来自 `goal_x/y/z`，`point6` 默认回到同一个 goal，形成闭环 waypoint 序列。
-- 默认 GNSS smoke test 使用 `gnss_ephemeris_source:=synthetic` 和 `gnss_enabled_constellations:=GPS`；RINEX 模式需要显式传入有效 `gnss_rinex_nav_file`。
-- logger 会在 `export/` 下写出 `desired_vs_truth.csv`、`planner_traj.csv`、`planner_cmd.csv`、`topic_contract.json` 和 `phase1_summary.json`。
-
-### 4.11 Demo10：PI-lite 只读轨迹完整性评估
-
-> 历史说明：本节仅用于复现旧实验。`phase2_planner_integrity_evaluator`
-> 已废弃，不得出现在 canonical 运行图中；当前 Advisory Integrity 使用 P0。
-
-目的：在 demo9 闭环栈上增加 `phase2_planner_integrity_evaluator`，沿 EGO planner 的未来 B-spline 采样并导出 `AL_pred`、`PL_pred`、`IM_pred`。demo10 只是评估器，不会把 ARAIM/AL/PL/IM 加入 planner cost，也不会修改 planner、ARAIM、IAP estimator、控制器或仿真动力学。
-
-官方 Phase 2 运行命令：
-
-```bash
-ros2 launch iap demo10_ego_planner_pi_lite_eval.launch.py \
-  start_rviz:=false \
-  run_duration_s:=60 \
-  allow_truth_alignment:=false \
-  use_so3_dynamics:=true \
-  use_gnss:=true \
-  use_araim:=true \
-  phase2_pl_model:=constant_current \
-  phase2_al_model:=cloud_clearance
-```
-
-离线对齐和验证：
-
-```bash
-python3 src/iap/tools/phase2/analyze_phase2_integrity_eval.py \
-  --run-dir /home/dev/ws_iap/src/iap/log/latest
-
-python3 src/iap/tools/phase2/validate_phase2_integrity_eval.py \
-  --run-dir /home/dev/ws_iap/src/iap/log/latest
-```
-
-主要输出：
-
-- `export/integrity_along_planner_traj.csv`
-- `export/phase2_integrity_eval_aligned.csv`
-- `export/phase2_summary.json`
-
-GNSS 相关常用参数：
-
-| 参数 | 默认值 | 作用 |
-|---|---|---|
-| `sim_epoch_enabled` | `true` | SO3 simulator 是否使用固定仿真 UTC |
-| `sim_start_utc` | `2022-07-06T00:00:00Z` | 默认仿真历元 |
-| `gnss_time_source` | `trigger_topic` | GNSS epoch 触发方式 |
-| `gnss_trigger_topic` | `/sim/drone_0/lidar` | 默认跟随 LiDAR epoch 触发 |
-| `gnss_num_gps_sats` | `24` | 合成 GPS 卫星数量 |
-| `gnss_enabled_constellations` | `GPS` | 启用星座，RINEX 模式下可设 `GPS,BDS,GAL,GLO` |
-| `gnss_enable_map_occlusion` | `true` | 使用地图点云做遮挡判断 |
-| `gnss_enable_visualization` | `true` | 发布 RViz GNSS 可视化 |
-
-使用 RINEX NAV 文件：
-
-```bash
-ros2 launch iap demo7.launch \
-  gnss_ephemeris_source:=rinex \
-  gnss_rinex_nav_file:=/path/to/brdc.nav \
-  gnss_enabled_constellations:=GPS,BDS,GAL,GLO
-```
-
-GNSS 可视化/诊断 topic：
-
-- `/gnss_sim/diagnostics`
-- `/gnss_sim/visualization/satellite_markers`
-- `/gnss_sim/visualization/signal_rays`
-- `/gnss_sim/visualization/nlos_paths`
-- `/gnss_sim/visualization/sky_dome`
-- `/gnss_sim/visualization/skyplot`
-- `/gnss_sim/visualization/status_text`
-- `/gnss_sim/visualization/occlusion_points`
-
-### 4.12 Demo11：IAP 系统闭环验证
-
-> 历史说明：本节保留旧 demo11 的复现方法。当前完整系统入口是
-> `iap_sim.launch.py`，不是 demo11。
-
-目的：`demo11` 是历史 IAP 系统闭环验证。它在 `demo9` 的 EGO planner + SO3 controller + IAP odom 闭环和 `demo10` 的未来 PL/AL/IM 预测基础上，加入森林走廊地图、GNSS SkyMask/NLOS/多路径/故障注入、PL grid，以及回灌到 EGO 前端 A* 的 integrity cost field。和 `demo10` 不同，`demo11` 不只是记录评估结果，而是让 planner 在搜索阶段主动避开预测低完整性区域。
-
-构建 demo11 依赖：
-
-```bash
-cd /home/dev/ws_iap
-bash src/iap/tools/build_phase1_ego_planner_closed_loop.sh
-source install/setup.bash
-```
-
-推荐的 Full 闭环运行命令：
-
-```bash
-ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
-  start_rviz:=false \
-  run_duration_s:=90 \
-  allow_truth_alignment:=false \
-  use_so3_dynamics:=true \
-  use_iap_odom_for_planner:=true \
-  use_gnss:=true \
-  use_araim:=true \
-  planner_use_integrity_cost:=true \
-  planner_use_integrity_front_search:=true \
-  planner_use_integrity_global_search:=true
-```
-
-关键链路：
-
-```text
-demo11_corridor_map_publisher -> /map_generator/global_cloud
-GNSS sim + IAP -> /iap/integrity
-phase2_planner_integrity_evaluator [DEPRECATED, historical only] -> /iap/integrity_front_cost_field
-EGO planner front-end A* -> integrity-aware global/front search
-traj_server -> SO3 controller -> SO3 plant -> IAP odom feedback
-```
-
-关键输出：
-
-- 地图：`/map_generator/global_cloud`、`/demo11/trunk_cloud`、`/demo11/canopy_cloud`
-- 完整性场：`/iap/integrity_cost_field`、`/iap/integrity_front_cost_field`
-- 闭环轨迹：`/drone_0_visual_slam/odom`、`/drone_0_planning/bspline`、`/drone_0_planning/pos_cmd`
-- GNSS/ARAIM：`/ublox_driver/*`、`/iap/integrity`、`export/demo11_araim_truth_compare.csv`
-- 日志：`export/integrity_along_planner_traj.csv`、`export/planner_traj.csv`、`export/phase1_summary.json`、`export/phase2_summary.json`
-
-常用对比实验：
-
-```bash
-# Baseline：关闭完整性搜索，等价于普通 EGO 前端
-ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
-  start_rviz:=false run_duration_s:=90 use_iap_odom_for_planner:=true \
-  planner_use_integrity_cost:=false \
-  planner_use_integrity_front_search:=false \
-  planner_use_integrity_global_search:=false
-
-# Front-Only：只启用局部/front integrity-aware A*
-ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
-  start_rviz:=false run_duration_s:=90 use_iap_odom_for_planner:=true \
-  planner_use_integrity_cost:=true \
-  planner_use_integrity_front_search:=true \
-  planner_use_integrity_global_search:=false
-
-# Full：启用 front + global integrity-aware search
-ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
-  start_rviz:=false run_duration_s:=90 use_iap_odom_for_planner:=true \
-  planner_use_integrity_cost:=true \
-  planner_use_integrity_front_search:=true \
-  planner_use_integrity_global_search:=true
-```
-
-运行后可以用统一日志分析入口做单次或成对对比：
-
-```bash
-python3 src/iap/tools/ana_log.py \
-  --run /home/dev/ws_iap/src/iap/log/latest
-
-python3 src/iap/tools/ana_log.py \
-  --run /path/to/baseline_run \
-  --compare-run /path/to/full_run
-```
-
-也可以把两次运行的轨迹和完整性 cost field 发布到 RViz 做直观对比：
-
-```bash
-ros2 launch iap demo11_compare_paths.launch.py \
-  off_run_dir:=/path/to/baseline_run \
-  on_run_dir:=/path/to/full_run
-```
-
-关键参数：
-
-| 参数 | 默认值 | 作用 |
-|---|---|---|
-| `use_iap_odom_for_planner` | `false` | 是否让 planner/controller 使用 `/drone_0_visual_slam/odom`；IAP 闭环验证建议显式设为 `true` |
-| `planner_use_integrity_cost` | `true` | 是否在 planner 侧启用完整性代价入口 |
-| `planner_use_integrity_front_search` | `true` | 是否把 `/iap/integrity_front_cost_field` 注入前端 A* |
-| `planner_use_integrity_global_search` | `true` | 是否对全局 waypoint 段使用 integrity-aware A* |
-| `planner_lambda_integrity_front` | `2.0` | 前端完整性代价权重 |
-| `phase2_pl_model` | `gnss_geometry_araim` | 未来 PL 预测模型 |
-| `phase2_use_pl_grid` | `true` | 是否启用 PL grid cache |
-| `phase2_publish_integrity_front_cost_field` | `true` | 是否发布 planner 前端使用的完整性 cost field |
-| `gnss_ephemeris_source` | `rinex` | 默认使用 RINEX 星历；需要文件存在 |
-| `gnss_scenario_file` | `config/gnss_sim/demo7_skymask_nlos.yaml` | 默认 GNSS 退化/故障场景 |
-
-如果当前环境没有默认 RINEX NAV 文件，可以临时切到合成星历做 smoke test：
-
-```bash
-ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
-  gnss_ephemeris_source:=synthetic \
-  gnss_enabled_constellations:=GPS
-```
-
----
-
-## 5. 记录与分析
-
-默认日志目录：
-
-```text
-src/iap/log/<timestamp>/
-src/iap/log/latest -> <timestamp>/
-```
-
-常见子目录：
-
-| 目录 | 内容 |
-|---|---|
-| `runtime/` | 运行日志 |
-| `profiling/` | timing CSV |
-| `export/` | ARAIM、GNSS factor、ICP、仿真指标等导出 |
-| `metadata/` | 本次运行的配置快照 |
-
-### 5.1 一键分析：`ana_log.py`
-
-`tools/ana_log.py` 是推荐的运行日志总分析入口。它默认分析 `src/iap/log/latest`，会自动读取当前 run 目录里的日志、CSV、配置快照和导出文件，并把综合报告写到 `<run>/export/analysis/`。
-
-最常用命令：
+`tools/ana_log.py` 汇总文本日志、产物覆盖、模块耗时、GNSS/ICP、当前完整性和仿真真值等信息。常用命令：
 
 ```bash
 cd /home/dev/ws_iap
 
-# 分析最新一次运行
+# 默认仓库日志根目录的最新 run
 python3 src/iap/tools/ana_log.py
 
-# 分析指定 run 目录
+# 指定一次运行：替换为实际 run ID
 python3 src/iap/tools/ana_log.py \
-  --run src/iap/log/20260430_120000
+  --run "src/iap/log/<run_id>"
 
-# 显式导出到 run 外（该路径会登记进 run manifest）
+# 使用自定义根目录时，必须显式指定 --run
+python3 src/iap/tools/ana_log.py --run "$IAP_RUN_ROOT/latest"
+
+# 快速检查，不生成图，也不调用外部绘图工具
 python3 src/iap/tools/ana_log.py \
-  --run src/iap/log/latest \
-  --out /tmp/iap_analysis
+  --run src/iap/log/latest --no-plots --skip-external-tools
 ```
 
-常用参数：
-
-| 参数 | 作用 |
-|---|---|
-| `--run <dir>` | 指定要分析的 run 目录；默认 `src/iap/log/latest` |
-| `--out <dir>` | 显式指定分析结果输出目录；默认 `<run>/export/analysis` |
-| `--no-plots` | 跳过 `ana_log.py` 自己生成的 PNG/SVG 图 |
-| `--skip-external-tools` | 不调用 `plot_icp_timing.py`、`plot_gnss_factor_debug.py`、`plot_araim_timeline.py` |
-| `--strict` | 如果 runtime 有 error/critical，或配置启用的产物缺失，则返回非零退出码，适合 CI |
-
-`ana_log.py` 会检查这些输入产物；缺失时不会直接失败，报告里会标注 `found`、`missing`、`disabled`、`expected_missing` 或 `empty`：
-
-| 输入 | 作用 |
-|---|---|
-| `runtime/*.log` | 统计运行日志、warning/error、加载模块、shutdown/save 信息 |
-| `metadata/run_manifest.json` | 读取 run 身份、生命周期、git/build 和 retention 元信息；旧 `run_info.json` 只读兼容 |
-| `metadata/config/**/*.json` | 判断哪些产物按配置应当存在 |
-| `profiling/iap_timing.csv` | 统计各模块耗时 mean/p50/p95/p99/max |
-| `export/glio/*.csv` | ICP、GNSS factor 和 GLIO 轨迹诊断 |
-| `export/current_integrity/*.csv` | 当前 ARAIM、HPL/VPL/HAL/VAL/IM 和完整性轨迹 |
-| `export/advisory/` | 未来完整性、风险栅格和预测证据 |
-| `export/planner/` | 候选、P1–P5、lineage、认证和 HOLD 证据 |
-| `export/simulation/` | 仿真真值和 tracking metrics |
-| `export/glio/dump/*` | 建图 dump、submap 和 factor graph 数据 |
-
-默认输出：
+把 `<run_id>` 替换为真实目录名后再执行。分析器的默认路径固定为仓库 `log/latest`，不会自动随 `IAP_RUN_ROOT` 改变。默认输出位于所分析 run 的 `export/analysis/`：
 
 | 输出 | 内容 |
 |---|---|
-| `<out>/report.md` | 人可读 Markdown 总报告，包含 run summary、artifact coverage、runtime warnings/errors、timing、ICP、GNSS、ARAIM、仿真真值校验等章节 |
-| `<out>/report.json` | 与 Markdown 对应的结构化 JSON，适合脚本或 CI 读取 |
-| `<out>/figs/module_timing_summary.png` | 各模块 mean/p95 耗时柱状图；需要 `matplotlib`，没有也不会中断 |
-| `<out>/sim_integrity_validation.csv` | 每个匹配 ARAIM epoch 的 truth/estimate/error/HPL/VPL/coverage 明细 |
-| `<out>/sim_integrity_summary.json` | 仿真真值完整性校验摘要 |
-| `<out>/figs/sim_integrity_timeline.svg` | 水平/垂直 error、PL、alert limit 时间线 |
-| `<out>/figs/sim_integrity_trajectory.svg` | truth 与 estimate 的 XY 轨迹，按 integrity state 着色 |
-| `<out>/figs/sim_integrity_3d_envelope.svg` | 3D 轨迹和 HPL/VPL 保护包络示意 |
-| `<out>/figs/sim_integrity_margin_scatter.svg` | error-vs-PL 覆盖散点图 |
-| `<out>/figs/sim_accuracy_summary.svg` | 仿真真值误差统计图 |
-| `<out>/figs/sim_integrity_source_split.svg` | final/GNSS/LiDAR protection level 来源对比 |
-| `<out>/figs/sim_gnss_truth_comparison.svg` | GNSS-only protection level 与仿真真值误差对比 |
-| `<out>/figs/external/*` | 外部绘图脚本生成的 ICP、GNSS factor、ARAIM timeline 图和报告 |
+| `report.md` | 人可读综合报告 |
+| `report.json` | 结构化分析结果 |
+| `figs/` | 已启用且输入可用时生成的图表 |
+| `sim_integrity_validation.csv` / `sim_integrity_summary.json` | 有匹配仿真数据时的完整性真值分析 |
 
-终端会打印本次分析的三个关键路径，例如：
+先查看报告中的产物覆盖、runtime 错误、timing 和完整性结果。缺失文件会按配置标记为缺失、禁用或预期缺失；并非每个 launch 都应产生全部文件。
 
-```text
-Analyzed run: /home/dev/ws_iap/src/iap/log/latest
-Markdown report: /home/dev/ws_iap/src/iap/log/latest/analysis/report.md
-JSON report    : /home/dev/ws_iap/src/iap/log/latest/analysis/report.json
-Figures dir     : /home/dev/ws_iap/src/iap/log/latest/analysis/figs
-```
+`--strict` 在存在 runtime error/critical 或应启用的当前产物缺失时返回非零；它是日志检查，不能替代完整运行或飞行验收。显式 `--out /absolute/path/to/report` 可导出到其他目录，外部导出会登记到 run manifest。所有参数见 `python3 src/iap/tools/ana_log.py --help`。
 
-如果只想快速判断一次 run 是否健康，优先看 `report.md` 里的这些章节：
+## 9. 运行检查与常见问题
 
-- `Artifact Coverage`：哪些配置启用的 CSV/log/dump 产物缺失。
-- `Runtime Warnings/Errors`：运行时 warning/error 和重复模式。
-- `Module Timing`：最耗时模块及 p95/p99 延迟。
-- `ICP Quality`：ICP 是否退化、RMSE 和 inlier 情况。
-- `GNSS Factor Debug`：GNSS residual 是否异常、哪些 factor/卫星参与。
-- `ARAIM Timeline Summary`：SAFE/UNSAFE 比例、HPL/VPL/HAL/VAL。
-- `Simulation Truth Integrity Validation`：仿真中真实误差是否被 HPL/VPL 覆盖，是否出现 false safe 或过保守 unsafe。
+### 如何判断系统已运行正常？
 
-### 5.2 单项绘图脚本
-
-常用分析脚本：
+按入口检查所需输入、估计初始化、当前完整性、未来预测/执行风险快照、地图证据和规划输出。完整系统还要检查必需进程是否仍在运行、是否有经过认证的轨迹或明确的 HOLD 原因。顶层 launch 返回 0 或 RViz 有画面不能单独证明闭环成功。
 
 ```bash
-# ARAIM timeline
-python3 src/iap/tools/plot_araim_timeline.py \
-  src/iap/log/latest/export/iap_araim.csv \
-  src/iap/log/latest/export
-
-# GNSS factor diagnostics
-python3 src/iap/tools/plot_gnss_factor_debug.py \
-  --csv src/iap/log/latest/export/iap_gnss_factor_debug.csv \
-  --out src/iap/log/latest/export
-
-# ICP + module timing
-python3 src/iap/tools/plot_icp_timing.py \
-  src/iap/log/latest/export/iap_icp.csv \
-  src/iap/log/latest/profiling/iap_timing.csv \
-  src/iap/log/latest/export
+ros2 node list
+ros2 topic list -t
+ros2 topic hz /livox/imu
+ros2 topic hz /livox/lidar
+ros2 topic echo /iap/integrity --once
 ```
 
----
-
-## 6. 常见问题
+按所选入口替换输入 topic；GLIO-only 不要求 `/iap/integrity`。使用 `ros2 node info <节点名>` 核对实际订阅和发布接口。
 
 ### 找不到 package 或 launch
 
-确认已经 source 工作区：
+先加载本工作区 `install/setup.bash`，再检查：
 
 ```bash
-cd /home/dev/ws_iap
-source install/setup.bash
-ros2 pkg list | grep -E '^(iap|gnss_sim|map_generator|so3_quadrotor_simulator)$'
+ros2 pkg prefix iap
+ros2 pkg prefix ego_planner
 ```
 
-如果缺包，重新执行第 1.2 节的完整构建命令。
+确认解析到预期 overlay，并按第 3 节的显式路径构建。旧源码目录、旧构建脚本和 Demo 编号不作为当前启动方式。
 
-### RViz 不显示点云
+### 缺少依赖或编译失败
 
-先确认 topic 是否在发布：
+查看工作区 `log/latest_build/` 和对应包的构建输出。按 CMake 报错检查 GTSAM/gtsam_points、CUDA、Iridescence 或仿真依赖。只构建 `iap` 时，其依赖必须已经安装；首次使用应执行完整构建。
 
-```bash
-ros2 topic hz /map_generator/global_cloud
-ros2 topic hz /sim/drone_0/lidar
+### GPU 检查失败
+
+运行第 4.1 节检查，阅读其摘要和 `GPU_NOT_READY` 原因。确认宿主驱动、容器 GPU 访问和 CUDA Driver API 正常。关闭 RViz 不会绕过 GPU 后端要求。
+
+### 传感器有 topic，估计器却没有有效结果
+
+检查消息是否持续更新、QoS 是否匹配、时间戳与 `/clock` 是否一致、外参和点云字段是否正确。用 `ros2 topic info <topic> -v` 检查发布/订阅端；定位输入初始化问题时同时查看 `runtime/` 日志。
+
+### RViz 没有点云或轨迹
+
+检查 Fixed Frame、TF、实际发布 topic、QoS 和扩展列表。模块默认 profile 不加载 RViz 发布扩展；完整仿真会配置所需可视化。无桌面环境使用 `iap_sim.launch.py start_rviz:=false`。
+
+### 规划器持续 HOLD
+
+先查 `export/planner/` 和运行日志中的具体原因，再检查当前完整性、地图/观测证据、执行风险快照、时间新鲜度及制动条件。规划器启动延迟不是就绪确认；增大延迟不能替代缺失证据。诊断应保留适用的认证门限。
+
+## 10. 目录与专题文档
+
+```text
+src/iap/
+├── apps/                     # ROS 节点与可执行程序
+├── include/iap/              # 模块头文件与接口
+├── src/iap/                  # 估计、完整性、预测、建图等实现
+│   └── planner/              # 规划组件及嵌套 ROS 包
+├── src/uav_simulator/        # 动力学、控制、LiDAR/GNSS 仿真
+├── config/                   # profiles、场景与共享配置
+├── launch/                   # 四个正式入口及内部组合代码
+├── msg/                      # IAP ROS 消息
+├── test/                     # 单元与回归测试
+├── scripts/                  # 构建、诊断与实验工具
+├── tools/                    # 日志分析与绘图
+├── docs/                     # 规范、设计和专题资料
+└── log/                      # 默认运行产物（Git 忽略）
 ```
 
-demo launch 已设置 `FASTRTPS_DEFAULT_PROFILES_FILE`，让 FastDDS 使用 UDP transport，减少共享内存锁文件导致的发现/接收异常。若仍然没有点云，重启相关 launch，并确认没有旧进程占用相同 topic。
+| 文档 | 用途 |
+|---|---|
+| [Launch 使用契约](launch/README.md) | 四入口的组合、输入、就绪条件及飞行校准清单 |
+| [Run artifact contract](docs/spec/run_artifact_contract.md) | 日志、产物、manifest 和保留策略的权威规范 |
+| [系统约定](docs/spec/conventions.md) | 当前接口与规划/完整性语义 |
+| [GNSS 仿真接口](docs/GNSS_SIM_NODE_INTERFACE.md) | GNSS 仿真输入输出与场景配置 |
+| [局部表面误差校准研究](docs/research/LOCAL_SURFACE_ERROR_CALIBRATION.md) | 校准背景与证据要求 |
+| [算法与方法文档](docs/methodology/overview.md) | 算法说明 |
+| [Agent 开发约束](AGENTS.md) | 源码修改、日志写入和构建运行约束 |
+| [历史 launch](launch/bp/README.md) | 旧入口的兼容边界 |
 
-### 没有图形界面
+`docs/icra27/`、`docs/dev_planner/`、`docs/dev_predictor/`、`docs/dev_ARAIM/` 和旧审计目录保留专题设计、测试报告及实验记录。记录中的阶段状态和历史命令应按对应版本解释；日常编译与启动以本 README 和当前 launch 契约为准。
 
-运行时关闭 RViz：
-
-```bash
-ros2 launch iap demo7.launch start_rviz:=false
-```
-
-### IAP 没有收到 IMU 或点云
-
-检查输入 topic：
-
-```bash
-ros2 topic hz /sim/drone_0/imu_iap
-ros2 topic hz /sim/drone_0/lidar_body
-```
-
-再检查 `config_path` 指向的 `config_ros.json` 中 `imu_topic` 和 `points_topic` 是否与 launch 中的 topic 一致。`demo4/5/6/7` 也可以通过参数覆盖：
-
-```bash
-ros2 launch iap demo4.launch \
-  iap_imu_topic:=/sim/drone_0/imu_iap \
-  iap_lidar_topic:=/sim/drone_0/lidar_body
-```
-
-### GNSS sim 没有输出
-
-先确认真值 odom 和 GNSS 诊断：
-
-```bash
-ros2 topic hz /sim/drone_0/truth_odom
-ros2 topic echo /gnss_sim/diagnostics
-ros2 topic hz /ublox_driver/range_meas
-```
-
-`demo7` 默认使用 `gnss_time_source:=trigger_topic`，触发 topic 是 `/sim/drone_0/lidar`。如果 LiDAR 没有输出，GNSS range epoch 也不会按预期发布。
-
----
-
-## 7. 功能检查建议
-
-1. `demo1`：确认地图、LiDAR、RViz。
-2. `demo2`：确认动态轨迹和 LiDAR。
-3. `demo3`：确认 SO3 动力学、IMU 和 LiDAR。
-4. `demo4`：第一次接入 IAP 和 GNSS sim。
-5. `demo5`：检查运动中的 IAP。
-6. `demo6`：检查 desired/truth/IAP 控制反馈链路。
-7. `demo7`：检查 GNSS/ARAIM、遮挡、NLOS 和故障注入。
-8. `demo8`：检查 GNSS/ARAIM 真值对照和三路轨迹。
-9. `demo9`：检查 EGO planner 使用 IAP odom 的 Phase 1 闭环验收。
-10. `demo10`：检查 PI-lite 只读完整性预测和离线对齐。
-11. `demo11`：检查完整 IAP 系统闭环、integrity-aware EGO planner 和 baseline/full 对比。
-
-完成配置修改后，请重启对应 launch；IAP 配置在节点启动时读取，运行中修改 JSON/YAML 不会自动生效。
-
-### ICRA 开发接口逐层集成
-
-`test_icra.launch.py` 是 ICRA 开发纵切面的入口。仿真显式使用 SI
-加速度缩放 `odometry_acc_scale:=1.0`；开发 profile
-`icra_p0_p4_v2_p5_dev` 固定使用 NAIVE 初始化、2 秒 LiDAR 延迟、10 秒规划器
-延迟，并隔离 P1/P2/P3。专用 RViz 配置只影响此入口。
-
-该 profile 启用 `p0.fit_grid_to_map_cloud:=true`：P0 从第一幅合法的
-`/map_generator/global_cloud`（`map` frame）计算有限点包围盒跨度，并用该跨度初始化
-RiskGridMap 的 X/Y/Z 尺寸；网格中心仍按规划 odom 滚动，不固定在场景中心。空点云、
-非有限边界或 frame 不匹配会 fail closed。其他 profile 默认保持 `false`，继续使用
-显式 `p0.size_*_m`。ICRA profile 还将 `planner_executor_thread_count` 设为 6，为规划、
-点云输入/处理、里程计及 P0 refresh/health 回调留出执行槽；通用默认值仍为 4。
-
-当前基线的 `planner_odom_topic` 仍绑定 `/sim/drone_0/truth_odom`；上述场景自适应只改变
-风险网格尺寸来源，不改变 pose 来源。将规划 pose 切换为 IAP 估计里程计属于独立接口
-变更，需要重新执行 estimator 至 full 的分层验收。
-
-在已构建并 source 工作空间后，运行单层或逐层门禁：
-
-```bash
-python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
-  --stage estimator --repetitions 3
-
-python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
-  --through full --repetitions 3
-
-python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
-  --stage full --repetitions 1 --rviz
-```
-
-`--rviz` 会显式加载已安装的
-`share/iap/config/sim_demo11/test_icra.rviz`，并并行运行只读 ROS graph/message
-探针。探针在所有必需图层首次收到数据后再等待至少 2 秒，以最终
-`/test_planner_rviz` endpoint 的 QoS、非空 PointCloud2 和有限 MarkerArray
-几何写出 `rviz_runtime.json`；启动期 incompatible-QoS warning 仅作计数诊断。
-当前执行轨迹的 endpoint 始终检查，但仅在正式 B-spline 已发布时要求其 Marker
-payload 非空。探针在同一稳定时刻保存 `rviz_visual_proof.png`，并把图片路径、
-SHA256 和像素尺寸写入运行时 JSON；最终仍须打开图片进行人工可见性确认。
-
-可切换的茂密森林开发场景为 `icra_dense_forest_four_fork_v1`。它冻结
-`forest_random_seed=41021` 和 `fork_risk_seed=21`，四段开阔低风险侧依次为
-右、左、右、左；两侧都是由真实点云清出的 2.4 m 可通行曲线分支。GNSS 使用
-GPS+Galileo+GLONASS RINEX 子集（排除大规模 BDS 集）以兼顾实时地图遮挡与空间几何，风险差异来自地图遮挡/NLOS/multipath、
-冠层和 LiDAR 可观测性；P0 使用保守 GNSS max 融合，避免高 LiDAR 特征量掩盖
-GNSS 高 PL，不注入 fixture risk。
-
-2.4 m 是该开发场景的几何折中，不是固定的系统常量：以 0.14 m 树干、0.05 m
-根部保护间隙和最大 1.5 m 冠幅计算，边缘树中心距通道中心约 1.39 m，树干在净空区外、
-冠层仍能覆盖高风险分支中心；若使用 3.0 m，树中心距约 1.69 m，最大冠幅也无法稳定
-覆盖中心线。几何单测固定这一约束，实际 risk grid 尺寸仍由场景点云 bbox 自动适配。
-直接观察完整链路：
-
-```bash
-python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
-  --scenario icra_dense_forest_four_fork_v1 \
-  --stage full --repetitions 1 --rviz
-```
-
-配对验证会对每个 repetition 先运行 90 秒 P4/P5-off baseline，再运行 90 秒
-P4/P5-on 风险规划；默认连续 3 次。capture 只保存 B-spline/位置指令坐标、实际
-点云 bbox/hash，以及每个 P0 generation 的四分叉两侧 PL/c_pi/valid 汇总，不保存
-重复的完整风险点云；`session_summary.json` 的 `forest_pairs` 会记录两次分支选择、
-低风险分支数量差值、风险对比 generation 和 lineage 数量：
-
-```bash
-python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
-  --scenario icra_dense_forest_four_fork_v1 \
-  --stage full --forest-ab --repetitions 3
-```
-
-不传 `--scenario` 时仍使用 `icra072_p4_selection_trigger_v1`。森林 preset 也保持
-规划 pose 来自 truth odometry；它是开发集成和可视化场景，不是科学效果或资格结论。
-
-阶段为 `estimator|p0|p4|p5-final|full|shutdown`。普通运行在首个失败处停止；
-`--forest-ab` 若 baseline 失败，会先完成同一 repetition 的 risk 变体以保留成对诊断，
-写完 `forest_pairs` 后仍返回失败。runner 将 launch 参数、stdout、ROS/IAP 日志、
-topic capture、退出状态和阶段摘要保存到
-`results/icra27/dev_runs/interface_integration/`。终端会在启动时打印 session、当前
-stage 和 `stdout.log` 路径，并每 5 秒报告一次运行进度。按 Ctrl+C 时 runner 会先
-清理本次拥有的 launch/capture 进程组，写入 `INTERRUPTED` 阶段与 session 摘要，
-然后以状态码 130 退出。这些结果仅用于开发集成，不构成 P4 科学效果或正式资格声明。
-
-ICRA-076 measured-repeatability repair (2026-08-28): preregistration now
-requires 60 machine measurements from an offline production-shaped P4 profile
-probe over one byte-identical serialized FLAT_NULL input. U95 is the
-nearest-rank 95% bound of observed `|D_peak|`; verification/freeze evidence
-must remain repository-local and bind pushed source. ICRA-077 is unauthorized.
-Fresh replay-002 retains 60/60 measurements (U95 `0.0 m`); verification-001
-and preregistration-freeze-004 independently validate against the pushed
-implementation. This is a Builder candidate, not Supervisor PASS.
-That first candidate was review-rejected. Replay-003/verification-002/
-preregistration-freeze-005 is also immutable historical evidence: its local
-checks passed, but later review and the retained pre-access blocker prevent it
-from being current authority or PASS. The current ICRA-077A candidate is
-described below.
-
-ICRA-077A governance closure (2026-08-28): freeze-005 correctly blocked before
-held-out access when later Supervisor prose changed frozen authority bytes.
-The bounded repair treats exactly three named governance documents as Git-blob
-snapshots from `3a3486f`, separately fingerprints protected research-route
-fields, and leaves every executable input/current install byte strict. The
-offline 004/003/006 candidate was review-rejected because route JSON admission
-was weaker than the canonical guard and malformed fourth snapshot entries could
-be ignored. It remains immutable history. Fresh 005/004/007 evidence postdates
-pushed repair source `b222c91`, passes the exact offline suite and independently
-validates 1017 source / 958 install records, but Supervisor Review rejected it
-as formal authority. User decision 010 authorizes only frozen-blob route
-cross-binding and unambiguous evidence identity. Fresh 006/005/008 postdates
-pushed source `ef94154`, passes the offline exact suite and validates 1017
-source / 958 install records. ICRA-077B remains unauthorized pending Review.
+本仓库包含从 GLIM 及 EGO Planner 体系借鉴或迁移的实现，具体来源见源码注释。本仓库许可证见 [LICENSE](LICENSE)，子包及第三方代码另见其各自声明。
