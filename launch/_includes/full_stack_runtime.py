@@ -2632,7 +2632,8 @@ def _strict_descendant(path, root):
     return path != root
 
 
-def _materialize_iap_logging_config(config_path, runtime_base, iap_log_root):
+def _materialize_iap_logging_config(
+        config_path, runtime_base, iap_log_root, *, artifact_run_dir=""):
     """Bind every IAP log/timing path to one validated run-local root."""
     config_path = Path(config_path).resolve()
     runtime_base = Path(runtime_base).expanduser()
@@ -2644,10 +2645,33 @@ def _materialize_iap_logging_config(config_path, runtime_base, iap_log_root):
         raise RuntimeError("iap_log_root must be absolute")
     runtime_base = runtime_base.resolve()
     requested = requested.resolve()
-    if not _strict_descendant(requested, runtime_base):
-        raise RuntimeError(
-            f"iap_log_root must be below runtime_root_dir: {requested}"
-        )
+    artifact_run_raw = str(artifact_run_dir).strip()
+    if artifact_run_raw:
+        artifact_run = Path(artifact_run_raw).expanduser()
+        if not artifact_run.is_absolute():
+            raise RuntimeError("IAP_RUN_DIR must be absolute")
+        artifact_run = artifact_run.resolve()
+        config_snapshot_root = (artifact_run / "metadata" / "config").resolve()
+        expected_log_root = (artifact_run / "runtime").resolve()
+        if requested != expected_log_root:
+            raise RuntimeError(
+                "iap_log_root must equal <IAP_RUN_DIR>/runtime: "
+                f"{requested}"
+            )
+        if runtime_base != config_snapshot_root and not _strict_descendant(
+                runtime_base, config_snapshot_root):
+            raise RuntimeError(
+                "runtime_root_dir must be below <IAP_RUN_DIR>/metadata/config"
+            )
+        timing_path = (
+            artifact_run / "profiling" / "iap_timing.csv"
+        ).resolve()
+    else:
+        if not _strict_descendant(requested, runtime_base):
+            raise RuntimeError(
+                f"iap_log_root must be below runtime_root_dir: {requested}"
+            )
+        timing_path = (requested / "profiling" / "iap_timing.csv").resolve()
     if not _strict_descendant(config_path, runtime_base):
         raise RuntimeError("effective config.json must be below runtime_root_dir")
 
@@ -2667,8 +2691,12 @@ def _materialize_iap_logging_config(config_path, runtime_base, iap_log_root):
     if not isinstance(referenced_logging, dict):
         raise RuntimeError("referenced config_logging lacks logging block")
 
-    timing_path = (requested / "profiling" / "iap_timing.csv").resolve()
-    if not _strict_descendant(timing_path, runtime_base):
+    timing_parent = (
+        (Path(artifact_run_raw).expanduser().resolve() / "profiling")
+        if artifact_run_raw
+        else runtime_base
+    )
+    if not _strict_descendant(timing_path, timing_parent):
         raise RuntimeError("derived IAP timing path escapes runtime_root_dir")
 
     logging_config["log_dir"] = str(requested)
@@ -2716,7 +2744,10 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         LaunchConfiguration("iap_log_root").perform(context),
     )
     logging_effective = _materialize_iap_logging_config(
-        runtime_config_dir / "config.json", runtime_base, requested_log_root
+        runtime_config_dir / "config.json",
+        runtime_base,
+        requested_log_root,
+        artifact_run_dir=context.environment.get("IAP_RUN_DIR", ""),
     )
 
     mapping_backend = _normalize_mapping_backend(

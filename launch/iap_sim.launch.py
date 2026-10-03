@@ -86,6 +86,13 @@ def _setup(context):
         SetEnvironmentVariable(
             "ROS_LOG_DIR", str(output_dir / "runtime" / "ros")
         ),
+        RegisterEventHandler(
+            OnShutdown(
+                on_shutdown=lambda event, _context: finalize_run_from_shutdown(
+                    output_dir, event
+                )
+            )
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 str(
@@ -100,20 +107,13 @@ def _setup(context):
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "runtime_root_dir": str(output_dir / "metadata" / "config" / "full_stack"),
                 "export_root_dir": str(output_dir / "export" / "planner"),
-                "iap_log_root": str(output_dir),
+                "iap_log_root": str(output_dir / "runtime"),
                 "bag_output_dir": str(output_dir / "export" / "capture"),
                 "run_duration_s": LaunchConfiguration("run_duration_s").perform(context),
                 "planner_start_delay_s": LaunchConfiguration(
                     "planner_start_delay_s"
                 ).perform(context),
             }.items(),
-        ),
-        RegisterEventHandler(
-            OnShutdown(
-                on_shutdown=lambda event, _context: finalize_run_from_shutdown(
-                    output_dir, event
-                )
-            )
         ),
     ]
 

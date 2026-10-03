@@ -341,6 +341,134 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertNotIn(' / "bp" / ', runtime)
         self.assertNotIn("icra_p0_p5_qualification.py", runtime)
 
+    def test_sim_paths_follow_canonical_run_categories(self):
+        simulation = self._load_launch("iap_sim.launch.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ, {"IAP_RUN_ROOT": temporary}
+        ), mock.patch.object(
+            simulation, "get_package_share_directory", return_value=str(REPO)
+        ):
+            context = LaunchContext()
+            context.launch_configurations.update(
+                {
+                    "scenario": "lidar_corridor_degenerate",
+                    "start_rviz": "true",
+                    "planner_start_delay_s": "10.0",
+                    "run_duration_s": "60.0",
+                }
+            )
+            actions = simulation._setup(context)
+            action_names = [type(action).__name__ for action in actions]
+            self.assertLess(
+                action_names.index("RegisterEventHandler"),
+                action_names.index("IncludeLaunchDescription"),
+            )
+            include = next(
+                action
+                for action in actions
+                if type(action).__name__ == "IncludeLaunchDescription"
+            )
+            arguments = dict(include.launch_arguments)
+            runtime_root = Path(arguments["runtime_root_dir"])
+            log_root = Path(arguments["iap_log_root"])
+            run_dir = log_root.parent
+            self.assertEqual(
+                runtime_root, run_dir / "metadata" / "config" / "full_stack"
+            )
+            self.assertEqual(log_root, run_dir / "runtime")
+
+    def test_sim_logging_materialization_uses_canonical_run_categories(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary).resolve()
+            runtime_base = run_dir / "metadata" / "config" / "full_stack"
+            config_dir = runtime_base / "instance" / "sim_demo11"
+            config_dir.mkdir(parents=True)
+            config_path = config_dir / "config.json"
+            logging_path = config_dir / "config_logging.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "global": {"config_logging": "config_logging.json"},
+                        "logging": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            logging_path.write_text(
+                json.dumps({"logging": {}}), encoding="utf-8"
+            )
+
+            effective = runtime._materialize_iap_logging_config(
+                config_path,
+                runtime_base,
+                run_dir / "runtime",
+                artifact_run_dir=run_dir,
+            )
+            root = json.loads(config_path.read_text(encoding="utf-8"))
+            referenced = json.loads(logging_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(root["logging"]["log_dir"], str(run_dir / "runtime"))
+            self.assertEqual(
+                referenced["logging"]["log_dir"], str(run_dir / "runtime")
+            )
+            self.assertEqual(
+                root["global"]["timing_csv_path"],
+                str(run_dir / "profiling" / "iap_timing.csv"),
+            )
+            self.assertEqual(effective["log_root"], str(run_dir / "runtime"))
+            with self.assertRaisesRegex(
+                RuntimeError, "iap_log_root must equal <IAP_RUN_DIR>/runtime"
+            ):
+                runtime._materialize_iap_logging_config(
+                    config_path,
+                    runtime_base,
+                    run_dir / "export",
+                    artifact_run_dir=run_dir,
+                )
+
+    def test_sim_runtime_config_accepts_canonical_artifact_layout(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            runtime, "get_package_share_directory", return_value=str(REPO)
+        ):
+            run_dir = Path(temporary).resolve()
+            for relative in (
+                "runtime",
+                "profiling",
+                "export/planner",
+                "metadata/config/full_stack",
+            ):
+                (run_dir / relative).mkdir(parents=True, exist_ok=True)
+            context = LaunchContext()
+            for name, default in runtime.ARG_DEFAULTS:
+                context.launch_configurations[name] = str(default)
+            context.launch_configurations.update(
+                {
+                    "experiment": "canonical_full_stack_sim",
+                    "scenario": "lidar_corridor_degenerate",
+                    "runtime_root_dir": str(
+                        run_dir / "metadata/config/full_stack"
+                    ),
+                    "export_root_dir": str(run_dir / "export/planner"),
+                    "iap_log_root": str(run_dir / "runtime"),
+                }
+            )
+            context.environment["IAP_RUN_DIR"] = str(run_dir)
+
+            _, _, _, _, logging = runtime._runtime_config(
+                context,
+                use_gnss=False,
+                use_araim=True,
+                allow_truth_alignment=False,
+            )
+
+            self.assertEqual(logging["log_root"], str(run_dir / "runtime"))
+            self.assertEqual(
+                logging["timing_csv_path"],
+                str(run_dir / "profiling/iap_timing.csv"),
+            )
+
     def test_catalog_task_mode_is_applied_to_every_canonical_scenario(self):
         catalog = json.loads(
             (REPO / "config/scenarios/catalog.json").read_text(encoding="utf-8")
