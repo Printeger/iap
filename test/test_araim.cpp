@@ -2663,6 +2663,17 @@ TEST(IntegrityCurrentMotionTest, SingleSourceAndBoundedBridge) {
                                               unavailable, report);
   EXPECT_EQ(report.current_motion_quality, 1);
   EXPECT_EQ(report.current_motion_reason, "lidar_supported");
+  frame.stamp = fgo.stamp = 101.4;
+  frame.icp_quality.inlier_count = 1;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              unavailable, report);
+  EXPECT_EQ(report.current_motion_quality, 2);
+  frame.stamp = fgo.stamp = 101.5;
+  frame.icp_quality.inlier_count = 100;
+  frame.icp_quality.rmse = 5.0;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              unavailable, report);
+  EXPECT_EQ(report.current_motion_quality, 2);
   fgo.frame_id = 92;
   IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
                                               gnss, report);

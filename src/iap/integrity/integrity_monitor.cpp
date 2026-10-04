@@ -557,6 +557,9 @@ void IntegrityMonitor::computeIntegrityMargins(IntegrityReport& report) const {
 void IntegrityMonitor::updateStateAndPlannerMode(IntegrityReport& report) {
   const auto t0_state = std::chrono::high_resolution_clock::now();
   report.state = update_state(report);
+  // Retain the historical source-max recommendation for diagnostics only.
+  // The EGO FSM does not consume it; current_motion_quality determines the
+  // operational fused-motion decision with physical environment evidence.
   report.planner_state = (report.state == IntegrityState::UNSAFE)
                            ? PlannerState::HOVER
                            : PlannerState::CRUISE;
@@ -620,11 +623,19 @@ void IntegrityMonitor::evaluateCurrentMotionQuality(
   // Registration support is the actual ICP measurement on this frame. The
   // LiDAR source PL may be unavailable even while registration constrains FGO.
   const bool lidar_supported = !frame.icp_quality.degeneracy_flag &&
-      frame.icp_quality.inlier_count > 0 &&
+      params_.current_icp_min_inliers > 0 &&
+      std::isfinite(params_.current_icp_min_inlier_fraction) &&
+      params_.current_icp_min_inlier_fraction > 0.0 &&
+      params_.current_icp_min_inlier_fraction <= 1.0 &&
+      std::isfinite(params_.current_icp_max_rmse_m) &&
+      params_.current_icp_max_rmse_m > 0.0 &&
+      frame.icp_quality.inlier_count >= params_.current_icp_min_inliers &&
       std::isfinite(frame.icp_quality.inlier_fraction) &&
-      frame.icp_quality.inlier_fraction > 0.0 &&
+      frame.icp_quality.inlier_fraction >=
+          params_.current_icp_min_inlier_fraction &&
       std::isfinite(frame.icp_quality.rmse) &&
-      frame.icp_quality.rmse >= 0.0;
+      frame.icp_quality.rmse >= 0.0 &&
+      frame.icp_quality.rmse <= params_.current_icp_max_rmse_m;
   if (gnss_supported || lidar_supported)
     last_external_support_stamp_s_ = frame.stamp;
   report.current_external_support_age_s =

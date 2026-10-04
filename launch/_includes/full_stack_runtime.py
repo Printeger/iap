@@ -59,8 +59,8 @@ def planner_parameters(scenario):
         "optimization/max_vel": velocity, "optimization/max_acc": 2.0,
         "bspline/limit_vel": velocity, "bspline/limit_acc": 2.0,
         "bspline/limit_ratio": 1.1, "risk/validity_s": 0.5,
-        # Experimental four-fork motion/advisory contract. These values are
-        # planning preferences and FGO error-proxy budgets, not certified PL.
+        # Experimental full-stack defaults; four-fork is the standard test
+        # scene. These are preferences/proxy budgets, not certified PL.
         "planning/advisory_hpl_budget_m": 0.55,
         "planning/advisory_vpl_budget_m": 0.60,
         "planning/advisory_hpl_reserve_m": 0.10,

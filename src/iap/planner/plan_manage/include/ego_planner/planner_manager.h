@@ -106,6 +106,7 @@ namespace ego_planner
     GridPlanningRiskPolicy planning_risk_policy_;
     double motion_body_radius_m_ = 0.35;
     double motion_tracking_reserve_m_ = 0.10;
+    double motion_start_tolerance_m_ = 0.30;
     double motion_budget_m_ = 0.55;
     double motion_max_age_s_ = 0.5;
     double environment_max_age_s_ = 0.5;

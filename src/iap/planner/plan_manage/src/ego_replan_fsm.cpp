@@ -738,12 +738,14 @@ namespace ego_planner
 
     if (!assessment.executable()) {
       const double lead = assessment.first_execution_time_s - elapsed;
-      RCLCPP_WARN(node_->get_logger(),
-                  "Remaining trajectory %s, lead=%.2fs",
-                  gridExecutionReasonName(assessment.execution_reason), lead);
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                           "Remaining trajectory %s, lead=%.2fs",
+                           gridExecutionReasonName(assessment.execution_reason), lead);
       if (lead > emergency_time_) {
         changeFSMExecState(REPLAN_TRAJ, "SAFETY");
-      } else if (planFromCurrentTraj()) {
+      } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
+                      ? planFromGlobalTraj(1)
+                      : planFromCurrentTraj())) {
         changeFSMExecState(EXEC_TRAJ, "SAFETY");
         publishSwarmTrajs(false);
       } else {

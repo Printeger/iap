@@ -144,6 +144,13 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   // ── Build IntegrityMonitor with config overrides ─────────────────────────
   IntegrityMonitor::Params mp;
   mp.K_pl               = config.param<double>("integrity", "K_pl",               mp.K_pl);
+  mp.current_icp_min_inliers = config.param<int>(
+      "integrity", "current_icp_min_inliers", mp.current_icp_min_inliers);
+  mp.current_icp_min_inlier_fraction = config.param<double>(
+      "integrity", "current_icp_min_inlier_fraction",
+      mp.current_icp_min_inlier_fraction);
+  mp.current_icp_max_rmse_m = config.param<double>(
+      "integrity", "current_icp_max_rmse_m", mp.current_icp_max_rmse_m);
   mp.gamma_H            = config.param<double>("integrity", "gamma_H",            mp.gamma_H);
   mp.r_drone            = config.param<double>("integrity", "r_drone",            mp.r_drone);
   mp.HAL_trunk_default  = config.param<double>("integrity", "HAL_trunk_default",  mp.HAL_trunk_default);

@@ -27,6 +27,9 @@ struct GridMapTestAccess {
 };
 namespace ego_planner {
 struct EGOPlannerManagerTestAccess {
+  static void setExternalSupportAge(EGOPlannerManager& manager, double age) {
+    manager.current_integrity_.current_external_support_age_s = age;
+  }
   static void setMotion(EGOPlannerManager& manager, double stamp,
                         uint8_t quality) {
     manager.current_integrity_.stamp = stamp;
@@ -151,6 +154,23 @@ TEST(EgoBaseline, PhysicalPlanningProducesFiniteCurveAndObstacleDetour) {
       unsafe, 0, node->now().seconds());
   EXPECT_FALSE(post_retime.executable());
   EXPECT_TRUE(std::isfinite(post_retime.first_execution_time_s));
+  Eigen::MatrixXd shifted_controls = unsafe_controls;
+  shifted_controls.row(0).array() += 1.0;
+  ego_planner::UniformBspline shifted(shifted_controls, 3, 0.25);
+  const auto wrong_start = manager.assessTrajectory(
+      shifted, 0, node->now().seconds());
+  EXPECT_EQ(wrong_start.execution_reason, GridExecutionReason::TRACKING_ERROR);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(
+      manager,node->now().seconds(),2);
+  ego_planner::EGOPlannerManagerTestAccess::setExternalSupportAge(manager, 0.9);
+  manager.local_data_.position_traj_ = unsafe;
+  manager.local_data_.start_time_ = node->now();
+  const auto bridged_lookahead = manager.assessRemainingTrajectory(
+      node->now().seconds());
+  EXPECT_EQ(bridged_lookahead.execution_reason,
+            GridExecutionReason::INSUFFICIENT_CLEARANCE);
+  ego_planner::EGOPlannerManagerTestAccess::setExternalSupportAge(manager, 1.1);
+  EXPECT_EQ(manager.currentMotionContext(true).quality, 0);
   const auto committed_id = local.traj_id_;
   ego_planner::EGOPlannerManagerTestAccess::setMotion(
       manager,node->now().seconds(),0);

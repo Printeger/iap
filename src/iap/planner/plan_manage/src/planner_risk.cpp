@@ -83,6 +83,7 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   planning_risk_policy_.stale_soft_seconds = node->declare_parameter("planning/advisory_stale_soft_s", 1.0);
   motion_body_radius_m_ = node->declare_parameter("planning/body_radius_m", 0.35);
   motion_tracking_reserve_m_ = node->declare_parameter("planning/tracking_reserve_m", 0.10);
+  node->get_parameter("planning/tracking_error_limit_m", motion_start_tolerance_m_);
   motion_budget_m_ = node->declare_parameter("planning/current_motion_budget_m", 0.55);
   motion_max_age_s_ = node->declare_parameter("planning/current_motion_max_age_s", 0.5);
   environment_max_age_s_ = node->declare_parameter("planning/environment_max_age_s", 0.5);
@@ -102,6 +103,7 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
       planning_risk_policy_.stale_soft_seconds <= 0.0 ||
       !std::isfinite(motion_body_radius_m_) || motion_body_radius_m_ <= 0.0 ||
       !std::isfinite(motion_tracking_reserve_m_) || motion_tracking_reserve_m_ < 0.0 ||
+      !std::isfinite(motion_start_tolerance_m_) || motion_start_tolerance_m_ <= 0.0 ||
       !std::isfinite(motion_budget_m_) || motion_budget_m_ <= 0.0 ||
       !std::isfinite(motion_max_age_s_) || motion_max_age_s_ <= 0.0 ||
       !std::isfinite(environment_max_age_s_) || environment_max_age_s_ <= 0.0)
@@ -321,13 +323,21 @@ uint64_t EGOPlannerManager::beginRiskQuery() {
 GridMotionContext EGOPlannerManager::currentMotionContext(
     const bool allow_bridged) const {
   GridMotionContext motion;
+  const double now_s = node_->now().seconds();
   const double odom_age_s = risk_odom_
-      ? node_->now().seconds() - stampToSec(risk_odom_->header.stamp)
+      ? now_s - stampToSec(risk_odom_->header.stamp)
       : std::numeric_limits<double>::infinity();
   motion.quality = risk_frame_valid_ && risk_odom_ &&
       risk_odom_->header.frame_id == grid_map_->getFrameId() &&
       odom_age_s >= 0.0 && odom_age_s <= motion_max_age_s_
       ? current_integrity_.current_motion_quality : 0;
+  // A stopped monitor cannot indefinitely extend the bounded inertial bridge
+  // by leaving its last BRIDGED report in memory.
+  if (motion.quality == 2 &&
+      (!std::isfinite(current_integrity_.current_external_support_age_s) ||
+       current_integrity_.current_external_support_age_s +
+           std::max(0.0, now_s - current_integrity_.stamp) > 1.0))
+    motion.quality = 0;
   motion.allow_bridged = allow_bridged;
   motion.stamp_s = current_integrity_.stamp;
   motion.error_proxy_m = current_integrity_.current_motion_error_proxy_m;
@@ -346,6 +356,17 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   TrajectoryAssessment assessment;
   auto curve = trajectory;
   const double duration = curve.getTimeSum();
+  if (from_time_s <= 0.0 && risk_odom_) {
+    const auto& p = risk_odom_->pose.pose.position;
+    const Eigen::Vector3d actual(p.x, p.y, p.z);
+    if (!actual.allFinite() ||
+        (curve.evaluateDeBoorT(0.0) - actual).norm() >
+            motion_start_tolerance_m_) {
+      assessment.execution_reason = GridExecutionReason::TRACKING_ERROR;
+      assessment.first_execution_time_s = 0.0;
+      return assessment;
+    }
+  }
   const double end = std::min(duration, to_time_s);
   const auto motion = currentMotionContext(allow_bridged);
   const double step = std::min(0.02, grid_map_->getResolution() /
@@ -388,14 +409,11 @@ EGOPlannerManager::assessRemainingTrajectory(const double now_s) {
     version = beginRiskQuery();
   }
   const double elapsed = now_s - local_data_.start_time_.seconds();
-  double end = std::numeric_limits<double>::infinity();
-  if (current_integrity_.current_motion_quality == 2) {
-    const double remaining_bridge = std::max(0.0,
-        1.0 - current_integrity_.current_external_support_age_s);
-    end = elapsed + remaining_bridge;
-  }
+  // Continue to find physical obstacles over the entire remaining curve.
+  // The bridge is a current authorization with a wall-clock expiry, checked
+  // again on every supervision tick; it is not a spatial lookahead cutoff.
   return assessTrajectory(local_data_.position_traj_, version, now_s,
-                          true, elapsed, end);
+                          true, elapsed);
 }
 
 uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& snapshot,

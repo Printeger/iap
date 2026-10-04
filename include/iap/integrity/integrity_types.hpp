@@ -30,12 +30,13 @@ inline const char* to_string(IntegrityState s) {
   }
 }
 
-/// @brief Planner state (§5 of checklist).
+/// @brief Legacy source-monitor recommendation (§5 of checklist).
+/// This is diagnostic history, not an actuation command or motion authority.
 enum class PlannerState {
   CRUISE      = 0,  ///< normal mission flight, IM >> IM_threshold
   OPTIMIZING  = 1,  ///< active search for better geometry (IM ≤ IM_threshold)
   TRAVERSING  = 2,  ///< executing re-planned trajectory
-  HOVER       = 3,  ///< UNSAFE state, holding position
+  HOVER       = 3,  ///< legacy suggestion for source-max UNSAFE
 };
 
 inline const char* to_string(PlannerState s) {
@@ -146,7 +147,7 @@ struct IntegrityReport {
   double im_v = 0.0;  ///< vertical margin = VAL - VPL [m]
 
   IntegrityState state = IntegrityState::UNSAFE;  ///< §1.13 three-state
-  PlannerState   planner_state = PlannerState::CRUISE;
+  PlannerState   planner_state = PlannerState::CRUISE;  ///< legacy diagnostic only
 
   // --- Legacy mode (deprecated, kept for backward compat) ----------------
   IntegrityMode mode = IntegrityMode::NOMINAL;

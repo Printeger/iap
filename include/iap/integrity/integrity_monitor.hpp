@@ -46,6 +46,10 @@ class IntegrityMonitor {
   struct Params {
     // --- PL proxy scale factor (fallback when ARAIM unavailable) ---
     double K_pl              = 3.0;    ///< coverage factor for PL = K*sqrt(λ_max)
+    // Experimental registration support gate for current fused motion.
+    int current_icp_min_inliers = 20;
+    double current_icp_min_inlier_fraction = 0.20;
+    double current_icp_max_rmse_m = 0.50;
 
     // --- HAL from trunk geometry (IAP-RQ-210 / §1.12) ---
     double gamma_H           = 0.5;    ///< safety factor for trunk-based HAL
