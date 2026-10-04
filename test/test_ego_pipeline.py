@@ -20,9 +20,9 @@ ARGS, EXTRA = PARSER.parse_known_args()
 os.environ["ROS_DOMAIN_ID"] = str(100 + os.getpid() % 100)
 import rclpy
 from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path as NavPath
 from sensor_msgs.msg import PointCloud2
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
 from quadrotor_msgs.msg import PositionCommand
@@ -80,12 +80,17 @@ class EgoPipelineTest(unittest.TestCase):
             cloud_pub = node.create_publisher(PointCloud2, "/grid_map/cloud", 10)
             goal_pub = node.create_publisher(PoseStamped, "/move_base_simple/goal", 10)
             curves, commands, displayed_curves, risk_clouds, risk_statuses = {}, [], [], [], []
+            risk_surfaces, risk_histories, risk_legends, glio_paths = [], [], [], []
             subscriptions = [
                 node.create_subscription(Bspline, "/planning/bspline", lambda m: curves.__setitem__(m.traj_id,m), 10),
                 node.create_subscription(PositionCommand, "/position_cmd", commands.append, 100),
                 node.create_subscription(Marker, "/planning/trajectory_curve", displayed_curves.append, 10),
                 node.create_subscription(PointCloud2, "/grid_map/risk_slice", risk_clouds.append, 10),
                 node.create_subscription(Marker, "/grid_map/risk_status", risk_statuses.append, 10),
+                node.create_subscription(MarkerArray, "/grid_map/risk_surface", risk_surfaces.append, 10),
+                node.create_subscription(MarkerArray, "/grid_map/risk_history", risk_histories.append, 10),
+                node.create_subscription(MarkerArray, "/grid_map/risk_legend", risk_legends.append, 10),
+                node.create_subscription(NavPath, "/grid_map/glio_path", glio_paths.append, 10),
             ]
             parameter_client = node.create_client(SetParameters, "/ego_planner_node/set_parameters")
             try:
@@ -136,6 +141,15 @@ class EgoPipelineTest(unittest.TestCase):
                 self.assertTrue(risk_clouds)
                 self.assertTrue(all(cloud.width == 0 for cloud in risk_clouds),
                                 "missing monitor input must not be shown as valid PL")
+                self.assertTrue(risk_surfaces)
+                self.assertTrue(all(m.markers[0].action == Marker.DELETE for m in risk_surfaces),
+                                "invalid PL must clear the current heatmap")
+                self.assertTrue(risk_histories)
+                self.assertTrue(all(m.markers[0].action == Marker.DELETEALL for m in risk_histories),
+                                "invalid PL must clear faded history")
+                self.assertTrue(risk_legends)
+                self.assertTrue(glio_paths)
+                self.assertEqual(glio_paths[-1].header.frame_id, "map")
                 self.assertEqual({f.name for f in risk_clouds[-1].fields},
                                  {"x","y","z","rgb","hpl","vpl","status"})
                 self.assertTrue(displayed_curves)

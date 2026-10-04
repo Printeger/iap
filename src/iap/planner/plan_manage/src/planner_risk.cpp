@@ -89,6 +89,7 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   risk_odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>("odom_world", qos,
       [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
         risk_odom_ = msg;
+        updateGlioPath(*msg);
         grid_map_->invalidateRiskContext();
       });
   integrity_sub_ = node->create_subscription<iap::msg::IntegrityReport>("risk/integrity", qos,

@@ -85,7 +85,7 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
   curve.type = visualization_msgs::msg::Marker::LINE_STRIP;
   curve.action = visualization_msgs::msg::Marker::ADD;
   curve.pose.orientation.w = 1.0;
-  curve.scale.x = 0.06;
+  curve.scale.x = 0.12;
   curve.color.g = curve.color.b = curve.color.a = 1.0;
   const double step = std::max(0.05, traj_duration_ / 500.0);
   for (double t = 0; t < traj_duration_; t += step) {

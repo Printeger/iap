@@ -294,7 +294,7 @@ ros2 launch iap iap_sim.launch.py \
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
-本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的占据点云、飞行高度 PL 采样、EGO 实际 B-spline 曲线与 GLIO 运动历史。风险样本可在没有目标时出现，`risk_status` 给出预测版本、有效率和失败原因。切片约 1 Hz，颜色表示冻结时刻的空间预测；当前 EGO 仍只根据物理障碍规划。
+本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 仍只根据物理障碍规划。
 
 运行时切换色彩依据：
 
@@ -303,7 +303,7 @@ ros2 param set /drone_0_ego_planner_node risk_viz/metric vpl
 ros2 param set /drone_0_ego_planner_node risk_viz/metric hpl
 ```
 
-点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`。色标 HPL 0–10 m、VPL 0–20 m 是显示范围，不是通行规则。单点预测无效显示紫色，预测上下文过期或坐标不匹配则发布空切片。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。
+点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；当前插值面、淡色历史和带米数刻度的图例在 `/grid_map/risk_surface`、`/grid_map/risk_history`、`/grid_map/risk_legend`。状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`，白色连续轨迹在 `/grid_map/glio_path`。HPL 默认色标 0.25–0.65 m、VPL 0.4–1.2 m，只是显示范围；可在 planner 启动参数调整。小点是实际预测，面内颜色仅是显示插值，不会写回 GridMap 或用于规划。单点预测无效显示紫色，预测上下文过期或坐标不匹配会删除当前与历史风险面。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。
 
 `risk_status` 同时显示 Current Integrity Monitor 的状态与 HPL/VPL。Advisory 空间 PL 只是冻结时刻的预测：当前监测报告 `UNSAFE` 时，即使切片有有效颜色，也不能据此认定当前定位或轨迹安全。状态中的 `cost` 是整轮耗时，`bind` 是冻结输入和预测器准备耗时；逐点采样另受 20 ms 预算限制。
 

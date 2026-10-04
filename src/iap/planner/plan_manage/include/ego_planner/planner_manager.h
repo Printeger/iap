@@ -3,12 +3,15 @@
 
 #include <stdlib.h>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <unordered_map>
 #include <gnss_comm/gnss_ros.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 #include <iap/msg/integrity_report.hpp>
 #include <iap/predictor/predictor_module.hpp>
 
@@ -72,6 +75,7 @@ namespace ego_planner
     void initRiskInputs(const rclcpp::Node::SharedPtr& node);
     void initRiskVisualization(const rclcpp::Node::SharedPtr& node);
     void publishRiskSlice();
+    void updateGlioPath(const nav_msgs::msg::Odometry& odom);
     uint64_t beginRiskQuery();
     void rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg);
     rclcpp::Node::SharedPtr node_;
@@ -95,13 +99,27 @@ namespace ego_planner
     rclcpp::Subscription<gnss_comm::msg::GnssIonosphereParameter>::SharedPtr iono_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr risk_slice_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr risk_status_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr risk_surface_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr risk_history_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr risk_legend_pub_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr glio_path_pub_;
+    nav_msgs::msg::Path glio_path_;
+    size_t glio_path_publish_count_ = 0;
+    Eigen::Vector3d last_history_position_ = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    int risk_history_id_ = 0;
+    bool risk_history_clear_pending_ = false;
     rclcpp::TimerBase::SharedPtr risk_viz_timer_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr risk_viz_param_callback_;
     std::string risk_viz_metric_ = "hpl";
     std::string risk_viz_z_mode_ = "follow";
     double risk_viz_fixed_z_m_ = 1.5;
-    double risk_viz_hpl_max_m_ = 10.0;
-    double risk_viz_vpl_max_m_ = 20.0;
+    double risk_viz_hpl_min_m_ = 0.25;
+    double risk_viz_hpl_max_m_ = 0.65;
+    double risk_viz_vpl_min_m_ = 0.4;
+    double risk_viz_vpl_max_m_ = 1.2;
+    double risk_viz_history_lifetime_s_ = 60.0;
+    double risk_viz_history_step_m_ = 4.0;
     bool risk_viz_enabled_ = false;
 
     /* main planning algorithms & modules */

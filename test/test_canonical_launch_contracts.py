@@ -72,6 +72,8 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(params["grid_map/frame_id"], "map")
             self.assertTrue(params["risk_viz/enabled"])
             self.assertEqual(params["risk_viz/metric"], "hpl")
+            self.assertLess(params["risk_viz/hpl_max_m"], 1.0)
+            self.assertEqual(params["risk_viz/history_lifetime_s"], 60.0)
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)
             for i, axis in enumerate("xyz"):
@@ -120,7 +122,9 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         rviz = (REPO / "config/sim_ego/grid_map_stage1.rviz").read_text()
         for topic in ("/grid_map/occupancy", "/grid_map/occupancy_inflate",
                       "/grid_map/risk_slice", "/grid_map/risk_status",
-                      "/planning/trajectory_curve", "/drone_0_visual_slam/odom"):
+                      "/grid_map/risk_surface", "/grid_map/risk_history",
+                      "/grid_map/risk_legend", "/grid_map/glio_path",
+                      "/planning/trajectory_curve"):
             self.assertIn(topic, rviz)
         self.assertNotIn("/map_generator/global_cloud", rviz)
         self.assertNotIn("/iap/rviz/p1_", rviz)

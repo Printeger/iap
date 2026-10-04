@@ -19,12 +19,12 @@ Visualization Manager:
       Enabled: true
       Topic:
         Value: /grid_map/occupancy
-      Style: Flat Squares
+      Style: Boxes
       Size (m): 0.1
       Color Transformer: FlatColor
-      Color: 65; 65; 70
+      Color: 58; 62; 68
       Alpha: 1
-      Decay Time: 0
+      Decay Time: 20
     - Class: rviz_default_plugins/PointCloud2
       Name: GridMap inflated obstacles (optional)
       Enabled: false
@@ -33,20 +33,38 @@ Visualization Manager:
       Style: Flat Squares
       Size (m): 0.1
       Color Transformer: FlatColor
-      Color: 145; 145; 150
-      Alpha: 0.25
+      Color: 190; 194; 200
+      Alpha: 0.12
       Decay Time: 0
     - Class: rviz_default_plugins/PointCloud2
-      Name: Frozen spatial PL samples
+      Name: True PL sample points
       Enabled: true
       Topic:
         Value: /grid_map/risk_slice
       Style: Flat Squares
-      Size (m): 0.2
+      Size (m): 0.11
       Color Transformer: RGB8
       Channel Name: rgb
       Alpha: 0.9
       Decay Time: 0
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Current PL surface (visual interpolation)
+      Enabled: true
+      Topic:
+        Value: /grid_map/risk_surface
+      Queue Size: 10
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Past PL surfaces (up to 60 s)
+      Enabled: true
+      Topic:
+        Value: /grid_map/risk_history
+      Queue Size: 10
+    - Class: rviz_default_plugins/MarkerArray
+      Name: PL color legend in metres
+      Enabled: true
+      Topic:
+        Value: /grid_map/risk_legend
+      Queue Size: 10
     - Class: rviz_default_plugins/Marker
       Name: PL sample status and scale
       Enabled: true
@@ -57,21 +75,17 @@ Visualization Manager:
       Enabled: true
       Topic:
         Value: /planning/trajectory_curve
-    - Class: rviz_default_plugins/Odometry
-      Name: GLIO motion history
+    - Class: rviz_default_plugins/Path
+      Name: GLIO trajectory
       Enabled: true
       Topic:
-        Value: /drone_0_visual_slam/odom
-      Keep: 500
-      Position Tolerance: 0.05
-      Shape:
-        Value: Arrow
-        Color: 245; 245; 245
-        Alpha: 0.8
-        Shaft Length: 0.12
-        Shaft Radius: 0.015
-        Head Length: 0.05
-        Head Radius: 0.025
+        Value: /grid_map/glio_path
+      Buffer Length: 1
+      Color: 245; 245; 245
+      Alpha: 0.95
+      Line Style: Lines
+      Line Width: 0.10
+      Pose Style: None
     - Class: rviz_default_plugins/Marker
       Name: Goal
       Enabled: true
