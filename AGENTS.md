@@ -63,6 +63,11 @@ belong in a module contract under `docs/spec/`, not in this file. An important
 choice among viable module designs belongs in an ADR. Implementation details
 belong near the implementation.
 
+The EGO-based planner rebuild is tracked in `docs/spec/ego_based_planning_flow.md`.
+Every change in this development round must update its current flow, stage status,
+interfaces and verification evidence in the same commit. Unimplemented stages
+retain their explicitly labelled EGO baseline behavior.
+
 ## Development workflow and Git
 
 - Start each file-changing task with `git status --short --branch` and keep

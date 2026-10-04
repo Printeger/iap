@@ -134,55 +134,15 @@ is:
 
 ### `iap_sim.launch.py`
 
-- Required processes: simulation environment, GLIO, Current Integrity Monitor,
-  P0 Advisory Integrity, P4/P5 safety-aware planner, trajectory server.
-- The `icra_dense_forest_four_fork_v2` scene also starts the same current-
-  integrity validator used by the ICRA `continuous-flight` runner. Automatic
-  bag recording and the Phase-2 evaluator remain disabled.
-- Required input: generated IMU/LiDAR/GNSS plus selected scenario map.
-- Output: integrity report, advisory risk grid/health, certified B-spline or a
-  typed HOLD, position commands, and scenario/run manifests.
-- Ready acceptance criterion: environment topics, estimator odometry, current
-  integrity, P0 snapshot, registered local-map source health, and planner
-  readiness are all fresh. The launch delay is only startup scheduling; it is
-  not a topic-readiness gate. P0/P4/P5 remain fail-closed after that delay.
-- HOLD: any applicable current-integrity, local-motion, support, braking,
-  freshness, identity, P4, or P5 failure.
-- Config: the maintained full-stack runtime materializes `config/sim_demo11`
-  below the run directory. Scenario names come from
-  `config/scenarios/catalog.json`; their exact established parameters are
-  resolved by the private `_includes/full_stack_runtime.py` implementation.
-- ICRA four-fork parity: `icra_dense_forest_four_fork_v2` uses
-  `config/sim_demo11/test_icra.rviz` and the runner's GLIO initialization,
-  LiDAR renderer/start ordering, P0 horizons/workers, planner executor,
-  P4/P5 switches, sensor clock, and validation duration. The runner still adds
-  GPU/disk preflight, topic capture, repetitions, and PASS/FAIL analysis.
-- Results: everything is rooted below the allocated run directory.
+- Starts the existing simulator and GLIO/current-integrity inputs, the restored EGO planner, and traj_server.
+- The manager binds PredictorModule to the same GridMap. Spatial HPL/VPL is cached independently of physical occupancy.
+- Stage 1 retains EGO physical route selection. Risk-guided search and full integrity trajectory checks are later stages.
+- Scenarios are selected from `config/scenarios/catalog.json`; the maintained graph is `_includes/full_stack_runtime.py`. All outputs use one canonical run directory.
+- The four-fork scene uses this same stage-1 graph. Old P0/P4/P5 and continuous-flight validator settings are retired.
 
 ### `iap_flight.launch.py`
 
-- Required processes: GLIO, Current Integrity Monitor, P0 Advisory Integrity,
-  P4/P5 safety-aware planner, trajectory server.
-- Forbidden: simulation packages, truth topics/adapters, fake odometry, random
-  maps, rosbag playback/recording, auto-generated deployment calibration, and
-  Phase-2 evaluator.
-- Required input: explicitly configured vehicle IMU/LiDAR/GNSS, odometry,
-  complete hardware ray/return evidence on `beam_evidence_topic`, controller
-  feedback, calibration ID, alert-limit policy, and goal. The flight launch
-  does not synthesize beam evidence; missing/incomplete evidence is HOLD.
-- Output: certified executable trajectory or typed HOLD; no raw candidate may
-  reach the controller.
-- Ready acceptance criterion: explicit `flight_authorized:=true`, a retained
-  calibration manifest with three calibration runs and a passing independent
-  held-out run, fresh estimator/current-integrity/advisory/registered-map
-  evidence, and a vehicle-side controller handshake. The launch verifies the
-  manifest and requires `controller_handshake_confirmed:=true`; topic freshness
-  remains a runtime P0/P4/P5 fail-closed responsibility.
-- HOLD: launch refuses to start on a simulation extension or missing/default
-  calibration; runtime failures follow the P4/P5 fail-closed contract.
-- Config: `config/profiles/full_stack_flight` unless an equivalent deployment
-  profile with GNSS, integrity, and planner-local-map extensions is supplied.
-- Results: everything is rooted below the allocated run directory.
+This entrypoint refuses to start during the rebuild. Stages 4/5 must implement the actual trajectory check, execution handoff and stopping behavior before vehicle calibration/handshake can be revalidated. GLIO and current-integrity launches remain available independently.
 
 ## Internal and retained files
 

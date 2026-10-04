@@ -27,7 +27,6 @@ rosidl_generate_interfaces(traj_utils
   "msg/Bspline.msg"
   "msg/DataDisp.msg"
   "msg/MultiBsplines.msg"
-  "msg/TrajectoryCommandStatus.msg"
 
   DEPENDENCIES std_msgs geometry_msgs rclcpp builtin_interfaces
 )
@@ -44,10 +43,10 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-include_directories( 
-    SYSTEM 
-    include 
-    ${Eigen3_INCLUDE_DIRS} 
+include_directories(
+    SYSTEM
+    include
+    ${Eigen3_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
 )
 
@@ -56,8 +55,8 @@ ament_export_include_directories(include)
 link_directories(${PCL_LIBRARY_DIRS})
 
 add_library( traj_utils_lib SHARED
-    src/planning_visualization.cpp 
-    src/polynomial_traj.cpp 
+    src/planning_visualization.cpp
+    src/polynomial_traj.cpp
     )
 
 # Eigen implements its aligned allocator as inline template code.  Several IAP

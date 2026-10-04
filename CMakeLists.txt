@@ -105,15 +105,6 @@ target_link_libraries(iap_predictor INTERFACE
   iap_prediction_integrity Eigen3::Eigen spdlog::spdlog
 )
 
-# --- iap_planner_risk_grid ---
-add_library(iap_planner_risk_grid INTERFACE)
-target_include_directories(iap_planner_risk_grid INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
-target_link_libraries(iap_planner_risk_grid INTERFACE
-  iap_predictor Eigen3::Eigen spdlog::spdlog
-)
-
 add_library(iap SHARED
   # util
   src/iap/util/config.cpp
@@ -164,11 +155,7 @@ add_library(iap SHARED
   src/iap/planner/pl_grid.cpp
   src/iap/planner/future_pl_field_predictor.cpp
   src/iap/planner/pi_cost_adapter.cpp
-  src/iap/planner/unified_risk_grid.cpp
   src/iap/planner/predicted_araim.cpp
-  src/iap/planner/risk_grid_map.cpp
-  src/iap/planner/p1_accepted_context_validation.cpp
-  src/iap/planner/trajectory_assurance.cpp
   src/iap/predictor/gnss_geometry_pl_predictor.cpp
   # independent advisory predictor query module
   src/iap/predictor/gnss_advisory_predictor.cpp
@@ -224,14 +211,6 @@ if(BUILD_WITH_OPENCV)
   target_compile_definitions(iap PUBLIC GLIM_USE_OPENCV)
 endif()
 list(APPEND iap_LIBRARIES iap)
-
-# Repository-local, non-ROS P0 provider profiler (IAP-RQ-320).
-add_executable(iap_predictor_offline_profile
-  apps/iap_predictor_offline_profile.cpp
-)
-target_link_libraries(iap_predictor_offline_profile
-  iap iap_predictor iap_planner_risk_grid
-)
 
 # Create shared libraries for estimation modules
 list(APPEND module_srcs
@@ -529,24 +508,6 @@ if(DEFINED ENV{ROS_VERSION})
     ament_target_dependencies(demo4_lidar_body_bridge rclcpp nav_msgs sensor_msgs)
     list(APPEND iap_LIBRARIES demo4_lidar_body_bridge)
 
-    ## Demo10 Phase 2 planner integrity evaluator (C++ GNSS geometry ARAIM)
-    add_executable(phase2_planner_integrity_evaluator
-      apps/phase2_planner_integrity_evaluator.cpp
-    )
-    target_link_libraries(phase2_planner_integrity_evaluator iap "${iap_msgs_cpp_ts}")
-    target_compile_definitions(phase2_planner_integrity_evaluator PRIVATE GLIM_ROS2)
-    ament_target_dependencies(phase2_planner_integrity_evaluator
-      rclcpp
-      nav_msgs
-      sensor_msgs
-      geometry_msgs
-      visualization_msgs
-      gnss_comm
-      traj_utils
-      quadrotor_msgs
-    )
-    list(APPEND iap_LIBRARIES phase2_planner_integrity_evaluator)
-
     ## Demo11 forest scenario helpers
     add_executable(demo_takeoff_cmd_publisher
       apps/demo_takeoff_cmd_publisher.cpp
@@ -598,7 +559,6 @@ if(DEFINED ENV{ROS_VERSION})
       demo3_odom_mux
       demo3_iap_bridge
       demo4_lidar_body_bridge
-      phase2_planner_integrity_evaluator
       demo_takeoff_cmd_publisher
       demo11_corridor_map_publisher
       demo11_compare_paths_visualizer
@@ -713,18 +673,11 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_rolling_spatial_advisory_window
         iap iap_predictor
       )
-      ament_add_gtest(test_predictor_risk_conversion
-        test/test_predictor_risk_conversion.cpp
-      )
-      target_link_libraries(test_predictor_risk_conversion
-        iap iap_predictor iap_planner_risk_grid
-      )
-      ament_add_gtest(test_risk_grid_map test/test_risk_grid_map.cpp)
-      target_link_libraries(test_risk_grid_map iap iap_planner_risk_grid)
+
+
       ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
       target_link_libraries(test_pi_cost_adapter iap)
-      ament_add_gtest(test_unified_risk_grid test/test_unified_risk_grid.cpp)
-      target_link_libraries(test_unified_risk_grid iap)
+
       ament_add_gtest(test_odom_freshness test/test_odom_freshness.cpp)
       target_link_libraries(test_odom_freshness iap)
       ament_add_gtest(test_initial_state_estimation
@@ -733,8 +686,7 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_initial_state_estimation iap)
       ament_add_gtest(test_alert_limit_model test/test_alert_limit_model.cpp)
       target_link_libraries(test_alert_limit_model iap)
-      ament_add_gtest(test_trajectory_assurance test/test_trajectory_assurance.cpp)
-      target_link_libraries(test_trajectory_assurance iap)
+
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       ament_add_gtest(test_run_log_manager_standalone test/test_run_log_manager_standalone.cpp)
       ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
@@ -761,74 +713,8 @@ if(DEFINED ENV{ROS_VERSION})
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ana_log_contract.py
       )
       add_test(
-        NAME test_icra006_provider_profile
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra006_provider_profile.py
-      )
-      add_test(
-        NAME test_icra007_provider_profile
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra007_provider_profile.py
-      )
-      add_test(
-        NAME test_icra011_spatial_dedup_profile
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra011_spatial_dedup_profile.py
-      )
-      add_test(
-        NAME test_icra020_p0_rolling_worker_profile
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra020_p0_rolling_worker_profile.py
-      )
-      add_test(
         NAME test_verify_planner_recorder_smoke
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_verify_planner_recorder_smoke.py
-      )
-      add_test(
-        NAME test_verify_p1_pre_admission_feedback
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_verify_p1_pre_admission_feedback.py
-      )
-      add_test(
-        NAME test_analyze_p1_pre_admission_smoke
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p1_pre_admission_smoke.py
-      )
-      add_test(
-        NAME test_p1_formal_metrics
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_p1_formal_metrics.py
-      )
-      add_test(
-        NAME test_calibrate_p1_formal_tolerances
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_calibrate_p1_formal_tolerances.py
-      )
-      add_test(
-        NAME test_archive_p1_2_retrospective
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_archive_p1_2_retrospective.py
-      )
-      add_test(
-        NAME test_gate0_analyzer
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_analyzer.py
-      )
-      add_test(
-        NAME test_gate0_runner
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_runner.py
-      )
-      add_test(
-        NAME test_gate0_capture_p0_health
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_capture_p0_health.py
-      )
-      add_test(
-        NAME test_test_planner_launch
-        COMMAND
-          ${Python3_EXECUTABLE}
-          ${CMAKE_CURRENT_SOURCE_DIR}/scripts/dev_planner/run_p4_g0c_tests.py
-          --task-root ${CMAKE_CURRENT_SOURCE_DIR}/results/icra27/icra072/test_planner_launch_ctest
-          unittest -- discover -s ${CMAKE_CURRENT_SOURCE_DIR}/test
-          -p test_test_planner_launch.py
-      )
-      add_test(
-        NAME test_test_icra_launch
-        COMMAND ${Python3_EXECUTABLE}
-          ${CMAKE_CURRENT_SOURCE_DIR}/scripts/dev_planner/run_p4_g0c_tests.py
-          --task-root
-          ${CMAKE_CURRENT_SOURCE_DIR}/results/icra27/icra072/test_icra_launch_ctest
-          unittest -- discover -s ${CMAKE_CURRENT_SOURCE_DIR}/test
-          -p test_test_icra_launch.py
       )
       add_test(
         NAME test_canonical_launch_contracts
@@ -836,20 +722,8 @@ if(DEFINED ENV{ROS_VERSION})
           ${CMAKE_CURRENT_SOURCE_DIR}/test/test_canonical_launch_contracts.py
       )
       add_test(
-        NAME test_icra_interface_integration
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra_interface_integration.py
-      )
-      add_test(
-        NAME test_analyze_continuous_flight
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_continuous_flight.py
-      )
-      add_test(
         NAME test_analyze_control_capability
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_control_capability.py
-      )
-      add_test(
-        NAME test_analyze_p4_gnss_sensitivity
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p4_gnss_sensitivity.py
       )
       add_test(
         NAME test_local_surface_error_calibration

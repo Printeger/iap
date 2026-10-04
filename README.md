@@ -2,9 +2,11 @@
 
 IAP 是基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图与完整性感知规划系统。它融合传感器观测，评估当前定位结果的可信程度，并预测未来位置的完整性，让规划器选择更安全、更可观测的飞行路径。
 
-系统采用因子图估计和优化规划。完整闭环的输出是经过认证的可执行轨迹，或一个明确的 HOLD（保持/停止执行）原因。
+系统采用因子图估计和优化规划。目标闭环将输出通过检查的可执行轨迹，或明确的失败原因；当前阶段能力见下文。
 
-本 README 是当前编译、运行、日志和分析的主要参考。日常运行使用四个正式 launch：`glio.launch.py`、`glio_integrity.launch.py`、`iap_sim.launch.py`、`iap_flight.launch.py`。旧 Demo1–11 和阶段实验入口保留在 `launch/bp/`，用途见[历史入口说明](launch/bp/README.md)。
+本 README 是当前编译、运行、日志和分析的主要参考。规划器已进入 **EGO 重建阶段 1**：同一 GridMap 的空间 PL 缓存已接入，主动风险搜索和完整性执行检查尚未实现；`iap_flight` 暂不可用。流程与开发顺序见 [EGO 规划流程](docs/spec/ego_based_planning_flow.md)。
+
+日常运行使用四个正式 launch：`glio.launch.py`、`glio_integrity.launch.py`、`iap_sim.launch.py`、`iap_flight.launch.py`。旧 Demo1–11 和阶段实验入口保留在 `launch/bp/`，用途见[历史入口说明](launch/bp/README.md)。
 
 ## 目录
 
@@ -25,8 +27,8 @@ IAP 是基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图与完整�
 |---|---|---|
 | GLIO | GNSS 伪距/多普勒、IMU 与 LiDAR 的滑窗/因子图融合估计 | 位姿、地图及估计诊断 |
 | Current Integrity Monitor | 基于 GNSS/LiDAR 证据监测当前位姿完整性 | 当前 PL、AL、IM、来源与有效性状态 |
-| Advisory Integrity Evaluator | 预测未来位置的 GNSS/LiDAR 完整性与风险 | 预测查询、执行风险快照、风险栅格与健康状态 |
-| Safety-aware planner | 根据目标、地图、当前及预测完整性选择通道、优化并认证轨迹 | 可执行 B-spline、位置指令或明确的 HOLD 原因 |
+| Advisory Integrity Evaluator | 预测未来位置的 GNSS/LiDAR 完整性与风险 | 同一 GridMap 中的空间 HPL/VPL、查询状态与版本 |
+| Safety-aware planner | 当前按原版 EGO 生成物理避障轨迹；完整性搜索与检查按阶段开发 | EGO B-spline、位置指令及 PL 查询状态 |
 
 ```mermaid
 flowchart LR
@@ -35,15 +37,15 @@ flowchart LR
     GLIO --> Map[局部地图与观测证据]
     Monitor --> Advisory[未来完整性预测]
     Map --> Advisory
-    Goal[任务目标] --> Planner[安全规划与轨迹认证]
+    Goal[任务目标] --> Planner[EGO 物理规划：阶段 1]
     GLIO --> Planner
     Monitor --> Planner
     Map --> Planner
     Advisory --> Planner
-    Planner --> Result[可执行轨迹 / HOLD]
+    Planner --> Result[B-spline / 位置指令]
 ```
 
-四个模块是逻辑划分。当前完整性监测以 `iap_rosnode` 的扩展运行；未来完整性使用维护中的 P0 路径，完整系统由规划节点、轨迹服务和估计器共同组成。模块数量不等于 ROS 进程数量。
+四个模块是逻辑划分。当前完整性监测以 `iap_rosnode` 的扩展运行；未来完整性由现有 PredictorModule 点查询写入 EGO GridMap 的 PL 缓存，完整系统由规划节点、轨迹服务和估计器共同组成。模块数量不等于 ROS 进程数量。
 
 ### 完整性指标
 
@@ -55,7 +57,7 @@ flowchart LR
 | HAL / VAL | 水平 / 垂直告警限，单位 m |
 | IM（Integrity Margin） | 当前监测中的 `min(HAL - HPL, VAL - VPL)` |
 
-正裕度需要结合报告有效性、来源和新鲜度解释。预测风险帮助选择路径；最终执行还要通过实际轨迹的碰撞、净空、动力学、制动及适用完整性检查。完整消息定义见 [IntegrityReport.msg](msg/IntegrityReport.msg)。
+正裕度需要结合报告有效性、来源和新鲜度解释。目标设计中预测风险引导路径，最终检查实际轨迹；阶段 1 的 PL 查询尚不影响路线或执行授权。完整消息定义见 [IntegrityReport.msg](msg/IntegrityReport.msg)。
 
 ## 2. 环境与依赖
 
@@ -216,7 +218,7 @@ python3 src/iap/tools/ana_log.py
 | `glio.launch.py` | 定位建图 | GLIO | 传感器或单独播放的 bag |
 | `glio_integrity.launch.py` | 定位 + 当前完整性 | GLIO + Current Integrity Monitor | 传感器及完整性证据 |
 | `iap_sim.launch.py` | 完整闭环仿真 | 四模块 + 仿真环境 | scenario 生成的输入 |
-| `iap_flight.launch.py` | 真实车辆部署 | 四模块 + 真实车辆接口 | 车辆传感器、控制反馈及校准 |
+| `iap_flight.launch.py` | 重建期间不可用 | 等待阶段 4/5 检查与接续 | 完成后重新验证车辆接口与校准 |
 
 完整启动契约见 [launch/README.md](launch/README.md)。先完成环境加载和适用的 GPU 检查。查看参数不启动运行：
 
@@ -301,12 +303,7 @@ ros2 launch iap iap_sim.launch.py \
   run_duration_s:=180
 ```
 
-这个场景与 `run_icra_interface_integration.py --stage continuous-flight`
-使用相同的单次 ROS 运行配置和 `config/sim_demo11/test_icra.rviz`：包括
-GLIO `NAIVE` 初始化、LiDAR 的 `spherical_first_hit_v1` renderer 和 2 秒延迟、
-P0 预测 horizon/worker、P4/P5、planner executor、仿真传感器时间以及 175 秒
-完整性 validator。runner 额外执行 GPU/磁盘预检、topic 抓取、重复运行和
-PASS/FAIL 分析；这些外层测试工作不属于 `iap_sim.launch.py` 的 ROS 节点图。
+本轮该场景使用与其他场景相同的 EGO 基线主线和系统时钟，不启动旧 P0/P4/P5 或旧 validator。历史 continuous-flight runner 的 PASS/FAIL 规则不适用于新主线。所有传感器、地图和预测都通过当前注册输入接入。
 
 常用场景：
 
@@ -321,43 +318,11 @@ PASS/FAIL 分析；这些外层测试工作不属于 `iap_sim.launch.py` 的 ROS
 
 全部名称和参数见 [config/scenarios/catalog.json](config/scenarios/catalog.json)。其中论文、开发和 fixture 场景有各自用途；场景存在不代表已获得正式实验结论。
 
-`strict_global` 要求适用的全局完整性条件成立。`mission_best_effort` 可按明确分类处理部分 GNSS 降级，但仍要求本地运动、碰撞、净空、动力学和制动条件成立。完整仿真使用维护中的 P0/P4/P5 路径，不启动旧 Phase-2 evaluator 或自动 bag recorder。ICRA 四分叉场景会启动 continuous-flight 使用的完整性 validator；其他 canonical 场景不启动它。
+表中任务模式保留为场景元数据；阶段 1 不据此授权完整性运动。只有物理避障链路已经恢复，空旷环境中的主动风险绕行将在阶段 2 开发。
 
 ### 5.4 真实飞行
 
-真实飞行使用独立入口。启动前需有车辆传感器、统一坐标系下的 odometry、完整硬件射线/回波证据、控制器接口及部署校准。
-
-下面是部署命令模板。topic、目标和校准参数必须替换为车辆的实际值；数值示例不能替代标定结果。先执行第 4.1 节 GPU 检查。
-
-```bash
-ros2 launch iap iap_flight.launch.py \
-  flight_authorized:=true \
-  controller_handshake_confirmed:=true \
-  imu_topic:=/vehicle/imu \
-  points_topic:=/vehicle/lidar \
-  odometry_topic:=/vehicle/odom \
-  planner_cloud_topic:=/vehicle/lidar \
-  beam_evidence_topic:=/vehicle/lidar/beam_evidence \
-  goal_x:=10.0 goal_y:=0.0 goal_z:=2.0 \
-  local_surface_error_bound_m:=0.04 \
-  local_surface_error_calibration_id:=vehicle_01_heldout \
-  local_surface_error_calibration_manifest:=/data/iap/calibration/vehicle_01.json
-```
-
-默认配置是 `config/profiles/full_stack_flight`。重要参数：
-
-| 参数 | 要求 |
-|---|---|
-| `flight_authorized` | 默认 `false`；部署方显式授权后设为 `true` |
-| `controller_handshake_confirmed` | 默认 `false`；真实控制器握手完成后设为 `true` |
-| `beam_evidence_topic` | 必填，与部署 profile 中的局部地图证据接口一致 |
-| `goal_x/y/z` | 必填，使用规划坐标系，单位 m |
-| `local_surface_error_bound_m` | 必填，与校准清单中的误差界一致 |
-| `local_surface_error_calibration_id` | 必填，与清单 ID 一致 |
-| `local_surface_error_calibration_manifest` | 必填，至少包含 3 次校准和 1 次通过的独立 held-out 验证 |
-| `max_velocity_mps` / `max_acceleration_mps2` | 默认 `1.0` / `1.5`，按车辆控制能力配置 |
-
-完整参数、清单 schema 和就绪条件见 [launch/README.md](launch/README.md)。缺失校准或混入仿真扩展时 launch 拒绝启动；缺失/过期的运行证据产生 HOLD。布尔确认参数记录部署确认，不能自行完成硬件握手。`--show-args` 成功不等于真实飞行验收。
+`iap_flight.launch.py` 在重建期间明确拒绝启动。旧 P4/P5 执行链已移除，阶段 4/5 完成实际轨迹检查、接续与停止后，再恢复车辆校准和控制接口验收。GLIO 与当前完整性模块仍可独立使用。
 
 ### 5.5 rosbag 回放
 
@@ -714,7 +679,7 @@ python3 src/iap/tools/ana_log.py \
 
 ### 如何判断系统已运行正常？
 
-按入口检查所需输入、估计初始化、当前完整性、未来预测/执行风险快照、地图证据和规划输出。完整系统还要检查必需进程是否仍在运行、是否有经过认证的轨迹或明确的 HOLD 原因。顶层 launch 返回 0 或 RViz 有画面不能单独证明闭环成功。
+按入口检查输入、估计初始化、当前完整性、注册地图和 EGO 轨迹/命令输出。阶段 1 的 PL 状态可从 GridMap 查询；轨迹尚未经过目标设计中的完整性检查。顶层 launch 返回 0 或 RViz 有画面不能单独证明闭环成功。
 
 ```bash
 ros2 node list
@@ -753,9 +718,9 @@ ros2 pkg prefix ego_planner
 
 检查 Fixed Frame、TF、实际发布 topic、QoS 和扩展列表。模块默认 profile 不加载 RViz 发布扩展；完整仿真会配置所需可视化。无桌面环境使用 `iap_sim.launch.py start_rviz:=false`。
 
-### 规划器持续 HOLD
+### 规划器未生成轨迹
 
-先查 `export/planner/` 和运行日志中的具体原因，再检查当前完整性、地图/观测证据、执行风险快照、时间新鲜度及制动条件。规划器启动延迟不是就绪确认；增大延迟不能替代缺失证据。诊断应保留适用的认证门限。
+检查 FSM 是否收到有效里程计与目标、GridMap 是否收到注册点云，以及 EGO 优化是否失败。阶段 1 的 PL 无效不会伪装成零风险，但也尚不触发后续阶段的完整性执行检查。
 
 ## 10. 目录与专题文档
 

@@ -108,6 +108,7 @@ def materialize_profile(
     contract: str,
     integrity_profile: str = "fused",
     forbid_sim_extensions: bool = False,
+    simulation_scenario: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Create a run-local config and validate its module contract.
 
@@ -171,6 +172,37 @@ def materialize_profile(
     glim_ros = ros_config.get("glim_ros")
     if not isinstance(glim_ros, dict):
         raise RuntimeError(f"glim_ros must be an object: {ros_source}")
+    if simulation_scenario is not None:
+        if forbid_sim_extensions or contract != "full_stack":
+            raise RuntimeError("simulation configuration requires the simulation full_stack contract")
+        initial = list(simulation_scenario["initial"])
+        extent = list(simulation_scenario["map_size"])
+        glim_ros["extension_modules"] = [
+            "libgnss_extension.so", "libintegrity_extension.so",
+            "libplanner_local_map_extension.so", "libsim_extension.so",
+        ]
+        glim_ros["acc_scale"] = 1.0
+        glim_ros["imu_topic"] = "/sim/drone_0/imu_iap"
+        glim_ros["points_topic"] = "/sim/drone_0/lidar_body"
+        glim_ros["sim"] = {
+            "truth_odom_topic": "/sim/drone_0/truth_odom",
+            "planner_odom_topic": "/drone_0_visual_slam/odom",
+            "planner_odom_frame_id": "map",
+            "planner_body_frame_id": "imu",
+            "align_planner_odom_to_truth": False,
+            "static_planner_alignment_enabled": True,
+            "static_planner_translation_m": initial,
+            "enable_metrics_csv": False,
+        }
+        glim_ros["planner_local_map"].update({
+            "frame_contract_id": "ego_grid_map_sim_v1",
+            "beam_evidence_topic": "/iap/simulator/lidar_beam_evidence",
+            "static_planner_translation_m": initial,
+            "planning_lattice_resolution_m": 0.1,
+            "planning_lattice_origin_m": [-extent[0] / 2, -extent[1] / 2, 0.0],
+            "planning_lattice_extent_m": extent,
+            "publish_current_hits_map": True,
+        })
     modules = list(glim_ros.get("extension_modules", []))
     if "libgnss_extension.so" not in modules:
         raise RuntimeError(f"{contract} requires libgnss_extension.so")
@@ -264,6 +296,8 @@ def materialize_profile(
             log_dir=log_dir,
             dump_dir=dump_dir,
         )
+        if simulation_scenario is not None and key == "config_odometry":
+            secondary["odometry_estimation"]["initialization_mode"] = "NAIVE"
         secondary_name = f"{key}.json"
         _write_json(runtime_dir / secondary_name, secondary)
         global_config[key] = secondary_name

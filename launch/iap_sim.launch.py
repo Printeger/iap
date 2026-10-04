@@ -1,11 +1,4 @@
-"""Canonical all-module IAP simulation entrypoint.
-
-The current production planner graph is provided by a private runtime include
-extracted from the maintained validation graph. The maintained four-fork ICRA
-scene uses the same single-run continuous-flight runtime and visualization
-profile as the development runner. Automatic bag recording, repetition,
-capture, and runner-side PASS/FAIL analysis remain outside this entrypoint.
-"""
+"""Canonical EGO baseline simulation with a shared GridMap PL layer."""
 
 from __future__ import annotations
 
@@ -56,7 +49,6 @@ def _setup(context):
         valid = ", ".join(sorted(catalog))
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario}'; valid: {valid}")
 
-    icra_continuous_flight = scenario == "icra_dense_forest_four_fork_v2"
 
     output_dir = resolve_run_directory(entrypoint="iap_sim", scenario=scenario)
     register_config_snapshot(
@@ -69,28 +61,22 @@ def _setup(context):
         "scenario_runtime_preset": scenario,
         "task_mode": str(catalog[scenario]["task_mode"]),
         "runtime_profile": (
-            "icra_continuous_flight"
-            if icra_continuous_flight
-            else "canonical_full_stack_sim"
+            "ego_grid_map_stage1"
         ),
         "modules": [
             "GLIO",
             "Current Integrity Monitor",
-            "Advisory Integrity Evaluator (P0)",
-            "Safety-aware planner (P4/P5)",
+            "GridMap spatial PL (PredictorModule)",
+            "EGO baseline planner (stage 1)",
         ],
-        "test_validator_enabled": icra_continuous_flight,
+        "test_validator_enabled": False,
         "rviz_profile": (
-            "config/sim_demo11/test_icra.rviz"
-            if icra_continuous_flight
-            else "config/sim_demo11/demo11_integrity_corridor.rviz"
+            "config/sim_demo11/demo11_integrity_corridor.rviz"
         ),
         "rosbag_recording_enabled": False,
         "phase2_planner_integrity_evaluator_enabled": False,
         "clock_contract": (
-            "icra_simulated_sensor_time"
-            if icra_continuous_flight
-            else "system_clock_for_ros_and_simulated_sensor_stamps"
+            "system_clock_for_ros_and_simulated_sensor_stamps"
         ),
     }
     write_subordinate_manifest(output_dir, "full_stack", manifest)

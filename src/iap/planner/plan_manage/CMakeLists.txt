@@ -24,19 +24,13 @@ find_package(bspline_opt REQUIRED)
 find_package(traj_utils REQUIRED COMPONENTS traj_utils_lib)
 find_package(cv_bridge REQUIRED)
 find_package(iap REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(glog REQUIRED)
 find_package(gnss_comm REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_library(IAP_MSGS_TYPESUPPORT_CPP NAMES iap__rosidl_typesupport_cpp REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
-
-find_library(IAP_MSGS_TYPESUPPORT_CPP
-  NAMES iap__rosidl_typesupport_cpp
-  REQUIRED
-)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -59,34 +53,22 @@ include_directories(
 )
 
 add_executable(ego_planner_node
-  src/ego_planner_node.cpp 
+  src/ego_planner_node.cpp
   src/ego_replan_fsm.cpp
-  src/gate0_qualification_writer.cpp
   src/planner_manager.cpp
-  src/p4_actual_curve_certifier.cpp
-  src/p4_terminal_stop.cpp
-  src/p4_execution_risk_window.cpp
-  src/p0_risk_grid_runtime.cpp
-  src/p0_occupancy_epoch_adapter.cpp
-  src/p1_replan_admission.cpp
-  src/p1_candidate_selection.cpp
-  src/p2_candidate_ranking.cpp
-  src/p3_reference_bias.cpp
-  src/p5_runtime_integrity_gate.cpp
-  src/safety_rviz_publisher.cpp
+  src/planner_risk.cpp
 )
 
 # target_link_libraries(ego_planner_node
 #   traj_utils_lib
 # )
 
-ament_target_dependencies(ego_planner_node 
-                          rclcpp nav_msgs visualization_msgs 
-                          geometry_msgs quadrotor_msgs 
-                          plan_env path_searching 
-                          bspline_opt traj_utils 
-                          cv_bridge pcl_conversions
-                          std_msgs sensor_msgs gnss_comm )
+ament_target_dependencies(ego_planner_node
+                          rclcpp nav_msgs visualization_msgs
+                          geometry_msgs quadrotor_msgs
+                          plan_env path_searching
+                          bspline_opt traj_utils
+                          cv_bridge pcl_conversions iap gnss_comm sensor_msgs )
 
 find_library(TRAJ_UTILS_LIB traj_utils_lib PATHS ${traj_utils_LIBRARY_DIRS})
 
@@ -98,161 +80,25 @@ target_link_libraries(ego_planner_node
 
 add_executable(traj_server src/traj_server.cpp)
 
-ament_target_dependencies(traj_server 
-                          rclcpp nav_msgs 
-                          visualization_msgs geometry_msgs 
-                          quadrotor_msgs plan_env 
-                          path_searching bspline_opt 
+ament_target_dependencies(traj_server
+                          rclcpp nav_msgs
+                          visualization_msgs geometry_msgs
+                          quadrotor_msgs plan_env
+                          path_searching bspline_opt
                           traj_utils cv_bridge pcl_conversions)
 
 if(BUILD_TESTING)
-  ament_add_gtest(test_gate0_qualification_writer
-    test/test_gate0_qualification_writer.cpp
-    src/gate0_qualification_writer.cpp
-  )
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
-  add_test(
-    NAME test_traj_server_handshake
-    COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
-      --server $<TARGET_FILE:traj_server>
-      --planner-test $<TARGET_FILE:test_planning_risk_context>
-  )
-  add_test(
-    NAME P4LimitedPrefixPublication.PlannerMessageActivatesUnchangedInTrajServer
-    COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
-      --server $<TARGET_FILE:traj_server>
-      --planner-test $<TARGET_FILE:test_planning_risk_context>
-      -k test_planner_message_activates_unchanged_in_traj_server
-  )
-  ament_target_dependencies(test_gate0_qualification_writer Eigen3)
-
-  ament_add_gtest(test_p0_risk_grid_runtime
-    test/test_p0_risk_grid_runtime.cpp
-    src/p0_risk_grid_runtime.cpp
-    src/p0_occupancy_epoch_adapter.cpp
-    src/safety_rviz_publisher.cpp
-  )
-
-  ament_add_gtest(test_p0_occupancy_epoch_adapter
-    test/test_p0_occupancy_epoch_adapter.cpp
-    src/p0_occupancy_epoch_adapter.cpp
-  )
-  ament_target_dependencies(test_p0_occupancy_epoch_adapter
-    Eigen3 iap plan_env
-  )
-  target_link_libraries(test_p0_occupancy_epoch_adapter iap::iap)
-
-  ament_add_gtest(test_p1_replan_admission
-    test/test_p1_replan_admission.cpp
-    src/p1_replan_admission.cpp
-  )
-  ament_add_gtest(test_p4_risk_grid_planning_admission
-    test/test_p4_risk_grid_planning_admission.cpp
-  )
-  ament_target_dependencies(test_p4_risk_grid_planning_admission
-    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
-    quadrotor_msgs traj_utils bspline_opt plan_env path_searching cv_bridge
-    pcl_conversions gnss_comm iap
-  )
-  target_link_libraries(test_p4_risk_grid_planning_admission iap::iap)
-  ament_add_gtest(test_p4_execution_risk_window
-    test/test_p4_execution_risk_window.cpp
-    src/p4_execution_risk_window.cpp
-  )
-  ament_target_dependencies(test_p4_execution_risk_window Eigen3 iap)
-  target_link_libraries(test_p4_execution_risk_window iap::iap)
-
-  ament_add_gtest(test_p4_actual_curve_certifier
-    test/test_p4_actual_curve_certifier.cpp
-    src/p4_actual_curve_certifier.cpp
-  )
-  ament_target_dependencies(test_p4_actual_curve_certifier
-    rclcpp Eigen3 bspline_opt traj_utils iap
-  )
-  target_link_libraries(test_p4_actual_curve_certifier iap::iap)
-  ament_add_gtest(test_p1_candidate_selection
-    test/test_p1_candidate_selection.cpp
-    src/p1_candidate_selection.cpp
-  )
-  ament_target_dependencies(test_p0_risk_grid_runtime
-    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
-    gnss_comm iap plan_env cv_bridge pcl_conversions
-  )
-  target_link_libraries(test_p0_risk_grid_runtime
-    iap::iap
-    ${IAP_MSGS_TYPESUPPORT_CPP}
-  )
-
-  ament_add_gtest(test_p5_runtime_integrity_gate
-    test/test_p5_runtime_integrity_gate.cpp
-    src/p5_runtime_integrity_gate.cpp
-    src/safety_rviz_publisher.cpp
-  )
-  ament_target_dependencies(test_p5_runtime_integrity_gate
-    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
-    traj_utils bspline_opt plan_env iap
-  )
-  target_link_libraries(test_p5_runtime_integrity_gate
-    ${TRAJ_UTILS_LIB}
-    iap::iap
-    ${IAP_MSGS_TYPESUPPORT_CPP}
-  )
-
-  ament_add_gtest(test_p2_candidate_ranking
-    test/test_p2_candidate_ranking.cpp
-    src/p2_candidate_ranking.cpp
-  )
-  ament_target_dependencies(test_p2_candidate_ranking
-    rclcpp Eigen3 nav_msgs visualization_msgs plan_env path_searching
-    bspline_opt traj_utils cv_bridge pcl_conversions iap gnss_comm
-  )
-  target_link_libraries(test_p2_candidate_ranking
-    iap::iap
-  )
-
-  ament_add_gtest(test_p3_reference_bias
-    test/test_p3_reference_bias.cpp
-    src/p3_reference_bias.cpp
-  )
-  ament_target_dependencies(test_p3_reference_bias
-    rclcpp Eigen3 iap gnss_comm
-  )
-  target_link_libraries(test_p3_reference_bias
-    iap::iap
-  )
-
-  ament_add_gtest(test_planning_risk_context
-    test/test_planning_risk_context.cpp
-    src/ego_replan_fsm.cpp
-    src/gate0_qualification_writer.cpp
-    src/planner_manager.cpp
-    src/p4_actual_curve_certifier.cpp
-    src/p4_terminal_stop.cpp
-    src/p4_execution_risk_window.cpp
-    src/p0_risk_grid_runtime.cpp
-    src/p0_occupancy_epoch_adapter.cpp
-    src/p1_replan_admission.cpp
-    src/p1_candidate_selection.cpp
-    src/p2_candidate_ranking.cpp
-    src/p3_reference_bias.cpp
-    src/p5_runtime_integrity_gate.cpp
-    src/safety_rviz_publisher.cpp
-  )
-  ament_target_dependencies(test_planning_risk_context
-    rclcpp nav_msgs visualization_msgs geometry_msgs quadrotor_msgs
-    plan_env path_searching bspline_opt traj_utils cv_bridge pcl_conversions
-    std_msgs sensor_msgs gnss_comm iap
-  )
-  target_link_libraries(test_planning_risk_context
-    ${TRAJ_UTILS_LIB}
-    iap::iap
-    ${IAP_MSGS_TYPESUPPORT_CPP}
-  )
-  set_tests_properties(
-    P4LimitedPrefixPublication.PlannerMessageActivatesUnchangedInTrajServer
-    PROPERTIES DEPENDS test_planning_risk_context)
+  add_test(NAME test_ego_pipeline COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_pipeline.py
+    --planner $<TARGET_FILE:ego_planner_node> --server $<TARGET_FILE:traj_server>)
+  set_tests_properties(test_ego_pipeline PROPERTIES TIMEOUT 40)
+  ament_add_gtest(test_ego_baseline test/test_ego_baseline.cpp
+    src/planner_manager.cpp src/planner_risk.cpp)
+  ament_target_dependencies(test_ego_baseline rclcpp nav_msgs geometry_msgs
+    visualization_msgs quadrotor_msgs plan_env path_searching bspline_opt
+    traj_utils cv_bridge pcl_conversions iap gnss_comm sensor_msgs)
+  target_link_libraries(test_ego_baseline iap::iap ${TRAJ_UTILS_LIB} ${IAP_MSGS_TYPESUPPORT_CPP})
 endif()
 
 # Install targets

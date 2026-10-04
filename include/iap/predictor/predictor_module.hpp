@@ -39,6 +39,7 @@ class PredictorModule {
 
   void set_params(const PredictorParams& params);
   void set_local_occupancy(const LocalOccupancyGrid* occupancy);
+  void set_occupancy_query(VisibilityPredictor::OccupancyQuery query, double resolution_m);
   void set_observation_predicate(
       VisibilityPredictor::ObservationPredicate predicate);
   void set_support_query(VisibilityPredictor::SupportQuery query);

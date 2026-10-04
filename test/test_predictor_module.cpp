@@ -26,6 +26,38 @@
 
 namespace {
 
+TEST(VisibilityPredictorTest, GridMapQueryUsesRawOccupancyAndKeepsUnknownSupport) {
+  iap::VisibilityPredictor predictor;
+  iap::GnssEpoch epoch;
+  iap::SatObs sat;
+  sat.sat_id = 1; sat.elevation = 0.8; sat.azimuth = 0.2; sat.pr_sigma = 1;
+  epoch.sats.push_back(sat);
+  predictor.set_support_query([](const Eigen::Vector3d&, double, double) {
+    iap::LocalMapSupportQuery support;
+    support.status = iap::LocalMapSupportStatus::MODEL_COMPLETE;
+    return support;
+  });
+  predictor.set_occupancy_query([](const Eigen::Vector3d&) { return false; }, 0.1);
+  const auto clear = predictor.predict(Eigen::Vector3d::Zero(), epoch);
+  predictor.set_occupancy_query([](const Eigen::Vector3d&) { return true; }, 0.1);
+  const auto occupied = predictor.predict(Eigen::Vector3d::Zero(), epoch);
+  ASSERT_EQ(clear.known_occupancy_kappas.size(), 1u);
+  EXPECT_DOUBLE_EQ(clear.known_occupancy_kappas[0], 0.0);
+  EXPECT_DOUBLE_EQ(occupied.known_occupancy_kappas[0], 1.0);
+  EXPECT_GT(occupied.sigma_effs[0], clear.sigma_effs[0]);
+  predictor.set_support_query([](const Eigen::Vector3d&, double, double) {
+    return iap::LocalMapSupportQuery{};
+  });
+  const auto unknown = predictor.predict(Eigen::Vector3d::Zero(), epoch);
+  EXPECT_EQ(unknown.n_unknown, 1);
+  EXPECT_TRUE(unknown.unknown_flags[0]);
+  EXPECT_THROW(predictor.set_occupancy_query({}, 0), std::invalid_argument);
+  predictor.set_occupancy(nullptr);
+  const auto unbound = predictor.predict(Eigen::Vector3d::Zero(), epoch);
+  EXPECT_DOUBLE_EQ(unbound.known_occupancy_kappas[0], 0.0);
+  EXPECT_TRUE(unbound.unknown_flags[0]);
+}
+
 TEST(GnssGeometryPlPredictorTest, SubsetDegeneracyIsExplicitAndHasNoNumericPL) {
   iap::GnssGeometryPlPredictor predictor;
   std::vector<iap::GnssGeometrySat> sats;

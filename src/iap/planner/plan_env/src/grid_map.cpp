@@ -413,6 +413,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
 
   int buffer_size = mp_.map_voxel_num_(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2);
 
+  md_.risk_buffer_.resize(buffer_size);
   md_.occupancy_buffer_ = vector<double>(buffer_size, mp_.clamp_min_log_ - mp_.unknown_flag_);
   md_.occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);
   md_.occupancy_buffer_raw_cloud_ = vector<char>(buffer_size, 0);
@@ -651,6 +652,18 @@ void GridMap::resetBuffer()
 
 void GridMap::resetBuffer(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
 {
+  std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_);
+  beginOccupancyWriteTransaction();
+  resetBufferUnlocked(min_pos, max_pos);
+  const auto notification = commitOccupancyWriteTransaction(
+      occupancy_cloud_stamp_s_.load(std::memory_order_acquire));
+  lock.unlock();
+  notifyOccupancyCommitted(notification);
+}
+
+void GridMap::resetBufferUnlocked(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
+{
+  invalidateRiskContext();
 
   Eigen::Vector3i min_id, max_id;
   posToIndex(min_pos, min_id);
@@ -2103,7 +2116,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 
   beginOccupancyWriteTransaction();
 
-  this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
+  this->resetBufferUnlocked(md_.camera_pos_ - mp_.local_update_range_,
                     md_.camera_pos_ + mp_.local_update_range_);
 
   markCurrentVehicleFootprintObserved();

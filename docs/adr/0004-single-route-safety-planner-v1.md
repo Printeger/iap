@@ -2,11 +2,13 @@
 
 ## Status
 
-Proposed. The current implementation does not yet conform.
+Accepted as a staged architecture by the user. Stage 1 (original EGO mainline and a shared GridMap PL layer) is implemented; full-system integrity planning and live acceptance are pending.
+
+The authoritative stage flow and evidence are in [EGO-based planning flow](../spec/ego_based_planning_flow.md).
 
 ## Context
 
-The current Safety Planner can enumerate topology channels, generate sibling
+The superseded Safety Planner could enumerate topology channels, generate sibling
 actual curves, retain runner-up state, and compare an actual-curve cohort. That
 design accumulated route-selection, certification, retry, and lifecycle logic
 inside Planner Manager. It now behaves like a planning framework above EGO
@@ -51,6 +53,16 @@ Final assurance may pass or reject the actual candidate. It cannot choose
 another guide. Runtime supervision may continue, request replanning, or stop;
 it cannot become a route selector.
 
+## Shared map decision
+
+Extend the original EGO GridMap with independent HPL/VPL, status and version
+storage addressed by its existing spatial indexing. Occupancy values retain
+physical meaning. Stage 1 freezes a spatial prediction reference, computes
+voxel PL lazily and rejects invalid/stale inputs. No independent RiskGridMap,
+P0 runtime, time-horizon map or compatibility manager remains in the mainline.
+The first backend extension will track one guide using the existing fitness
+cost, without adding a separate PL-gradient objective.
+
 ## Consequences
 
 - Route preference is decided before actual-trajectory generation.
@@ -82,14 +94,14 @@ addressing duplicate external authority.
 This would move rather than remove the complexity and would create another
 authority seam.
 
-## Activation conditions
+## Full-system completion conditions
 
-This ADR may become `Accepted` only when:
+Acceptance of the design does not imply completion. The full system still requires:
 
 1. production no longer performs sibling/cohort actual-curve competition;
 2. route, generation, assurance, and publication ownership is tested at their
    interfaces;
-3. legacy parameters and evidence fields are removed or explicitly retained
-   as non-authoritative compatibility diagnostics; and
+3. legacy parameters and evidence fields are removed from the active path;
+   historical artifacts are not a compatibility path; and
 4. the standard Safety Planner acceptance contract passes on a committed,
    clean revision.

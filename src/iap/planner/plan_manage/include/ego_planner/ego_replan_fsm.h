@@ -3,20 +3,12 @@
 
 #include <Eigen/Eigen>
 #include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
 #include <iostream>
-#include <functional>
-#include <string>
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/imu.hpp"
-#include "quadrotor_msgs/msg/position_command.hpp"
-#include "quadrotor_msgs/msg/controller_command_trace.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/empty.hpp"
-#include "std_msgs/msg/string.hpp"
 #include <vector>
 #include "visualization_msgs/msg/marker.hpp"
 
@@ -24,197 +16,15 @@
 #include "plan_env/grid_map.h"
 #include "traj_utils/msg/bspline.hpp"
 #include "traj_utils/msg/multi_bsplines.hpp"
-#include "traj_utils/msg/trajectory_command_status.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "traj_utils/msg/data_disp.hpp"
 #include "ego_planner/planner_manager.h"
-#include "ego_planner/p1_replan_admission.h"
 #include "traj_utils/planning_visualization.h"
 
 using std::vector;
 
 namespace ego_planner
 {
-  inline Eigen::Vector3d specificForceBodyToWorldAcceleration(
-      const Eigen::Vector3d &specific_force_body,
-      const Eigen::Quaterniond &body_to_world)
-  {
-    constexpr double kGravityMps2 = 9.81;
-    return body_to_world * specific_force_body +
-        Eigen::Vector3d(0.0, 0.0, -kGravityMps2);
-  }
-
-  enum class P4PlanningCycleResult
-  {
-    NEW_TRAJECTORY_READY = 0,
-    CONTINUE_COMMITTED,
-    HOLD_APPROVED_ENDPOINT,
-    RETRYABLE_FAILURE,
-    EXECUTION_REVOKED,
-  };
-
-  inline P4PlanningCycleResult classifyP4PlanningCycle(
-      const bool new_trajectory_ready,
-      const P4PlanningDisposition disposition,
-      const bool approved_endpoint_reached,
-      const bool execution_revoked = false)
-  {
-    if (new_trajectory_ready)
-      return P4PlanningCycleResult::NEW_TRAJECTORY_READY;
-    if (execution_revoked)
-      return P4PlanningCycleResult::EXECUTION_REVOKED;
-    if (disposition == P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
-      return approved_endpoint_reached
-          ? P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT
-          : P4PlanningCycleResult::CONTINUE_COMMITTED;
-    return P4PlanningCycleResult::RETRYABLE_FAILURE;
-  }
-
-  inline bool p4PlanningCycleMayRetry(const P4PlanningCycleResult result)
-  {
-    return result == P4PlanningCycleResult::RETRYABLE_FAILURE;
-  }
-
-  inline bool p4PlanningCycleRequiresEmergency(
-      const P4PlanningCycleResult result)
-  {
-    return result == P4PlanningCycleResult::EXECUTION_REVOKED;
-  }
-
-  inline bool p4PreparedSuccessorNeedsImmediateFollowup(
-      const bool planning_succeeded, const bool prepared_successor_due)
-  {
-    return !planning_succeeded && prepared_successor_due;
-  }
-
-  inline bool p4PlannerStateOwnsActiveCommand(
-      const bool executing, const bool replanning)
-  {
-    return executing || replanning;
-  }
-
-  inline bool p4SafetyObserverShouldDriveSuccessorPlanning(
-      const bool active_command_owned, const bool execution_check_applicable,
-      const bool execution_allowed, const bool rolling_successor,
-      const bool successor_due,
-      const bool trajectory_command_awaiting_activation)
-  {
-    return active_command_owned && execution_check_applicable &&
-        execution_allowed &&
-        rolling_successor && successor_due &&
-        !trajectory_command_awaiting_activation;
-  }
-
-  inline bool p4P5ReplanUsesAuthorizedSuccessorHandoff(
-      const bool p5_replan_requested,
-      const bool successor_handoff_ready)
-  {
-    return p5_replan_requested && successor_handoff_ready;
-  }
-
-  inline bool p4ExecutionUsesRollingSuccessor(
-      const P4ExecutionCertificate &certificate,
-      const bool execution_revoked)
-  {
-    return certificate.valid && !execution_revoked &&
-        certificate.authority !=
-            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
-  }
-
-  class P4EndpointRetryScheduler
-  {
-  public:
-    explicit P4EndpointRetryScheduler(
-        const double minimum_replan_period_s = 0.5)
-      : minimum_replan_period_s_(minimum_replan_period_s) {}
-
-    bool runIfDue(const double now_s, const bool worker_result_ready,
-                  const std::function<void()> &replan)
-    {
-      if (!worker_result_ready &&
-          now_s - last_replan_s_ < minimum_replan_period_s_)
-        return false;
-      last_replan_s_ = now_s;
-      replan();
-      return true;
-    }
-
-  private:
-    double minimum_replan_period_s_ = 0.5;
-    double last_replan_s_ = -std::numeric_limits<double>::infinity();
-  };
-
-  class P4RiskGridPlanningAdmission
-  {
-  public:
-    struct Inputs
-    {
-      bool enabled = false;
-      bool snapshot_owned = false;
-      bool health_ready = false;
-      bool health_stale = true;
-      uint64_t generation_id = 0;
-      double stamp_s = 0.0;
-      std::string frame_id;
-    };
-
-    struct Decision
-    {
-      bool allow_planning = true;
-      bool released_now = false;
-      uint64_t generation_id = 0;
-      std::string reason = "barrier_disabled";
-    };
-
-    Decision admit(const Inputs &inputs)
-    {
-      if (!inputs.enabled)
-        return {};
-
-      std::string reason;
-      if (!inputs.snapshot_owned)
-        reason = "snapshot_unavailable";
-      else if (!inputs.health_ready)
-        reason = "health_not_ready";
-      else if (inputs.health_stale)
-        reason = "health_stale";
-      else if (inputs.generation_id == 0)
-        reason = "generation_not_positive";
-      else if (!std::isfinite(inputs.stamp_s) || inputs.stamp_s <= 0.0)
-        reason = "stamp_not_finite_positive";
-      else if (inputs.frame_id.empty())
-        reason = "frame_empty";
-
-      if (!reason.empty())
-      {
-        ++defer_count_;
-        return {false, false, 0, reason};
-      }
-
-      const bool released_now = !released_;
-      if (released_now)
-      {
-        released_ = true;
-        release_stamp_s_ = inputs.stamp_s;
-        release_generation_id_ = inputs.generation_id;
-        defer_count_at_release_ = defer_count_;
-      }
-      return {true, released_now, inputs.generation_id,
-              released_now ? "risk_grid_ready_released" : "risk_grid_ready"};
-    }
-    uint64_t deferCount() const { return defer_count_; }
-    bool released() const { return released_; }
-    double releaseStampS() const { return release_stamp_s_; }
-    uint64_t releaseGenerationId() const { return release_generation_id_; }
-    uint64_t deferCountAtRelease() const { return defer_count_at_release_; }
-
-  private:
-    uint64_t defer_count_ = 0;
-    bool released_ = false;
-    double release_stamp_s_ = 0.0;
-    uint64_t release_generation_id_ = 0;
-    uint64_t defer_count_at_release_ = 0;
-  };
 
   class EGOReplanFSM
   {
@@ -259,14 +69,8 @@ namespace ego_planner
     FSM_EXEC_STATE exec_state_;
     int continously_called_times_{0};
 
-    Eigen::Vector3d odom_pos_, odom_vel_;
-    Eigen::Vector3d odom_acc_ = Eigen::Vector3d::Zero(); // world acceleration
+    Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_; // odometry state
     Eigen::Quaterniond odom_orient_;
-    rclcpp::Time latest_odom_stamp_{0, 0, RCL_ROS_TIME};
-    std::chrono::steady_clock::time_point latest_odom_receive_steady_{};
-    bool have_odom_receive_steady_ = false;
-    rclcpp::Time latest_imu_stamp_{0, 0, RCL_ROS_TIME};
-    bool have_imu_acceleration_ = false;
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state
     Eigen::Vector3d end_pt_, end_vel_;                                       // goal state
@@ -274,14 +78,7 @@ namespace ego_planner
     std::vector<Eigen::Vector3d> wps_;
     int current_wp_;
 
-    bool flag_escape_emergency_ = false;
-    bool p4_waiting_for_risk_grid_ready_ = false;
-    bool p4_require_risk_grid_ready_before_planning_ = false;
-    P4EndpointRetryScheduler p4_endpoint_retry_scheduler_;
-    std::shared_ptr<const iap::RiskGridSnapshot> p4_admitted_risk_grid_snapshot_;
-    P4RiskGridPlanningAdmission p4_risk_grid_planning_admission_;
-    P1ReplanAdmission p1_replan_admission_;
-    uint64_t p1_formal_observation_attempt_id_ = 0;
+    bool flag_escape_emergency_;
 
     /* ROS utils */
     rclcpp::Node::SharedPtr node_;
@@ -289,23 +86,13 @@ namespace ego_planner
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
-    rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr
-        position_command_sub_;
-    rclcpp::CallbackGroup::SharedPtr controller_trace_callback_group_;
-    rclcpp::Subscription<quadrotor_msgs::msg::ControllerCommandTrace>::SharedPtr
-        controller_trace_sub_;
     rclcpp::Subscription<traj_utils::msg::MultiBsplines>::SharedPtr swarm_trajs_sub_;
     rclcpp::Subscription<traj_utils::msg::Bspline>::SharedPtr broadcast_bspline_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr trigger_sub_;
-    rclcpp::Subscription<traj_utils::msg::TrajectoryCommandStatus>::SharedPtr
-        guard_status_sub_;
 
     // rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr replan_pub_;
     // rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr new_pub_;
     rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr bspline_pub_;
-    rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr
-        guard_bspline_pub_;
     rclcpp::Publisher<traj_utils::msg::DataDisp>::SharedPtr data_disp_pub_;
     rclcpp::Publisher<traj_utils::msg::MultiBsplines>::SharedPtr swarm_trajs_pub_;
     rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr broadcast_bspline_pub_;
@@ -314,7 +101,8 @@ namespace ego_planner
     bool callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj); // front-end and back-end method
     bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
     bool planFromGlobalTraj(const int trial_times = 1);
-    P4PlanningCycleResult planFromCurrentTraj(const int trial_times = 1);
+    bool planFromCurrentTraj(const int trial_times = 1);
+
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);
     std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> timesOfConsecutiveStateCalls();
@@ -322,12 +110,7 @@ namespace ego_planner
 
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
-    bool shouldDeferP4PlanningForRiskGridReady();
     void getLocalTarget();
-    rclcpp::Time plannerNow() const;
-    rclcpp::Time plannerSchedulingNow() const;
-    rclcpp::Time executionWatchdogNow() const;
-    rclcpp::Time preparedP4SuccessorNow() const;
 
     /* ROS functions */
     void execFSMCallback();
@@ -335,7 +118,6 @@ namespace ego_planner
     void waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg);
-    void imuCallback(const std::shared_ptr<const sensor_msgs::msg::Imu> &msg);
     void swarmTrajsCallback(const std::shared_ptr<const traj_utils::msg::MultiBsplines> &msg);
     void BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg);
 
@@ -351,57 +133,8 @@ namespace ego_planner
     }
 
     void init(rclcpp::Node::SharedPtr &node);
-    void setP4TerminalFlowForTest(
-        EGOPlannerManager::Ptr planner_manager,
-        rclcpp::Node::SharedPtr node,
-        rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr publisher,
-        std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot,
-        rclcpp::Time planning_time,
-        std::function<bool()> rebound_planner)
-    {
-      planner_manager_ = std::move(planner_manager);
-      node_ = std::move(node);
-      bspline_pub_ = std::move(publisher);
-      p4_require_risk_grid_ready_before_planning_ = true;
-      p4_admitted_risk_grid_snapshot_ = std::move(admitted_snapshot);
-      latest_odom_stamp_ = planning_time;
-      latest_odom_receive_steady_ = std::chrono::steady_clock::now();
-      have_odom_receive_steady_ = true;
-      rebound_planner_for_test_ = std::move(rebound_planner);
-    }
-    bool callReboundReplanForTest()
-    {
-      return callReboundReplan(false, false);
-    }
-    rclcpp::Time executionWatchdogNowForTest() const
-    {
-      return executionWatchdogNow();
-    }
-    void setPlannerSchedulingElapsedForTest(double elapsed_s)
-    {
-      latest_odom_receive_steady_ = std::chrono::steady_clock::now() -
-          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-              std::chrono::duration<double>(elapsed_s));
-      have_odom_receive_steady_ = true;
-    }
-    rclcpp::Time preparedP4SuccessorNowForTest() const
-    {
-      return preparedP4SuccessorNow();
-    }
-    rclcpp::Time plannerNowForTest() const
-    {
-      return plannerNow();
-    }
-    void setP5PreEvaluationHookForTest(std::function<void()> hook)
-    {
-      p5_pre_evaluation_hook_for_test_ = std::move(hook);
-    }
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-  private:
-    std::function<bool()> rebound_planner_for_test_;
-    std::function<void()> p5_pre_evaluation_hook_for_test_;
   };
 
 } // namespace ego_planner

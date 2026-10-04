@@ -91,6 +91,11 @@ class VisibilityPredictor {
   /// @brief Provide a (possibly shared) occupancy grid for ray checks.
   ///        Pass nullptr to disable occlusion checks (open-sky assumption).
   void set_occupancy(const LocalOccupancyGrid* grid);
+  // Query raw physical occupancy from an existing map, without a second grid.
+  // Replaces set_occupancy; unknown evidence is handled by SupportQuery.
+  // This path uses binary occupancy sampled at half the supplied resolution.
+  using OccupancyQuery = std::function<bool(const Eigen::Vector3d&)>;
+  void set_occupancy_query(OccupancyQuery query, double resolution_m);
 
   /// @brief Provide the immutable online-map support test used by this query.
   /// A false result means UNKNOWN, not free. When configured, every sampled
@@ -129,6 +134,8 @@ class VisibilityPredictor {
 
   Params                      params_;
   const LocalOccupancyGrid*   grid_ = nullptr;
+  OccupancyQuery occupancy_query_;
+  double occupancy_resolution_m_ = 0.2;
   ObservationPredicate       observation_predicate_;
   SupportQuery               support_query_;
 };

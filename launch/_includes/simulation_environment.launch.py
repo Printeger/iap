@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
@@ -247,7 +247,7 @@ def _setup(context):
             output="screen",
             parameters=[_map_parameters(str(scenario["map_profile"]))],
         ),
-        Node(
+        TimerAction(period=2.0, actions=[Node(
             package="local_sensing",
             executable="pcl_render_node",
             name="drone_0_pcl_render_node",
@@ -262,6 +262,15 @@ def _setup(context):
             ],
             parameters=[
                 {"sensing_horizon": 10.0},
+                {"renderer_mode": "spherical_first_hit_v1"},
+                {"lidar.horizontal_samples": 512},
+                {"lidar.vertical_samples": 40},
+                {"lidar.horizontal_fov_deg": 360.0},
+                {"lidar.vertical_min_deg": -7.0},
+                {"lidar.vertical_max_deg": 52.0},
+                {"lidar.min_range_m": 0.1},
+                {"lidar.max_range_m": 10.0},
+                {"lidar.world_voxel_resolution_m": 0.1},
                 {"sensing_rate": 10.0},
                 {"estimation_rate": 15.0},
                 {"map/x_size": map_size[0]},
@@ -270,7 +279,7 @@ def _setup(context):
                 {"map/resolution": 0.1},
                 str(local_sensing_share / "config" / "camera.yaml"),
             ],
-        ),
+        )]),
         Node(
             package="iap",
             executable="demo4_lidar_body_bridge",

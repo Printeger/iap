@@ -467,6 +467,11 @@ void PredictorModule::set_params(const PredictorParams& params) {
   fusion_.set_params(params_.fusion);
 }
 
+void PredictorModule::set_occupancy_query(
+    VisibilityPredictor::OccupancyQuery query, const double resolution_m) {
+  gnss_.set_occupancy_query(std::move(query), resolution_m);
+}
+
 void PredictorModule::set_local_occupancy(const LocalOccupancyGrid* occupancy) {
   gnss_.set_local_occupancy(occupancy);
 }

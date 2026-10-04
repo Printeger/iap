@@ -22,6 +22,9 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(message_filters REQUIRED)
+find_package(iap REQUIRED)
+find_package(glog REQUIRED)
+find_package(gnss_comm REQUIRED)
 
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -53,6 +56,9 @@ if(BUILD_TESTING)
   # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  ament_add_gtest(test_grid_map_risk test/test_grid_map_risk.cpp)
+  target_link_libraries(test_grid_map_risk plan_env)
 
   ament_add_gtest(test_grid_map_occupancy_epoch
     test/test_grid_map_occupancy_epoch.cpp
@@ -94,10 +100,11 @@ include_directories(
 
 link_directories(${PCL_LIBRARY_DIRS})
 
-ament_export_include_directories(include)
+ament_export_include_directories(include ${IAP_MSGS_INCLUDE_DIR})
 
 add_library(plan_env SHARED
   src/grid_map.cpp
+  src/grid_map_risk.cpp
   src/local_evidence_snapshot.cpp
   src/registered_lidar_window.cpp
   src/raycast.cpp
@@ -136,5 +143,6 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 ament_export_libraries(plan_env)
+ament_export_dependencies(iap gnss_comm glog cv_bridge message_filters)
 
 ament_package()

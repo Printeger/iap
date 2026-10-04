@@ -1,41 +1,21 @@
 #include <rclcpp/rclcpp.hpp>
-#include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <visualization_msgs/msg/marker.hpp>
-#include <cstddef>
 #include <iostream>
 
 #include <ego_planner/ego_replan_fsm.h>
 
 using namespace ego_planner;
 
-namespace
-{
-constexpr int kDefaultExecutorThreadCount = 4;
-}
-
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("ego_planner_node");
-  const int executor_thread_count = node->declare_parameter<int>(
-      "executor_thread_count", kDefaultExecutorThreadCount);
-  if (executor_thread_count < 1)
-  {
-    RCLCPP_FATAL(node->get_logger(),
-                 "executor_thread_count must be at least one, got %d",
-                 executor_thread_count);
-    rclcpp::shutdown();
-    return 2;
-  }
 
   EGOReplanFSM rebo_replan;
 
   rebo_replan.init(node);
 
-  rclcpp::executors::MultiThreadedExecutor exec(rclcpp::ExecutorOptions(),
-      static_cast<std::size_t>(executor_thread_count));
-  exec.add_node(node);
-  exec.spin();
+  rclcpp::spin(node);
   rclcpp::shutdown();
 
   return 0;

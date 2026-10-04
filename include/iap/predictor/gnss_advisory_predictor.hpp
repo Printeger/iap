@@ -20,6 +20,7 @@ class GnssAdvisoryPredictor {
 
   void set_params(const GnssAdvisoryPredictorParams& params);
   void set_local_occupancy(const LocalOccupancyGrid* occupancy);
+  void set_occupancy_query(VisibilityPredictor::OccupancyQuery query, double resolution_m);
   void set_observation_predicate(
       VisibilityPredictor::ObservationPredicate predicate);
   void set_support_query(VisibilityPredictor::SupportQuery query);
@@ -110,6 +111,8 @@ class GnssAdvisoryPredictor {
   VisibilityPredictor visibility_predictor_;
   VisibilityPredictor::ObservationPredicate observation_predicate_;
   VisibilityPredictor::SupportQuery support_query_;
+  VisibilityPredictor::OccupancyQuery occupancy_query_;
+  double occupancy_resolution_m_ = 0.2;
   std::shared_ptr<ReceiverAnchorCache> receiver_anchor_cache_;
   std::shared_ptr<VisibilityEvidenceCache> visibility_evidence_cache_;
 };

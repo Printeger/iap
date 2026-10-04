@@ -62,6 +62,53 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         )
         return run
 
+    def test_stage1_parameters_have_one_map_and_no_retired_planner_controls(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        catalog = json.loads((REPO / "config/scenarios/catalog.json").read_text())
+        for entry in catalog.values():
+            params = runtime.planner_parameters(entry)
+            self.assertEqual(params["grid_map/resolution"], 0.1)
+            self.assertTrue(params["grid_map/registered_lidar_window_enabled"])
+            self.assertEqual(params["grid_map/frame_id"], "map")
+            self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
+            self.assertNotIn("manager/use_distinctive_trajs", params)
+            for i, axis in enumerate("xyz"):
+                self.assertEqual(params[f"grid_map/map_size_{axis}"], entry["map_size"][i])
+
+    def test_stage1_graph_materializes_same_registered_lattice_and_preserves_artifacts(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        runs = self._load_launch("_includes/run_directory.py")
+        catalog = json.loads((REPO / "config/scenarios/catalog.json").read_text())
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+            run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="fused_nominal")
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
+                context = LaunchContext()
+                context.launch_configurations.update({"scenario": "fused_nominal", "start_rviz": "false",
+                    "planner_start_delay_s": "0", "run_duration_s": "0", "p0.enable_risk_grid": "true"})
+                actions = runtime._setup(context)
+            self.assertEqual(len(actions), 4)
+            ros = json.loads((run / "metadata/config/iap/config_ros.json").read_text())["glim_ros"]
+            local = ros["planner_local_map"]
+            params = runtime.planner_parameters(catalog["fused_nominal"])
+            self.assertEqual(local["planning_lattice_resolution_m"],params["grid_map/resolution"])
+            self.assertEqual(local["frame_contract_id"],params["grid_map/registered_frame_contract_id"])
+            self.assertEqual(local["planning_lattice_extent_m"],catalog["fused_nominal"]["map_size"])
+            self.assertEqual(ros["acc_scale"], 1.0)
+            odometry = json.loads((run / "metadata/config/iap/config_odometry.json").read_text())
+            self.assertEqual(odometry["odometry_estimation"]["initialization_mode"], "NAIVE")
+            self.assertFalse(ros["sim"]["align_planner_odom_to_truth"])
+            self.assertEqual(ros["sim"]["static_planner_translation_m"],local["static_planner_translation_m"])
+            self.assertIn("libplanner_local_map_extension.so",ros["extension_modules"])
+            manifest=json.loads((run / "metadata/run_manifest.json").read_text())
+            self.assertIn("metadata/config/iap",manifest["config_snapshots"])
+
+    def test_flight_is_unavailable_during_execution_rebuild(self):
+        flight=self._load_launch("iap_flight.launch.py")
+        context=LaunchContext()
+        context.launch_configurations.update({"flight_authorized":"true", "controller_handshake_confirmed":"true"})
+        with self.assertRaisesRegex(RuntimeError,"stages 4/5"):
+            flight._setup(context)
+
     def test_all_historical_scenario_names_are_in_catalog(self):
         catalog = json.loads(
             (REPO / "config/scenarios/catalog.json").read_text(encoding="utf-8")
@@ -89,15 +136,13 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertEqual(set(catalog), expected)
 
     def test_canonical_scenario_resources_are_package_relative_and_present(self):
-        source = (LAUNCH / "_includes/full_stack_runtime.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("results/icra27/icra070/install_v2", source)
-        self.assertIn(
-            '"gnss_scenario_file": "config/gnss_sim/demo7_skymask_nlos.yaml"',
-            source,
-        )
-        self.assertTrue((REPO / "config/gnss_sim/demo7_skymask_nlos.yaml").is_file())
+        environment = self._load_launch("_includes/simulation_environment.launch.py")
+        for profile in ("open_sky", "degraded", "open_sky_occlusion"):
+            params = environment._gnss_parameters(REPO, profile)
+            path = Path(params["scenario_file"])
+            self.assertTrue(path.is_file())
+            self.assertTrue(path.is_relative_to(REPO))
+
 
     def test_module_launches_do_not_start_environments(self):
         forbidden = (
@@ -171,7 +216,6 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             "glio.launch.py",
             "glio_integrity.launch.py",
             "iap_sim.launch.py",
-            "iap_flight.launch.py",
         ):
             source = (LAUNCH / filename).read_text(encoding="utf-8")
             self.assertEqual(source.count("resolve_run_directory("), 1, filename)
@@ -181,25 +225,6 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             source = (LAUNCH / filename).read_text(encoding="utf-8")
             self.assertIn("adopt_run_directory(internal_run)", source, filename)
 
-    def test_flight_graph_has_no_simulator_or_bag_process(self):
-        source = (LAUNCH / "iap_flight.launch.py").read_text(encoding="utf-8")
-        for token in (
-            'package="gnss_sim"',
-            'package="so3_quadrotor_simulator"',
-            'package="map_generator"',
-            'executable="poscmd_2_odom"',
-            "ExecuteProcess",
-        ):
-            self.assertNotIn(token, source)
-        self.assertIn('"forbid_sim_extensions": "true"', source)
-        self.assertIn('"realworld_experiment": "true"', source)
-        self.assertIn('"p0_online_mapping_mode": "true"', source)
-        self.assertIn('"p0_fit_grid_to_map_cloud": "false"', source)
-        self.assertIn('"p0_map_topic": ""', source)
-        self.assertIn('"p4_require_risk_grid_ready_before_planning": "false"', source)
-        for axis in "xyz":
-            self.assertIn(f'"grid_map_origin_{axis}"', source)
-            self.assertIn(f'"p0_origin_{axis}_m"', source)
 
     def test_profiles_select_exact_extension_sets(self):
         glio = json.loads(
@@ -318,152 +343,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             )
             self.assertEqual(Path(redirected["log_dir"]), root / "runtime")
 
-    def test_sim_profile_uses_maintained_runtime_without_historical_launches(self):
-        canonical = (LAUNCH / "iap_sim.launch.py").read_text(encoding="utf-8")
-        internal = (
-            LAUNCH / "_includes/full_stack_simulation.launch.py"
-        ).read_text(encoding="utf-8")
-        runtime = (LAUNCH / "_includes/full_stack_runtime.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("full_stack_simulation.launch.py", canonical)
-        self.assertIn('"experiment": "canonical_full_stack_sim"', internal)
-        self.assertIn(
-            '"run_validator": "true" if icra_continuous_flight else "false"',
-            internal,
-        )
-        self.assertIn('"record_bag": "false"', internal)
-        self.assertIn('"planner_local_map_enable": "true"', runtime)
-        self.assertIn("ICRA_CONTINUOUS_FLIGHT_RUNTIME_PRESET", runtime)
-        self.assertIn('"rviz_config": "config/sim_demo11/test_icra.rviz"', runtime)
-        self.assertIn('"sim_time_enable": "true"', runtime)
-        self.assertIn(
-            '"p4.require_risk_grid_ready_before_planning": "true"', runtime
-        )
-        self.assertIn(
-            '{"sim_time/enable": _param_bool(context, "sim_time_enable")}', runtime
-        )
-        self.assertNotIn(' / "bp" / ', runtime)
-        self.assertNotIn("icra_p0_p5_qualification.py", runtime)
 
-    def test_icra_forest_sim_matches_continuous_flight_runtime_contract(self):
-        runtime = self._load_launch("_includes/full_stack_runtime.py")
-
-        icra_path = LAUNCH / "bp/test_icra.launch.py"
-        icra_spec = importlib.util.spec_from_file_location(
-            "canonical_contract_test_icra_launch", icra_path
-        )
-        icra = importlib.util.module_from_spec(icra_spec)
-        if icra_spec.loader is None:
-            raise RuntimeError(f"cannot load {icra_path}")
-        icra_spec.loader.exec_module(icra)
-
-        runner_path = REPO / "scripts/dev_planner/run_icra_interface_integration.py"
-        runner_spec = importlib.util.spec_from_file_location(
-            "canonical_contract_icra_runner", runner_path
-        )
-        runner = importlib.util.module_from_spec(runner_spec)
-        if runner_spec.loader is None:
-            raise RuntimeError(f"cannot load {runner_path}")
-        runner_spec.loader.exec_module(runner)
-
-        scenario = "icra_dense_forest_four_fork_v2"
-        runner_args = runner.stage_launch_args(
-            "continuous-flight",
-            scenario,
-            None,
-            "bds",
-            "braking_window_pointwise",
-            "mission_best_effort",
-        )
-        runner_args.update(runner.raw_evidence_launch_args(False, 5_000))
-        runner_args.update(
-            {
-                "start_rviz": "true",
-                "run_duration_s": "180.0",
-                "validation_duration_s": "175.0",
-                "rviz_config": "config/sim_demo11/test_icra.rviz",
-            }
-        )
-        runner_context = LaunchContext()
-        runner_context.launch_configurations.update(dict(icra.ARG_DEFAULTS))
-        runner_context.launch_configurations.update(runner_args)
-        with mock.patch.object(
-            sys,
-            "argv",
-            ["test_icra.launch.py"]
-            + [f"{key}:={value}" for key, value in runner_args.items()],
-        ):
-            _, _, runner_preset_keys = icra._BASE._apply_presets(
-                runner_context, str(REPO)
-            )
-            runner_safety = icra._BASE._resolve_safety_switches(
-                runner_context, runner_preset_keys
-            )
-
-        sim_context = LaunchContext()
-        sim_context.launch_configurations.update(dict(runtime.ARG_DEFAULTS))
-        sim_context.launch_configurations.update(
-            {
-                "experiment": "canonical_full_stack_sim",
-                "scenario": scenario,
-                "start_rviz": "true",
-                "run_duration_s": "180.0",
-                "planner_start_delay_s": "10.0",
-            }
-        )
-        with mock.patch.object(sys, "argv", ["iap_sim.launch.py"]):
-            _, _, sim_preset_keys = runtime._apply_presets(
-                sim_context, str(REPO)
-            )
-            sim_safety = runtime._resolve_safety_switches(
-                sim_context, sim_preset_keys
-            )
-
-        equivalent_keys = {
-            "grid_map/independent_cloud_clock_guard_s",
-            "grid_map/independent_cloud_min_interval_s",
-            "lidar_renderer_mode",
-            "lidar_start_delay_s",
-            "manager/use_distinctive_trajs",
-            "odometry_acc_scale",
-            "odometry_initialization_mode",
-            "p0.horizons_s",
-            "p0.predictor.sigma_grow_m_sqrt_s",
-            "p0.predictor.sigma_growth_profile",
-            "p0.predictor.worker_count",
-            "p0.refresh_start_delay_s",
-            "p4.raw_detail_enable",
-            "p4.require_risk_grid_ready_before_planning",
-            "p4.runtime_window_satellite_detail_max_rows",
-            "planner_enable_p1",
-            "planner_enable_p2",
-            "planner_enable_p3_global",
-            "planner_enable_p3_local",
-            "planner_enable_p4",
-            "planner_enable_p5_final",
-            "planner_enable_p5_runtime",
-            "planner_executor_thread_count",
-            "run_validator",
-            "rviz_config",
-            "safety_viz.enable_p4_viz",
-            "validation_duration_s",
-        }
-        self.assertEqual(
-            {
-                key: str(sim_context.launch_configurations[key])
-                for key in equivalent_keys
-            },
-            {
-                key: str(runner_context.launch_configurations[key])
-                for key in equivalent_keys
-            },
-        )
-        # The historical ICRA graph hard-codes simulated sensor time on the
-        # vehicle plant; the maintained graph exposes the same behavior as a
-        # launch value.
-        self.assertEqual(sim_context.launch_configurations["sim_time_enable"], "true")
-        self.assertEqual(sim_safety[:4], runner_safety[:4])
 
     def test_sim_paths_follow_canonical_run_categories(self):
         simulation = self._load_launch("iap_sim.launch.py")
@@ -501,194 +381,10 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             )
             self.assertEqual(log_root, run_dir / "runtime")
 
-    def test_sim_logging_materialization_uses_canonical_run_categories(self):
-        runtime = self._load_launch("_includes/full_stack_runtime.py")
-        with tempfile.TemporaryDirectory() as temporary:
-            run_dir = Path(temporary).resolve()
-            runtime_base = run_dir / "metadata" / "config" / "full_stack"
-            config_dir = runtime_base / "instance" / "sim_demo11"
-            config_dir.mkdir(parents=True)
-            config_path = config_dir / "config.json"
-            logging_path = config_dir / "config_logging.json"
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "global": {"config_logging": "config_logging.json"},
-                        "logging": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            logging_path.write_text(
-                json.dumps({"logging": {}}), encoding="utf-8"
-            )
 
-            effective = runtime._materialize_iap_logging_config(
-                config_path,
-                runtime_base,
-                run_dir / "runtime",
-                artifact_run_dir=run_dir,
-            )
-            root = json.loads(config_path.read_text(encoding="utf-8"))
-            referenced = json.loads(logging_path.read_text(encoding="utf-8"))
 
-            self.assertEqual(root["logging"]["log_dir"], str(run_dir / "runtime"))
-            self.assertEqual(
-                referenced["logging"]["log_dir"], str(run_dir / "runtime")
-            )
-            self.assertEqual(
-                root["global"]["timing_csv_path"],
-                str(run_dir / "profiling" / "iap_timing.csv"),
-            )
-            self.assertEqual(effective["log_root"], str(run_dir / "runtime"))
-            with self.assertRaisesRegex(
-                RuntimeError, "iap_log_root must equal <IAP_RUN_DIR>/runtime"
-            ):
-                runtime._materialize_iap_logging_config(
-                    config_path,
-                    runtime_base,
-                    run_dir / "export",
-                    artifact_run_dir=run_dir,
-                )
 
-    def test_sim_runtime_config_accepts_canonical_artifact_layout(self):
-        runtime = self._load_launch("_includes/full_stack_runtime.py")
-        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
-            runtime, "get_package_share_directory", return_value=str(REPO)
-        ):
-            run_dir = Path(temporary).resolve()
-            for relative in (
-                "runtime",
-                "profiling",
-                "export/planner",
-                "metadata/config/full_stack",
-            ):
-                (run_dir / relative).mkdir(parents=True, exist_ok=True)
-            context = LaunchContext()
-            for name, default in runtime.ARG_DEFAULTS:
-                context.launch_configurations[name] = str(default)
-            context.launch_configurations.update(
-                {
-                    "experiment": "canonical_full_stack_sim",
-                    "scenario": "lidar_corridor_degenerate",
-                    "runtime_root_dir": str(
-                        run_dir / "metadata/config/full_stack"
-                    ),
-                    "export_root_dir": str(run_dir / "export/planner"),
-                    "iap_log_root": str(run_dir / "runtime"),
-                }
-            )
-            context.environment["IAP_RUN_DIR"] = str(run_dir)
-            runtime._apply_presets(context, str(REPO))
 
-            config_path, _, _, _, logging = runtime._runtime_config(
-                context,
-                use_gnss=False,
-                use_araim=True,
-                allow_truth_alignment=False,
-            )
-
-            def reject_nonfinite(value):
-                raise ValueError(f"non-finite JSON constant: {value}")
-
-            config_ros = json.loads(
-                (Path(config_path) / "config_ros.json").read_text(
-                    encoding="utf-8"
-                ),
-                parse_constant=reject_nonfinite,
-            )
-
-            self.assertEqual(logging["log_root"], str(run_dir / "runtime"))
-            self.assertEqual(
-                logging["timing_csv_path"],
-                str(run_dir / "profiling/iap_timing.csv"),
-            )
-            self.assertEqual(
-                config_ros["glim_ros"]["planner_local_map"][
-                    "planning_lattice_origin_m"
-                ],
-                [-15.0, -15.0, -0.01],
-            )
-
-    def test_catalog_task_mode_is_applied_to_every_canonical_scenario(self):
-        catalog = json.loads(
-            (REPO / "config/scenarios/catalog.json").read_text(encoding="utf-8")
-        )
-        runtime = self._load_launch("_includes/full_stack_runtime.py")
-        for scenario, entry in catalog.items():
-            context = LaunchContext()
-            for name, default in runtime.ARG_DEFAULTS:
-                context.launch_configurations[name] = str(default)
-            context.launch_configurations.update(
-                {
-                    "experiment": "canonical_full_stack_sim",
-                    "scenario": scenario,
-                }
-            )
-            runtime._apply_presets(context, str(REPO))
-            self.assertEqual(
-                context.launch_configurations["p4.assurance.task_mode"],
-                entry["task_mode"],
-                scenario,
-            )
-
-    def test_hidden_legacy_cli_cannot_override_canonical_safety(self):
-        runtime = self._load_launch("_includes/full_stack_runtime.py")
-        context = LaunchContext()
-        for name, default in runtime.ARG_DEFAULTS:
-            context.launch_configurations[name] = str(default)
-        context.launch_configurations.update(
-            {
-                "experiment": "canonical_full_stack_sim",
-                "scenario": "fused_nominal",
-                "planner_enable_p5_runtime": "false",
-                "p4.require_risk_grid_ready_before_planning": "true",
-            }
-        )
-        with mock.patch.object(
-            sys,
-            "argv",
-            [
-                "iap_sim.launch.py",
-                "planner_enable_p5_runtime:=false",
-                "p4.require_risk_grid_ready_before_planning:=true",
-            ],
-        ):
-            runtime._apply_presets(context, str(REPO))
-        self.assertEqual(context.launch_configurations["planner_enable_p5_runtime"], "true")
-        self.assertEqual(
-            context.launch_configurations[
-                "p4.require_risk_grid_ready_before_planning"
-            ],
-            "false",
-        )
-
-    def test_flight_requires_retained_calibration_manifest(self):
-        helper_path = LAUNCH / "iap_flight.launch.py"
-        spec = importlib.util.spec_from_file_location("iap_flight_test", helper_path)
-        module = importlib.util.module_from_spec(spec)
-        self.assertIsNotNone(spec.loader)
-        spec.loader.exec_module(module)
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "calibration.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "schema_version": "iap_local_surface_calibration_v1",
-                        "calibration_id": "vehicle_01_heldout_2026_09",
-                        "local_surface_error_bound_m": 0.04,
-                        "calibration_run_count": 3,
-                        "held_out_run_count": 1,
-                        "held_out_passed": True,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            retained, digest = module._verify_calibration_manifest(
-                str(path), "vehicle_01_heldout_2026_09", 0.04
-            )
-            self.assertEqual(retained, path.resolve())
-            self.assertEqual(len(digest), 64)
 
     def test_bp_is_installed_for_frozen_script_compatibility(self):
         cmake = (REPO / "CMakeLists.txt").read_text(encoding="utf-8")
@@ -1047,46 +743,9 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 self.assertEqual(len(simulation._setup(context)), 4)
 
             flight = self._load_launch("iap_flight.launch.py")
-            context = LaunchContext()
-            context.launch_configurations.update(
-                {
-                    "flight_authorized": "true",
-                    "controller_handshake_confirmed": "true",
-                    "config_path": str(REPO / "config/profiles/full_stack_flight"),
-                    "imu_topic": "/imu",
-                    "points_topic": "/points",
-                    "odometry_topic": "/odom",
-                    "planner_cloud_topic": "/points",
-                    "beam_evidence_topic": "/vehicle/lidar/beam_evidence",
-                    "camera_pose_topic": "/camera_pose",
-                    "depth_topic": "/depth",
-                    "goal_x": "1",
-                    "goal_y": "0",
-                    "goal_z": "1",
-                    "drone_id": "0",
-                    "map_size_x": "42",
-                    "map_size_y": "30",
-                    "map_size_z": "8",
-                    "max_velocity_mps": "1",
-                    "max_acceleration_mps2": "1.5",
-                    "planning_horizon_m": "8",
-                    "planner_start_delay_s": "0",
-                    "local_surface_error_bound_m": "0.04",
-                    "local_surface_error_calibration_id": "test_vehicle_heldout_v1",
-                    "local_surface_error_calibration_manifest": str(
-                        REPO
-                        / "test/fixtures/valid_local_surface_calibration.json"
-                    ),
-                }
-            )
+            with self.assertRaisesRegex(RuntimeError, "stages 4/5"):
+                flight._setup(LaunchContext())
 
-            def package_share(name):
-                return str(REPO if name == "iap" else REPO / "src/iap/planner")
-
-            with mock.patch.object(
-                flight, "get_package_share_directory", side_effect=package_share
-            ):
-                self.assertEqual(len(flight._setup(context)), 6)
 
     def test_historical_launches_exist_only_in_backup(self):
         canonical = {

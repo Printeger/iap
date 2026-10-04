@@ -1,3 +1,4 @@
+#include <stdexcept>
 // IAP-RQ-312: Satellite visibility prediction by ray casting
 // IAP-RQ-313: Canopy density κ along LOS
 // IAP-RQ-314: σ_eff(κ, θ) noise model
@@ -13,7 +14,16 @@ namespace iap {
 VisibilityPredictor::VisibilityPredictor() : params_(Params{}) {}
 VisibilityPredictor::VisibilityPredictor(const Params& p) : params_(p) {}
 
+void VisibilityPredictor::set_occupancy_query(OccupancyQuery query, double resolution_m) {
+  if (!std::isfinite(resolution_m) || resolution_m <= 0.0)
+    throw std::invalid_argument("occupancy query requires positive resolution");
+  grid_ = nullptr;
+  occupancy_query_ = std::move(query);
+  occupancy_resolution_m_ = resolution_m;
+}
+
 void VisibilityPredictor::set_occupancy(const LocalOccupancyGrid* grid) {
+  occupancy_query_ = {};
   grid_ = grid;
 }
 
@@ -168,7 +178,22 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     // κ and occlusion
     double known_occupancy_kappa = 0.0;
     bool blocked = false;
-    if (grid_ != nullptr) {
+    if (occupancy_query_) {
+      const double offset = std::max(0.0, params_.ray_start_offset);
+      const Eigen::Vector3d origin = pos_world + offset * dir;
+      const double step = 0.5 * occupancy_resolution_m_;
+      const int samples = std::max(1, static_cast<int>(std::ceil(params_.occ_L / step)));
+      for (int k = 0; k < samples; ++k)
+        known_occupancy_kappa += occupancy_query_(
+            origin + ((k + 0.5) * params_.occ_L / samples) * dir) ? 1.0 : 0.0;
+      known_occupancy_kappa /= samples;
+      if (params_.hard_occlusion) {
+        const double length = std::max(0.0, params_.occ_range - offset);
+        for (double distance = 0.0; distance <= length; distance += step) {
+          if (occupancy_query_(origin + distance * dir)) { blocked = true; break; }
+        }
+      }
+    } else if (grid_ != nullptr) {
       const double start_offset = std::max(0.0, params_.ray_start_offset);
       const Eigen::Vector3d ray_origin = pos_world + start_offset * dir;
       const double occ_range = std::max(0.0, params_.occ_range - start_offset);

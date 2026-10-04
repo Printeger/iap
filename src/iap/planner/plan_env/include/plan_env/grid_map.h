@@ -108,12 +108,33 @@ struct MappingParameters
   double unknown_flag_;
 };
 
+// Spatial advisory values only. Physical occupancy never encodes integrity.
+enum class GridRiskStatus : uint8_t {
+  UNCOMPUTED, VALID, INVALID, STALE, OUT_OF_MAP, FRAME_MISMATCH,
+  VERSION_CHANGED, INVALID_QUERY
+};
+struct GridRiskVoxel {
+  double hpl = std::numeric_limits<double>::quiet_NaN();
+  double vpl = std::numeric_limits<double>::quiet_NaN();
+  uint64_t version = 0;
+  GridRiskStatus status = GridRiskStatus::UNCOMPUTED;
+};
+struct GridRiskContext {
+  double reference_time_s = std::numeric_limits<double>::quiet_NaN();
+  double valid_until_s = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_id;
+  uint64_t occupancy_generation = 0;
+  // Must own frozen inputs, never borrow live predictor state.
+  std::function<GridRiskVoxel(const Eigen::Vector3d&)> predict;
+};
+
 // intermediate mapping data for fusion
 
 struct MappingData
 {
   // main map data, occupancy of each voxel and Euclidean distance
 
+  std::vector<GridRiskVoxel> risk_buffer_;
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
   std::vector<char> occupancy_buffer_raw_cloud_;
@@ -294,6 +315,13 @@ public:
   using OccupancyDiagnosticQuery = GridMapOccupancyDiagnosticQuery;
   using FrozenOccupancyEpoch = ::FrozenOccupancyEpoch;
 
+  // A new binding invalidates previous versions, including failed bindings.
+  uint64_t bindRiskContext(GridRiskContext context);
+  void invalidateRiskContext();
+  GridRiskVoxel queryRisk(const Eigen::Vector3d& position, uint64_t version,
+                          double evaluation_time_s);
+  std::string getFrameId() const { return mp_.frame_id_; }
+
   // occupancy map management
   void resetBuffer();
   void resetBuffer(Eigen::Vector3d min, Eigen::Vector3d max);
@@ -360,9 +388,14 @@ public:
 
 private:
   friend struct GridMapTestAccess;
+  void resetBufferUnlocked(Eigen::Vector3d min, Eigen::Vector3d max);
 
   MappingParameters mp_;
   MappingData md_;
+  std::mutex risk_mutex_;
+  GridRiskContext risk_context_;
+  uint64_t risk_version_ = 0;
+  uint64_t risk_occupancy_sequence_ = 0;
 
   // get depth image and camera pose
   void depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,

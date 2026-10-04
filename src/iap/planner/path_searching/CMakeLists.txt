@@ -21,9 +21,6 @@ find_package(visualization_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(plan_env REQUIRED)
 find_package(cv_bridge REQUIRED)
-find_package(glog REQUIRED)
-find_package(gnss_comm REQUIRED)
-find_package(iap REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
@@ -31,7 +28,6 @@ find_package(pcl_conversions REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  find_package(ament_cmake_gtest REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -42,10 +38,10 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-include_directories( 
-    SYSTEM 
-    include 
-    ${Eigen3_INCLUDE_DIRS} 
+include_directories(
+    SYSTEM
+    include
+    ${Eigen3_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
 )
 
@@ -55,24 +51,7 @@ add_library( path_searching SHARED
     src/dyn_a_star.cpp
 )
 
-ament_target_dependencies(path_searching plan_env std_msgs visualization_msgs nav_msgs rclcpp Eigen3 PCL pcl_conversions cv_bridge glog gnss_comm iap )
-
-target_link_libraries(path_searching
-    iap::iap
-)
-
-if(BUILD_TESTING)
-  ament_add_gtest(test_p4_risk_astar
-    test/test_p4_risk_astar.cpp
-  )
-  ament_target_dependencies(test_p4_risk_astar
-    rclcpp Eigen3 glog gnss_comm iap
-  )
-  target_link_libraries(test_p4_risk_astar
-    path_searching
-    iap::iap
-  )
-endif()
+ament_target_dependencies(path_searching plan_env std_msgs visualization_msgs nav_msgs rclcpp Eigen3 PCL pcl_conversions cv_bridge )
 
 install(TARGETS path_searching
         DESTINATION lib
@@ -83,8 +62,5 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 ament_export_libraries(path_searching)
-ament_export_dependencies(glog)
-ament_export_dependencies(gnss_comm)
-ament_export_dependencies(iap)
 
 ament_package()
