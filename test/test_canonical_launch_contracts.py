@@ -75,7 +75,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(params["risk_viz/metric"], "hpl")
             self.assertLess(params["risk_viz/hpl_max_m"], 1.0)
             self.assertEqual(params["risk_viz/vpl_min_m"], 0.20)
-            self.assertEqual(params["risk_viz/vpl_max_m"], 0.65)
+            self.assertEqual(params["risk_viz/vpl_max_m"], 0.55)
             self.assertEqual(params["risk_viz/history_lifetime_s"], 60.0)
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)

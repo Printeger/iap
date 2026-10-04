@@ -117,7 +117,7 @@ namespace ego_planner
     double risk_viz_hpl_min_m_ = 0.25;
     double risk_viz_hpl_max_m_ = 0.65;
     double risk_viz_vpl_min_m_ = 0.20;
-    double risk_viz_vpl_max_m_ = 0.65;
+    double risk_viz_vpl_max_m_ = 0.55;
     double risk_viz_history_lifetime_s_ = 60.0;
     double risk_viz_history_step_m_ = 4.0;
     bool risk_viz_enabled_ = false;

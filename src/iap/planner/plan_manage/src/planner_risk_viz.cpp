@@ -17,19 +17,19 @@ namespace {
 
 uint32_t riskColor(double value, double minimum, double maximum) {
   const double t = std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0);
-  uint8_t red = 0, green = 0, blue = 0;
-  if (t <= 0.5) {
-    const double u = t * 2.0;
-    red = static_cast<uint8_t>(255 * u);
-    green = static_cast<uint8_t>(255 * u);
-    blue = static_cast<uint8_t>(255 * (1.0 - u));
-  } else {
-    const double u = (t - 0.5) * 2.0;
-    red = 255;
-    green = static_cast<uint8_t>(255 * (1.0 - u));
-  }
-  return (static_cast<uint32_t>(red) << 16) |
-         (static_cast<uint32_t>(green) << 8) | blue;
+  // Keep the middle of the scale chromatic: linear blue-to-yellow RGB
+  // interpolation passes through gray and hides the small PL differences.
+  constexpr std::array<std::array<double, 3>, 4> stops{{
+      {{25, 65, 190}}, {{35, 190, 225}},
+      {{250, 220, 55}}, {{225, 50, 40}}}};
+  const double scaled = t * (stops.size() - 1);
+  const size_t left = std::min(static_cast<size_t>(scaled), stops.size() - 2);
+  const double blend = scaled - left;
+  auto channel = [&](size_t index) {
+    return static_cast<uint32_t>(std::lround(
+        stops[left][index] * (1.0 - blend) + stops[left + 1][index] * blend));
+  };
+  return (channel(0) << 16) | (channel(1) << 8) | channel(2);
 }
 
 std_msgs::msg::ColorRGBA markerColor(uint32_t packed, float alpha) {
@@ -247,7 +247,7 @@ void EGOPlannerManager::initRiskVisualization(const rclcpp::Node::SharedPtr& nod
   risk_viz_hpl_min_m_ = node->declare_parameter("risk_viz/hpl_min_m", 0.25);
   risk_viz_hpl_max_m_ = node->declare_parameter("risk_viz/hpl_max_m", 0.65);
   risk_viz_vpl_min_m_ = node->declare_parameter("risk_viz/vpl_min_m", 0.20);
-  risk_viz_vpl_max_m_ = node->declare_parameter("risk_viz/vpl_max_m", 0.65);
+  risk_viz_vpl_max_m_ = node->declare_parameter("risk_viz/vpl_max_m", 0.55);
   risk_viz_history_lifetime_s_ = node->declare_parameter("risk_viz/history_lifetime_s", 60.0);
   risk_viz_history_step_m_ = node->declare_parameter("risk_viz/history_step_m", 4.0);
   if ((risk_viz_metric_ != "hpl" && risk_viz_metric_ != "vpl") ||
