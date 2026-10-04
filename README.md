@@ -303,7 +303,9 @@ ros2 param set /drone_0_ego_planner_node risk_viz/metric vpl
 ros2 param set /drone_0_ego_planner_node risk_viz/metric hpl
 ```
 
-点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`。色标 HPL 0–10 m、VPL 0–20 m 是显示范围，不是通行规则。无效预测显示紫色，过期或不兼容输入会清空本轮切片。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。
+点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`。色标 HPL 0–10 m、VPL 0–20 m 是显示范围，不是通行规则。单点预测无效显示紫色，预测上下文过期或坐标不匹配则发布空切片。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。
+
+`risk_status` 同时显示 Current Integrity Monitor 的状态与 HPL/VPL。Advisory 空间 PL 只是冻结时刻的预测：当前监测报告 `UNSAFE` 时，即使切片有有效颜色，也不能据此认定当前定位或轨迹安全。状态中的 `cost` 是整轮耗时，`bind` 是冻结输入和预测器准备耗时；逐点采样另受 20 ms 预算限制。
 
 最新 ICRA 四分叉完整闭环使用：
 
