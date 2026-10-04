@@ -107,6 +107,11 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
     def test_sim_controller_and_rviz_use_the_current_grid_map(self):
         environment = (LAUNCH / "_includes/simulation_environment.launch.py").read_text()
         self.assertIn('("odom", "/drone_0_visual_slam/odom")', environment)
+        module = self._load_launch("_includes/simulation_environment.launch.py")
+        profile = module._map_parameters("feature_rich", [-12.0, 0.0, 1.2], [12.0, 0.0, 1.2])
+        self.assertEqual(profile["endpoint_clearance_radius_m"], 1.0)
+        self.assertEqual((profile["endpoint_start_x_m"], profile["endpoint_goal_x_m"]),
+                         (-12.0, 12.0))
         rviz = (REPO / "config/sim_ego/grid_map_stage1.rviz").read_text()
         for topic in ("/grid_map/occupancy", "/grid_map/occupancy_inflate",
                       "/grid_map/risk_slice", "/grid_map/risk_status",

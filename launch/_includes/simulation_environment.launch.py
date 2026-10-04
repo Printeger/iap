@@ -27,7 +27,7 @@ def _catalog(iap_share: Path) -> dict:
     return catalog
 
 
-def _map_parameters(profile: str) -> dict:
+def _map_parameters(profile: str, initial: list[float], goal: list[float]) -> dict:
     base = {
         "resolution_m": 0.10,
         "publish_rate_hz": 2.0,
@@ -68,6 +68,11 @@ def _map_parameters(profile: str) -> dict:
     if profile == "feature_rich":
         return {
             **base,
+            "endpoint_clearance_radius_m": 1.0,
+            "endpoint_start_x_m": initial[0],
+            "endpoint_start_y_m": initial[1],
+            "endpoint_goal_x_m": goal[0],
+            "endpoint_goal_y_m": goal[1],
             "tree_density_lower_left_per_m2": 0.75,
             "tree_density_lower_right_per_m2": 0.75,
             "tree_density_upper_left_per_m2": 0.75,
@@ -245,7 +250,7 @@ def _setup(context):
             executable="demo11_corridor_map_publisher",
             name="iap_sim_map_publisher",
             output="screen",
-            parameters=[_map_parameters(str(scenario["map_profile"]))],
+            parameters=[_map_parameters(str(scenario["map_profile"]), initial, scenario["goal"])],
         ),
         TimerAction(period=2.0, actions=[Node(
             package="local_sensing",

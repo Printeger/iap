@@ -159,7 +159,7 @@ void EGOPlannerManager::publishRiskSlice() {
             grid_map_->posToIndex(query, index);
             Eigen::Vector3d center;
             grid_map_->indexToPos(index, center);
-            if (grid_map_->getOccupancy(center) != 0) continue;
+            if (grid_map_->queryOccupancyDiagnostic(center).raw_occupied) continue;
             const auto risk = grid_map_->queryRisk(center, version, node_->now().seconds());
             if (risk.status == GridRiskStatus::VERSION_CHANGED ||
                 risk.status == GridRiskStatus::STALE ||
@@ -197,6 +197,9 @@ void EGOPlannerManager::publishRiskSlice() {
   }
   marker.scale.z = 0.32;
   marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0;
+  if (current_integrity_.valid && current_integrity_.integrity_state == 2) {
+    marker.color.g = marker.color.b = 0.2;
+  }
   marker.lifetime = rclcpp::Duration::from_seconds(1.5);
   std::ostringstream label;
   label << "Advisory spatial PL (frozen) " << risk_viz_metric_
@@ -204,6 +207,10 @@ void EGOPlannerManager::publishRiskSlice() {
         << now << " z=" << slice_z << " valid=" << valid << "/"
         << (valid + invalid) << " incomplete=" << (truncated ? "yes" : "no")
         << " cost=" << std::setprecision(1) << elapsed_ms << "ms";
+  if (current_integrity_.valid)
+    label << " monitor_state=" << static_cast<int>(current_integrity_.integrity_state)
+          << " monitor_HPL/VPL=" << current_integrity_.hpl << "/"
+          << current_integrity_.vpl;
   if (!reason.empty()) label << " " << reason;
   marker.text = label.str();
   risk_status_pub_->publish(marker);

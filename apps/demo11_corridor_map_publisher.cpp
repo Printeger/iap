@@ -311,6 +311,13 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     trunk_radius_m_ = declare_parameter<double>("trunk_radius_m", 0.14);
     trunk_min_height_m_ = declare_parameter<double>("trunk_min_height_m", 1.5);
     trunk_max_height_m_ = declare_parameter<double>("trunk_max_height_m", 3.0);
+    endpoint_clearance_radius_m_ = declare_parameter<double>("endpoint_clearance_radius_m", 0.0);
+    endpoint_start_x_m_ = declare_parameter<double>("endpoint_start_x_m", 0.0);
+    endpoint_start_y_m_ = declare_parameter<double>("endpoint_start_y_m", 0.0);
+    endpoint_goal_x_m_ = declare_parameter<double>("endpoint_goal_x_m", 0.0);
+    endpoint_goal_y_m_ = declare_parameter<double>("endpoint_goal_y_m", 0.0);
+    if (!std::isfinite(endpoint_clearance_radius_m_) || endpoint_clearance_radius_m_ < 0.0)
+      throw std::invalid_argument("endpoint_clearance_radius_m must be finite and nonnegative");
     terminal_wall_enabled_ =
         declare_parameter<bool>("terminal_wall_enabled", true);
     terminal_wall_x_m_ = declare_parameter<double>("terminal_wall_x_m", 13.5);
@@ -527,6 +534,12 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
                  const double y,
                  const double height,
                  const int region_index) {
+    if (endpoint_clearance_radius_m_ > 0.0 &&
+        (std::hypot(x - endpoint_start_x_m_, y - endpoint_start_y_m_) <
+             endpoint_clearance_radius_m_ + trunk_radius_m_ ||
+         std::hypot(x - endpoint_goal_x_m_, y - endpoint_goal_y_m_) <
+             endpoint_clearance_radius_m_ + trunk_radius_m_))
+      return;
     add_cylinder(groups_.trunks, groups_.all, x, y, trunk_radius_m_, 0.0, height,
                  resolution_);
     trunks_.push_back(TrunkInstance{x, y, height, region_index});
@@ -1166,6 +1179,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double trunk_radius_m_ = 0.14;
   double trunk_min_height_m_ = 1.5;
   double trunk_max_height_m_ = 3.0;
+  double endpoint_clearance_radius_m_ = 0.0;
+  double endpoint_start_x_m_ = 0.0, endpoint_start_y_m_ = 0.0;
+  double endpoint_goal_x_m_ = 0.0, endpoint_goal_y_m_ = 0.0;
   bool terminal_wall_enabled_ = true;
   double terminal_wall_x_m_ = 13.5;
   double terminal_wall_y_m_ = 0.0;

@@ -2313,7 +2313,11 @@ void GridMap::publishMap()
     for (int y = min_cut(1); y <= max_cut(1); ++y)
       for (int z = min_cut(2); z <= max_cut(2); ++z)
       {
-        if (md_.occupancy_buffer_[toAddress(x, y, z)] < mp_.min_occupancy_log_)
+        const int address = toAddress(x, y, z);
+        const bool occupied = registered_lidar_window_enabled_
+            ? md_.occupancy_buffer_raw_cloud_[address] != 0
+            : md_.occupancy_buffer_[address] >= mp_.min_occupancy_log_;
+        if (!occupied)
           continue;
 
         Eigen::Vector3d pos;
