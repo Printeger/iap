@@ -5,8 +5,10 @@
 #include "std_msgs/msg/empty.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include <rclcpp/rclcpp.hpp>
+#include <algorithm>
 
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr trajectory_curve_pub;
 
 quadrotor_msgs::msg::PositionCommand cmd;
 double pos_gain[3] = {0, 0, 0};
@@ -66,6 +68,31 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
   traj_.push_back(traj_[1].getDerivative());
 
   traj_duration_ = traj_[0].getTimeSum();
+
+  // Display samples of the curve that traj_server actually executes.
+  visualization_msgs::msg::Marker curve;
+  curve.header.frame_id = command_frame;
+  curve.header.stamp = server_node->now();
+  curve.ns = "executed_bspline";
+  curve.id = 0;
+  curve.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  curve.action = visualization_msgs::msg::Marker::ADD;
+  curve.pose.orientation.w = 1.0;
+  curve.scale.x = 0.06;
+  curve.color.g = curve.color.b = curve.color.a = 1.0;
+  const double step = std::max(0.05, traj_duration_ / 500.0);
+  for (double t = 0; t < traj_duration_; t += step) {
+    const auto p = traj_[0].evaluateDeBoorT(t);
+    geometry_msgs::msg::Point point;
+    point.x = p.x(); point.y = p.y(); point.z = p.z();
+    curve.points.push_back(point);
+  }
+  const auto end = traj_[0].evaluateDeBoorT(traj_duration_);
+  geometry_msgs::msg::Point endpoint;
+  endpoint.x = end.x(); endpoint.y = end.y(); endpoint.z = end.z();
+  curve.points.push_back(endpoint);
+  curve.lifetime = rclcpp::Duration::from_seconds(traj_duration_ + 1.0);
+  trajectory_curve_pub->publish(curve);
 
   receive_traj_ = true;
 }
@@ -248,6 +275,8 @@ int main(int argc, char **argv)
   pos_cmd_pub = node->create_publisher<quadrotor_msgs::msg::PositionCommand>(
       "/position_cmd",
       50);
+  trajectory_curve_pub = node->create_publisher<visualization_msgs::msg::Marker>(
+      "planning/trajectory_curve", 2);
 
   auto cmd_timer = node->create_wall_timer(
       std::chrono::milliseconds(10),

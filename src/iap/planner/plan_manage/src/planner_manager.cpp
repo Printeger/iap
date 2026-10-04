@@ -36,6 +36,7 @@ namespace ego_planner
     grid_map_->initMap(node);
     node_ = node;
     initRiskInputs(node);
+    initRiskVisualization(node);
 
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);

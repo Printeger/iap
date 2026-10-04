@@ -346,7 +346,7 @@ def _setup(context):
                         str(so3_control_share / "config" / "corrections_hummingbird.yaml"),
                     ],
                     remappings=[
-                        ("odom", truth_odom),
+                        ("odom", "/drone_0_visual_slam/odom"),
                         ("position_cmd", position_cmd),
                         ("motors", "/iap_sim/motors"),
                         ("corrections", "/iap_sim/corrections"),

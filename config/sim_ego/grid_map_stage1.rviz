@@ -1,0 +1,110 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Ground grid
+      Enabled: true
+      Cell Size: 1
+      Plane: XY
+      Plane Cell Count: 40
+      Color: 100; 100; 100
+      Alpha: 0.35
+    - Class: rviz_default_plugins/PointCloud2
+      Name: GridMap physical occupancy
+      Enabled: true
+      Topic:
+        Value: /grid_map/occupancy
+      Style: Flat Squares
+      Size (m): 0.1
+      Color Transformer: FlatColor
+      Color: 65; 65; 70
+      Alpha: 1
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: GridMap inflated obstacles (optional)
+      Enabled: false
+      Topic:
+        Value: /grid_map/occupancy_inflate
+      Style: Flat Squares
+      Size (m): 0.1
+      Color Transformer: FlatColor
+      Color: 145; 145; 150
+      Alpha: 0.25
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Frozen spatial PL samples
+      Enabled: true
+      Topic:
+        Value: /grid_map/risk_slice
+      Style: Flat Squares
+      Size (m): 0.2
+      Color Transformer: RGB8
+      Channel Name: rgb
+      Alpha: 0.9
+      Decay Time: 0
+    - Class: rviz_default_plugins/Marker
+      Name: PL sample status and scale
+      Enabled: true
+      Topic:
+        Value: /grid_map/risk_status
+    - Class: rviz_default_plugins/Marker
+      Name: Executed B-spline curve
+      Enabled: true
+      Topic:
+        Value: /planning/trajectory_curve
+    - Class: rviz_default_plugins/Odometry
+      Name: GLIO motion history
+      Enabled: true
+      Topic:
+        Value: /drone_0_visual_slam/odom
+      Keep: 500
+      Position Tolerance: 0.05
+      Shape:
+        Value: Arrow
+        Color: 245; 245; 245
+        Alpha: 0.8
+        Shaft Length: 0.12
+        Shaft Radius: 0.015
+        Head Length: 0.05
+        Head Radius: 0.025
+    - Class: rviz_default_plugins/Marker
+      Name: Goal
+      Enabled: true
+      Topic:
+        Value: /goal_point
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+  Enabled: true
+  Global Options:
+    Fixed Frame: map
+    Frame Rate: 30
+    Background Color: 20; 23; 27
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+    - Class: rviz_default_plugins/PublishPoint
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 31
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1.5
+      Pitch: 0.78
+      Yaw: 0.7
+      Target Frame: map
+Window Geometry:
+  Height: 900
+  Width: 1440

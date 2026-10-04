@@ -134,8 +134,9 @@ is:
 
 ### `iap_sim.launch.py`
 
-- Starts the existing simulator and GLIO/current-integrity inputs, the restored EGO planner, and traj_server.
+- Starts the existing simulator and GLIO/current-integrity inputs, the restored EGO planner, traj_server, and SO3 controller. Planner and controller both consume GLIO `/drone_0_visual_slam/odom`; truth stays with simulated sensors and comparison.
 - The manager binds PredictorModule to the same GridMap. Spatial HPL/VPL is cached independently of physical occupancy.
+- RViz defaults to `config/sim_ego/grid_map_stage1.rviz`: observed obstacles, a sampled spatial PL slice, actual B-spline curve, GLIO motion history, and prediction status. Set `risk_viz/metric` on the planner node to `hpl` or `vpl` at runtime to change the color scale.
 - Stage 1 retains EGO physical route selection. Risk-guided search and full integrity trajectory checks are later stages.
 - Scenarios are selected from `config/scenarios/catalog.json`; the maintained graph is `_includes/full_stack_runtime.py`. All outputs use one canonical run directory.
 - The four-fork scene uses this same stage-1 graph. Old P0/P4/P5 and continuous-flight validator settings are retired.

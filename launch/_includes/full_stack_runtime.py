@@ -60,6 +60,11 @@ def planner_parameters(scenario):
         "bspline/limit_ratio": 1.1, "risk/validity_s": 0.5,
         "risk/gnss_max_age_s": 2.0,
         "risk/source": {"lidar_only": "lidar", "gnss_only": "gnss"}.get(profile, "fusion"),
+        "risk_viz/enabled": True,
+        "risk_viz/metric": "hpl",
+        "risk_viz/z_mode": "follow",
+        "risk_viz/hpl_max_m": 10.0,
+        "risk_viz/vpl_max_m": 20.0,
     }
     for i, axis in enumerate("xyz"):
         params[f"grid_map/map_size_{axis}"] = size[i]
@@ -105,7 +110,7 @@ def _setup(context):
     ]
     if context.launch_configurations.get("start_rviz", "true").lower() == "true":
         actions.append(Node(package="rviz2", executable="rviz2", name="iap_rviz",
-                            arguments=["-d", str(share / "config/sim_demo11/demo11_integrity_corridor.rviz")]))
+                            arguments=["-d", str(share / "config/sim_ego/grid_map_stage1.rviz")]))
     duration = float(context.launch_configurations.get("run_duration_s", "0"))
     if duration > 0:
         actions.append(TimerAction(period=duration, actions=[EmitEvent(event=Shutdown(reason="run duration reached"))]))

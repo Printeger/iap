@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <gnss_comm/gnss_ros.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 #include <iap/msg/integrity_report.hpp>
 #include <iap/predictor/predictor_module.hpp>
 
@@ -68,6 +70,8 @@ namespace ego_planner
   private:
     // Input callbacks and planning run on the original serial executor.
     void initRiskInputs(const rclcpp::Node::SharedPtr& node);
+    void initRiskVisualization(const rclcpp::Node::SharedPtr& node);
+    void publishRiskSlice();
     uint64_t beginRiskQuery();
     void rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg);
     rclcpp::Node::SharedPtr node_;
@@ -89,6 +93,16 @@ namespace ego_planner
     rclcpp::Subscription<gnss_comm::msg::GnssGloEphemMsg>::SharedPtr glo_ephem_sub_;
     rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr receiver_lla_sub_;
     rclcpp::Subscription<gnss_comm::msg::GnssIonosphereParameter>::SharedPtr iono_sub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr risk_slice_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr risk_status_pub_;
+    rclcpp::TimerBase::SharedPtr risk_viz_timer_;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr risk_viz_param_callback_;
+    std::string risk_viz_metric_ = "hpl";
+    std::string risk_viz_z_mode_ = "follow";
+    double risk_viz_fixed_z_m_ = 1.5;
+    double risk_viz_hpl_max_m_ = 10.0;
+    double risk_viz_vpl_max_m_ = 20.0;
+    bool risk_viz_enabled_ = false;
 
     /* main planning algorithms & modules */
     PlanningVisualization::Ptr visualization_;

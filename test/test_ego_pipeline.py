@@ -22,6 +22,9 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2
+from visualization_msgs.msg import Marker
+from rcl_interfaces.srv import SetParameters
+from rclpy.parameter import Parameter
 from quadrotor_msgs.msg import PositionCommand
 from traj_utils.msg import Bspline
 
@@ -76,11 +79,15 @@ class EgoPipelineTest(unittest.TestCase):
             map_odom_pub = node.create_publisher(Odometry, "/grid_map/odom", 10)
             cloud_pub = node.create_publisher(PointCloud2, "/grid_map/cloud", 10)
             goal_pub = node.create_publisher(PoseStamped, "/move_base_simple/goal", 10)
-            curves, commands = {}, []
+            curves, commands, displayed_curves, risk_clouds, risk_statuses = {}, [], [], [], []
             subscriptions = [
                 node.create_subscription(Bspline, "/planning/bspline", lambda m: curves.__setitem__(m.traj_id,m), 10),
                 node.create_subscription(PositionCommand, "/position_cmd", commands.append, 100),
+                node.create_subscription(Marker, "/planning/trajectory_curve", displayed_curves.append, 10),
+                node.create_subscription(PointCloud2, "/grid_map/risk_slice", risk_clouds.append, 10),
+                node.create_subscription(Marker, "/grid_map/risk_status", risk_statuses.append, 10),
             ]
+            parameter_client = node.create_client(SetParameters, "/ego_planner_node/set_parameters")
             try:
                 for label, command in [
                     ("planner", [ARGS.planner,"--ros-args","--params-file",str(config)]),
@@ -91,6 +98,9 @@ class EgoPipelineTest(unittest.TestCase):
                     processes.append(subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT))
                 deadline=time.monotonic()+20
                 sent_goal=False
+                saw_risk_before_goal=False
+                changed_metric=False
+                metric_future=None
                 start=time.monotonic()
                 while time.monotonic()<deadline:
                     stamp=node.get_clock().now().to_msg()
@@ -100,15 +110,35 @@ class EgoPipelineTest(unittest.TestCase):
                     odom_pub.publish(odom); map_odom_pub.publish(odom)
                     cloud=PointCloud2(); cloud.header=odom.header; cloud.height=1
                     cloud_pub.publish(cloud)
-                    if not sent_goal and time.monotonic()-start>1.5 and goal_pub.get_subscription_count():
+                    if risk_statuses and not sent_goal:
+                        saw_risk_before_goal=True
+                    if risk_statuses and not changed_metric and parameter_client.service_is_ready():
+                        request=SetParameters.Request()
+                        request.parameters=[Parameter("risk_viz/metric", value="vpl").to_parameter_msg()]
+                        metric_future=parameter_client.call_async(request)
+                        changed_metric=True
+                    if not sent_goal and time.monotonic()-start>2.5 and goal_pub.get_subscription_count():
                         goal=PoseStamped(); goal.header=odom.header
                         goal.pose.position.x=2.; goal.pose.position.z=1.; goal.pose.orientation.w=1.
                         goal_pub.publish(goal); sent_goal=True
                     rclpy.spin_once(node,timeout_sec=0.02)
-                    if len(commands)>=20 and any(c.position.x>-1.85 for c in commands): break
+                    if (len(commands)>=20 and any(c.position.x>-1.85 for c in commands)
+                            and displayed_curves and risk_clouds and saw_risk_before_goal
+                            and any(" vpl " in m.text for m in risk_statuses)):
+                        break
                     self.assertTrue(all(p.poll() is None for p in processes),"planner/server exited")
                 self.assertTrue(curves,"FSM published no trajectory")
                 self.assertGreaterEqual(len(commands),20)
+                self.assertTrue(saw_risk_before_goal, "risk slice did not run while idle")
+                self.assertTrue(metric_future.done())
+                self.assertTrue(metric_future.result().results[0].successful)
+                self.assertTrue(any(" vpl " in m.text for m in risk_statuses))
+                self.assertTrue(risk_clouds)
+                self.assertEqual({f.name for f in risk_clouds[-1].fields},
+                                 {"x","y","z","rgb","hpl","vpl","status"})
+                self.assertTrue(displayed_curves)
+                self.assertEqual(displayed_curves[-1].header.frame_id,"map")
+                self.assertGreater(len(displayed_curves[-1].points),2)
                 checked=0
                 for cmd in commands:
                     if cmd.trajectory_id not in curves: continue

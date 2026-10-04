@@ -70,6 +70,8 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(params["grid_map/resolution"], 0.1)
             self.assertTrue(params["grid_map/registered_lidar_window_enabled"])
             self.assertEqual(params["grid_map/frame_id"], "map")
+            self.assertTrue(params["risk_viz/enabled"])
+            self.assertEqual(params["risk_viz/metric"], "hpl")
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)
             for i, axis in enumerate("xyz"):
@@ -101,6 +103,17 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertIn("libplanner_local_map_extension.so",ros["extension_modules"])
             manifest=json.loads((run / "metadata/run_manifest.json").read_text())
             self.assertIn("metadata/config/iap",manifest["config_snapshots"])
+
+    def test_sim_controller_and_rviz_use_the_current_grid_map(self):
+        environment = (LAUNCH / "_includes/simulation_environment.launch.py").read_text()
+        self.assertIn('("odom", "/drone_0_visual_slam/odom")', environment)
+        rviz = (REPO / "config/sim_ego/grid_map_stage1.rviz").read_text()
+        for topic in ("/grid_map/occupancy", "/grid_map/occupancy_inflate",
+                      "/grid_map/risk_slice", "/grid_map/risk_status",
+                      "/planning/trajectory_curve", "/drone_0_visual_slam/odom"):
+            self.assertIn(topic, rviz)
+        self.assertNotIn("/map_generator/global_cloud", rviz)
+        self.assertNotIn("/iap/rviz/p1_", rviz)
 
     def test_flight_is_unavailable_during_execution_rebuild(self):
         flight=self._load_launch("iap_flight.launch.py")

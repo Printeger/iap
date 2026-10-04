@@ -4,7 +4,7 @@
 
 结构基线：`../ego-planner-swarm`，提交 `23a8d5a191711dd65633df689bd00f55d4dea8f9`。原版目录只读。
 设计依据：工作区 `docs/0928_review.md` 第 1862 行以后的最终收敛，以及本轮用户确认。
-本轮阶段 1 已实现并通过下述构建与自动化检查：恢复 EGO 主线、同一个 GridMap 的空间 PL 缓存、真实 PredictorModule 接入。完整传感器闭环尚未验收。
+阶段 1 已恢复 EGO 主线、同一个 GridMap 的空间 PL 缓存与真实 PredictorModule 接入。本轮扩展同图可视化与仿真闭环：控制器改用 GLIO 里程计；完整传感器闭环的实测结果单独记录，不将 RViz 画面当作安全认证。
 风险搜索、guide 跟踪、完整实际轨迹检查、统一提交与连续接续依次在后续阶段开发。
 
 ## 原版轨迹流程（固定基线）
@@ -57,9 +57,14 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Inputs[里程计与注册点云] --> Map[GridMap 共用索引与占据/膨胀：已实现]
+    Sensors[仿真 LiDAR/IMU/GNSS] --> GLIO[GLIO 状态估计与当前完整性监测：已接入]
+    GLIO --> Inputs[估计里程计与注册点云：已接入]
+    GLIO --> Control[SO3 控制反馈使用 GLIO：本轮接入]
+    Inputs --> Map[GridMap 共用索引与占据/膨胀：已实现]
     Predictor[真实 PredictorModule：已接入] --> Risk[同索引空间 HPL/VPL 缓存：已实现]
     Map --> Risk
+    Risk --> Viz[空闲时也采样并发布风险切片：本轮接入]
+    Map --> Viz
     FSM -.->|冻结输入并查询 PL，暂不影响路线| Risk
     Map --> FSM[FSM 规划触发：EGO 基线]
     FSM --> Target[全局参考选局部目标：EGO 基线]
@@ -68,6 +73,8 @@ flowchart TD
     Search --> Opt[B-spline 优化及时间调整：EGO 基线]
     Opt --> Commit[更新 local_data 并发布：EGO 基线]
     Commit --> Execute[轨迹采样执行：EGO 基线]
+    Execute --> Control
+    Control --> Sensors
     Execute --> Check[进度/物理碰撞监督：EGO 基线]
     Check --> FSM
 ```
@@ -77,6 +84,7 @@ flowchart TD
 | 阶段 | 修改 | 验收 |
 |---|---|---|
 | 1：已实现，闭环待验收 | 恢复 EGO 主线，在 GridMap 增加独立 PL 层 | 同一索引、真实预测、缓存有效性、物理规划与命令链路的自动化测试已通过 |
+| 1a：本轮仿真集成 | GLIO 同时接规划与 SO3，发布障碍及同图空间 PL 切片 | 真实输入链、有效 PL、实际曲线、控制反馈与可视化经闭环实测核验 |
 | 2 | 每次规划主动搜索一条风险 guide | 无物理障碍、前方只有退化区时仍能绕行 |
 | 3 | guide 初始化与主优化参考跟踪 | 优化和时间调整后实际曲线没有切回禁入区 |
 | 4 | manager 中统一实际轨迹检查 | 完整候选发布前检查，运行时检查剩余轨迹；失败不污染当前轨迹 |
@@ -141,6 +149,15 @@ flowchart TD
 
 原版为适配现有输入进行了必要调整：统一节点时钟、命令 frame、Jazzy 头文件/依赖导出；未来开始时间到来前不发送原版的零坐标命令。尚未实现 pending 轨迹接续。
 
+### 本轮仿真可视化接口
+
+- `iap_sim` 中规划器与 SO3 控制器统一订阅 `/drone_0_visual_slam/odom`（`map`）；真值只供传感器仿真与对照。Current Integrity Monitor 仍是 GLIO 扩展，Advisory 查询仍由 EGO manager 调用 PredictorModule。
+- `risk_viz/enabled=true` 时，manager 独立于规划目标每秒冻结一次预测上下文，在无人机附近 10×10 m、高度吸附至原 GridMap 体素中心的水平层，最多查询 100 个、间距约 1 m 的格子；同轮使用同一版本和原 `queryRisk()`，连续采样预算 20 ms。超预算只显示已算点并明确标为 incomplete。
+- `/grid_map/occupancy`、`/grid_map/occupancy_inflate` 继续表示物理层。`/grid_map/risk_slice` 为 PointCloud2，字段 `x,y,z,rgb,hpl,vpl,status`，有效 PL 由固定色标着色；无效预测为紫色，未计算不伪造值。上下文过期、版本变化或坐标错误发布空切片。
+- `/grid_map/risk_status` 是 TEXT_VIEW_FACING Marker，显示版本、冻结时间、切片高度、有效样本比例、耗时和原因；文字明确标注 frozen spatial PL。默认 HPL 色标 0–10 m、VPL 0–20 m，仅为可视化范围，不是安全阈值。
+- `risk_viz/metric` 默认 `hpl`，可在 planner 运行时设成 `vpl`，下次切片更新颜色；`risk_viz/z_mode=follow|fixed` 与 `risk_viz/fixed_z_m` 在启动时选择高度。`traj_server` 在 `/planning/trajectory_curve` 发布其实际装载 B-spline 的采样曲线；RViz 用 GLIO 里程计历史显示实际运动。
+- 当前风险图始终是某一冻结参考时刻的空间切片，不是未来到达时刻 PL，不影响 EGO 搜索、优化或执行授权。旧风险体素在新版本查询时不会作为有效数据返回。
+
 ### 验证证据
 
 - 显式 IAP 源路径构建 `iap、traj_utils、plan_env、path_searching、bspline_opt、ego_planner`：通过。
@@ -150,7 +167,7 @@ flowchart TD
 - `test_ego_baseline`：2 项通过；真实 LiDAR PL 查询及过期拒绝、EGO 物理障碍绕行与曲线/导数有限性。
 - `test_ego_pipeline`：通过；独立规划节点接收目标、发布 B-spline，traj_server 输出 p/v/a 与独立 Cox-de Boor 基函数计算吻合。
 - `test_canonical_launch_contracts`：32 项通过，涵盖统一地图配置、注册输入坐标、运行产物目录和阶段 1 实飞不可用。
-- 本轮未运行 GPU/完整传感器闭环；用户原有两处 RViz 未提交改动导致 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`。不声明四分叉场景 LIVE PASS 或主动风险绕行已实现。
+- 上轮未运行 GPU/完整传感器闭环；当时两处 RViz 改动导致 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`。本轮已按用户要求单独提交两处改动；本次仿真可视化改动的自动化构建、GridMap 风险层、预测器、EGO 管线与 canonical launch 测试已通过。GPU 闭环结果待在提交后的干净工作区记录。不声明四分叉场景 LIVE PASS 或主动风险绕行已实现。
 
 可复查命令（先加载 ROS 与工作区环境）：
 

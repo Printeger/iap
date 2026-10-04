@@ -294,6 +294,17 @@ ros2 launch iap iap_sim.launch.py \
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
+本轮仿真规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的占据点云、飞行高度 PL 采样、EGO 实际 B-spline 曲线与 GLIO 运动历史。风险样本可在没有目标时出现，`risk_status` 给出预测版本、有效率和失败原因。切片约 1 Hz，颜色表示冻结时刻的空间预测；当前 EGO 仍只根据物理障碍规划。
+
+运行时切换色彩依据：
+
+```bash
+ros2 param set /drone_0_ego_planner_node risk_viz/metric vpl
+ros2 param set /drone_0_ego_planner_node risk_viz/metric hpl
+```
+
+点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`。色标 HPL 0–10 m、VPL 0–20 m 是显示范围，不是通行规则。无效预测显示紫色，过期或不兼容输入会清空本轮切片。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。
+
 最新 ICRA 四分叉完整闭环使用：
 
 ```bash

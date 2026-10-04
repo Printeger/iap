@@ -71,7 +71,7 @@ def _setup(context):
         ],
         "test_validator_enabled": False,
         "rviz_profile": (
-            "config/sim_demo11/demo11_integrity_corridor.rviz"
+            "config/sim_ego/grid_map_stage1.rviz"
         ),
         "rosbag_recording_enabled": False,
         "phase2_planner_integrity_evaluator_enabled": False,
