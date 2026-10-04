@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <sstream>
+#include <stdexcept>
 
 // #define current_img_ md_.depth_image_[image_cnt_ & 1]
 // #define last_img_ md_.depth_image_[!(image_cnt_ & 1)]
@@ -231,6 +232,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/min_ray_length", -0.1);
   node_->declare_parameter("grid_map/max_ray_length", -0.1);
   node_->declare_parameter("grid_map/visualization_truncate_height", -0.1);
+  node_->declare_parameter("grid_map/visualization_period_s", 0.11);
   node_->declare_parameter("grid_map/virtual_ceil_height", -0.1);
   node_->declare_parameter("grid_map/virtual_ceil_yp", -0.1);
   node_->declare_parameter("grid_map/virtual_ceil_yn", -0.1);
@@ -302,6 +304,10 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/min_ray_length", mp_.min_ray_length_);
   node_->get_parameter("grid_map/max_ray_length", mp_.max_ray_length_);
   node_->get_parameter("grid_map/visualization_truncate_height", mp_.visualization_truncate_height_);
+  double visualization_period_s = 0.11;
+  node_->get_parameter("grid_map/visualization_period_s", visualization_period_s);
+  if (!std::isfinite(visualization_period_s) || visualization_period_s <= 0.0)
+    throw std::invalid_argument("grid_map/visualization_period_s must be positive and finite");
   node_->get_parameter("grid_map/virtual_ceil_height", mp_.virtual_ceil_height_);
   node_->get_parameter("grid_map/virtual_ceil_yp", mp_.virtual_ceil_yp_);
   node_->get_parameter("grid_map/virtual_ceil_yn", mp_.virtual_ceil_yn_);
@@ -609,7 +615,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
       std::bind(&GridMap::updateOccupancyCallback, this));
 
   vis_timer_ = node_->create_wall_timer(
-      std::chrono::duration<double>(0.11),
+      std::chrono::duration<double>(visualization_period_s),
       std::bind(&GridMap::visCallback, this));
 
   // 发布者

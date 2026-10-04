@@ -41,6 +41,7 @@ def planner_parameters(scenario):
         "grid_map/local_map_margin": 10, "grid_map/ground_height": 0.0,
         "grid_map/virtual_ceil_height": size[2] - 0.1,
         "grid_map/visualization_truncate_height": size[2],
+        "grid_map/visualization_period_s": 1.0,
         "grid_map/pose_type": 2, "grid_map/frame_id": "map",
         "grid_map/registered_lidar_window_enabled": True,
         "grid_map/registered_frame_contract_id": "ego_grid_map_sim_v1",
@@ -65,8 +66,8 @@ def planner_parameters(scenario):
         "risk_viz/z_mode": "follow",
         "risk_viz/hpl_min_m": 0.25,
         "risk_viz/hpl_max_m": 0.65,
-        "risk_viz/vpl_min_m": 0.4,
-        "risk_viz/vpl_max_m": 1.2,
+        "risk_viz/vpl_min_m": 0.20,
+        "risk_viz/vpl_max_m": 0.65,
         "risk_viz/history_lifetime_s": 60.0,
         "risk_viz/history_step_m": 4.0,
     }

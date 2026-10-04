@@ -246,8 +246,8 @@ void EGOPlannerManager::initRiskVisualization(const rclcpp::Node::SharedPtr& nod
   risk_viz_fixed_z_m_ = node->declare_parameter("risk_viz/fixed_z_m", 1.5);
   risk_viz_hpl_min_m_ = node->declare_parameter("risk_viz/hpl_min_m", 0.25);
   risk_viz_hpl_max_m_ = node->declare_parameter("risk_viz/hpl_max_m", 0.65);
-  risk_viz_vpl_min_m_ = node->declare_parameter("risk_viz/vpl_min_m", 0.4);
-  risk_viz_vpl_max_m_ = node->declare_parameter("risk_viz/vpl_max_m", 1.2);
+  risk_viz_vpl_min_m_ = node->declare_parameter("risk_viz/vpl_min_m", 0.20);
+  risk_viz_vpl_max_m_ = node->declare_parameter("risk_viz/vpl_max_m", 0.65);
   risk_viz_history_lifetime_s_ = node->declare_parameter("risk_viz/history_lifetime_s", 60.0);
   risk_viz_history_step_m_ = node->declare_parameter("risk_viz/history_step_m", 4.0);
   if ((risk_viz_metric_ != "hpl" && risk_viz_metric_ != "vpl") ||
