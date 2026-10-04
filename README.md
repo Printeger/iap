@@ -200,7 +200,7 @@ python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
 python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
   --output-root src/iap/results/preflight/gpu \
   --gpu-preflight-only && \
-ros2 launch iap iap_sim.launch.py scenario:=fused_nominal
+ros2 launch iap iap_sim.launch.py
 ```
 
 远程或无桌面环境加 `start_rviz:=false`。按 Ctrl+C 结束运行，随后分析日志：
@@ -278,7 +278,7 @@ ros2 launch iap glio_integrity.launch.py start_rviz:=false
 ### 5.3 完整系统仿真
 
 ```bash
-ros2 launch iap iap_sim.launch.py scenario:=fused_nominal
+ros2 launch iap iap_sim.launch.py
 
 # 有限时长、无 RViz 的 LiDAR 退化走廊场景
 ros2 launch iap iap_sim.launch.py \
@@ -289,12 +289,12 @@ ros2 launch iap iap_sim.launch.py \
 
 | 参数 | 默认值 | 作用 |
 |---|---|---|
-| `scenario` | `fused_nominal` | 场景目录中的名称 |
+| `scenario` | `icra_dense_forest_four_fork_v2` | 统一的四分叉测试场景；仍可显式选择目录中的其他场景 |
 | `start_rviz` | `true` | 启动 RViz |
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
-本轮仿真规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的占据点云、飞行高度 PL 采样、EGO 实际 B-spline 曲线与 GLIO 运动历史。风险样本可在没有目标时出现，`risk_status` 给出预测版本、有效率和失败原因。切片约 1 Hz，颜色表示冻结时刻的空间预测；当前 EGO 仍只根据物理障碍规划。
+本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的占据点云、飞行高度 PL 采样、EGO 实际 B-spline 曲线与 GLIO 运动历史。风险样本可在没有目标时出现，`risk_status` 给出预测版本、有效率和失败原因。切片约 1 Hz，颜色表示冻结时刻的空间预测；当前 EGO 仍只根据物理障碍规划。
 
 运行时切换色彩依据：
 
@@ -307,7 +307,7 @@ ros2 param set /drone_0_ego_planner_node risk_viz/metric hpl
 
 `risk_status` 同时显示 Current Integrity Monitor 的状态与 HPL/VPL。Advisory 空间 PL 只是冻结时刻的预测：当前监测报告 `UNSAFE` 时，即使切片有有效颜色，也不能据此认定当前定位或轨迹安全。状态中的 `cost` 是整轮耗时，`bind` 是冻结输入和预测器准备耗时；逐点采样另受 20 ms 预算限制。
 
-最新 ICRA 四分叉完整闭环使用：
+四分叉场景的定时演示：
 
 ```bash
 ros2 launch iap iap_sim.launch.py \

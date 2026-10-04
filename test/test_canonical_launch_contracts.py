@@ -82,19 +82,19 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         runs = self._load_launch("_includes/run_directory.py")
         catalog = json.loads((REPO / "config/scenarios/catalog.json").read_text())
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
-            run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="fused_nominal")
+            run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2")
             with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
                 context = LaunchContext()
-                context.launch_configurations.update({"scenario": "fused_nominal", "start_rviz": "false",
+                context.launch_configurations.update({"scenario": "icra_dense_forest_four_fork_v2", "start_rviz": "false",
                     "planner_start_delay_s": "0", "run_duration_s": "0", "p0.enable_risk_grid": "true"})
                 actions = runtime._setup(context)
             self.assertEqual(len(actions), 4)
             ros = json.loads((run / "metadata/config/iap/config_ros.json").read_text())["glim_ros"]
             local = ros["planner_local_map"]
-            params = runtime.planner_parameters(catalog["fused_nominal"])
+            params = runtime.planner_parameters(catalog["icra_dense_forest_four_fork_v2"])
             self.assertEqual(local["planning_lattice_resolution_m"],params["grid_map/resolution"])
             self.assertEqual(local["frame_contract_id"],params["grid_map/registered_frame_contract_id"])
-            self.assertEqual(local["planning_lattice_extent_m"],catalog["fused_nominal"]["map_size"])
+            self.assertEqual(local["planning_lattice_extent_m"],catalog["icra_dense_forest_four_fork_v2"]["map_size"])
             self.assertEqual(ros["acc_scale"], 1.0)
             odometry = json.loads((run / "metadata/config/iap/config_odometry.json").read_text())
             self.assertEqual(odometry["odometry_estimation"]["initialization_mode"], "NAIVE")
@@ -105,6 +105,11 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertIn("metadata/config/iap",manifest["config_snapshots"])
 
     def test_sim_controller_and_rviz_use_the_current_grid_map(self):
+        for filename in ("iap_sim.launch.py", "_includes/simulation_environment.launch.py"):
+            self.assertIn(
+                'DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2")',
+                (LAUNCH / filename).read_text(),
+            )
         environment = (LAUNCH / "_includes/simulation_environment.launch.py").read_text()
         self.assertIn('("odom", "/drone_0_visual_slam/odom")', environment)
         module = self._load_launch("_includes/simulation_environment.launch.py")
@@ -458,7 +463,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             os.environ, {"IAP_RUN_ROOT": temporary}
         ):
             run_dir = helper.resolve_run_directory(
-                entrypoint="iap_sim", scenario="fused_nominal"
+                entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2"
             )
             self.assertEqual(run_dir.parent, Path(temporary))
 
@@ -749,7 +754,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             context = LaunchContext()
             context.launch_configurations.update(
                 {
-                    "scenario": "fused_nominal",
+                    "scenario": "icra_dense_forest_four_fork_v2",
                     "start_rviz": "false",
                     "planner_start_delay_s": "0",
                     "run_duration_s": "0",

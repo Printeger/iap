@@ -379,7 +379,7 @@ def _setup(context):
 def generate_launch_description():
     return LaunchDescription(
         [
-            DeclareLaunchArgument("scenario", default_value="fused_nominal"),
+            DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument(
                 "output_dir",
                 description="Required absolute directory for scenario manifest.",

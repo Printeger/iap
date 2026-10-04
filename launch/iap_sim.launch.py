@@ -121,7 +121,7 @@ def _setup(context):
 def generate_launch_description():
     return LaunchDescription(
         [
-            DeclareLaunchArgument("scenario", default_value="fused_nominal"),
+            DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),

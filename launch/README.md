@@ -40,7 +40,7 @@ python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
   --output-root /tmp/iap_runs/sim_001/preflight \
   --gpu-preflight-only
 ros2 launch iap iap_sim.launch.py \
-  scenario:=fused_nominal
+  scenario:=icra_dense_forest_four_fork_v2
 
 # Full flight is deliberately fail-closed and requires deployment calibration
 python3 src/iap/scripts/dev_planner/run_gate0_qualification.py \
