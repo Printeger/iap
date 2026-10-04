@@ -222,8 +222,12 @@ IntegritySourceResult IntegrityMonitor::run_araim(const GnssEpoch& epoch,
     return IntegritySourceResult::make_invalid("GNSS", "ARAIM result invalid");
   }
 
-  if (!numerical_guard::is_valid(ar.HPL) || !numerical_guard::is_valid(ar.VPL)) {
-    return IntegritySourceResult::make_invalid("GNSS", "GNSS ARAIM produced NaN/Inf PL");
+  if (!numerical_guard::is_valid(ar.HPL) || !numerical_guard::is_valid(ar.VPL) ||
+      ar.HPL >= numerical_guard::kSentinel * 0.99 ||
+      ar.VPL >= numerical_guard::kSentinel * 0.99) {
+    last_gnss_araim_result_ = ar;
+    return IntegritySourceResult::make_invalid(
+        "GNSS", "GNSS ARAIM has no finite usable protection bound");
   }
 
   last_gnss_araim_result_ = ar;
@@ -584,6 +588,61 @@ void IntegrityMonitor::updateStateAndPlannerMode(IntegrityReport& report) {
   }
 }
 
+void IntegrityMonitor::evaluateCurrentMotionQuality(
+    const glim::EstimationFrame& frame, const FGOPositionInfo* fgo_info,
+    const IntegritySourceResult& gnss_src,
+    IntegrityReport& report) {
+  report.current_motion_quality = 0;
+  report.current_motion_reason = "fgo_unavailable_or_wrong_frame";
+  if (!fgo_info || !fgo_info->valid || !fgo_info->pose_cov_valid ||
+      fgo_info->frame_id != frame.id ||
+      !std::isfinite(fgo_info->stamp) ||
+      std::abs(fgo_info->stamp - frame.stamp) > 0.25 ||
+      !fgo_info->sigma_p.allFinite()) return;
+
+  const Eigen::Matrix3d cov =
+      0.5 * (fgo_info->sigma_p + fgo_info->sigma_p.transpose());
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov, Eigen::EigenvaluesOnly);
+  if (eig.info() != Eigen::Success ||
+      !eig.eigenvalues().allFinite() || eig.eigenvalues().minCoeff() < -1e-9) {
+    report.current_motion_reason = "invalid_fgo_covariance";
+    return;
+  }
+  report.current_motion_error_proxy_m =
+      params_.K_pl * std::sqrt(std::max(0.0, eig.eigenvalues().maxCoeff()));
+  if (!std::isfinite(report.current_motion_error_proxy_m) ||
+      report.current_motion_error_proxy_m >= numerical_guard::kSentinel * 0.99) {
+    report.current_motion_reason = "invalid_fgo_error_proxy";
+    return;
+  }
+
+  const bool gnss_supported = gnss_src.valid && fgo_info->n_gnss_factors > 0;
+  // Registration support is the actual ICP measurement on this frame. The
+  // LiDAR source PL may be unavailable even while registration constrains FGO.
+  const bool lidar_supported = !frame.icp_quality.degeneracy_flag &&
+      frame.icp_quality.inlier_count > 0 &&
+      std::isfinite(frame.icp_quality.inlier_fraction) &&
+      frame.icp_quality.inlier_fraction > 0.0 &&
+      std::isfinite(frame.icp_quality.rmse) &&
+      frame.icp_quality.rmse >= 0.0;
+  if (gnss_supported || lidar_supported)
+    last_external_support_stamp_s_ = frame.stamp;
+  report.current_external_support_age_s =
+      frame.stamp - last_external_support_stamp_s_;
+  if (gnss_supported || lidar_supported) {
+    report.current_motion_quality = 1;
+    report.current_motion_reason = gnss_supported && lidar_supported
+        ? "gnss_and_lidar_supported"
+        : gnss_supported ? "gnss_supported" : "lidar_supported";
+  } else if (report.current_external_support_age_s >= 0.0 &&
+             report.current_external_support_age_s <= 1.0) {
+    report.current_motion_quality = 2;
+    report.current_motion_reason = "bounded_inertial_bridge";
+  } else {
+    report.current_motion_reason = "external_support_missing";
+  }
+}
+
 // ===========================================================================
 // compute() — orchestration (Step 9: decomposed)
 // ===========================================================================
@@ -612,6 +671,7 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   const auto fallback_src = buildFallbackSource(frame, report);
   const auto gnss_src     = evaluateGnssSource(epoch, trunk, report);
   const auto lidar_src    = evaluateLidarSource(lidar_snapshot, fgo_info, report);
+  evaluateCurrentMotionQuality(frame, fgo_info, gnss_src, report);
   if (epoch != nullptr) {
     report.gnss_epoch_identity =
         gnss_epoch_identity(*epoch, report.excluded_sats);

@@ -32,6 +32,7 @@ namespace ego_planner
 
   class EGOPlannerManager
   {
+    friend struct EGOPlannerManagerTestAccess;
     // SECTION stable
   public:
     EGOPlannerManager();
@@ -47,6 +48,9 @@ namespace ego_planner
     uint64_t bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
                                 double reference_time_s);
     bool EmergencyStop(Eigen::Vector3d stop_pos);
+    bool planCheckedBrake(const Eigen::Vector3d& position,
+                          const Eigen::Vector3d& velocity,
+                          const Eigen::Vector3d& acceleration);
     bool planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                         const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc);
     bool planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
@@ -61,6 +65,24 @@ namespace ego_planner
     double getSwarmClearance(void) { return bspline_optimizer_->getSwarmClearance(); }
 
     bool checkCollision(int drone_id);
+
+    struct TrajectoryAssessment {
+      GridExecutionReason execution_reason = GridExecutionReason::OK;
+      double first_execution_time_s = std::numeric_limits<double>::quiet_NaN();
+      double first_advisory_time_s = std::numeric_limits<double>::quiet_NaN();
+      size_t advisory_avoid_samples = 0;
+      size_t advisory_unknown_samples = 0;
+      size_t sampled_points = 0;
+      bool executable() const { return execution_reason == GridExecutionReason::OK; }
+    };
+    GridMotionContext currentMotionContext(bool allow_bridged = false) const;
+    TrajectoryAssessment assessTrajectory(const UniformBspline& trajectory,
+                                          uint64_t risk_version, double now_s,
+                                          bool allow_bridged = false,
+                                          double from_time_s = 0.0,
+                                          double to_time_s =
+                                              std::numeric_limits<double>::infinity());
+    TrajectoryAssessment assessRemainingTrajectory(double now_s);
 
 
     PlanParameters pp_;
@@ -81,6 +103,14 @@ namespace ego_planner
     rclcpp::Node::SharedPtr node_;
     iap::PredictorParams predictor_params_;
     double risk_validity_s_ = 0.5;
+    GridPlanningRiskPolicy planning_risk_policy_;
+    double motion_body_radius_m_ = 0.35;
+    double motion_tracking_reserve_m_ = 0.10;
+    double motion_budget_m_ = 0.55;
+    double motion_max_age_s_ = 0.5;
+    double environment_max_age_s_ = 0.5;
+    double last_runtime_advisory_query_s_ =
+        -std::numeric_limits<double>::infinity();
     iap::CurrentIntegrityState current_integrity_;
     nav_msgs::msg::Odometry::ConstSharedPtr risk_odom_;
     bool risk_frame_valid_ = false;

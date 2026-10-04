@@ -111,7 +111,7 @@ struct MappingParameters
 // Spatial advisory values only. Physical occupancy never encodes integrity.
 enum class GridRiskStatus : uint8_t {
   UNCOMPUTED, VALID, INVALID, STALE, OUT_OF_MAP, FRAME_MISMATCH,
-  VERSION_CHANGED, INVALID_QUERY
+  VERSION_CHANGED, INVALID_QUERY, PREDICTED_DEGRADED
 };
 struct GridRiskVoxel {
   double hpl = std::numeric_limits<double>::quiet_NaN();
@@ -124,8 +124,73 @@ struct GridRiskContext {
   double valid_until_s = std::numeric_limits<double>::quiet_NaN();
   std::string frame_id;
   uint64_t occupancy_generation = 0;
+  Eigen::Vector3d reference_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
   // Must own frozen inputs, never borrow live predictor state.
   std::function<GridRiskVoxel(const Eigen::Vector3d&)> predict;
+};
+
+// Search preference only. AVOID and PREDICTED_DEGRADED are blocked during
+// the first search attempt, but never become physical occupancy or an
+// execution emergency by themselves.
+enum class GridAdvisoryClass : uint8_t {
+  VALID, AVOID, PREDICTED_DEGRADED, STALE_REFERENCE, UNKNOWN
+};
+struct GridPlanningRiskPolicy {
+  double hpl_budget_m = 0.55;
+  double vpl_budget_m = 0.60;
+  double reserve_h_m = 0.10;
+  double reserve_v_m = 0.10;
+  double unknown_multiplier = 1.5;
+  double stale_soft_seconds = 1.0;
+  double stale_max_motion_m = 0.5;
+};
+struct GridPlanningRisk {
+  GridAdvisoryClass classification = GridAdvisoryClass::UNKNOWN;
+  GridRiskStatus query_status = GridRiskStatus::UNCOMPUTED;
+  double hpl = std::numeric_limits<double>::quiet_NaN();
+  double vpl = std::numeric_limits<double>::quiet_NaN();
+  double cost_multiplier = 1.5;
+  uint64_t version = 0;
+};
+
+enum class GridExecutionReason : uint8_t {
+  OK, OUT_OF_MAP, ENVIRONMENT_UNOBSERVED, ENVIRONMENT_STALE,
+  PHYSICAL_OBSTACLE, INSUFFICIENT_CLEARANCE,
+  CURRENT_MOTION_UNAVAILABLE, CURRENT_MOTION_STALE,
+  CURRENT_MOTION_BUDGET, TRACKING_ERROR
+};
+inline const char* gridExecutionReasonName(const GridExecutionReason reason) {
+  switch (reason) {
+    case GridExecutionReason::OK: return "OK";
+    case GridExecutionReason::OUT_OF_MAP: return "OUT_OF_MAP";
+    case GridExecutionReason::ENVIRONMENT_UNOBSERVED: return "ENVIRONMENT_UNOBSERVED";
+    case GridExecutionReason::ENVIRONMENT_STALE: return "ENVIRONMENT_STALE";
+    case GridExecutionReason::PHYSICAL_OBSTACLE: return "PHYSICAL_OBSTACLE";
+    case GridExecutionReason::INSUFFICIENT_CLEARANCE: return "INSUFFICIENT_CLEARANCE";
+    case GridExecutionReason::CURRENT_MOTION_UNAVAILABLE: return "CURRENT_MOTION_UNAVAILABLE";
+    case GridExecutionReason::CURRENT_MOTION_STALE: return "CURRENT_MOTION_STALE";
+    case GridExecutionReason::CURRENT_MOTION_BUDGET: return "CURRENT_MOTION_BUDGET";
+    case GridExecutionReason::TRACKING_ERROR: return "TRACKING_ERROR";
+  }
+  return "UNKNOWN_EXECUTION_REASON";
+}
+struct GridMotionContext {
+  uint8_t quality = 0;
+  bool allow_bridged = false;
+  double stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double error_proxy_m = std::numeric_limits<double>::quiet_NaN();
+  double body_radius_m = 0.35;
+  double tracking_reserve_m = 0.10;
+  double motion_budget_m = 0.55;
+  double max_motion_age_s = 0.5;
+  double max_environment_age_s = 0.5;
+};
+struct GridPlanningCell {
+  GridExecutionReason execution_reason = GridExecutionReason::OUT_OF_MAP;
+  GridPlanningRisk advisory;
+  double raw_center_clearance_m = std::numeric_limits<double>::quiet_NaN();
+  bool executable() const { return execution_reason == GridExecutionReason::OK; }
 };
 
 // intermediate mapping data for fusion
@@ -320,6 +385,13 @@ public:
   void invalidateRiskContext();
   GridRiskVoxel queryRisk(const Eigen::Vector3d& position, uint64_t version,
                           double evaluation_time_s);
+  GridPlanningRisk queryPlanningRisk(const Eigen::Vector3d& position,
+                                     uint64_t version, double evaluation_time_s,
+                                     const GridPlanningRiskPolicy& policy);
+  GridPlanningCell queryPlanningCell(const Eigen::Vector3d& position,
+                                    uint64_t version, double evaluation_time_s,
+                                    const GridPlanningRiskPolicy& risk_policy,
+                                    const GridMotionContext& motion);
   std::string getFrameId() const { return mp_.frame_id_; }
 
   // occupancy map management
@@ -396,6 +468,16 @@ private:
   GridRiskContext risk_context_;
   uint64_t risk_version_ = 0;
   uint64_t risk_occupancy_sequence_ = 0;
+  struct RiskHistorySample {
+    double hpl = std::numeric_limits<double>::quiet_NaN();
+    double vpl = std::numeric_limits<double>::quiet_NaN();
+    double reference_time_s = std::numeric_limits<double>::quiet_NaN();
+    double valid_until_s = std::numeric_limits<double>::quiet_NaN();
+    Eigen::Vector3d reference_position = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    std::string frame_id;
+  };
+  std::unordered_map<size_t, RiskHistorySample> risk_history_;
 
   // get depth image and camera pose
   void depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,

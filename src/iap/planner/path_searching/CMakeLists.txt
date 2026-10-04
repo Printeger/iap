@@ -27,6 +27,12 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_advisory_a_star test/test_advisory_a_star.cpp)
+  if(TARGET test_advisory_a_star)
+    target_link_libraries(test_advisory_a_star path_searching)
+    ament_target_dependencies(test_advisory_a_star plan_env rclcpp Eigen3)
+  endif()
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

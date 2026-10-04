@@ -26,6 +26,9 @@ struct GridMapTestAccess {
   static GridRiskVoxel cached(const GridMap& map, int address) {
     return map.md_.risk_buffer_.at(address);
   }
+  static void setObserved(GridMap& map, int address, bool observed) {
+    map.md_.observed_buffer_.at(address) = observed ? 1 : 0;
+  }
 };
 class GridRiskTest : public testing::Test {
  protected:
@@ -39,6 +42,7 @@ class GridRiskTest : public testing::Test {
     ctx.reference_time_s = 10;
     ctx.valid_until_s = 11;
     ctx.occupancy_generation = map.occupancyGeneration();
+    ctx.reference_position = Eigen::Vector3d(0, 0, 0);
     ctx.predict = [this](const Eigen::Vector3d& p) {
       ++calls;
       GridRiskVoxel v;
@@ -128,4 +132,65 @@ TEST_F(GridRiskTest, InputChangeDuringPredictionDoesNotPublishOldResult) {
   const auto v=map.queryRisk(point,version,10);
   EXPECT_EQ(v.status,GridRiskStatus::VERSION_CHANGED);
   EXPECT_TRUE(std::isnan(v.hpl));
+}
+
+TEST_F(GridRiskTest, AdvisoryWarningIsDistinctFromUnknownAndExecution) {
+  GridPlanningRiskPolicy policy;
+  auto ctx = context();
+  ctx.predict = [](const Eigen::Vector3d&) {
+    GridRiskVoxel value;
+    value.status = GridRiskStatus::VALID;
+    value.hpl = 0.46;
+    value.vpl = 0.30;
+    return value;
+  };
+  const auto version = map.bindRiskContext(ctx);
+  const auto warning = map.queryPlanningRisk(point, version, 10.0, policy);
+  EXPECT_EQ(warning.classification, GridAdvisoryClass::AVOID);
+  EXPECT_EQ(warning.query_status, GridRiskStatus::VALID);
+
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 10.0;
+  motion.error_proxy_m = 0.05;
+  const auto cell = map.queryPlanningCell(point, version, 10.0, policy, motion);
+  EXPECT_TRUE(cell.executable());
+  EXPECT_EQ(cell.advisory.classification, GridAdvisoryClass::AVOID);
+
+  const auto stale = map.queryPlanningRisk(point, version, 11.1, policy);
+  EXPECT_EQ(stale.classification, GridAdvisoryClass::STALE_REFERENCE);
+  EXPECT_GT(stale.cost_multiplier, policy.unknown_multiplier);
+  const auto unknown = map.queryPlanningRisk(point, version, 12.1, policy);
+  EXPECT_EQ(unknown.classification, GridAdvisoryClass::UNKNOWN);
+  EXPECT_DOUBLE_EQ(unknown.cost_multiplier, policy.unknown_multiplier);
+  EXPECT_TRUE(std::isnan(unknown.hpl));
+  EXPECT_EQ(map.getInflateOccupancy(point), 0);
+}
+
+TEST_F(GridRiskTest, CurrentMotionAndPhysicalEvidenceAreSeparateConditions) {
+  GridPlanningRiskPolicy policy;
+  const auto version = map.bindRiskContext(context());
+  GridMotionContext motion;
+  motion.stamp_s = 10.0;
+  motion.error_proxy_m = 0.05;
+  EXPECT_EQ(map.queryPlanningCell(point, version, 10, policy, motion).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_UNAVAILABLE);
+  motion.quality = 2;
+  EXPECT_EQ(map.queryPlanningCell(point, version, 10, policy, motion).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_UNAVAILABLE);
+  motion.allow_bridged = true;
+  EXPECT_TRUE(map.queryPlanningCell(point, version, 10, policy, motion).executable());
+  motion.quality = 1;
+  motion.allow_bridged = false;
+  Eigen::Vector3i index;
+  map.posToIndex(point, index);
+  GridMapTestAccess::setObserved(map, map.toAddress(index), false);
+  EXPECT_EQ(map.queryPlanningCell(point, version, 10, policy, motion).execution_reason,
+            GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  GridMapTestAccess::setObserved(map, map.toAddress(index), true);
+  EXPECT_EQ(map.queryPlanningCell(point, version, 10.6, policy, motion).execution_reason,
+            GridExecutionReason::ENVIRONMENT_STALE);
+  map.setOccupied(point);
+  EXPECT_EQ(map.queryPlanningCell(point, version, 10, policy, motion).execution_reason,
+            GridExecutionReason::PHYSICAL_OBSTACLE);
 }

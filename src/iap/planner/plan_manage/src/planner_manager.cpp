@@ -52,12 +52,24 @@ namespace ego_planner
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
-    // Stage 1 exercises the actual spatial PL source without changing EGO's
-    // physical route policy. Stage 2 will consume this version in active search.
     const auto risk_version = beginRiskQuery();
-    const auto risk = grid_map_->queryRisk(start_pt, risk_version, node_->now().seconds());
-    RCLCPP_DEBUG(node_->get_logger(), "GridMap PL version=%lu status=%d HPL=%g VPL=%g",
-                 risk.version, static_cast<int>(risk.status), risk.hpl, risk.vpl);
+    const double planning_time_s = node_->now().seconds();
+    const auto motion = currentMotionContext();
+    const auto planning_query = [this, risk_version, planning_time_s, motion](
+        const Eigen::Vector3d& position) {
+      return grid_map_->queryPlanningCell(position, risk_version,
+          planning_time_s, planning_risk_policy_, motion);
+    };
+    const auto start_cell = planning_query(start_pt);
+    if (!start_cell.executable()) {
+      RCLCPP_WARN(node_->get_logger(), "Planning denied: start %s",
+                  gridExecutionReasonName(start_cell.execution_reason));
+      return false;
+    }
+    const bool start_in_advisory =
+        start_cell.advisory.classification == GridAdvisoryClass::AVOID ||
+        start_cell.advisory.classification == GridAdvisoryClass::PREDICTED_DEGRADED;
+    bspline_optimizer_->setPlanningQuery(planning_query, start_in_advisory);
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -231,6 +243,10 @@ namespace ego_planner
 
     vector<std::pair<int, int>> segments;
     segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
+    if (bspline_optimizer_->initializationFailed()) {
+      ++continous_failures_count_;
+      return false;
+    }
     // 计算时间差并更新时间
     auto now = node_->now();
     t_init = now - t_start;
@@ -294,7 +310,62 @@ namespace ego_planner
     // t_refine = ros::Time::now() - t_start;
     t_refine = node_->now() - t_start;
 
-    // save planned results
+    // Assess the final time-adjusted curve before touching the active plan.
+    double feasibility_ratio = 1.0;
+    pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
+    bool feasible = pos.checkFeasibility(feasibility_ratio, false);
+    for (int retime = 0; !feasible && retime < 2; ++retime) {
+      pos.lengthenTime(std::max(1.1, feasibility_ratio * 1.05));
+      feasible = pos.checkFeasibility(feasibility_ratio, false);
+    }
+    if (!feasible) {
+      RCLCPP_WARN(node_->get_logger(), "Candidate rejected: dynamic limits");
+      ++continous_failures_count_;
+      return false;
+    }
+    auto assessment = assessTrajectory(pos, risk_version,
+                                       node_->now().seconds());
+    if (!assessment.executable()) {
+      RCLCPP_WARN(node_->get_logger(),
+                  "Candidate rejected before commit: %s at t=%.3f",
+                  gridExecutionReasonName(assessment.execution_reason),
+                  assessment.first_execution_time_s);
+      ++continous_failures_count_;
+      return false;
+    }
+    if (assessment.advisory_avoid_samples != 0 &&
+        !bspline_optimizer_->advisoryFallbackUsed()) {
+      // One bounded correction of a curve that cut across its guide. The
+      // original executable candidate remains available if correction fails.
+      Eigen::MatrixXd corrected_points = pos.getControlPoint();
+      bspline_optimizer_->initControlPoints(corrected_points, true);
+      if (!bspline_optimizer_->initializationFailed() &&
+          bspline_optimizer_->BsplineOptimizeTrajRebound(
+              corrected_points, pos.getInterval())) {
+        UniformBspline corrected(corrected_points, 3, pos.getInterval());
+        corrected.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_,
+                                    pp_.feasibility_tolerance_);
+        double ratio = 1.0;
+        const auto corrected_check = assessTrajectory(
+            corrected, risk_version, node_->now().seconds());
+        if (corrected.checkFeasibility(ratio, false) &&
+            corrected_check.executable() &&
+            corrected_check.advisory_avoid_samples <
+                assessment.advisory_avoid_samples) {
+          pos = corrected;
+          assessment = corrected_check;
+        }
+      }
+    }
+    if (assessment.advisory_avoid_samples != 0)
+      RCLCPP_WARN(node_->get_logger(),
+                  "Candidate uses degraded advisory fallback: %zu warning samples",
+                  assessment.advisory_avoid_samples);
+    if (assessment.advisory_unknown_samples != 0)
+      RCLCPP_INFO(node_->get_logger(),
+                  "Candidate advisory coverage incomplete: %zu/%zu samples",
+                  assessment.advisory_unknown_samples, assessment.sampled_points);
+    // Commit is the only write to local_data_ on the success path.
     updateTrajInfo(pos, node_->now());
 
     static double sum_time = 0;
@@ -323,6 +394,47 @@ namespace ego_planner
     updateTrajInfo(UniformBspline(control_points, 3, 1.0), node_->now());
 
     return true;
+  }
+
+  bool EGOPlannerManager::planCheckedBrake(
+      const Eigen::Vector3d& position, const Eigen::Vector3d& velocity,
+      const Eigen::Vector3d& acceleration)
+  {
+    if (!position.allFinite() || !velocity.allFinite() ||
+        !acceleration.allFinite() || pp_.max_acc_ <= 0.0)
+      return false;
+    const double now = node_->now().seconds();
+    const auto risk_version = beginRiskQuery();
+    for (int attempt = 0; attempt < 3; ++attempt) {
+      const double duration = std::max(0.5,
+          2.0 * velocity.norm() / pp_.max_acc_) * std::pow(1.5, attempt);
+      const Eigen::Vector3d end = position + velocity * duration * 0.5;
+      auto polynomial = PolynomialTraj::one_segment_traj_gen(
+          position, velocity, acceleration, end, Eigen::Vector3d::Zero(),
+          Eigen::Vector3d::Zero(), duration);
+      const double dt = duration / 10.0;
+      std::vector<Eigen::Vector3d> samples;
+      for (int i = 0; i <= 10; ++i)
+        samples.push_back(polynomial.evaluate(i * dt));
+      std::vector<Eigen::Vector3d> derivatives{
+          velocity, Eigen::Vector3d::Zero(), acceleration,
+          Eigen::Vector3d::Zero()};
+      Eigen::MatrixXd controls;
+      UniformBspline::parameterizeToBspline(dt, samples, derivatives, controls);
+      UniformBspline candidate(controls, 3, dt);
+      candidate.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_,
+                                  pp_.feasibility_tolerance_);
+      double ratio = 1.0;
+      if (!candidate.checkFeasibility(ratio, false)) continue;
+      const auto assessment = assessTrajectory(candidate, risk_version,
+                                               now, true);
+      if (!assessment.executable()) continue;
+      updateTrajInfo(candidate, node_->now());
+      RCLCPP_WARN(node_->get_logger(),
+                  "Checked continuous braking trajectory committed");
+      return true;
+    }
+    return false;
   }
 
   bool EGOPlannerManager::checkCollision(int drone_id)

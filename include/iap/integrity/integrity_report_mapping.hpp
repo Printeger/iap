@@ -115,6 +115,10 @@ inline void fill_integrity_report_msg(const IntegrityReport& report,
   msg.negative_variance_rejected = report.numerical_failure.negative_variance_rejected;
   msg.degenerate_geometry        = report.numerical_failure.degenerate_geometry;
   msg.failure_reason             = report.numerical_failure.failure_reason;
+  msg.current_motion_quality = report.current_motion_quality;
+  msg.current_motion_error_proxy_m = report.current_motion_error_proxy_m;
+  msg.current_external_support_age_s = report.current_external_support_age_s;
+  msg.current_motion_reason = report.current_motion_reason;
 }
 
 }  // namespace iap

@@ -126,17 +126,17 @@ struct DynamicALResult {
 // Integrity monitoring report (per frame)
 // ---------------------------------------------------------------------------
 
-/// @brief Current certified monitor report for one frame.
+/// @brief Current diagnostic monitor report for one frame.
 ///
-/// The primary PL fields are monitor-fused certified outputs:
-/// PL_mon_q = max(PL_G_q, PL_L_q). Future planner/advisory predictors use
-/// separate types in iap/planner and must not claim certification.
+/// The primary PL fields conservatively combine source diagnostics by max:
+/// PL_mon_q = max(PL_G_q, PL_L_q). They are not a fused FGO posterior PL and
+/// do not authorize motion. Future advisory predictors use separate types.
 /// IAP-RQ-200: monitor PL, AL, monitor IM = AL - PL, state.
 struct IntegrityReport {
   double stamp = 0.0;  ///< frame timestamp [s]
   std::int64_t estimation_frame_id = -1;  ///< exact GLIM frame identity
 
-  // --- Current certified monitor scalars (IAP-RQ-200) --------------------
+  // --- Current source-max monitor diagnostics (IAP-RQ-200) --------------
   double PL  = 1e9;  ///< monitor_fused_pl [m] (= monitor_fused_hpl)
   double AL  = 0.0;  ///< Alert Limit [m] (= min(HAL, VAL), §1.12)
   double IM  = 0.0;  ///< monitor_integrity_margin = min(im_h, im_v) (positive = safe)
@@ -158,6 +158,11 @@ struct IntegrityReport {
 
   // --- Key intermediate quantities (IAP-RQ-200 completeness) -------------
   double lambda_max_sigma_p = 0.0;  ///< lambda_max(Σ_p)
+  // Same-frame GLIO/FGO operational quality, not a protection level.
+  uint8_t current_motion_quality = 0;  ///< 0 invalid, 1 supported, 2 bridged
+  double current_motion_error_proxy_m = 1e9;
+  double current_external_support_age_s = 1e9;
+  std::string current_motion_reason = "not_evaluated";
   std::vector<double> sat_nis;
   std::vector<int> excluded_sats;
   double gamma_R = 1.0;

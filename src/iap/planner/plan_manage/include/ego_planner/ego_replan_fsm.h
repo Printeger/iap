@@ -3,6 +3,7 @@
 
 #include <Eigen/Eigen>
 #include <algorithm>
+#include <limits>
 #include <iostream>
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -61,6 +62,9 @@ namespace ego_planner
     int waypoint_num_, wp_id_;
     double planning_horizen_, planning_horizen_time_;
     double emergency_time_;
+    double tracking_error_limit_m_ = 0.30;
+    double last_advisory_replan_time_s_ = 0.0;
+    double last_failed_plan_time_s_ = -std::numeric_limits<double>::infinity();
     bool flag_realworld_experiment_;
     bool enable_fail_safe_;
 

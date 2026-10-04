@@ -2294,7 +2294,7 @@ TEST(IntegrityMonitorTest, LidarOnlyGpuBlocksOverrideFallbackByMax) {
   EXPECT_DOUBLE_EQ(report.PL, report.lidar_HPL);
 }
 
-TEST_F(GnssAraimEvaluatorTest, IntegrityMonitorFusesGnssAndLidarByPerAxisMax) {
+TEST_F(GnssAraimEvaluatorTest, UnusableGnssSentinelDoesNotOverrideLidar) {
   IntegrityMonitor::Params params;
   params.K_pl = 1.0;
   params.HAL_trunk_default = 100.0;
@@ -2345,14 +2345,15 @@ TEST_F(GnssAraimEvaluatorTest, IntegrityMonitorFusesGnssAndLidarByPerAxisMax) {
   GnssEpoch epoch = make_epoch(8);
   const auto report = monitor.compute(frame, &epoch, nullptr, &fgo, &snapshot);
 
-  ASSERT_EQ(report.gnss_valid, 1);
+  ASSERT_EQ(report.gnss_valid, 0);
   ASSERT_EQ(report.lidar_valid, 1);
-  EXPECT_DOUBLE_EQ(report.PL_E, std::max(report.gnss_PL_E, report.lidar_PL_E));
-  EXPECT_DOUBLE_EQ(report.PL_N, std::max(report.gnss_PL_N, report.lidar_PL_N));
-  EXPECT_DOUBLE_EQ(report.PL_U, std::max(report.gnss_PL_U, report.lidar_PL_U));
-  EXPECT_DOUBLE_EQ(report.HPL, std::max(report.gnss_HPL, report.lidar_HPL));
-  EXPECT_DOUBLE_EQ(report.VPL, std::max(report.gnss_VPL, report.lidar_VPL));
-  EXPECT_DOUBLE_EQ(report.PL, std::max(report.gnss_HPL, report.lidar_HPL));
+  EXPECT_GE(monitor.last_araim_result().HPL, 1e9 * 0.99);
+  EXPECT_DOUBLE_EQ(report.PL_E, report.lidar_PL_E);
+  EXPECT_DOUBLE_EQ(report.PL_N, report.lidar_PL_N);
+  EXPECT_DOUBLE_EQ(report.PL_U, report.lidar_PL_U);
+  EXPECT_DOUBLE_EQ(report.HPL, report.lidar_HPL);
+  EXPECT_DOUBLE_EQ(report.VPL, report.lidar_VPL);
+  EXPECT_DOUBLE_EQ(report.PL, report.lidar_HPL);
 }
 
 // ============================================================================
@@ -2603,6 +2604,13 @@ namespace iap {
 
 class IntegrityMonitorTestAccess {
  public:
+  static void evaluate_motion(IntegrityMonitor& monitor,
+                              const glim::EstimationFrame& frame,
+                              const FGOPositionInfo* fgo,
+                              const IntegritySourceResult& gnss,
+                              IntegrityReport& report) {
+    monitor.evaluateCurrentMotionQuality(frame, fgo, gnss, report);
+  }
   static void compute_margins(const IntegrityMonitor& monitor,
                               IntegrityReport& report) {
     monitor.computeIntegrityMargins(report);
@@ -2613,6 +2621,54 @@ class IntegrityMonitorTestAccess {
     monitor.updateStateAndPlannerMode(report);
   }
 };
+
+TEST(IntegrityCurrentMotionTest, SingleSourceAndBoundedBridge) {
+  IntegrityMonitor monitor;
+  glim::EstimationFrame frame;
+  frame.id = 91;
+  frame.stamp = 100.0;
+  FGOPositionInfo fgo;
+  fgo.valid = true;
+  fgo.pose_cov_valid = true;
+  fgo.frame_id = frame.id;
+  fgo.stamp = frame.stamp;
+  fgo.sigma_p = Eigen::Matrix3d::Identity() * 0.01;
+  fgo.n_gnss_factors = 3;
+  const auto gnss = IntegritySourceResult::make_valid("GNSS", 0.4, 0.4, 0.3, 0.3, 0.3);
+  const auto unavailable = IntegritySourceResult::make_invalid("LIDAR", "not_registered");
+  IntegrityReport report;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              gnss, report);
+  EXPECT_EQ(report.current_motion_quality, 1);
+  EXPECT_NEAR(report.current_motion_error_proxy_m, 0.3, 1e-9);
+  EXPECT_EQ(report.current_motion_reason, "gnss_supported");
+
+  fgo.n_gnss_factors = 0;
+  frame.stamp = fgo.stamp = 100.5;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              unavailable, report);
+  EXPECT_EQ(report.current_motion_quality, 2);
+  EXPECT_EQ(report.current_motion_reason, "bounded_inertial_bridge");
+  frame.stamp = fgo.stamp = 101.2;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              unavailable, report);
+  EXPECT_EQ(report.current_motion_quality, 0);
+  // Source PL can be unavailable while this frame's ICP still supplies a
+  // registration measurement to the fused estimator.
+  frame.stamp = fgo.stamp = 101.3;
+  frame.icp_quality.inlier_count = 100;
+  frame.icp_quality.inlier_fraction = 0.8;
+  frame.icp_quality.rmse = 0.05;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              unavailable, report);
+  EXPECT_EQ(report.current_motion_quality, 1);
+  EXPECT_EQ(report.current_motion_reason, "lidar_supported");
+  fgo.frame_id = 92;
+  IntegrityMonitorTestAccess::evaluate_motion(monitor, frame, &fgo,
+                                              gnss, report);
+  EXPECT_EQ(report.current_motion_quality, 0);
+  EXPECT_EQ(report.current_motion_reason, "fgo_unavailable_or_wrong_frame");
+}
 
 }  // namespace iap
 
@@ -3014,8 +3070,8 @@ TEST_F(IntegrityMonitorBaselineTest, GnssSourceFieldsPopulated) {
 
   auto report = monitor.compute(frame, &epoch, nullptr, nullptr, nullptr);
 
-  // GNSS source fields should be populated
-  EXPECT_EQ(report.gnss_valid, 1);
+  // ARAIM calculated hypotheses, but its 1e9 sentinel is not usable PL.
+  EXPECT_EQ(report.gnss_valid, 0);
   EXPECT_GT(report.gnss_n_hyp, 0);
   EXPECT_GT(report.gnss_HPL, 0.0);
   EXPECT_GT(report.gnss_VPL, 0.0);

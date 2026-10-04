@@ -154,6 +154,10 @@ class IntegrityMonitor {
                            IntegrityReport& report);
   void computeIntegrityMargins(IntegrityReport& report) const;
   void updateStateAndPlannerMode(IntegrityReport& report);
+  void evaluateCurrentMotionQuality(const glim::EstimationFrame& frame,
+                                    const FGOPositionInfo* fgo_info,
+                                    const IntegritySourceResult& gnss_src,
+                                    IntegrityReport& report);
 
   Params params_;
   double obstacle_dist_     = 1e9;    ///< latest obstacle distance [m]
@@ -163,6 +167,8 @@ class IntegrityMonitor {
   IntegrityState current_state_ = IntegrityState::UNSAFE;
   IntegrityMode  current_mode_  = IntegrityMode::NOMINAL;  ///< legacy
   int    recovery_counter_      = 0;
+  double last_external_support_stamp_s_ =
+      -std::numeric_limits<double>::infinity();
   GnssAraimEvaluator gnss_araim_;
   LidarAraim lidar_araim_;
   IntegrityFusionPolicy fusion_policy_;

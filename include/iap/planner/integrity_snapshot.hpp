@@ -19,6 +19,10 @@ namespace iap {
 struct CurrentIntegrityState {
   double stamp = std::numeric_limits<double>::quiet_NaN();
   std::int64_t estimation_frame_id = -1;
+  uint8_t current_motion_quality = 0;
+  double current_motion_error_proxy_m = std::numeric_limits<double>::quiet_NaN();
+  double current_external_support_age_s = std::numeric_limits<double>::quiet_NaN();
+  std::string current_motion_reason;
   bool valid = false;
   bool gnss_valid = false;
   double gnss_hpl = std::numeric_limits<double>::quiet_NaN();
@@ -39,7 +43,8 @@ struct CurrentIntegrityState {
 
   int integrity_state = -1;
 
-  // Current certified monitor outputs copied from /iap/integrity.
+  // Source-max monitor diagnostics copied from /iap/integrity. These are not
+  // the fused FGO posterior or an authorization for local motion.
   double hpl = std::numeric_limits<double>::quiet_NaN();
   double vpl = std::numeric_limits<double>::quiet_NaN();
   double pl_e = std::numeric_limits<double>::quiet_NaN();
@@ -88,7 +93,7 @@ struct IntegritySnapshot {
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Quaterniond q_wb = Eigen::Quaterniond::Identity();
 
-  CurrentIntegrityState current;  ///< current certified monitor snapshot
+  CurrentIntegrityState current;  ///< current monitor diagnostics and FGO proxy
 
   bool has_epoch = false;
   GnssEpoch gnss_epoch;

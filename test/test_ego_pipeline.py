@@ -22,6 +22,8 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry, Path as NavPath
 from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py import point_cloud2
+from iap.msg import IntegrityReport
 from visualization_msgs.msg import Marker, MarkerArray
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
@@ -78,6 +80,7 @@ class EgoPipelineTest(unittest.TestCase):
             odom_pub = node.create_publisher(Odometry, "/odom_world", 10)
             map_odom_pub = node.create_publisher(Odometry, "/grid_map/odom", 10)
             cloud_pub = node.create_publisher(PointCloud2, "/grid_map/cloud", 10)
+            integrity_pub = node.create_publisher(IntegrityReport, "/risk/integrity", 10)
             goal_pub = node.create_publisher(PoseStamped, "/move_base_simple/goal", 10)
             curves, commands, displayed_curves, risk_clouds, risk_statuses = {}, [], [], [], []
             risk_surfaces, risk_legends, glio_paths = [], [], []
@@ -112,8 +115,18 @@ class EgoPipelineTest(unittest.TestCase):
                     odom.pose.pose.position.x=-2.; odom.pose.pose.position.z=1.
                     odom.pose.pose.orientation.w=1.
                     odom_pub.publish(odom); map_odom_pub.publish(odom)
-                    cloud=PointCloud2(); cloud.header=odom.header; cloud.height=1
+                    # A known free ray through the planned corridor, ending
+                    # beyond the local goal, is physical evidence for this
+                    # CPU-only pipeline fixture.
+                    cloud=point_cloud2.create_cloud_xyz32(
+                        odom.header, [(3.4, y, 1.0) for y in (-0.2, 0.0, 0.2)])
                     cloud_pub.publish(cloud)
+                    report=IntegrityReport(); report.header=odom.header
+                    report.current_motion_quality=IntegrityReport.CURRENT_MOTION_SUPPORTED
+                    report.current_motion_error_proxy_m=0.05
+                    report.hpl=report.vpl=0.3
+                    report.hal=0.55; report.val=0.60; report.im=0.25
+                    integrity_pub.publish(report)
                     if risk_statuses and not sent_goal:
                         saw_risk_before_goal=True
                     if risk_statuses and not changed_metric and parameter_client.service_is_ready():
@@ -138,8 +151,13 @@ class EgoPipelineTest(unittest.TestCase):
                 self.assertTrue(metric_future.result().results[0].successful)
                 self.assertTrue(any(" vpl " in m.text for m in risk_statuses))
                 self.assertTrue(risk_clouds)
-                self.assertTrue(all(cloud.width == 0 for cloud in risk_clouds),
-                                "missing monitor input must not be shown as valid PL")
+                self.assertTrue(all(
+                    cloud.data[i * cloud.point_step + next(
+                        field.offset for field in cloud.fields if field.name == "status")]
+                    != 1
+                    for cloud in risk_clouds
+                    for i in range(cloud.width * cloud.height)),
+                    "missing spatial advisory input must not be shown as valid PL")
                 self.assertTrue(risk_surfaces)
                 self.assertTrue(all(m.markers[0].action == Marker.DELETEALL for m in risk_surfaces),
                                 "invalid PL must clear all retained heatmap surfaces")

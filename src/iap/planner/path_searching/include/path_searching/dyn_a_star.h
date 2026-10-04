@@ -6,6 +6,8 @@
 #include <Eigen/Eigen>
 #include <plan_env/grid_map.h>
 #include <queue>
+#include <functional>
+#include <optional>
 
 constexpr double inf = 1 >> 20;
 struct GridNode;
@@ -31,12 +33,10 @@ struct GridNode
 	GridNodePtr cameFrom{NULL};
 };
 
-class NodeComparator
-{
-public:
-	bool operator()(GridNodePtr node1, GridNodePtr node2)
-	{
-		return node1->fScore > node2->fScore;
+struct AStarQueueEntry { GridNodePtr node; double score; };
+struct NodeComparator {
+	bool operator()(const AStarQueueEntry& a, const AStarQueueEntry& b) const {
+		return a.score > b.score;
 	}
 };
 
@@ -44,6 +44,11 @@ class AStar
 {
 private:
 	GridMap::Ptr grid_map_;
+	std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
+	bool advisory_fallback_ = false;
+	bool rejected_advisory_ = false;
+	std::optional<double> edgeMultiplier(const Eigen::Vector3d& from,
+	                                     const Eigen::Vector3d& to);
 
 	inline void coord2gridIndexFast(const double x, const double y, const double z, int &id_x, int &id_y, int &id_z);
 
@@ -59,7 +64,16 @@ private:
 
 	//bool (*checkOccupancyPtr)( const Eigen::Vector3d &pos );
 
-	inline bool checkOccupancy(const Eigen::Vector3d &pos) { return (bool)grid_map_->getInflateOccupancy(pos); }
+	inline bool checkOccupancy(const Eigen::Vector3d &pos) {
+		if (!planning_query_) return (bool)grid_map_->getInflateOccupancy(pos);
+		const auto cell = planning_query_(pos);
+		if (!cell.executable()) return true;
+		const auto cls = cell.advisory.classification;
+		const bool avoid = cls == GridAdvisoryClass::AVOID ||
+		                   cls == GridAdvisoryClass::PREDICTED_DEGRADED;
+		if (avoid && !advisory_fallback_) rejected_advisory_ = true;
+		return avoid && !advisory_fallback_;
+	}
 
 	std::vector<GridNodePtr> retrievePath(GridNodePtr current);
 
@@ -71,7 +85,7 @@ private:
 	std::vector<GridNodePtr> gridPath_;
 
 	GridNodePtr ***GridNodeMap_;
-	std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
+	std::priority_queue<AStarQueueEntry, std::vector<AStarQueueEntry>, NodeComparator> openSet_;
 
 	int rounds_{0};
 
@@ -82,6 +96,12 @@ public:
 	~AStar();
 
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
+	void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
+	                      bool advisory_fallback = false) {
+		planning_query_ = std::move(query);
+		advisory_fallback_ = advisory_fallback;
+	}
+	bool rejectedAdvisory() const { return rejected_advisory_; }
 
 	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 

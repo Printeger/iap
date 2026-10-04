@@ -20,6 +20,8 @@ namespace ego_planner
     node_->declare_parameter("fsm/planning_horizon", -1.0);
     node_->declare_parameter("fsm/planning_horizen_time", -1.0);
     node_->declare_parameter("fsm/emergency_time", 1.0);
+    tracking_error_limit_m_ = node_->declare_parameter(
+        "planning/tracking_error_limit_m", 0.30);
     node_->declare_parameter("fsm/realworld_experiment", false);
     node_->declare_parameter("fsm/fail_safe", true);
 
@@ -62,7 +64,7 @@ namespace ego_planner
     exec_timer_ = node_->create_wall_timer(std::chrono::milliseconds(10),
                                            std::bind(&EGOReplanFSM::execFSMCallback, this));
 
-    safety_timer_ = node_->create_wall_timer(std::chrono::milliseconds(50),
+    safety_timer_ = node_->create_wall_timer(std::chrono::milliseconds(200),
                                              std::bind(&EGOReplanFSM::checkCollisionCallback, this));
 
     odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
@@ -698,96 +700,80 @@ namespace ego_planner
 
   void EGOReplanFSM::checkCollisionCallback()
   {
-
-    LocalTrajData *info = &planner_manager_->local_data_;
-    auto map = planner_manager_->grid_map_;
-
-    if (exec_state_ == WAIT_TARGET || info->start_time_.seconds() < 1e-5)
+    auto& info = planner_manager_->local_data_;
+    // A failed rolling replan must not silence supervision of the trajectory
+    // still being executed. In particular, its first violation may move from
+    // the replan window into the emergency window while REPLAN_TRAJ retries.
+    if ((exec_state_ != EXEC_TRAJ && exec_state_ != REPLAN_TRAJ) ||
+        info.start_time_.seconds() < 1e-5)
       return;
-
-    /* ---------- check lost of depth ---------- */
-    if (map->getOdomDepthTimeout())
-    {
-      RCLCPP_ERROR(node_->get_logger(), "Depth Lost! EMERGENCY_STOP");
-
-      enable_fail_safe_ = false;
-      changeFSMExecState(EMERGENCY_STOP, "SAFETY");
+    const double now = node_->now().seconds();
+    const double elapsed = std::max(0.0, now - info.start_time_.seconds());
+    if (elapsed >= info.duration_) return;
+    auto assessment = planner_manager_->assessRemainingTrajectory(now);
+    const auto expected = info.position_traj_.evaluateDeBoorT(elapsed);
+    if ((expected - odom_pos_).norm() > tracking_error_limit_m_) {
+      assessment.execution_reason = GridExecutionReason::TRACKING_ERROR;
+      assessment.first_execution_time_s = elapsed;
     }
 
-    /* ---------- check trajectory ---------- */
-    constexpr double time_step = 0.01;
-    // double t_cur = (ros::Time::now() - info->start_time_).toSec();
-    double t_cur = (node_->now() - info->start_time_).seconds();
-
-    Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(t_cur);
-    const double CLEARANCE = 1.0 * planner_manager_->getSwarmClearance();
-    // double t_cur_global = ros::Time::now().toSec();
-    double t_cur_global = node_->now().seconds();
-
-    double t_2_3 = info->duration_ * 2 / 3;
-    for (double t = t_cur; t < info->duration_; t += time_step)
-    {
-      if (t_cur < t_2_3 && t >= t_2_3) // If t_cur < t_2_3, only the first 2/3 partition of the trajectory is considered valid and will get checked.
-        break;
-
-      bool occ = false;
-      occ |= map->getInflateOccupancy(info->position_traj_.evaluateDeBoorT(t));
-
-      for (size_t id = 0; id < planner_manager_->swarm_trajs_buf_.size(); id++)
-      {
-        if ((planner_manager_->swarm_trajs_buf_.at(id).drone_id != (int)id) || (planner_manager_->swarm_trajs_buf_.at(id).drone_id == planner_manager_->pp_.drone_id))
-        {
+    // Swarm separation retains its physical execution meaning.
+    const double swarm_clearance = planner_manager_->getSwarmClearance();
+    for (double t = elapsed; t < info.duration_ && assessment.executable();
+         t += 0.02) {
+      const auto p = info.position_traj_.evaluateDeBoorT(t);
+      for (const auto& peer : planner_manager_->swarm_trajs_buf_) {
+        if (peer.drone_id < 0 || peer.drone_id == planner_manager_->pp_.drone_id)
           continue;
-        }
-
-        double t_X = t_cur_global - planner_manager_->swarm_trajs_buf_.at(id).start_time_.seconds();
-        Eigen::Vector3d swarm_pridicted = planner_manager_->swarm_trajs_buf_.at(id).position_traj_.evaluateDeBoorT(t_X);
-        double dist = (p_cur - swarm_pridicted).norm();
-
-        if (dist < CLEARANCE)
-        {
-          occ = true;
+        const double peer_t = now - peer.start_time_.seconds() + t - elapsed;
+        if (peer_t < 0.0 || peer_t > peer.duration_) continue;
+        auto peer_curve = peer.position_traj_;
+        if ((p - peer_curve.evaluateDeBoorT(peer_t)).norm() < swarm_clearance) {
+          assessment.execution_reason = GridExecutionReason::PHYSICAL_OBSTACLE;
+          assessment.first_execution_time_s = t;
           break;
         }
       }
+    }
 
-      if (occ)
-      {
-
-        if (planFromCurrentTraj()) // Make a chance
-        {
-          changeFSMExecState(EXEC_TRAJ, "SAFETY");
-          publishSwarmTrajs(false);
-          return;
-        }
-        else
-        {
-          if (t - t_cur < emergency_time_) // 0.8s of emergency time
-          {
-            RCLCPP_WARN(node_->get_logger(), "Suddenly discovered obstacles. emergency stop! time=%f", t - t_cur);
-
-            changeFSMExecState(EMERGENCY_STOP, "SAFETY");
-          }
-          else
-          {
-            RCLCPP_WARN(node_->get_logger(), "current traj in collision, replan.");
-            changeFSMExecState(REPLAN_TRAJ, "SAFETY");
-          }
-          return;
-        }
-        break;
+    if (!assessment.executable()) {
+      const double lead = assessment.first_execution_time_s - elapsed;
+      RCLCPP_WARN(node_->get_logger(),
+                  "Remaining trajectory %s, lead=%.2fs",
+                  gridExecutionReasonName(assessment.execution_reason), lead);
+      if (lead > emergency_time_) {
+        changeFSMExecState(REPLAN_TRAJ, "SAFETY");
+      } else if (planFromCurrentTraj()) {
+        changeFSMExecState(EXEC_TRAJ, "SAFETY");
+        publishSwarmTrajs(false);
+      } else {
+        changeFSMExecState(EMERGENCY_STOP, "SAFETY");
       }
+      return;
+    }
+    // Advisory warnings request an early revision. Missing or brief stale PL
+    // does not enter the emergency path.
+    if (assessment.advisory_avoid_samples != 0 &&
+        now - last_advisory_replan_time_s_ > 1.0) {
+      last_advisory_replan_time_s_ = now;
+      RCLCPP_INFO(node_->get_logger(),
+                  "Advisory warning ahead at trajectory t=%.2fs; request replan",
+                  assessment.first_advisory_time_s);
+      changeFSMExecState(REPLAN_TRAJ, "ADVISORY");
     }
   }
 
   bool EGOReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
   {
+    const double now = node_->now().seconds();
+    if (now - last_failed_plan_time_s_ < 0.25) return false;
 
     getLocalTarget();
 
     bool plan_and_refine_success =
         planner_manager_->reboundReplan(start_pt_, start_vel_, start_acc_, local_target_pt_, local_target_vel_, (have_new_target_ || flag_use_poly_init), flag_randomPolyTraj);
     have_new_target_ = false;
+    if (!plan_and_refine_success) last_failed_plan_time_s_ = now;
 
     cout << "refine_success=" << plan_and_refine_success << endl;
 
@@ -887,7 +873,12 @@ namespace ego_planner
   bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)
   {
 
-    planner_manager_->EmergencyStop(stop_pos);
+    if (!planner_manager_->planCheckedBrake(stop_pos, odom_vel_,
+                                            Eigen::Vector3d::Zero())) {
+      RCLCPP_ERROR(node_->get_logger(),
+                   "Checked braking unavailable; simulation hover fallback is unverified");
+      planner_manager_->EmergencyStop(stop_pos);
+    }
 
     auto info = &planner_manager_->local_data_;
 
@@ -923,6 +914,7 @@ namespace ego_planner
   void EGOReplanFSM::getLocalTarget()
   {
     double t;
+    bool target_selected = false;
 
     double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;
     double dist_min = 9999, dist_min_t = 0.0;
@@ -958,10 +950,11 @@ namespace ego_planner
       {
         local_target_pt_ = pos_t;
         planner_manager_->global_data_.last_progress_time_ = dist_min_t;
+        target_selected = true;
         break;
       }
     }
-    if (t > planner_manager_->global_data_.global_duration_) // Last global point
+    if (!target_selected) // The loop may end exactly on global_duration_.
     {
       local_target_pt_ = end_pt_;
       planner_manager_->global_data_.last_progress_time_ = planner_manager_->global_data_.global_duration_;

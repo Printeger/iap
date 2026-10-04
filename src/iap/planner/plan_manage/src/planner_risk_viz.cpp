@@ -451,8 +451,11 @@ void EGOPlannerManager::publishRiskSlice() {
   }
   marker.scale.z = 0.32;
   marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0;
-  if (current_integrity_.valid && current_integrity_.integrity_state == 2) {
+  if (std::isfinite(current_integrity_.stamp) &&
+      current_integrity_.current_motion_quality == 0) {
     marker.color.g = marker.color.b = 0.2;
+  } else if (current_integrity_.current_motion_quality == 2) {
+    marker.color.b = 0.2;
   }
   marker.lifetime = rclcpp::Duration::from_seconds(1.5);
   std::ostringstream label;
@@ -463,10 +466,12 @@ void EGOPlannerManager::publishRiskSlice() {
         << " tiles=" << tiles << " display=" << minimum << ".." << maximum << "m"
         << " cost=" << std::setprecision(1) << elapsed_ms << "ms"
         << " bind=" << binding_ms << "ms";
-  if (current_integrity_.valid)
-    label << " monitor_state=" << static_cast<int>(current_integrity_.integrity_state)
-          << " monitor_HPL/VPL=" << current_integrity_.hpl << "/"
-          << current_integrity_.vpl;
+  if (std::isfinite(current_integrity_.stamp))
+    label << " motion_quality=" << static_cast<int>(current_integrity_.current_motion_quality)
+          << " FGO_proxy=" << current_integrity_.current_motion_error_proxy_m
+          << " source_max_HPL/VPL=" << current_integrity_.hpl << "/"
+          << current_integrity_.vpl
+          << " reason=" << current_integrity_.current_motion_reason;
   if (!reason.empty()) label << " " << reason;
   marker.text = label.str();
   risk_status_pub_->publish(marker);

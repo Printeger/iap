@@ -3,6 +3,48 @@
 using namespace std;
 using namespace Eigen;
 
+std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
+                                            const Vector3d& to)
+{
+    if (!planning_query_) {
+        return checkOccupancy(to) ? std::nullopt : std::optional<double>(1.0);
+    }
+    // Traverse the same GridMap voxel lattice as the physical and PL layers.
+    RayCaster ray;
+    const auto origin = grid_map_->getOrigin();
+    const double resolution = grid_map_->getResolution();
+    const auto begin = (from - origin) / resolution;
+    const auto end = (to - origin) / resolution;
+    double multiplier = 1.0;
+    auto examine = [&](const Vector3d& position) {
+        const auto cell = planning_query_(position);
+        if (!cell.executable()) return false;
+        const auto cls = cell.advisory.classification;
+        if (cls == GridAdvisoryClass::AVOID ||
+            cls == GridAdvisoryClass::PREDICTED_DEGRADED) {
+            if (!advisory_fallback_) {
+                rejected_advisory_ = true;
+                return false;
+            }
+            multiplier = std::max(multiplier, 3.0);
+        } else {
+            multiplier = std::max(multiplier, cell.advisory.cost_multiplier);
+        }
+        return true;
+    };
+    if (ray.setInput(begin, end)) {
+        Vector3d voxel;
+        do {
+            const bool more = ray.step(voxel);
+            if (!examine(origin + (voxel.array() + 0.5).matrix() * resolution))
+                return std::nullopt;
+            if (!more) break;
+        } while (true);
+    }
+    if (!examine(to)) return std::nullopt;
+    return multiplier;
+}
+
 AStar::~AStar()
 {
     for (int i = 0; i < POOL_SIZE_(0); i++)
@@ -93,7 +135,33 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
     if (!Coord2Index(start_pt, start_idx) || !Coord2Index(end_pt, end_idx))
         return false;
 
-    if (checkOccupancy(Index2Coord(start_idx)))
+    // A warning at the requested endpoint is not a physical obstacle to
+    // move the endpoint through. Let the normal attempt fail so the bounded
+    // advisory fallback can search to the actual local target.
+    if (planning_query_ && !advisory_fallback_) {
+        const auto end_cell = planning_query_(Index2Coord(end_idx));
+        if (end_cell.executable() &&
+            (end_cell.advisory.classification == GridAdvisoryClass::AVOID ||
+             end_cell.advisory.classification ==
+                 GridAdvisoryClass::PREDICTED_DEGRADED)) {
+            rejected_advisory_ = true;
+            return false;
+        }
+    }
+
+    const auto blocked_lattice_cell = [this](const Vector3i& search_index) {
+        const auto position = Index2Coord(search_index);
+        if (checkOccupancy(position)) return true;
+        if (!planning_query_) return false;
+        Vector3i map_index;
+        grid_map_->posToIndex(position, map_index);
+        if (!grid_map_->isInMap(map_index)) return true;
+        Vector3d map_center;
+        grid_map_->indexToPos(map_index, map_center);
+        return checkOccupancy(map_center);
+    };
+
+    if (blocked_lattice_cell(start_idx))
     {
         // RCLCPP_WARN(rclcpp::get_logger("ConvertToIndexAndAdjustStartEndPoints"), "Start point is insdide an obstacle.");
         do
@@ -101,10 +169,10 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
             start_pt = (start_pt - end_pt).normalized() * step_size_ + start_pt;
             if (!Coord2Index(start_pt, start_idx))
                 return false;
-        } while (checkOccupancy(Index2Coord(start_idx)));
+        } while (blocked_lattice_cell(start_idx));
     }
 
-    if (checkOccupancy(Index2Coord(end_idx)))
+    if (blocked_lattice_cell(end_idx))
     {
         // RCLCPP_WARN(rclcpp::get_logger("ConvertToIndexAndAdjustStartEndPoints"), "End point is insdide an obstacle.");
         do
@@ -112,7 +180,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
             end_pt = (end_pt - start_pt).normalized() * step_size_ + end_pt;
             if (!Coord2Index(end_pt, end_idx))
                 return false;
-        } while (checkOccupancy(Index2Coord(end_idx)));
+        } while (blocked_lattice_cell(end_idx));
     }
 
     return true;
@@ -122,6 +190,8 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
 {
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
+    rejected_advisory_ = false;
+    gridPath_.clear();
 
     step_size_ = step_size;
     inv_step_size_ = 1 / step_size;
@@ -140,7 +210,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     GridNodePtr startPtr = GridNodeMap_[start_idx(0)][start_idx(1)][start_idx(2)];
     GridNodePtr endPtr = GridNodeMap_[end_idx(0)][end_idx(1)][end_idx(2)];
 
-    std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> empty;
+    std::priority_queue<AStarQueueEntry, std::vector<AStarQueueEntry>, NodeComparator> empty;
     openSet_.swap(empty);
 
     GridNodePtr neighborPtr = NULL;
@@ -152,7 +222,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     startPtr->fScore = getHeu(startPtr, endPtr);
     startPtr->state = GridNode::OPENSET; //put start node in open set
     startPtr->cameFrom = NULL;
-    openSet_.push(startPtr); //put start in open set
+    openSet_.push({startPtr, startPtr->fScore});
 
     endPtr->index = end_idx;
 
@@ -162,8 +232,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     while (!openSet_.empty())
     {
         num_iter++;
-        current = openSet_.top();
+        const auto entry = openSet_.top();
         openSet_.pop();
+        current = entry.node;
+        if (current->state == GridNode::CLOSEDSET ||
+            entry.score > current->fScore + 1e-9) continue;
 
         // if ( num_iter < 10000 )
         //     cout << "current=" << current->index.transpose() << endl;
@@ -208,13 +281,14 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
 
                     neighborPtr->rounds = rounds_;
 
-                    if (checkOccupancy(Index2Coord(neighborPtr->index)))
-                    {
+                    const auto multiplier = edgeMultiplier(
+                        Index2Coord(current->index), Index2Coord(neighborPtr->index));
+                    if (!multiplier) {
                         continue;
                     }
 
                     double static_cost = sqrt(dx * dx + dy * dy + dz * dz);
-                    tentative_gScore = current->gScore + static_cost;
+                    tentative_gScore = current->gScore + static_cost * *multiplier;
 
                     if (!flag_explored)
                     {
@@ -223,19 +297,20 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
-                        openSet_.push(neighborPtr); //put neighbor in open set and record it.
+                        openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
                     else if (tentative_gScore < neighborPtr->gScore)
                     { //in open set and need update
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
+                        openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
                 }
         rclcpp::Time time_2 = rclcpp::Clock().now();
-        if ((time_2 - time_1).seconds() > 0.2)
+        if ((time_2 - time_1).seconds() > (planning_query_ ? 1.0 : 0.2))
         {
-            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
+            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "A* time budget exceeded");
             return false;
         }
     }

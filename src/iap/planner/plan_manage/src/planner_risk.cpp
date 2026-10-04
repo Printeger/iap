@@ -16,6 +16,10 @@ iap::CurrentIntegrityState currentFromMsg(
   iap::CurrentIntegrityState current;
   current.stamp = stampToSec(msg.header.stamp);
   current.estimation_frame_id = msg.estimation_frame_id;
+  current.current_motion_quality = msg.current_motion_quality;
+  current.current_motion_error_proxy_m = msg.current_motion_error_proxy_m;
+  current.current_external_support_age_s = msg.current_external_support_age_s;
+  current.current_motion_reason = msg.current_motion_reason;
   current.gnss_valid = msg.gnss_valid;
   current.gnss_hpl = msg.gnss_hpl;
   current.gnss_vpl = msg.gnss_vpl;
@@ -57,7 +61,11 @@ iap::CurrentIntegrityState currentFromMsg(
                                     msg.excluded_trunk_ids.end());
   current.n_trunks_observed = msg.n_trunks_observed;
   current.tdop = msg.tdop;
-  current.valid = std::isfinite(current.hpl) && std::isfinite(current.vpl) &&
+  // The source-max monitor PL is diagnostic. Only the same-frame FGO motion
+  // assessment supplies the operational current-valid flag.
+  current.valid = current.current_motion_quality != 0 &&
+                  std::isfinite(current.current_motion_error_proxy_m) &&
+                  std::isfinite(current.hpl) && std::isfinite(current.vpl) &&
                   std::isfinite(current.hal) && std::isfinite(current.val) &&
                   std::isfinite(current.im);
   return current;
@@ -67,6 +75,37 @@ iap::CurrentIntegrityState currentFromMsg(
 
 void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   risk_validity_s_ = node->declare_parameter("risk/validity_s", 0.5);
+  planning_risk_policy_.hpl_budget_m = node->declare_parameter("planning/advisory_hpl_budget_m", 0.55);
+  planning_risk_policy_.vpl_budget_m = node->declare_parameter("planning/advisory_vpl_budget_m", 0.60);
+  planning_risk_policy_.reserve_h_m = node->declare_parameter("planning/advisory_hpl_reserve_m", 0.10);
+  planning_risk_policy_.reserve_v_m = node->declare_parameter("planning/advisory_vpl_reserve_m", 0.10);
+  planning_risk_policy_.unknown_multiplier = node->declare_parameter("planning/advisory_unknown_multiplier", 1.5);
+  planning_risk_policy_.stale_soft_seconds = node->declare_parameter("planning/advisory_stale_soft_s", 1.0);
+  motion_body_radius_m_ = node->declare_parameter("planning/body_radius_m", 0.35);
+  motion_tracking_reserve_m_ = node->declare_parameter("planning/tracking_reserve_m", 0.10);
+  motion_budget_m_ = node->declare_parameter("planning/current_motion_budget_m", 0.55);
+  motion_max_age_s_ = node->declare_parameter("planning/current_motion_max_age_s", 0.5);
+  environment_max_age_s_ = node->declare_parameter("planning/environment_max_age_s", 0.5);
+  if (!std::isfinite(planning_risk_policy_.hpl_budget_m) ||
+      !std::isfinite(planning_risk_policy_.vpl_budget_m) ||
+      planning_risk_policy_.hpl_budget_m <= 0.0 ||
+      planning_risk_policy_.vpl_budget_m <= 0.0 ||
+      !std::isfinite(planning_risk_policy_.reserve_h_m) ||
+      !std::isfinite(planning_risk_policy_.reserve_v_m) ||
+      planning_risk_policy_.reserve_h_m < 0.0 ||
+      planning_risk_policy_.reserve_v_m < 0.0 ||
+      planning_risk_policy_.reserve_h_m >= planning_risk_policy_.hpl_budget_m ||
+      planning_risk_policy_.reserve_v_m >= planning_risk_policy_.vpl_budget_m ||
+      !std::isfinite(planning_risk_policy_.unknown_multiplier) ||
+      planning_risk_policy_.unknown_multiplier < 1.0 ||
+      !std::isfinite(planning_risk_policy_.stale_soft_seconds) ||
+      planning_risk_policy_.stale_soft_seconds <= 0.0 ||
+      !std::isfinite(motion_body_radius_m_) || motion_body_radius_m_ <= 0.0 ||
+      !std::isfinite(motion_tracking_reserve_m_) || motion_tracking_reserve_m_ < 0.0 ||
+      !std::isfinite(motion_budget_m_) || motion_budget_m_ <= 0.0 ||
+      !std::isfinite(motion_max_age_s_) || motion_max_age_s_ <= 0.0 ||
+      !std::isfinite(environment_max_age_s_) || environment_max_age_s_ <= 0.0)
+    throw std::invalid_argument("invalid experimental planning motion/advisory parameters");
   if (!std::isfinite(risk_validity_s_) || risk_validity_s_ <= 0.0)
     throw std::invalid_argument("risk/validity_s must be positive");
   const auto source = node->declare_parameter<std::string>("risk/source", "fusion");
@@ -265,22 +304,105 @@ uint64_t EGOPlannerManager::beginRiskQuery() {
     for (auto& sat : epoch->sats) sat.excluded = sat.excluded || excluded.count(sat.sat_id);
     input.gnss_epoch = &*epoch;
   }
-  // Advisory approximation retained from the existing predictor binding:
-  // convert the current PL to a diagonal position prior using its K factors.
+  // Advisory approximation: use the same-frame FGO posterior error proxy as
+  // a diagonal position prior. The source-max monitor PL is not a fused
+  // posterior and must not be interpreted as one.
   Eigen::Matrix3d prior = Eigen::Matrix3d::Zero();
-  if (current_integrity_.valid && current_integrity_.hpl > 0 && current_integrity_.vpl > 0) {
-    prior.diagonal() << std::pow(5.0 / current_integrity_.hpl, 2),
-                        std::pow(5.0 / current_integrity_.hpl, 2),
-                        std::pow(5.0 / current_integrity_.vpl, 2);
+  if (current_integrity_.valid &&
+      current_integrity_.current_motion_error_proxy_m > 0) {
+    const double information = std::pow(
+        3.0 / current_integrity_.current_motion_error_proxy_m, 2);
+    prior.diagonal().setConstant(information);
     input.lambda_base_pos = &prior;
   }
   return bindRiskPrediction(iap::IntegritySnapshotBuilder().build_from_latest(input), now);
+}
+
+GridMotionContext EGOPlannerManager::currentMotionContext(
+    const bool allow_bridged) const {
+  GridMotionContext motion;
+  const double odom_age_s = risk_odom_
+      ? node_->now().seconds() - stampToSec(risk_odom_->header.stamp)
+      : std::numeric_limits<double>::infinity();
+  motion.quality = risk_frame_valid_ && risk_odom_ &&
+      risk_odom_->header.frame_id == grid_map_->getFrameId() &&
+      odom_age_s >= 0.0 && odom_age_s <= motion_max_age_s_
+      ? current_integrity_.current_motion_quality : 0;
+  motion.allow_bridged = allow_bridged;
+  motion.stamp_s = current_integrity_.stamp;
+  motion.error_proxy_m = current_integrity_.current_motion_error_proxy_m;
+  motion.body_radius_m = motion_body_radius_m_;
+  motion.tracking_reserve_m = motion_tracking_reserve_m_;
+  motion.motion_budget_m = motion_budget_m_;
+  motion.max_motion_age_s = motion_max_age_s_;
+  motion.max_environment_age_s = environment_max_age_s_;
+  return motion;
+}
+
+EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
+    const UniformBspline& trajectory, const uint64_t risk_version,
+    const double now_s, const bool allow_bridged, const double from_time_s,
+    const double to_time_s) {
+  TrajectoryAssessment assessment;
+  auto curve = trajectory;
+  const double duration = curve.getTimeSum();
+  const double end = std::min(duration, to_time_s);
+  const auto motion = currentMotionContext(allow_bridged);
+  const double step = std::min(0.02, grid_map_->getResolution() /
+                                      (2.0 * std::max(0.1, pp_.max_vel_)));
+  for (double t = std::clamp(from_time_s, 0.0, duration);
+       t <= end + step / 2.0; t += step) {
+    const auto p = curve.evaluateDeBoorT(std::min(t, end));
+    const auto cell = grid_map_->queryPlanningCell(
+        p, risk_version, now_s, planning_risk_policy_, motion);
+    ++assessment.sampled_points;
+    if (!cell.executable() && assessment.executable()) {
+      assessment.execution_reason = cell.execution_reason;
+      assessment.first_execution_time_s = t;
+    }
+    if (!cell.executable()) continue;
+    const auto cls = cell.advisory.classification;
+    if (cls == GridAdvisoryClass::AVOID ||
+        cls == GridAdvisoryClass::PREDICTED_DEGRADED) {
+      ++assessment.advisory_avoid_samples;
+      if (!std::isfinite(assessment.first_advisory_time_s))
+        assessment.first_advisory_time_s = t;
+    } else if (cls == GridAdvisoryClass::UNKNOWN ||
+               cls == GridAdvisoryClass::STALE_REFERENCE) {
+      ++assessment.advisory_unknown_samples;
+    }
+  }
+  return assessment;
+}
+
+EGOPlannerManager::TrajectoryAssessment
+EGOPlannerManager::assessRemainingTrajectory(const double now_s) {
+  if (local_data_.start_time_.seconds() <= 0.0)
+    return {};
+  // The physical/current check runs at the FSM supervision rate. A full
+  // predictor binding is limited to about 1 Hz so it cannot occupy every
+  // 200 ms safety callback; omitted rounds treat advisory as unknown only.
+  uint64_t version = 0;
+  if (now_s - last_runtime_advisory_query_s_ >= 1.0) {
+    last_runtime_advisory_query_s_ = now_s;
+    version = beginRiskQuery();
+  }
+  const double elapsed = now_s - local_data_.start_time_.seconds();
+  double end = std::numeric_limits<double>::infinity();
+  if (current_integrity_.current_motion_quality == 2) {
+    const double remaining_bridge = std::max(0.0,
+        1.0 - current_integrity_.current_external_support_age_s);
+    end = elapsed + remaining_bridge;
+  }
+  return assessTrajectory(local_data_.position_traj_, version, now_s,
+                          true, elapsed, end);
 }
 
 uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
                                              const double now) {
   GridRiskContext context;
   context.reference_time_s = now;
+  context.reference_position = snapshot.p_wb;
   context.frame_id = grid_map_->getFrameId();
   const auto occupancy = grid_map_->captureFrozenExecutionOccupancyEpoch();
   if (!occupancy) {
@@ -338,6 +460,8 @@ uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& sna
       voxel.status = GridRiskStatus::VALID;
       voxel.hpl = result.fused.hpl;
       voxel.vpl = result.fused.vpl;
+    } else if (result.fallback_reason == "singular_advisory_fim") {
+      voxel.status = GridRiskStatus::PREDICTED_DEGRADED;
     }
     return voxel;
   };

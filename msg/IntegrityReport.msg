@@ -123,3 +123,13 @@ string  failure_reason
 # identity means that no GNSS epoch contributed to this report.
 float64 gnss_epoch_stamp
 uint64  gnss_epoch_identity
+
+# Experimental ability of the current GLIO/FGO estimate to support local
+# motion. This covariance-based diagnostic is not a certified PL.
+uint8 CURRENT_MOTION_INVALID=0
+uint8 CURRENT_MOTION_SUPPORTED=1
+uint8 CURRENT_MOTION_BRIDGED=2
+uint8 current_motion_quality
+float64 current_motion_error_proxy_m
+float64 current_external_support_age_s
+string current_motion_reason

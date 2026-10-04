@@ -108,6 +108,16 @@ namespace ego_planner
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
+    void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
+                          bool advisory_fallback = false) {
+      planning_query_ = std::move(query);
+      planning_advisory_fallback_ = advisory_fallback;
+      initialization_failed_ = false;
+      guide_tracking_ = false;
+      if (a_star_) a_star_->setPlanningQuery(planning_query_, advisory_fallback);
+    }
+    bool initializationFailed() const { return initialization_failed_; }
+    bool advisoryFallbackUsed() const { return planning_advisory_fallback_; }
     void setWaypoints(const vector<Eigen::Vector3d> &waypts,
                       const vector<int> &waypt_idx); // N-2 constraints at most
     void setLocalTargetPt(const Eigen::Vector3d local_target_pt) { local_target_pt_ = local_target_pt; };
@@ -130,6 +140,19 @@ namespace ego_planner
 
   private:
     GridMap::Ptr grid_map_;
+    std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
+    bool planning_advisory_fallback_ = false;
+    bool initialization_failed_ = false;
+    bool guide_tracking_ = false;
+    bool planningOccupied(const Eigen::Vector3d& position) const {
+      if (!planning_query_) return grid_map_->getInflateOccupancy(position) != 0;
+      const auto cell = planning_query_(position);
+      if (!cell.executable()) return true;
+      const auto cls = cell.advisory.classification;
+      return !planning_advisory_fallback_ &&
+          (cls == GridAdvisoryClass::AVOID ||
+           cls == GridAdvisoryClass::PREDICTED_DEGRADED);
+    }
     fast_planner::ObjPredictor::Ptr moving_objs_;
     SwarmTrajData *swarm_trajs_{NULL}; // Can not use shared_ptr and no need to free
     int drone_id_;
