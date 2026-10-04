@@ -126,6 +126,7 @@ void EGOPlannerManager::publishRiskSlice() {
   uint64_t version = 0;
   size_t valid = 0, invalid = 0;
   double slice_z = risk_viz_fixed_z_m_;
+  double binding_ms = 0.0;
 
   if (!risk_odom_) {
     reason = "waiting for GLIO odometry";
@@ -146,9 +147,11 @@ void EGOPlannerManager::publishRiskSlice() {
         grid_map_->indexToPos(z_index, z_center);
         slice_z = z_center.z();
         version = beginRiskQuery();
+        const auto sample_started = std::chrono::steady_clock::now();
+        binding_ms = std::chrono::duration<double, std::milli>(sample_started - started).count();
         for (int ix = 0; ix < 10 && reason.empty() && !truncated; ++ix) {
           for (int iy = 0; iy < 10; ++iy) {
-            if (std::chrono::steady_clock::now() - started >= std::chrono::milliseconds(20)) {
+            if (std::chrono::steady_clock::now() - sample_started >= std::chrono::milliseconds(20)) {
               truncated = true;
               break;
             }
@@ -206,7 +209,8 @@ void EGOPlannerManager::publishRiskSlice() {
         << " [m] v=" << version << " t=" << std::fixed << std::setprecision(2)
         << now << " z=" << slice_z << " valid=" << valid << "/"
         << (valid + invalid) << " incomplete=" << (truncated ? "yes" : "no")
-        << " cost=" << std::setprecision(1) << elapsed_ms << "ms";
+        << " cost=" << std::setprecision(1) << elapsed_ms << "ms"
+        << " bind=" << binding_ms << "ms";
   if (current_integrity_.valid)
     label << " monitor_state=" << static_cast<int>(current_integrity_.integrity_state)
           << " monitor_HPL/VPL=" << current_integrity_.hpl << "/"

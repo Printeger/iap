@@ -134,6 +134,8 @@ class EgoPipelineTest(unittest.TestCase):
                 self.assertTrue(metric_future.result().results[0].successful)
                 self.assertTrue(any(" vpl " in m.text for m in risk_statuses))
                 self.assertTrue(risk_clouds)
+                self.assertTrue(all(cloud.width == 0 for cloud in risk_clouds),
+                                "missing monitor input must not be shown as valid PL")
                 self.assertEqual({f.name for f in risk_clouds[-1].fields},
                                  {"x","y","z","rgb","hpl","vpl","status"})
                 self.assertTrue(displayed_curves)
@@ -166,6 +168,8 @@ class EgoPipelineTest(unittest.TestCase):
                     except subprocess.TimeoutExpired: p.kill(); p.wait()
                 for log in logs: log.close()
                 node.destroy_node(); rclpy.shutdown()
+                self.assertTrue(all(p.returncode == 0 for p in processes),
+                                f"planner/server shutdown codes: {[p.returncode for p in processes]}")
 
 
 if __name__ == "__main__":

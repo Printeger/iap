@@ -6,6 +6,13 @@
 #include "visualization_msgs/msg/marker.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <algorithm>
+#include <csignal>
+#include <thread>
+
+namespace {
+volatile std::sig_atomic_t stop_requested = 0;
+void requestStop(int) { stop_requested = 1; }
+}
 
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
 rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr trajectory_curve_pub;
@@ -262,7 +269,11 @@ void cmdCallback()
 
 int main(int argc, char **argv)
 {
-  rclcpp::init(argc, argv);
+  // Finish the active callback before shutting down the ROS context. The
+  // default signal handler can close the publisher during a 100 Hz command.
+  rclcpp::init(argc, argv, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, requestStop);
+  std::signal(SIGTERM, requestStop);
   auto node = rclcpp::Node::make_shared("traj_server");
   server_node = node;
   command_frame = node->declare_parameter<std::string>("frame_id", "map");
@@ -301,7 +312,19 @@ int main(int argc, char **argv)
 
   RCLCPP_WARN(node->get_logger(), "[Traj server]: ready.");
 
-  rclcpp::spin(node);
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  while (!stop_requested && rclcpp::ok()) {
+    executor.spin_some();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  executor.remove_node(node);
+  cmd_timer.reset();
+  bspline_sub.reset();
+  pos_cmd_pub.reset();
+  trajectory_curve_pub.reset();
+  server_node.reset();
+  node.reset();
   rclcpp::shutdown();
 
   return 0;
