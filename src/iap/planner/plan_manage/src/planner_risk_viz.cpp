@@ -116,7 +116,7 @@ void appendSurfaceTriangle(visualization_msgs::msg::Marker& marker,
   for (const SlicePoint* sample : {&a, &b, &c}) {
     marker.points.push_back(markerPoint(sample->center, -0.025));
     const double value = metric == "hpl" ? sample->risk.hpl : sample->risk.vpl;
-    marker.colors.push_back(markerColor(riskColor(value, minimum, maximum), 0.72f));
+    marker.colors.push_back(markerColor(riskColor(value, minimum, maximum), 0.42f));
   }
 }
 
@@ -136,11 +136,12 @@ bool freeSurfaceCell(GridMap& map, const SlicePoint& a, const SlicePoint& b,
 visualization_msgs::msg::MarkerArray makeSurface(
     const std::array<const SlicePoint*, 100>& lattice, GridMap& map,
     const std::string& frame, const rclcpp::Time& stamp,
-    const std::string& metric, double minimum, double maximum) {
-  auto surface = markerBase(frame, stamp, "risk_current_surface", 0,
-                            visualization_msgs::msg::Marker::TRIANGLE_LIST, 1.5);
+    const std::string& metric, double minimum, double maximum,
+    int surface_id, double lifetime_s) {
+  auto surface = markerBase(frame, stamp, "risk_surface", surface_id,
+                            visualization_msgs::msg::Marker::TRIANGLE_LIST, lifetime_s);
   surface.scale.x = surface.scale.y = surface.scale.z = 1.0;
-  surface.color.a = 0.72;
+  surface.color.a = 0.42;
   auto lines = markerBase(frame, stamp, "risk_sample_grid", 1,
                           visualization_msgs::msg::Marker::LINE_LIST, 1.5);
   lines.scale.x = 0.012;
@@ -186,7 +187,7 @@ void appendBarVertex(visualization_msgs::msg::Marker& marker,
 visualization_msgs::msg::MarkerArray makeLegend(
     const std::string& frame, const rclcpp::Time& stamp,
     const Eigen::Vector3d& corner, const std::string& metric,
-    double minimum, double maximum, double history_s) {
+    double minimum, double maximum, double retention_s) {
   visualization_msgs::msg::MarkerArray array;
   auto bar = markerBase(frame, stamp, "risk_legend", 0,
                         visualization_msgs::msg::Marker::TRIANGLE_LIST, 1.5);
@@ -230,8 +231,8 @@ visualization_msgs::msg::MarkerArray makeLegend(
   title.color = markerColor(0xffffffu, 1.0f);
   std::ostringstream text;
   text << (metric == "hpl" ? "HPL" : "VPL")
-       << ": dots predicted, surface interpolated, faded past "
-       << std::fixed << std::setprecision(0) << history_s << " s";
+       << ": dots predicted, surface interpolated, persists "
+       << std::fixed << std::setprecision(0) << retention_s << " s";
   title.text = text.str();
   array.markers.push_back(std::move(title));
   return array;
@@ -248,8 +249,8 @@ void EGOPlannerManager::initRiskVisualization(const rclcpp::Node::SharedPtr& nod
   risk_viz_hpl_max_m_ = node->declare_parameter("risk_viz/hpl_max_m", 0.65);
   risk_viz_vpl_min_m_ = node->declare_parameter("risk_viz/vpl_min_m", 0.20);
   risk_viz_vpl_max_m_ = node->declare_parameter("risk_viz/vpl_max_m", 0.55);
-  risk_viz_history_lifetime_s_ = node->declare_parameter("risk_viz/history_lifetime_s", 60.0);
-  risk_viz_history_step_m_ = node->declare_parameter("risk_viz/history_step_m", 4.0);
+  risk_viz_surface_lifetime_s_ = node->declare_parameter("risk_viz/surface_lifetime_s", 60.0);
+  risk_viz_surface_snapshot_step_m_ = node->declare_parameter("risk_viz/surface_snapshot_step_m", 4.0);
   if ((risk_viz_metric_ != "hpl" && risk_viz_metric_ != "vpl") ||
       (risk_viz_z_mode_ != "follow" && risk_viz_z_mode_ != "fixed") ||
       !std::isfinite(risk_viz_fixed_z_m_) ||
@@ -259,15 +260,14 @@ void EGOPlannerManager::initRiskVisualization(const rclcpp::Node::SharedPtr& nod
       !std::isfinite(risk_viz_vpl_min_m_) ||
       !std::isfinite(risk_viz_vpl_max_m_) ||
       risk_viz_vpl_max_m_ <= risk_viz_vpl_min_m_ ||
-      !std::isfinite(risk_viz_history_lifetime_s_) || risk_viz_history_lifetime_s_ <= 0.0 ||
-      !std::isfinite(risk_viz_history_step_m_) || risk_viz_history_step_m_ <= 0.0)
-    throw std::invalid_argument("risk_viz parameters require hpl/vpl, follow/fixed and finite display/history ranges");
+      !std::isfinite(risk_viz_surface_lifetime_s_) || risk_viz_surface_lifetime_s_ <= 0.0 ||
+      !std::isfinite(risk_viz_surface_snapshot_step_m_) || risk_viz_surface_snapshot_step_m_ <= 0.0)
+    throw std::invalid_argument("risk_viz parameters require hpl/vpl, follow/fixed and finite display/surface ranges");
   if (!risk_viz_enabled_) return;
 
   risk_slice_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("grid_map/risk_slice", 1);
   risk_status_pub_ = node->create_publisher<visualization_msgs::msg::Marker>("grid_map/risk_status", 1);
   risk_surface_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>("grid_map/risk_surface", 1);
-  risk_history_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>("grid_map/risk_history", 1);
   risk_legend_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>("grid_map/risk_legend", 1);
   glio_path_pub_ = node->create_publisher<nav_msgs::msg::Path>("grid_map/glio_path", 1);
   risk_viz_param_callback_ = node->add_on_set_parameters_callback(
@@ -286,7 +286,7 @@ void EGOPlannerManager::initRiskVisualization(const rclcpp::Node::SharedPtr& nod
         for (const auto& param : params)
           if (param.get_name() == "risk_viz/metric" && risk_viz_metric_ != param.as_string()) {
             risk_viz_metric_ = param.as_string();
-            risk_history_clear_pending_ = true;
+            risk_surface_clear_pending_ = true;
           }
         return result;
       });
@@ -397,49 +397,43 @@ void EGOPlannerManager::publishRiskSlice() {
                                      risk_viz_vpl_min_m_, risk_viz_vpl_max_m_));
   const double minimum = risk_viz_metric_ == "hpl" ? risk_viz_hpl_min_m_ : risk_viz_vpl_min_m_;
   const double maximum = risk_viz_metric_ == "hpl" ? risk_viz_hpl_max_m_ : risk_viz_vpl_max_m_;
-  auto surface = makeSurface(lattice, *grid_map_, frame, stamp,
-                             risk_viz_metric_, minimum, maximum);
-  const size_t tiles = surface.markers.front().points.size() / 6;
-  risk_surface_pub_->publish(surface);
-
-  if (!reason.empty() || valid == 0 || risk_history_clear_pending_) {
-    visualization_msgs::msg::MarkerArray clear;
-    auto marker = markerBase(frame, stamp, "risk_history", 0,
+  const bool clear_surface = !reason.empty() || valid == 0 || risk_surface_clear_pending_;
+  visualization_msgs::msg::MarkerArray surface_update;
+  if (clear_surface) {
+    auto marker = markerBase(frame, stamp, "risk_surface", 0,
                              visualization_msgs::msg::Marker::TRIANGLE_LIST, 0.0);
     marker.action = visualization_msgs::msg::Marker::DELETEALL;
-    clear.markers.push_back(marker);
-    risk_history_pub_->publish(clear);
-    last_history_position_ = Eigen::Vector3d::Constant(
+    surface_update.markers.push_back(std::move(marker));
+    risk_surface_anchor_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
-    risk_history_clear_pending_ = false;
+    risk_surface_clear_pending_ = false;
   }
-  if (tiles > 0 && risk_odom_ &&
-      risk_odom_->header.frame_id == frame &&
-      std::isfinite(risk_odom_->pose.pose.position.x) &&
-      std::isfinite(risk_odom_->pose.pose.position.y)) {
+  size_t tiles = 0;
+  if (reason.empty() && valid > 0 && risk_odom_) {
     const auto& position = risk_odom_->pose.pose.position;
     Eigen::Vector3d current(position.x, position.y, slice_z);
-    if (!last_history_position_.allFinite() ||
-        (current.head<2>() - last_history_position_.head<2>()).norm() >=
-            risk_viz_history_step_m_) {
-      auto past = surface.markers.front();
-      past.ns = "risk_history";
-      past.id = ++risk_history_id_;
-      past.lifetime = rclcpp::Duration::from_seconds(risk_viz_history_lifetime_s_);
-      past.color.a = 0.18;
-      for (auto& color : past.colors) color.a = 0.18f;
-      visualization_msgs::msg::MarkerArray history;
-      history.markers.push_back(std::move(past));
-      risk_history_pub_->publish(history);
-      last_history_position_ = current;
+    const bool new_snapshot = !risk_surface_anchor_.allFinite() ||
+        (current.head<2>() - risk_surface_anchor_.head<2>()).norm() >=
+            risk_viz_surface_snapshot_step_m_;
+    const int surface_id = risk_surface_id_ + (new_snapshot ? 1 : 0);
+    auto surface = makeSurface(lattice, *grid_map_, frame, stamp,
+                               risk_viz_metric_, minimum, maximum,
+                               surface_id, risk_viz_surface_lifetime_s_);
+    tiles = surface.markers.front().points.size() / 6;
+    if (tiles > 0 && new_snapshot) {
+      risk_surface_id_ = surface_id;
+      risk_surface_anchor_ = current;
     }
+    for (auto& marker : surface.markers)
+      surface_update.markers.push_back(std::move(marker));
   }
+  risk_surface_pub_->publish(surface_update);
   if (risk_odom_ && std::isfinite(risk_odom_->pose.pose.position.x) &&
       std::isfinite(risk_odom_->pose.pose.position.y)) {
     const auto& position = risk_odom_->pose.pose.position;
     const Eigen::Vector3d corner(position.x - 4.7, position.y - 5.2, slice_z + 0.08);
     risk_legend_pub_->publish(makeLegend(frame, stamp, corner, risk_viz_metric_,
-                                          minimum, maximum, risk_viz_history_lifetime_s_));
+                                          minimum, maximum, risk_viz_surface_lifetime_s_));
   }
   const double elapsed_ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - started).count();

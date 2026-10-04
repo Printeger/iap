@@ -68,8 +68,8 @@ def planner_parameters(scenario):
         "risk_viz/hpl_max_m": 0.65,
         "risk_viz/vpl_min_m": 0.20,
         "risk_viz/vpl_max_m": 0.55,
-        "risk_viz/history_lifetime_s": 60.0,
-        "risk_viz/history_step_m": 4.0,
+        "risk_viz/surface_lifetime_s": 60.0,
+        "risk_viz/surface_snapshot_step_m": 4.0,
     }
     for i, axis in enumerate("xyz"):
         params[f"grid_map/map_size_{axis}"] = size[i]

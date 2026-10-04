@@ -303,7 +303,7 @@ ros2 param set /drone_0_ego_planner_node risk_viz/metric vpl
 ros2 param set /drone_0_ego_planner_node risk_viz/metric hpl
 ```
 
-点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；当前插值面、淡色历史和带米数刻度的图例在 `/grid_map/risk_surface`、`/grid_map/risk_history`、`/grid_map/risk_legend`。状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`，白色连续轨迹在 `/grid_map/glio_path`。HPL 默认色标 0.25–0.65 m、VPL 0.20–0.55 m，采用蓝、青、黄、红连续色带；这些只是显示范围，可在 planner 启动参数调整。小点是实际预测，面内颜色仅是显示插值，不会写回 GridMap 或用于规划。单点预测无效显示紫色，预测上下文过期或坐标不匹配会删除当前与历史风险面。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。仿真的物理占据和膨胀点云以 `grid_map/visualization_period_s=1.0` 发布供 RViz 留存，地图更新和规划查询仍使用原频率。
+点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；RViz 还显示 `/iap/local_map/current_hits_map` 中 GLIO 注册到 `map` 坐标的最新 LiDAR 帧，显示留存仅 0.2 秒，停止输入后自动消失。PL 插值面统一发布到 `/grid_map/risk_surface`：RViz 的 MarkerArray 没有 PointCloud2 的 Decay Time 属性，规划器通过 marker 的 60 秒 lifetime 留存经过区域，每移动约 4 m 固定一幅面，相近位置的更新覆盖同一个 marker，避免重复叠加。带米数刻度的图例在 `/grid_map/risk_legend`，状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`，白色连续轨迹在 `/grid_map/glio_path`。HPL 默认色标 0.25–0.65 m、VPL 0.20–0.55 m，采用蓝、青、黄、红连续色带；这些只是显示范围，可在 planner 启动参数调整。小点是实际预测，面内颜色仅是显示插值，不会写回 GridMap 或用于规划。单点预测无效显示紫色，预测上下文过期、坐标不匹配或 HPL/VPL 切换会清除留存面。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。仿真的物理占据和膨胀点云以 `grid_map/visualization_period_s=1.0` 发布供 RViz 留存，地图更新和规划查询仍使用原频率。
 
 `risk_status` 同时显示 Current Integrity Monitor 的状态与 HPL/VPL。Advisory 空间 PL 只是冻结时刻的预测：当前监测报告 `UNSAFE` 时，即使切片有有效颜色，也不能据此认定当前定位或轨迹安全。状态中的 `cost` 是整轮耗时，`bind` 是冻结输入和预测器准备耗时；逐点采样另受 20 ms 预算限制。
 

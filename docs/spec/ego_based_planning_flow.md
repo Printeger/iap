@@ -64,8 +64,10 @@ flowchart TD
     Inputs --> Map[GridMap 共用索引与占据/膨胀：已实现]
     Predictor[真实 PredictorModule：已接入] --> Risk[同索引空间 HPL/VPL 缓存：已实现]
     Map --> Risk
-    Risk --> Viz[真实PL点、当前插值面与淡色历史：可视化层]
+    Risk --> Viz[真实PL点、单话题60秒留存面：可视化层]
     Map --> Viz
+    Inputs --> CurrentFrame[注册当前帧点云：已接入]
+    CurrentFrame --> Viz
     FSM -.->|冻结输入并查询 PL，暂不影响路线| Risk
     Map --> FSM[FSM 规划触发：EGO 基线]
     FSM --> Target[全局参考选局部目标：EGO 基线]
@@ -156,7 +158,8 @@ flowchart TD
 - `risk_viz/enabled=true` 时，manager 独立于规划目标每秒冻结一次预测上下文，在无人机附近 10×10 m、高度吸附至原 GridMap 体素中心的水平层，最多查询 100 个、间距约 1 m 的格子；同轮使用同一版本和原 `queryRisk()`，绑定上下文后给逐点采样 20 ms 预算。绑定开销另计并显示为 bind，整轮耗时显示为 cost；超采样预算只显示已算点并明确标为 incomplete。
 - `/grid_map/occupancy`、`/grid_map/occupancy_inflate` 继续表示物理层；注册点云模式的原始占据可视化读取其真实 raw-cloud buffer。`/grid_map/risk_slice` 为 PointCloud2，字段 `x,y,z,rgb,hpl,vpl,status`，有效 PL 由固定色标着色；无效预测为紫色，未计算不伪造值。上下文过期、版本变化或坐标错误发布空切片。
 - `/grid_map/risk_status` 是 TEXT_VIEW_FACING Marker，显示版本、冻结时间、切片高度、有效样本比例、实际插值面格数、耗时、当前监测 HPL/VPL 与原因；文字明确标注 frozen spatial PL。默认 HPL 显示范围 0.25–0.65 m、VPL 0.20–0.55 m，蓝、青、黄、红色带仅为可视化范围，不是安全阈值；`/grid_map/risk_legend` 在切片角落给出米数刻度。
-- `/grid_map/risk_surface` 从同一轮至多 100 个真实 PL 点生成半透明三角面，只在四角预测均有效且同版本、格子采样点未被物理膨胀障碍占据时显示。面内颜色为**视觉插值**，不写入 `risk_buffer_`、不参与规划或有效性判断；原 `/grid_map/risk_slice` 保留真实样本点。`/grid_map/risk_history` 每移动约 4 m 留下一幅低透明度历史面，默认寿命 60 秒，表示旧参考时刻而非当前预测。无有效 PL、预测上下文错误或色标指标切换时清除历史面；当前面每轮覆盖或删除。RViz 物理占据显示的 20 秒 Decay Time 同样只是显示历史，不改变 GridMap 物理层。仿真中原始和膨胀点云发布周期为 1 秒（`grid_map/visualization_period_s`）；仅可视化发布降频，地图更新与规划查询不降频，以免 20 秒重复三维方块耗尽 RViz 内存。
+- `/grid_map/risk_surface` 从同一轮至多 100 个真实 PL 点生成半透明三角面，只在四角预测均有效且同版本、格子采样点未被物理膨胀障碍占据时显示。面内颜色为**视觉插值**，不写入 `risk_buffer_`、不参与规划或有效性判断；原 `/grid_map/risk_slice` 保留真实样本点。风险面只有这一条 MarkerArray 话题：marker 的 lifetime 为 60 秒，相距约 4 m 的空间片段用不同 ID 留存，同一区域新结果覆盖同一 ID，避免持续叠加。RViz 的 MarkerArray 没有 Decay Time 属性；画面中的旧面只表示过去冻结时刻的显示结果。无有效 PL、预测上下文错误或色标指标切换时向同一话题发 DELETEALL，清除全部留存面。RViz 物理占据显示的 20 秒 Decay Time 同样只是显示历史，不改变 GridMap 物理层。仿真中原始和膨胀点云发布周期为 1 秒（`grid_map/visualization_period_s`）；仅可视化发布降频，地图更新与规划查询不降频，以免 20 秒重复三维方块耗尽 RViz 内存。
+- 仿真 GLIO 注册当前帧已按 `publish_current_hits_map=true` 发布 `/iap/local_map/current_hits_map`（`map` 坐标、PointCloud2、SensorDataQoS）。RViz 以浅青色点显示最新约 0.2 秒的帧，输入停止后点云消失，独立于累计障碍层；它不改变 GridMap 的占据或 PL 数据。
 - `risk_viz/metric` 默认 `hpl`，可在 planner 运行时设成 `vpl`，下次切片更新颜色；`risk_viz/z_mode=follow|fixed` 与 `risk_viz/fixed_z_m` 在启动时选择高度。`traj_server` 在 `/planning/trajectory_curve` 发布其实际装载 B-spline 的采样青色曲线；`/grid_map/glio_path` 是由 GLIO 里程计生成、最多 500 点的白色连续历史线。
 - 当前风险图始终是某一冻结参考时刻的空间切片，不是未来到达时刻 PL，不影响 EGO 搜索、优化或执行授权。旧风险体素在新版本查询时不会作为有效数据返回。
 - 首次 `fused_nominal` 闭环暴露随机森林树干直接穿过起飞点（真值地图最近障碍仅 0.089 m），造成 EGO 起始控制点碰撞。仿真随机森林现在只在起点和目标周围各留 1 m 圆形空间，保留中途树木与物理绕障任务；这属于场景输入修正，不改变 EGO 碰撞规则。

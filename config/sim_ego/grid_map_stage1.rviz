@@ -26,6 +26,18 @@ Visualization Manager:
       Alpha: 1
       Decay Time: 20
     - Class: rviz_default_plugins/PointCloud2
+      Name: GLIO registered current LiDAR frame
+      Enabled: true
+      Topic:
+        Reliability Policy: Best Effort
+        Value: /iap/local_map/current_hits_map
+      Style: Flat Squares
+      Size (m): 0.06
+      Color Transformer: FlatColor
+      Color: 126; 238; 211
+      Alpha: 0.9
+      Decay Time: 0.2
+    - Class: rviz_default_plugins/PointCloud2
       Name: GridMap inflated obstacles (optional)
       Enabled: false
       Topic:
@@ -48,16 +60,10 @@ Visualization Manager:
       Alpha: 0.9
       Decay Time: 0
     - Class: rviz_default_plugins/MarkerArray
-      Name: Current PL surface (visual interpolation)
+      Name: PL surface (up to 60 s)
       Enabled: true
       Topic:
         Value: /grid_map/risk_surface
-      Queue Size: 10
-    - Class: rviz_default_plugins/MarkerArray
-      Name: Past PL surfaces (up to 60 s)
-      Enabled: true
-      Topic:
-        Value: /grid_map/risk_history
       Queue Size: 10
     - Class: rviz_default_plugins/MarkerArray
       Name: PL color legend in metres

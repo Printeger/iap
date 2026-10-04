@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import yaml
 from launch import LaunchContext
 
 
@@ -76,7 +77,8 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertLess(params["risk_viz/hpl_max_m"], 1.0)
             self.assertEqual(params["risk_viz/vpl_min_m"], 0.20)
             self.assertEqual(params["risk_viz/vpl_max_m"], 0.55)
-            self.assertEqual(params["risk_viz/history_lifetime_s"], 60.0)
+            self.assertEqual(params["risk_viz/surface_lifetime_s"], 60.0)
+            self.assertEqual(params["risk_viz/surface_snapshot_step_m"], 4.0)
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)
             for i, axis in enumerate("xyz"):
@@ -100,6 +102,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(local["planning_lattice_resolution_m"],params["grid_map/resolution"])
             self.assertEqual(local["frame_contract_id"],params["grid_map/registered_frame_contract_id"])
             self.assertEqual(local["planning_lattice_extent_m"],catalog["icra_dense_forest_four_fork_v2"]["map_size"])
+            self.assertTrue(local["publish_current_hits_map"])
             self.assertEqual(ros["acc_scale"], 1.0)
             odometry = json.loads((run / "metadata/config/iap/config_odometry.json").read_text())
             self.assertEqual(odometry["odometry_estimation"]["initialization_mode"], "NAIVE")
@@ -125,10 +128,16 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         rviz = (REPO / "config/sim_ego/grid_map_stage1.rviz").read_text()
         for topic in ("/grid_map/occupancy", "/grid_map/occupancy_inflate",
                       "/grid_map/risk_slice", "/grid_map/risk_status",
-                      "/grid_map/risk_surface", "/grid_map/risk_history",
+                      "/grid_map/risk_surface", "/iap/local_map/current_hits_map",
                       "/grid_map/risk_legend", "/grid_map/glio_path",
                       "/planning/trajectory_curve"):
             self.assertIn(topic, rviz)
+        displays = yaml.safe_load(rviz)["Visualization Manager"]["Displays"]
+        current = next(display for display in displays
+                       if display.get("Topic", {}).get("Value") == "/iap/local_map/current_hits_map")
+        self.assertEqual(current["Topic"]["Reliability Policy"], "Best Effort")
+        self.assertEqual(current["Decay Time"], 0.2)
+        self.assertNotIn("/grid_map/risk_history", rviz)
         self.assertNotIn("/map_generator/global_cloud", rviz)
         self.assertNotIn("/iap/rviz/p1_", rviz)
 
