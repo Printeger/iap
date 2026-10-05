@@ -1,10 +1,159 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
 #include <thread>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <cmath>
+#include <iap/util/run_log_manager.hpp>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
 
 namespace ego_planner
 {
+  namespace {
+  std::string clearanceText(const double value) {
+    if (std::isnan(value)) return "not_measured";
+    if (std::isinf(value)) return "no_raw_obstacle_in_scan";
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(3) << value;
+    return out.str();
+  }
+  }
+
+  void EGOPlannerManager::captureFailureMap(
+      const char* kind, const Eigen::Vector3d& point,
+      const Eigen::Vector3d& other, const GridPlanningCell& cell,
+      const AStar::Result* search)
+  {
+    if (!capture_failure_map_) return;
+    if (std::string(kind) == "candidate" && failure_candidate_captured_) return;
+    if (std::string(kind) == "search" && failure_search_captured_) return;
+    auto* artifacts = glim::RunLogManager::get_if_initialized();
+    if (!artifacts) {
+      RCLCPP_ERROR(node_->get_logger(),
+                   "planner failure map capture requires IAP run artifacts");
+      return;
+    }
+    const auto snapshot = grid_map_->captureFailureSnapshot();
+    if (!snapshot || snapshot->generation != cell.occupancy_generation) {
+      RCLCPP_WARN(node_->get_logger(),
+          "planner failure map capture skipped: occupancy generation changed");
+      return;
+    }
+    const std::string leaf(kind);
+    const std::string relative = "planner/failure_map/" + leaf;
+    const auto directory = artifacts->export_path(relative);
+    if (std::filesystem::exists(directory / "snapshot.json")) {
+      if (leaf == "candidate") failure_candidate_captured_ = true;
+      else failure_search_captured_ = true;
+      RCLCPP_INFO(node_->get_logger(),
+          "planner failure map %s already registered for this run; keeping first snapshot",
+          kind);
+      return;
+    }
+    const auto number = [](const double value) {
+      if (!std::isfinite(value)) return std::string("null");
+      std::ostringstream text;
+      text << std::setprecision(17) << value;
+      return text.str();
+    };
+    const auto vector = [&number](const Eigen::Vector3d& value) {
+      return "[" + number(value.x()) + "," + number(value.y()) +
+          "," + number(value.z()) + "]";
+    };
+    try {
+      std::filesystem::create_directories(directory);
+      std::ofstream cells(directory / "cells.bin", std::ios::binary);
+      cells.write(reinterpret_cast<const char*>(snapshot->cell_flags.data()),
+                  snapshot->cell_flags.size());
+      cells.close();
+      if (!cells) throw std::runtime_error("cells.bin write failed");
+      std::ofstream risk(directory / "queried_risk.csv");
+      risk << "address,hpl_m,vpl_m,status,version\n";
+      for (const auto& sample : snapshot->queried_risk)
+        risk << sample.address << ',' << sample.value.hpl << ','
+             << sample.value.vpl << ','
+             << static_cast<unsigned>(sample.value.status) << ','
+             << sample.value.version << '\n';
+      risk.close();
+      if (!risk) throw std::runtime_error("queried_risk.csv write failed");
+      std::ofstream metadata(directory / "snapshot.json");
+      metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v1\",\n"
+          << "  \"kind\": " << std::quoted(leaf) << ",\n"
+          << "  \"frame_id\": " << std::quoted(snapshot->frame_id) << ",\n"
+          << "  \"generation\": " << snapshot->generation << ",\n"
+          << "  \"cloud_stamp_s\": " << number(snapshot->cloud_stamp_s) << ",\n"
+          << "  \"planning_time_s\": " << number(planning_time_s_) << ",\n"
+          << "  \"environment_max_age_s\": "
+          << number(planning_motion_.max_environment_age_s) << ",\n"
+          << "  \"motion_quality\": "
+          << static_cast<unsigned>(planning_motion_.quality) << ",\n"
+          << "  \"origin_m\": " << vector(snapshot->origin) << ",\n"
+          << "  \"dimensions\": [" << snapshot->dimensions.x() << ','
+          << snapshot->dimensions.y() << ',' << snapshot->dimensions.z()
+          << "],\n  \"resolution_m\": " << number(snapshot->resolution_m)
+          << ",\n  \"cell_flags_file\": \"cells.bin\",\n"
+          << "  \"cell_flag_bits\": {\"raw\": 1, \"inflated\": 2, \"observed\": 4},\n"
+          << "  \"risk_version\": " << snapshot->risk_version << ",\n"
+          << "  \"risk_context_matches_map\": "
+          << (snapshot->risk_context_matches_map ? "true" : "false") << ",\n"
+          << "  \"risk_reference_time_s\": "
+          << number(snapshot->risk_reference_time_s) << ",\n"
+          << "  \"risk_valid_until_s\": "
+          << number(snapshot->risk_valid_until_s) << ",\n"
+          << "  \"risk_samples_file\": \"queried_risk.csv\",\n"
+          << "  \"failure_position_m\": " << vector(point) << ",\n"
+          << "  \"other_endpoint_m\": " << vector(other) << ",\n"
+          << "  \"execution_reason\": "
+          << std::quoted(gridExecutionReasonName(cell.execution_reason)) << ",\n"
+          << "  \"required_clearance_m\": " << number(cell.required_clearance_m) << ",\n"
+          << "  \"nearest_raw_center_distance_m\": "
+          << number(cell.raw_center_clearance_m) << ",\n"
+          << "  \"nearest_raw_center_m\": " << vector(cell.nearest_raw_center)
+          << ",\n  \"advisory_class\": "
+          << static_cast<unsigned>(cell.advisory.classification) << ",\n"
+          << "  \"search_failure\": "
+          << (search ? std::string("\"") + AStar::failureName(search->failure) + "\""
+                     : "null") << ",\n"
+          << "  \"search_expanded\": " << (search ? search->expanded : 0)
+          << ",\n  \"search_query_calls\": "
+          << (search ? search->query_calls : 0) << ",\n"
+          << "  \"search_cache_hits\": "
+          << (search ? search->cache_hits : 0) << ",\n"
+          << "  \"search_rejected_execution\": [";
+      for (size_t i = 0; i < 10; ++i)
+        metadata << (i ? "," : "") <<
+            (search ? search->rejected_execution[i] : 0);
+      metadata << "],\n  \"search_rejected_advisory\": "
+               << (search ? search->rejected_advisory : 0) << ",\n"
+               << "  \"search_duration_s\": "
+               << number(search ? search->duration_s : 0.0) << "\n}\n";
+      metadata.close();
+      if (!metadata) throw std::runtime_error("snapshot.json write failed");
+      const auto manifest_path = artifacts->metadata_path(
+          "manifests/planner_failure_map_" + leaf + ".json");
+      std::filesystem::create_directories(manifest_path.parent_path());
+      std::ofstream manifest(manifest_path);
+      manifest << "{\"schema_version\":\"iap_planner_failure_artifact_v1\","
+          << "\"kind\":" << std::quoted(leaf) << ","
+          << "\"snapshot\":" << std::quoted(relative + "/snapshot.json")
+          << ",\"cells\":" << std::quoted(relative + "/cells.bin")
+          << ",\"risk_samples\":"
+          << std::quoted(relative + "/queried_risk.csv") << "}\n";
+      manifest.close();
+      if (!manifest) throw std::runtime_error("subordinate manifest write failed");
+      if (leaf == "candidate") failure_candidate_captured_ = true;
+      else failure_search_captured_ = true;
+      RCLCPP_INFO(node_->get_logger(),
+          "planner failure map %s saved at %s generation=%lu voxels=%zu",
+          kind, directory.c_str(), static_cast<unsigned long>(snapshot->generation),
+          snapshot->cell_flags.size());
+    } catch (const std::exception& error) {
+      RCLCPP_ERROR(node_->get_logger(),
+          "planner failure map %s save failed: %s", kind, error.what());
+    }
+  }
 
   EGOPlannerManager::EGOPlannerManager() {}
 
@@ -37,6 +186,8 @@ namespace ego_planner
     node_ = node;
     initRiskInputs(node);
     initRiskVisualization(node);
+    capture_failure_map_ = node->declare_parameter(
+        "planning/capture_failure_map", false);
 
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);
@@ -44,6 +195,37 @@ namespace ego_planner
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
+    bspline_optimizer_->a_star_->setFailureObserver(
+        [this](const AStar::Result& result) {
+          const auto end = grid_map_->queryPlanningCell(
+              result.requested_end, planning_risk_version_, planning_time_s_,
+              planning_risk_policy_, planning_motion_, true);
+          const auto start = grid_map_->queryPlanningCell(
+              result.requested_start, planning_risk_version_, planning_time_s_,
+              planning_risk_policy_, planning_motion_, true);
+          RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+              "A* endpoints failure=%s start_reason=%s start_required=%s start_nearest=%s start_nearest_xyz=(%.3f %.3f %.3f) start_observed=%d end_reason=%s end_required=%s end_nearest=%s end_nearest_xyz=(%.3f %.3f %.3f) end_observed=%d end_advisory=%u generation=%lu cloud=%.3f",
+              AStar::failureName(result.failure),
+              gridExecutionReasonName(start.execution_reason),
+              clearanceText(start.required_clearance_m).c_str(),
+              clearanceText(start.raw_center_clearance_m).c_str(),
+              start.nearest_raw_center.x(), start.nearest_raw_center.y(),
+              start.nearest_raw_center.z(),
+              start.observed,
+              gridExecutionReasonName(end.execution_reason),
+              clearanceText(end.required_clearance_m).c_str(),
+              clearanceText(end.raw_center_clearance_m).c_str(),
+              end.nearest_raw_center.x(), end.nearest_raw_center.y(),
+              end.nearest_raw_center.z(), end.observed,
+              static_cast<unsigned>(end.advisory.classification),
+              static_cast<unsigned long>(end.occupancy_generation),
+              end.cloud_stamp_s);
+          if (capture_failure_map_ && !failure_search_captured_ &&
+              (result.end_cell.occupancy_generation == 0 ||
+               result.end_cell.occupancy_generation == end.occupancy_generation))
+            captureFailureMap("search", result.requested_end,
+                              result.requested_start, end, &result);
+        });
 
     visualization_ = vis;
   }
@@ -52,9 +234,13 @@ namespace ego_planner
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
+    bspline_optimizer_->a_star_->clearLastResult();
     const auto risk_version = beginRiskQuery();
     const double planning_time_s = node_->now().seconds();
     const auto motion = currentMotionContext();
+    planning_risk_version_ = risk_version;
+    planning_time_s_ = planning_time_s;
+    planning_motion_ = motion;
     const auto planning_query = [this, risk_version, planning_time_s, motion](
         const Eigen::Vector3d& position) {
       return grid_map_->queryPlanningCell(position, risk_version,
@@ -62,8 +248,17 @@ namespace ego_planner
     };
     const auto start_cell = planning_query(start_pt);
     if (!start_cell.executable()) {
-      RCLCPP_WARN(node_->get_logger(), "Planning denied: start %s",
-                  gridExecutionReasonName(start_cell.execution_reason));
+      const auto detail = grid_map_->queryPlanningCell(
+          start_pt, risk_version, planning_time_s, planning_risk_policy_,
+          motion, true);
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+          "Planning denied: start %s pos=(%.3f %.3f %.3f) required=%s nearest=%s generation=%lu cloud=%.3f",
+          gridExecutionReasonName(detail.execution_reason), start_pt.x(),
+          start_pt.y(), start_pt.z(),
+          clearanceText(detail.required_clearance_m).c_str(),
+          clearanceText(detail.raw_center_clearance_m).c_str(),
+          static_cast<unsigned long>(detail.occupancy_generation),
+          detail.cloud_stamp_s);
       return false;
     }
     const bool start_in_advisory =
@@ -326,10 +521,34 @@ namespace ego_planner
     auto assessment = assessTrajectory(pos, risk_version,
                                        node_->now().seconds());
     if (!assessment.executable()) {
-      RCLCPP_WARN(node_->get_logger(),
-                  "Candidate rejected before commit: %s at t=%.3f",
+      auto detail = assessment.first_execution_cell;
+      if (assessment.first_execution_position.allFinite() &&
+          !std::isfinite(detail.raw_center_clearance_m))
+        detail = grid_map_->queryPlanningCell(
+            assessment.first_execution_position, risk_version,
+            node_->now().seconds(), planning_risk_policy_,
+            currentMotionContext(), true);
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                  "Candidate rejected before commit: %s at t=%.3f pos=(%.3f %.3f %.3f) required=%s nearest=%s nearest_raw=(%.3f %.3f %.3f) generation=%lu cloud=%.3f advisory=%u",
                   gridExecutionReasonName(assessment.execution_reason),
-                  assessment.first_execution_time_s);
+                  assessment.first_execution_time_s,
+                  assessment.first_execution_position.x(),
+                  assessment.first_execution_position.y(),
+                  assessment.first_execution_position.z(),
+                  clearanceText(detail.required_clearance_m).c_str(),
+                  clearanceText(detail.raw_center_clearance_m).c_str(),
+                  detail.nearest_raw_center.x(), detail.nearest_raw_center.y(),
+                  detail.nearest_raw_center.z(),
+                  static_cast<unsigned long>(detail.occupancy_generation),
+                  detail.cloud_stamp_s,
+                  static_cast<unsigned>(detail.advisory.classification));
+      if (capture_failure_map_ && !failure_candidate_captured_ &&
+          assessment.first_execution_position.allFinite() &&
+          (assessment.first_execution_cell.occupancy_generation == 0 ||
+           assessment.first_execution_cell.occupancy_generation ==
+               detail.occupancy_generation))
+        captureFailureMap("candidate", assessment.first_execution_position,
+                          local_target_pt, detail);
       ++continous_failures_count_;
       return false;
     }

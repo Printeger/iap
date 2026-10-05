@@ -13,6 +13,9 @@ struct GridMapTestAccess {
     map.mp_.resolution_ = 0.1;
     map.mp_.resolution_inv_ = 10.0;
   }
+  static void nextGeneration(GridMap& map) {
+    map.occupancy_update_sequence_.fetch_add(2);
+  }
 };
 
 namespace {
@@ -55,4 +58,133 @@ TEST(AdvisoryAStar, StartInsideWarningUsesSameHighCostSearch) {
   ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(0, 0, 1),
                                 Eigen::Vector3d(2, 0, 1)));
   EXPECT_FALSE(search.getPath().empty());
+}
+
+TEST(AdvisoryAStar, UnobservedEndpointDoesNotWalkOutOfPool) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(100, 100, 20));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = p.x() > 1.0
+        ? GridExecutionReason::ENVIRONMENT_UNOBSERVED
+        : GridExecutionReason::OK;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                  Eigen::Vector3d(2, 0, 1)));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_UNOBSERVED);
+  EXPECT_EQ(search.lastResult().expanded, 0u);
+}
+
+TEST(AdvisoryAStar, PhysicalEndpointCannotBeSilentlyMoved) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(100, 100, 20));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = p.x() > 0.8
+        ? GridExecutionReason::INSUFFICIENT_CLEARANCE
+        : GridExecutionReason::OK;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                  Eigen::Vector3d(2, 0, 1)));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_BLOCKED);
+  EXPECT_EQ(search.lastResult().expanded, 0u);
+}
+
+TEST(AdvisoryAStar, OutOfMapTargetKeepsDistinctReason) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(100, 100, 20));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = p.x() > 1.0
+        ? GridExecutionReason::OUT_OF_MAP : GridExecutionReason::OK;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                  Eigen::Vector3d(2, 0, 1)));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_OUT_OF_MAP);
+  EXPECT_EQ(search.lastResult().expanded, 0u);
+}
+
+TEST(AdvisoryAStar, RoundedEndpointNeedsAnExecutableConnector) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(100, 100, 20));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = p.x() > 0.99 && p.x() < 1.03
+        ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1.0, 0, 1),
+                                  Eigen::Vector3d(1.04, 0, 1)));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_BLOCKED);
+}
+
+TEST(AdvisoryAStar, UnobservedBarrierHasItsOwnFailureReason) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(30, 30, 10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = std::abs(p.x()) < 0.11
+        ? GridExecutionReason::ENVIRONMENT_UNOBSERVED
+        : GridExecutionReason::OK;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                  Eigen::Vector3d(1, 0, 1)));
+  EXPECT_EQ(search.lastResult().failure,
+            AStar::Failure::NO_PATH_WITH_UNOBSERVED);
+  EXPECT_GT(search.lastResult().rejected_execution[
+      static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)], 0u);
+}
+
+TEST(AdvisoryAStar, ReusesPhysicalAndRiskQueriesWithinOneSearch) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(80, 80, 10));
+  size_t calls = 0;
+  search.setPlanningQuery([&calls](const Eigen::Vector3d&) {
+    ++calls;
+    GridPlanningCell cell;
+    cell.execution_reason = GridExecutionReason::OK;
+    cell.advisory.classification = GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                Eigen::Vector3d(1, 0, 1)));
+  EXPECT_GT(search.lastResult().cache_hits, 0u);
+  EXPECT_LT(calls, search.lastResult().query_calls +
+                   search.lastResult().cache_hits + 3u);
+}
+
+TEST(AdvisoryAStar, MapChangeEndsSearchBeforeUsingPreviousCachedCells) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(80, 80, 10));
+  size_t calls = 0;
+  search.setPlanningQuery([&](const Eigen::Vector3d&) {
+    if (++calls == 12) GridMapTestAccess::nextGeneration(*map);
+    GridPlanningCell cell;
+    cell.execution_reason = GridExecutionReason::OK;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                  Eigen::Vector3d(1, 0, 1)));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::MAP_STALE);
 }

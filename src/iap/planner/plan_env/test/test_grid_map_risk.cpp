@@ -29,6 +29,10 @@ struct GridMapTestAccess {
   static void setObserved(GridMap& map, int address, bool observed) {
     map.md_.observed_buffer_.at(address) = observed ? 1 : 0;
   }
+  static void setRawAndInflated(GridMap& map, int address) {
+    map.md_.occupancy_buffer_raw_cloud_.at(address) = 1;
+    map.md_.occupancy_buffer_inflate_.at(address) = 1;
+  }
 };
 class GridRiskTest : public testing::Test {
  protected:
@@ -70,6 +74,25 @@ TEST_F(GridRiskTest, SameLatticeAndOccupancyIndependent) {
   EXPECT_EQ(inflated, 1);
   EXPECT_EQ(map.queryRisk(center, version, 10.1).status, GridRiskStatus::VALID);
   EXPECT_EQ(calls, 1);
+}
+TEST_F(GridRiskTest, FailureSnapshotKeepsOneGenerationAndAllPhysicalLayers) {
+  Eigen::Vector3i index;
+  map.posToIndex(point, index);
+  const int address = map.toAddress(index);
+  GridMapTestAccess::setRawAndInflated(map, address);
+  GridMapTestAccess::setObserved(map, address + 1, false);
+  const auto version = map.bindRiskContext(context());
+  ASSERT_EQ(map.queryRisk(point, version, 10).status, GridRiskStatus::VALID);
+  const auto saved = map.captureFailureSnapshot();
+  ASSERT_TRUE(saved.has_value());
+  EXPECT_EQ(saved->generation, map.occupancyGeneration());
+  EXPECT_EQ(saved->cell_flags.size(), 48u);
+  EXPECT_EQ(saved->cell_flags.at(address) & 7, 7);
+  EXPECT_EQ(saved->cell_flags.at(address + 1) & 4, 0);
+  ASSERT_EQ(saved->queried_risk.size(), 1u);
+  EXPECT_EQ(saved->queried_risk.front().address,
+            static_cast<uint32_t>(address));
+  EXPECT_EQ(saved->queried_risk.front().value.version, version);
 }
 TEST_F(GridRiskTest, AllCellsShareAddressAndBordersReject) {
   const auto version = map.bindRiskContext(context());

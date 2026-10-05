@@ -190,7 +190,34 @@ struct GridPlanningCell {
   GridExecutionReason execution_reason = GridExecutionReason::OUT_OF_MAP;
   GridPlanningRisk advisory;
   double raw_center_clearance_m = std::numeric_limits<double>::quiet_NaN();
+  double required_clearance_m = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d nearest_raw_center = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+  uint64_t occupancy_generation = 0;
+  double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  bool observed = false;
   bool executable() const { return execution_reason == GridExecutionReason::OK; }
+};
+
+struct GridMapFailureSnapshot {
+  Eigen::Vector3d origin = Eigen::Vector3d::Zero();
+  Eigen::Vector3i dimensions = Eigen::Vector3i::Zero();
+  double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t generation = 0;
+  uint64_t risk_version = 0;
+  bool risk_context_matches_map = false;
+  double risk_reference_time_s = std::numeric_limits<double>::quiet_NaN();
+  double risk_valid_until_s = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_id;
+  // One byte per existing GridMap voxel: raw=1, inflated=2, observed=4.
+  std::vector<uint8_t> cell_flags;
+  struct RiskSample {
+    uint32_t address = 0;
+    GridRiskVoxel value;
+  };
+  std::vector<RiskSample> queried_risk;
 };
 
 // intermediate mapping data for fusion
@@ -391,7 +418,9 @@ public:
   GridPlanningCell queryPlanningCell(const Eigen::Vector3d& position,
                                     uint64_t version, double evaluation_time_s,
                                     const GridPlanningRiskPolicy& risk_policy,
-                                    const GridMotionContext& motion);
+                                    const GridMotionContext& motion,
+                                    bool include_rejected_clearance = false);
+  std::optional<GridMapFailureSnapshot> captureFailureSnapshot() const;
   std::string getFrameId() const { return mp_.frame_id_; }
 
   // occupancy map management
@@ -464,7 +493,7 @@ private:
 
   MappingParameters mp_;
   MappingData md_;
-  std::mutex risk_mutex_;
+  mutable std::mutex risk_mutex_;
   GridRiskContext risk_context_;
   uint64_t risk_version_ = 0;
   uint64_t risk_occupancy_sequence_ = 0;

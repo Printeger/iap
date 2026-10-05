@@ -606,17 +606,23 @@ namespace ego_planner
     const Eigen::Vector3d in(init_points.col(segment_ids.front().first));
     const Eigen::Vector3d out(init_points.col(segment_ids.back().second));
     bool found = a_star_->AstarSearch(0.1, in, out);
-    if (!found && a_star_->rejectedAdvisory() && !planning_advisory_fallback_) {
+    if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
+        !planning_advisory_fallback_) {
       planning_advisory_fallback_ = true;
       a_star_->setPlanningQuery(planning_query_, true);
       found = a_star_->AstarSearch(0.1, in, out);
-      RCLCPP_WARN(rclcpp::get_logger("initControlPoints"),
+      static rclcpp::Clock fallback_clock(RCL_SYSTEM_TIME);
+      RCLCPP_WARN_THROTTLE(rclcpp::get_logger("initControlPoints"),
+                  fallback_clock, 1000,
                   "advisory avoidance search exhausted; bounded high-cost fallback %s",
                   found ? "used" : "failed");
     }
     if (!found) {
-      RCLCPP_WARN(rclcpp::get_logger("initControlPoints"),
-                  "One-guide A* failed from (%.2f %.2f %.2f) to (%.2f %.2f %.2f), segments=%zu, advisory_rejected=%d fallback=%d",
+      static rclcpp::Clock failure_clock(RCL_SYSTEM_TIME);
+      RCLCPP_WARN_THROTTLE(rclcpp::get_logger("initControlPoints"),
+                  failure_clock, 1000,
+                  "One-guide A* %s from (%.2f %.2f %.2f) to (%.2f %.2f %.2f), segments=%zu, advisory_rejected=%d fallback=%d",
+                  AStar::failureName(a_star_->lastResult().failure),
                   in.x(), in.y(), in.z(), out.x(), out.y(), out.z(),
                   segment_ids.size(), a_star_->rejectedAdvisory(),
                   planning_advisory_fallback_);
@@ -1428,13 +1434,19 @@ namespace ego_planner
       const Eigen::Vector3d in(cps_.points.col(segment_ids.front().first));
       const Eigen::Vector3d out(cps_.points.col(segment_ids.back().second));
       bool found = a_star_->AstarSearch(0.1, in, out);
-      if (!found && a_star_->rejectedAdvisory() &&
+      if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
           !planning_advisory_fallback_) {
         planning_advisory_fallback_ = true;
         a_star_->setPlanningQuery(planning_query_, true);
         found = a_star_->AstarSearch(0.1, in, out);
       }
       if (!found) {
+        static rclcpp::Clock recheck_failure_clock(RCL_SYSTEM_TIME);
+        RCLCPP_WARN_THROTTLE(rclcpp::get_logger("reboundCollisionCheck"),
+            recheck_failure_clock, 1000,
+            "Rebound A* %s from (%.2f %.2f %.2f) to (%.2f %.2f %.2f)",
+            AStar::failureName(a_star_->lastResult().failure),
+            in.x(), in.y(), in.z(), out.x(), out.y(), out.z());
         force_stop_type_ = STOP_FOR_ERROR;
         return false;
       }

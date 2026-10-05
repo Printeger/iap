@@ -3,9 +3,106 @@
 using namespace std;
 using namespace Eigen;
 
+const char* AStar::failureName(const Failure failure) {
+    switch (failure) {
+    case Failure::NONE: return "NONE";
+    case Failure::START_OUT_OF_POOL: return "START_OUT_OF_POOL";
+    case Failure::END_OUT_OF_POOL: return "END_OUT_OF_POOL";
+    case Failure::START_BLOCKED: return "START_BLOCKED";
+    case Failure::END_UNOBSERVED: return "END_UNOBSERVED";
+    case Failure::END_OUT_OF_MAP: return "END_OUT_OF_MAP";
+    case Failure::END_STALE: return "END_STALE";
+    case Failure::MAP_STALE: return "MAP_STALE";
+    case Failure::END_BLOCKED: return "END_BLOCKED";
+    case Failure::CURRENT_MOTION: return "CURRENT_MOTION";
+    case Failure::NO_PATH: return "NO_PATH";
+    case Failure::NO_PATH_WITH_UNOBSERVED: return "NO_PATH_WITH_UNOBSERVED";
+    case Failure::TIME_BUDGET: return "TIME_BUDGET";
+    case Failure::ADVISORY_NO_PATH: return "ADVISORY_NO_PATH";
+    }
+    return "UNKNOWN";
+}
+
+GridPlanningCell AStar::queryVoxelCenter(const Vector3d& position) {
+    GridPlanningCell cell;
+    if (grid_map_->occupancyGeneration() != search_generation_) {
+        cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
+        return cell;
+    }
+    if (!grid_map_->isInMap(position)) return cell;
+    Vector3i index;
+    grid_map_->posToIndex(position, index);
+    const int address = grid_map_->toAddress(index);
+    auto cached = voxel_cache_.find(address);
+    if (cached != voxel_cache_.end()) {
+        ++result_.cache_hits;
+        return cached->second;
+    }
+    ++result_.query_calls;
+    cell = planning_query_ ? planning_query_(position) : GridPlanningCell{};
+    if (!planning_query_)
+        cell.execution_reason = grid_map_->getInflateOccupancy(position)
+            ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    voxel_cache_.emplace(address, cell);
+    return cell;
+}
+
+GridPlanningCell AStar::queryLatticePoint(const Vector3i& index) {
+    if (grid_map_->occupancyGeneration() != search_generation_) {
+        GridPlanningCell stale;
+        stale.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
+        return stale;
+    }
+    const int address = (index.x() * POOL_SIZE_.y() + index.y()) *
+        POOL_SIZE_.z() + index.z();
+    auto cached = lattice_cache_.find(address);
+    if (cached != lattice_cache_.end()) {
+        ++result_.cache_hits;
+        return cached->second;
+    }
+    ++result_.query_calls;
+    const auto position = Index2Coord(index);
+    GridPlanningCell cell;
+    if (planning_query_) cell = planning_query_(position);
+    else cell.execution_reason = grid_map_->getInflateOccupancy(position)
+        ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    lattice_cache_.emplace(address, cell);
+    return cell;
+}
+
+void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
+    result_.failure = failure;
+    result_.duration_s = (rclcpp::Clock().now() - started).seconds();
+    static rclcpp::Clock log_clock(RCL_SYSTEM_TIME);
+    RCLCPP_WARN_THROTTLE(rclcpp::get_logger("AstarSearch"), log_clock, 1000,
+        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs",
+        failureName(failure), result_.requested_start.x(), result_.requested_start.y(),
+        result_.requested_start.z(), result_.requested_end.x(),
+        result_.requested_end.y(), result_.requested_end.z(),
+        gridExecutionReasonName(result_.start_cell.execution_reason),
+        gridExecutionReasonName(result_.end_cell.execution_reason),
+        result_.expanded, result_.query_calls, result_.cache_hits,
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::OUT_OF_MAP)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::PHYSICAL_OBSTACLE)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::INSUFFICIENT_CLEARANCE)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::ENVIRONMENT_STALE)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_UNAVAILABLE)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_STALE)],
+        result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_BUDGET)],
+        result_.rejected_advisory, result_.duration_s);
+    if (failure_observer_) failure_observer_(result_);
+}
+
 std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
-                                            const Vector3d& to)
+                                            const Vector3d& to,
+                                            const Vector3i& from_index,
+                                            const Vector3i& to_index)
 {
+    if (grid_map_->occupancyGeneration() != search_generation_) {
+        map_changed_ = true;
+        return std::nullopt;
+    }
     if (!planning_query_) {
         return checkOccupancy(to) ? std::nullopt : std::optional<double>(1.0);
     }
@@ -15,15 +112,22 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
     const double resolution = grid_map_->getResolution();
     const auto begin = (from - origin) / resolution;
     const auto end = (to - origin) / resolution;
+    const Vector3i first_voxel = begin.array().floor().cast<int>();
+    const Vector3i last_voxel = end.array().floor().cast<int>();
     double multiplier = 1.0;
-    auto examine = [&](const Vector3d& position) {
-        const auto cell = planning_query_(position);
-        if (!cell.executable()) return false;
+    auto examine = [&](const GridPlanningCell& cell) {
+        if (!cell.executable()) {
+            ++result_.rejected_execution[static_cast<size_t>(cell.execution_reason)];
+            if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE)
+                map_changed_ = true;
+            return false;
+        }
         const auto cls = cell.advisory.classification;
         if (cls == GridAdvisoryClass::AVOID ||
             cls == GridAdvisoryClass::PREDICTED_DEGRADED) {
             if (!advisory_fallback_) {
                 rejected_advisory_ = true;
+                ++result_.rejected_advisory;
                 return false;
             }
             multiplier = std::max(multiplier, 3.0);
@@ -36,12 +140,30 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
         Vector3d voxel;
         do {
             const bool more = ray.step(voxel);
-            if (!examine(origin + (voxel.array() + 0.5).matrix() * resolution))
+            const Vector3i index = voxel.cast<int>();
+            // The centre of an endpoint voxel may be closer to an obstacle
+            // than the actual search edge. Check the exact edge endpoints and
+            // midpoint below, and retain centre checks for interior voxels.
+            if (index != first_voxel && index != last_voxel &&
+                !examine(queryVoxelCenter(
+                    origin + (voxel.array() + 0.5).matrix() * resolution)))
                 return std::nullopt;
             if (!more) break;
         } while (true);
     }
-    if (!examine(to)) return std::nullopt;
+    if (!examine(queryLatticePoint(from_index))) return std::nullopt;
+    const Vector3i mid_key = from_index + to_index;
+    const int mid_address = (mid_key.x() * (2 * POOL_SIZE_.y()) + mid_key.y()) *
+        (2 * POOL_SIZE_.z()) + mid_key.z();
+    auto mid = midpoint_cache_.find(mid_address);
+    if (mid == midpoint_cache_.end()) {
+        ++result_.query_calls;
+        mid = midpoint_cache_.emplace(mid_address, planning_query_((from + to) / 2.0)).first;
+    } else {
+        ++result_.cache_hits;
+    }
+    if (!examine(mid->second)) return std::nullopt;
+    if (!examine(queryLatticePoint(to_index))) return std::nullopt;
     return multiplier;
 }
 
@@ -132,57 +254,130 @@ vector<GridNodePtr> AStar::retrievePath(GridNodePtr current)
 
 bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d end_pt, Vector3i &start_idx, Vector3i &end_idx)
 {
-    if (!Coord2Index(start_pt, start_idx) || !Coord2Index(end_pt, end_idx))
+    if (!Coord2Index(start_pt, start_idx)) {
+        result_.failure = Failure::START_OUT_OF_POOL;
         return false;
+    }
+    if (!Coord2Index(end_pt, end_idx)) {
+        result_.failure = Failure::END_OUT_OF_POOL;
+        return false;
+    }
+
+    if (planning_query_) result_.query_calls += 2;
+    result_.start_cell = planning_query_ ? planning_query_(start_pt)
+        : queryLatticePoint(start_idx);
+    result_.end_cell = planning_query_ ? planning_query_(end_pt)
+        : queryLatticePoint(end_idx);
+    if (!result_.start_cell.executable()) {
+        result_.failure = Failure::START_BLOCKED;
+        return false;
+    }
+    if (!result_.end_cell.executable()) {
+        const auto reason = result_.end_cell.execution_reason;
+        result_.failure = reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED
+            ? Failure::END_UNOBSERVED
+            : reason == GridExecutionReason::OUT_OF_MAP
+                ? Failure::END_OUT_OF_MAP
+            : reason == GridExecutionReason::ENVIRONMENT_STALE
+                ? Failure::END_STALE
+                : reason == GridExecutionReason::CURRENT_MOTION_UNAVAILABLE ||
+                  reason == GridExecutionReason::CURRENT_MOTION_STALE ||
+                  reason == GridExecutionReason::CURRENT_MOTION_BUDGET
+                    ? Failure::CURRENT_MOTION : Failure::END_BLOCKED;
+        return false;
+    }
 
     // A warning at the requested endpoint is not a physical obstacle to
     // move the endpoint through. Let the normal attempt fail so the bounded
     // advisory fallback can search to the actual local target.
     if (planning_query_ && !advisory_fallback_) {
-        const auto end_cell = planning_query_(Index2Coord(end_idx));
+        const auto end_cell = result_.end_cell;
         if (end_cell.executable() &&
             (end_cell.advisory.classification == GridAdvisoryClass::AVOID ||
              end_cell.advisory.classification ==
                  GridAdvisoryClass::PREDICTED_DEGRADED)) {
             rejected_advisory_ = true;
+            result_.rejected_advisory++;
+            result_.failure = Failure::ADVISORY_NO_PATH;
             return false;
         }
     }
 
-    const auto blocked_lattice_cell = [this](const Vector3i& search_index) {
-        const auto position = Index2Coord(search_index);
-        if (checkOccupancy(position)) return true;
-        if (!planning_query_) return false;
-        Vector3i map_index;
-        grid_map_->posToIndex(position, map_index);
-        if (!grid_map_->isInMap(map_index)) return true;
-        Vector3d map_center;
-        grid_map_->indexToPos(map_index, map_center);
-        return checkOccupancy(map_center);
+    if (!queryLatticePoint(start_idx).executable()) {
+        result_.failure = Failure::START_BLOCKED;
+        return false;
+    }
+    if (!queryLatticePoint(end_idx).executable()) {
+        // Rounding to the search lattice can place an otherwise valid target
+        // in a blocked cell. Only accept a nearby lattice endpoint when the
+        // connector back to the *requested* endpoint is fully executable.
+        bool adjusted = false;
+        const Vector3d direction = (start_pt - end_pt).normalized();
+        if (direction.allFinite()) {
+            for (double shift = step_size_; shift <= 1.0 + 1e-9;
+                 shift += step_size_) {
+                Vector3i candidate_index;
+                const auto candidate = end_pt + direction * shift;
+                if (!Coord2Index(candidate, candidate_index)) break;
+                if (!queryLatticePoint(candidate_index).executable()) continue;
+                const auto candidate_position = Index2Coord(candidate_index);
+                const int samples = std::max(1, static_cast<int>(std::ceil(
+                    (candidate_position - end_pt).norm() /
+                    (grid_map_->getResolution() * 0.5))));
+                bool connected = true;
+                for (int i = 0; i <= samples; ++i) {
+                    const auto p = end_pt + (candidate_position - end_pt) *
+                        (static_cast<double>(i) / samples);
+                    if (planning_query_) ++result_.query_calls;
+                    if (planning_query_ ? !planning_query_(p).executable()
+                                        : grid_map_->getInflateOccupancy(p) != 0) {
+                        connected = false;
+                        break;
+                    }
+                }
+                if (connected) {
+                    end_idx = candidate_index;
+                    adjusted = true;
+                    break;
+                }
+            }
+        }
+        if (!adjusted) {
+            result_.failure = Failure::END_BLOCKED;
+            return false;
+        }
+    }
+
+    const auto connector_ok = [this](const Vector3d& a, const Vector3d& b) {
+        if (!planning_query_) return true;
+        const int samples = std::max(1, static_cast<int>(std::ceil(
+            (a - b).norm() / (grid_map_->getResolution() * 0.5))));
+        for (int i = 0; i <= samples; ++i) {
+            const auto point = a + (b - a) * (static_cast<double>(i) / samples);
+            ++result_.query_calls;
+            const auto cell = planning_query_(point);
+            if (!cell.executable()) return false;
+            const auto cls = cell.advisory.classification;
+            if (!advisory_fallback_ &&
+                (cls == GridAdvisoryClass::AVOID ||
+                 cls == GridAdvisoryClass::PREDICTED_DEGRADED)) {
+                rejected_advisory_ = true;
+                ++result_.rejected_advisory;
+                return false;
+            }
+        }
+        return true;
     };
-
-    if (blocked_lattice_cell(start_idx))
-    {
-        // RCLCPP_WARN(rclcpp::get_logger("ConvertToIndexAndAdjustStartEndPoints"), "Start point is insdide an obstacle.");
-        do
-        {
-            start_pt = (start_pt - end_pt).normalized() * step_size_ + start_pt;
-            if (!Coord2Index(start_pt, start_idx))
-                return false;
-        } while (blocked_lattice_cell(start_idx));
+    if (!connector_ok(start_pt, Index2Coord(start_idx))) {
+        result_.failure = rejected_advisory_ ? Failure::ADVISORY_NO_PATH :
+            Failure::START_BLOCKED;
+        return false;
     }
-
-    if (blocked_lattice_cell(end_idx))
-    {
-        // RCLCPP_WARN(rclcpp::get_logger("ConvertToIndexAndAdjustStartEndPoints"), "End point is insdide an obstacle.");
-        do
-        {
-            end_pt = (end_pt - start_pt).normalized() * step_size_ + end_pt;
-            if (!Coord2Index(end_pt, end_idx))
-                return false;
-        } while (blocked_lattice_cell(end_idx));
+    if (!connector_ok(Index2Coord(end_idx), end_pt)) {
+        result_.failure = rejected_advisory_ ? Failure::ADVISORY_NO_PATH :
+            Failure::END_BLOCKED;
+        return false;
     }
-
     return true;
 }
 
@@ -191,7 +386,15 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
     rejected_advisory_ = false;
+    map_changed_ = false;
     gridPath_.clear();
+    voxel_cache_.clear();
+    lattice_cache_.clear();
+    midpoint_cache_.clear();
+    result_ = Result{};
+    result_.requested_start = start_pt;
+    result_.requested_end = end_pt;
+    search_generation_ = grid_map_->occupancyGeneration();
 
     step_size_ = step_size;
     inv_step_size_ = 1 / step_size;
@@ -200,7 +403,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
     {
-        RCLCPP_ERROR(rclcpp::get_logger("AstarSearch"), "Unable to handle the initial or end point, force return!");
+        finishFailure(result_.failure, time_1);
         return false;
     }
 
@@ -231,6 +434,10 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     int num_iter = 0;
     while (!openSet_.empty())
     {
+        if (grid_map_->occupancyGeneration() != search_generation_) {
+            finishFailure(Failure::MAP_STALE, time_1);
+            return false;
+        }
         num_iter++;
         const auto entry = openSet_.top();
         openSet_.pop();
@@ -248,9 +455,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
             // if((time_2 - time_1).toSec() > 0.1)
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
+            result_.duration_s = (rclcpp::Clock().now() - time_1).seconds();
             return true;
         }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.
+        ++result_.expanded;
 
         for (int dx = -1; dx <= 1; dx++)
             for (int dy = -1; dy <= 1; dy++)
@@ -282,8 +491,14 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
                     neighborPtr->rounds = rounds_;
 
                     const auto multiplier = edgeMultiplier(
-                        Index2Coord(current->index), Index2Coord(neighborPtr->index));
+                        Index2Coord(current->index), Index2Coord(neighborPtr->index),
+                        current->index,
+                        neighborIdx);
                     if (!multiplier) {
+                        if (map_changed_) {
+                            finishFailure(Failure::MAP_STALE, time_1);
+                            return false;
+                        }
                         continue;
                     }
 
@@ -310,7 +525,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
         rclcpp::Time time_2 = rclcpp::Clock().now();
         if ((time_2 - time_1).seconds() > (planning_query_ ? 1.0 : 0.2))
         {
-            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "A* time budget exceeded");
+            finishFailure(Failure::TIME_BUDGET, time_1);
             return false;
         }
     }
@@ -321,6 +536,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
         RCLCPP_WARN(rclcpp::get_logger("AstarSearch"),
                     "Time consume in A star path finding is %.3fs, iter=%d", (time_2 - time_1).seconds(), num_iter);
 
+    finishFailure(result_.rejected_advisory != 0 && !advisory_fallback_
+        ? Failure::ADVISORY_NO_PATH
+        : result_.rejected_execution[static_cast<size_t>(
+              GridExecutionReason::ENVIRONMENT_UNOBSERVED)] != 0
+            ? Failure::NO_PATH_WITH_UNOBSERVED : Failure::NO_PATH, time_1);
     return false;
 }
 
@@ -332,5 +552,9 @@ vector<Vector3d> AStar::getPath()
         path.push_back(Index2Coord(ptr->index));
 
     reverse(path.begin(), path.end());
+    if (!path.empty() && (path.front() - result_.requested_start).norm() > 1e-8)
+        path.insert(path.begin(), result_.requested_start);
+    if (!path.empty() && (path.back() - result_.requested_end).norm() > 1e-8)
+        path.push_back(result_.requested_end);
     return path;
 }

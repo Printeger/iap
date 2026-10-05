@@ -1,14 +1,20 @@
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <iostream>
+#include <cstdlib>
 
 #include <ego_planner/ego_replan_fsm.h>
+#include <iap/util/run_log_manager.hpp>
 
 using namespace ego_planner;
 
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
+  // Canonical launch supplies IAP_RUN_DIR; this process adopts that run and
+  // writes planner evidence through the shared artifact resolver.
+  if (std::getenv("IAP_RUN_DIR"))
+    glim::RunLogManager::initialize("ego_planner");
   auto node = std::make_shared<rclcpp::Node>("ego_planner_node");
 
   EGOReplanFSM rebo_replan;

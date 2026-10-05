@@ -8,6 +8,8 @@
 #include <queue>
 #include <functional>
 #include <optional>
+#include <unordered_map>
+#include <array>
 
 constexpr double inf = 1 >> 20;
 struct GridNode;
@@ -42,13 +44,44 @@ struct NodeComparator {
 
 class AStar
 {
+public:
+	enum class Failure {
+		NONE, START_OUT_OF_POOL, END_OUT_OF_POOL, START_BLOCKED,
+		END_UNOBSERVED, END_STALE, MAP_STALE, END_BLOCKED, CURRENT_MOTION,
+		NO_PATH, NO_PATH_WITH_UNOBSERVED, TIME_BUDGET, ADVISORY_NO_PATH,
+		END_OUT_OF_MAP
+	};
+	struct Result {
+		Failure failure = Failure::NONE;
+		Eigen::Vector3d requested_start = Eigen::Vector3d::Zero();
+		Eigen::Vector3d requested_end = Eigen::Vector3d::Zero();
+		GridPlanningCell start_cell, end_cell;
+		std::array<size_t, 10> rejected_execution{};
+		size_t rejected_advisory = 0;
+		size_t expanded = 0;
+		size_t query_calls = 0;
+		size_t cache_hits = 0;
+		double duration_s = 0.0;
+	};
 private:
 	GridMap::Ptr grid_map_;
 	std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
 	bool advisory_fallback_ = false;
 	bool rejected_advisory_ = false;
+	bool map_changed_ = false;
+	Result result_;
+	std::unordered_map<int, GridPlanningCell> voxel_cache_;
+	std::unordered_map<int, GridPlanningCell> lattice_cache_;
+	std::unordered_map<int, GridPlanningCell> midpoint_cache_;
+	uint64_t search_generation_ = 0;
+	std::function<void(const Result&)> failure_observer_;
+	GridPlanningCell queryVoxelCenter(const Eigen::Vector3d& position);
+	GridPlanningCell queryLatticePoint(const Eigen::Vector3i& index);
+	void finishFailure(Failure failure, const rclcpp::Time& started);
 	std::optional<double> edgeMultiplier(const Eigen::Vector3d& from,
-	                                     const Eigen::Vector3d& to);
+	                                     const Eigen::Vector3d& to,
+	                                     const Eigen::Vector3i& from_index,
+	                                     const Eigen::Vector3i& to_index);
 
 	inline void coord2gridIndexFast(const double x, const double y, const double z, int &id_x, int &id_y, int &id_z);
 
@@ -102,6 +135,12 @@ public:
 		advisory_fallback_ = advisory_fallback;
 	}
 	bool rejectedAdvisory() const { return rejected_advisory_; }
+	const Result& lastResult() const { return result_; }
+	void clearLastResult() { result_ = Result{}; }
+	void setFailureObserver(std::function<void(const Result&)> observer) {
+		failure_observer_ = std::move(observer);
+	}
+	static const char* failureName(Failure failure);
 
 	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 
@@ -124,7 +163,6 @@ inline bool AStar::Coord2Index(const Eigen::Vector3d &pt, Eigen::Vector3i &idx) 
 
 	if (idx(0) < 0 || idx(0) >= POOL_SIZE_(0) || idx(1) < 0 || idx(1) >= POOL_SIZE_(1) || idx(2) < 0 || idx(2) >= POOL_SIZE_(2))
 	{
-		RCLCPP_ERROR(rclcpp::get_logger("Coord2Index"), "Ran out of pool, index=%d %d %d, POOL_SIZE=%d %d %d", idx(0), idx(1), idx(2),POOL_SIZE_(0), POOL_SIZE_(1), POOL_SIZE_(2));
 		return false;
 	}
 

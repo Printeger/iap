@@ -65,6 +65,11 @@ namespace ego_planner
     double tracking_error_limit_m_ = 0.30;
     double last_advisory_replan_time_s_ = 0.0;
     double last_failed_plan_time_s_ = -std::numeric_limits<double>::infinity();
+    uint64_t wait_for_map_generation_ = 0;
+    GridExecutionReason wait_for_map_reason_ = GridExecutionReason::OK;
+    bool require_observed_reference_prefix_ = false;
+    uint64_t observed_prefix_failure_generation_ = 0;
+    double search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
     bool flag_realworld_experiment_;
     bool enable_fail_safe_;
 
@@ -114,7 +119,7 @@ namespace ego_planner
 
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
-    void getLocalTarget();
+    bool getLocalTarget();
 
     /* ROS functions */
     void execFSMCallback();

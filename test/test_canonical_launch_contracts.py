@@ -79,10 +79,14 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(params["risk_viz/vpl_max_m"], 0.55)
             self.assertEqual(params["risk_viz/surface_lifetime_s"], 60.0)
             self.assertEqual(params["risk_viz/surface_snapshot_step_m"], 4.0)
+            self.assertFalse(params["planning/capture_failure_map"])
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)
             for i, axis in enumerate("xyz"):
                 self.assertEqual(params[f"grid_map/map_size_{axis}"], entry["map_size"][i])
+        self.assertTrue(runtime.planner_parameters(
+            catalog["icra_dense_forest_four_fork_v2"], True)[
+                "planning/capture_failure_map"])
 
     def test_stage1_graph_materializes_same_registered_lattice_and_preserves_artifacts(self):
         runtime = self._load_launch("_includes/full_stack_runtime.py")

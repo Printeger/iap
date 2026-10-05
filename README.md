@@ -292,9 +292,30 @@ ros2 launch iap iap_sim.launch.py \
 | `scenario` | `icra_dense_forest_four_fork_v2` | 统一的四分叉测试场景；仍可显式选择目录中的其他场景 |
 | `start_rviz` | `true` | 启动 RViz |
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
+| `capture_failure_map` | `false` | 四分叉故障诊断时显式保存首个候选拒绝和首个 A* 失败的 GridMap 快照，最多两份 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
-本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 仍只根据物理障碍规划。
+本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 已把有效 advisory 预警用于局部绕行偏好，真实执行仍以物理环境、当前融合运动质量与最终曲线检查为准。
+
+诊断规划停滞时显式打开一次性地图取证：
+
+```bash
+ros2 launch iap iap_sim.launch.py \
+  scenario:=icra_dense_forest_four_fork_v2 \
+  capture_failure_map:=true \
+  run_duration_s:=180
+
+# 运行结束后，在已 source ROS 与工作区的终端：
+run_dir=$(readlink -f src/iap/log/latest)
+python3 src/iap/scripts/dev_planner/analyze_failure_map.py \
+  "$run_dir/export/planner/failure_map/search"
+ros2 run rviz2 rviz2 -d src/iap/config/sim_ego/grid_map_failure_replay.rviz
+# 在另一个终端启动离线地图发布器：
+python3 src/iap/scripts/dev_planner/replay_failure_map.py \
+  "$run_dir/export/planner/failure_map/search"
+```
+
+快照位于同一运行目录的 `export/planner/failure_map/{candidate,search}`；只保存实际发生的失败种类。`cells.bin` 是当时 GridMap 的原始占据、膨胀和已观测标志；`queried_risk.csv` 只包含当时真正查询过的 PL 格子。离线报告写入 `export/analysis/`，其“无路”结论只适用于所存地图的已观测搜索范围，不代表真实世界或未观测区域无路。旧运行没有保存快照，不能从过去的 RViz 历史画面还原首次失败那一帧。
 
 运行时切换色彩依据：
 

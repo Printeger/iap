@@ -380,6 +380,8 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     if (!cell.executable() && assessment.executable()) {
       assessment.execution_reason = cell.execution_reason;
       assessment.first_execution_time_s = t;
+      assessment.first_execution_position = p;
+      assessment.first_execution_cell = cell;
     }
     if (!cell.executable()) continue;
     const auto cls = cell.advisory.classification;
@@ -394,6 +396,13 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     }
   }
   return assessment;
+}
+
+GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
+    const Eigen::Vector3d& position, const double now_s) const {
+  return grid_map_->queryPlanningCell(position, 0, now_s,
+                                      planning_risk_policy_,
+                                      currentMotionContext());
 }
 
 EGOPlannerManager::TrajectoryAssessment

@@ -113,6 +113,9 @@ def _setup(context):
                 "planner_start_delay_s": LaunchConfiguration(
                     "planner_start_delay_s"
                 ).perform(context),
+                "capture_failure_map": context.launch_configurations.get(
+                    "capture_failure_map", "false"
+                ),
             }.items(),
         ),
     ]
@@ -124,6 +127,7 @@ def generate_launch_description():
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
+            DeclareLaunchArgument("capture_failure_map", default_value="false"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),
             OpaqueFunction(function=_setup),
         ]

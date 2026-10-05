@@ -69,6 +69,9 @@ namespace ego_planner
     struct TrajectoryAssessment {
       GridExecutionReason execution_reason = GridExecutionReason::OK;
       double first_execution_time_s = std::numeric_limits<double>::quiet_NaN();
+      Eigen::Vector3d first_execution_position = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      GridPlanningCell first_execution_cell;
       double first_advisory_time_s = std::numeric_limits<double>::quiet_NaN();
       size_t advisory_avoid_samples = 0;
       size_t advisory_unknown_samples = 0;
@@ -83,6 +86,11 @@ namespace ego_planner
                                           double to_time_s =
                                               std::numeric_limits<double>::infinity());
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
+    GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
+                                          double now_s) const;
+    AStar::Failure lastSearchFailure() const {
+      return bspline_optimizer_->a_star_->lastResult().failure;
+    }
 
 
     PlanParameters pp_;
@@ -110,6 +118,16 @@ namespace ego_planner
     double motion_budget_m_ = 0.55;
     double motion_max_age_s_ = 0.5;
     double environment_max_age_s_ = 0.5;
+    bool capture_failure_map_ = false;
+    bool failure_candidate_captured_ = false;
+    bool failure_search_captured_ = false;
+    uint64_t planning_risk_version_ = 0;
+    double planning_time_s_ = 0.0;
+    GridMotionContext planning_motion_;
+    void captureFailureMap(const char* kind, const Eigen::Vector3d& point,
+                           const Eigen::Vector3d& other,
+                           const GridPlanningCell& cell,
+                           const AStar::Result* search = nullptr);
     double last_runtime_advisory_query_s_ =
         -std::numeric_limits<double>::infinity();
     iap::CurrentIntegrityState current_integrity_;

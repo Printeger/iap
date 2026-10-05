@@ -174,23 +174,74 @@ GridPlanningRisk GridMap::queryPlanningRisk(const Eigen::Vector3d& position,
 GridPlanningCell GridMap::queryPlanningCell(
     const Eigen::Vector3d& position, const uint64_t version,
     const double now, const GridPlanningRiskPolicy& risk_policy,
-    const GridMotionContext& motion)
+    const GridMotionContext& motion, const bool include_rejected_clearance)
 {
   GridPlanningCell cell;
   const auto observed = queryOccupancyDiagnostic(position);
+  cell.voxel_index = observed.voxel_index;
+  cell.occupancy_generation = observed.generation;
+  cell.cloud_stamp_s = observed.cloud_stamp_s;
+  cell.observed = observed.observed;
+  if (std::isfinite(motion.error_proxy_m) &&
+      std::isfinite(observed.resolution_m))
+    cell.required_clearance_m = motion.body_radius_m +
+        motion.tracking_reserve_m + motion.error_proxy_m +
+        std::sqrt(3.0) * observed.resolution_m / 2.0;
+  const auto measure_clearance = [&]() {
+    if (!observed.available || !std::isfinite(cell.required_clearance_m) ||
+        !std::isfinite(observed.resolution_m) || observed.resolution_m <= 0.0)
+      return;
+    const int radius_cells = static_cast<int>(std::ceil(
+        cell.required_clearance_m / observed.resolution_m)) + 1;
+    double closest = std::numeric_limits<double>::infinity();
+    Eigen::Vector3d nearest = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    {
+      std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+      const auto dims = mp_.map_voxel_num_;
+      for (int x = std::max(0, observed.voxel_index.x() - radius_cells);
+           x <= std::min(dims.x() - 1, observed.voxel_index.x() + radius_cells); ++x)
+        for (int y = std::max(0, observed.voxel_index.y() - radius_cells);
+             y <= std::min(dims.y() - 1, observed.voxel_index.y() + radius_cells); ++y)
+          for (int z = std::max(0, observed.voxel_index.z() - radius_cells);
+               z <= std::min(dims.z() - 1, observed.voxel_index.z() + radius_cells); ++z) {
+            const Eigen::Vector3i index(x, y, z);
+            const auto address = static_cast<size_t>(toAddress(index));
+            const bool raw_cloud = address < md_.occupancy_buffer_raw_cloud_.size() &&
+                md_.occupancy_buffer_raw_cloud_[address] != 0;
+            const bool raw_fused = address < md_.occupancy_buffer_.size() &&
+                md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
+            if (raw_cloud || raw_fused) {
+              Eigen::Vector3d center;
+              indexToPos(index, center);
+              const double distance = (position - center).norm();
+              if (distance < closest) {
+                closest = distance;
+                nearest = center;
+              }
+            }
+          }
+    }
+    if (occupancyGeneration() != observed.generation) return;
+    cell.raw_center_clearance_m = closest;
+    cell.nearest_raw_center = nearest;
+  };
   if (!observed.available) return cell;
   if (!observed.observed) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+    if (include_rejected_clearance) measure_clearance();
     return cell;
   }
   if (!std::isfinite(observed.cloud_stamp_s) ||
       !std::isfinite(now) || now < observed.cloud_stamp_s ||
       now - observed.cloud_stamp_s > motion.max_environment_age_s) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
+    if (include_rejected_clearance) measure_clearance();
     return cell;
   }
   if (observed.raw_occupied || observed.inflated_occupied) {
     cell.execution_reason = GridExecutionReason::PHYSICAL_OBSTACLE;
+    if (include_rejected_clearance) measure_clearance();
     return cell;
   }
   if (motion.quality == 0 || (motion.quality == 2 && !motion.allow_bridged) ||
@@ -210,42 +261,60 @@ GridPlanningCell GridMap::queryPlanningCell(
   // The raw voxel test accounts for the body's radius, tracking reserve,
   // posterior error proxy, and voxel-center uncertainty exactly once. The
   // inflated occupancy above remains a separate fast physical guard.
-  const double required = motion.body_radius_m + motion.tracking_reserve_m +
-      motion.error_proxy_m + std::sqrt(3.0) * observed.resolution_m / 2.0;
-  const int radius_cells = static_cast<int>(std::ceil(required / observed.resolution_m)) + 1;
-  double closest = std::numeric_limits<double>::infinity();
-  {
-    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
-    const auto dims = mp_.map_voxel_num_;
-    for (int x = std::max(0, observed.voxel_index.x() - radius_cells);
-         x <= std::min(dims.x() - 1, observed.voxel_index.x() + radius_cells); ++x)
-      for (int y = std::max(0, observed.voxel_index.y() - radius_cells);
-           y <= std::min(dims.y() - 1, observed.voxel_index.y() + radius_cells); ++y)
-        for (int z = std::max(0, observed.voxel_index.z() - radius_cells);
-             z <= std::min(dims.z() - 1, observed.voxel_index.z() + radius_cells); ++z) {
-          const Eigen::Vector3i index(x, y, z);
-          const auto address = static_cast<size_t>(toAddress(index));
-          const bool raw_cloud = address < md_.occupancy_buffer_raw_cloud_.size() &&
-              md_.occupancy_buffer_raw_cloud_[address] != 0;
-          const bool raw_fused = address < md_.occupancy_buffer_.size() &&
-              md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
-          if (raw_cloud || raw_fused) {
-            Eigen::Vector3d center;
-            indexToPos(index, center);
-            closest = std::min(closest, (position - center).norm());
-          }
-        }
-  }
+  measure_clearance();
   if (occupancyGeneration() != observed.generation) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
     return cell;
   }
-  cell.raw_center_clearance_m = closest;
-  if (closest < required) {
+  if (cell.raw_center_clearance_m < cell.required_clearance_m) {
     cell.execution_reason = GridExecutionReason::INSUFFICIENT_CLEARANCE;
     return cell;
   }
   cell.execution_reason = GridExecutionReason::OK;
   cell.advisory = queryPlanningRisk(position, version, now, risk_policy);
   return cell;
+}
+
+std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot() const
+{
+  GridMapFailureSnapshot snapshot;
+  std::lock_guard<std::mutex> map_lock(occupancy_epoch_mutex_);
+  const auto sequence = occupancy_update_sequence_.load(std::memory_order_acquire);
+  if (sequence == 0 || (sequence & 1u) != 0u) return std::nullopt;
+  snapshot.origin = mp_.map_origin_;
+  snapshot.dimensions = mp_.map_voxel_num_;
+  snapshot.resolution_m = mp_.resolution_;
+  snapshot.cloud_stamp_s = occupancy_cloud_stamp_s_.load(
+      std::memory_order_acquire);
+  snapshot.generation = sequence / 2u;
+  snapshot.frame_id = mp_.frame_id_;
+  const auto count = static_cast<size_t>(snapshot.dimensions.x()) *
+      snapshot.dimensions.y() * snapshot.dimensions.z();
+  if (count == 0 || count > md_.occupancy_buffer_.size() ||
+      count > md_.occupancy_buffer_inflate_.size() ||
+      count > md_.occupancy_buffer_raw_cloud_.size() ||
+      count > md_.observed_buffer_.size()) return std::nullopt;
+  snapshot.cell_flags.resize(count);
+  for (size_t i = 0; i < count; ++i) {
+    const bool raw = md_.occupancy_buffer_raw_cloud_[i] != 0 ||
+        md_.occupancy_buffer_[i] > mp_.min_occupancy_log_;
+    snapshot.cell_flags[i] = static_cast<uint8_t>((raw ? 1 : 0) |
+        (md_.occupancy_buffer_inflate_[i] != 0 ? 2 : 0) |
+        (md_.observed_buffer_[i] != 0 ? 4 : 0));
+  }
+  std::lock_guard<std::mutex> risk_lock(risk_mutex_);
+  snapshot.risk_version = risk_version_;
+  snapshot.risk_context_matches_map = risk_occupancy_sequence_ == sequence &&
+      risk_context_.occupancy_generation == snapshot.generation;
+  snapshot.risk_reference_time_s = risk_context_.reference_time_s;
+  snapshot.risk_valid_until_s = risk_context_.valid_until_s;
+  if (!snapshot.risk_context_matches_map) return snapshot;
+  for (size_t i = 0; i < std::min(count, md_.risk_buffer_.size()); ++i) {
+    const auto& risk = md_.risk_buffer_[i];
+    if (risk.version == risk_version_ &&
+        risk.status != GridRiskStatus::UNCOMPUTED)
+      snapshot.queried_risk.push_back(
+          {static_cast<uint32_t>(i), risk});
+  }
+  return snapshot;
 }

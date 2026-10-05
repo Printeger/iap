@@ -164,7 +164,10 @@ TEST(EgoBaseline, PhysicalPlanningProducesFiniteCurveAndObstacleDetour) {
       manager,node->now().seconds(),2);
   ego_planner::EGOPlannerManagerTestAccess::setExternalSupportAge(manager, 0.9);
   manager.local_data_.position_traj_ = unsafe;
-  manager.local_data_.start_time_ = node->now();
+  // The remaining-trajectory check starts after execution has begun. Keep
+  // its elapsed time positive regardless of the host clock's resolution.
+  manager.local_data_.start_time_ = node->now() -
+      rclcpp::Duration::from_seconds(0.05);
   const auto bridged_lookahead = manager.assessRemainingTrajectory(
       node->now().seconds());
   EXPECT_EQ(bridged_lookahead.execution_reason,

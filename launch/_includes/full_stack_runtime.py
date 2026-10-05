@@ -23,7 +23,7 @@ from profile_runtime import materialize_profile
 from run_directory import register_config_snapshot
 
 
-def planner_parameters(scenario):
+def planner_parameters(scenario, capture_failure_map=False):
     size = [float(v) for v in scenario["map_size"]]
     goal = [float(v) for v in scenario["goal"]]
     velocity = float(scenario["max_velocity_mps"])
@@ -73,6 +73,7 @@ def planner_parameters(scenario):
         "planning/current_motion_max_age_s": 0.5,
         "planning/environment_max_age_s": 0.5,
         "planning/tracking_error_limit_m": 0.30,
+        "planning/capture_failure_map": capture_failure_map,
         "risk/gnss_max_age_s": 2.0,
         "risk/source": {"lidar_only": "lidar", "gnss_only": "gnss"}.get(profile, "fusion"),
         "risk_viz/enabled": True,
@@ -112,7 +113,11 @@ def _setup(context):
         remaps.append((f"risk/{local}", f"/ublox_driver/{remote}"))
     planner = Node(package="ego_planner", executable="ego_planner_node",
                    name="drone_0_ego_planner_node", output="screen",
-                   parameters=[planner_parameters(scenario)], remappings=remaps)
+                   parameters=[planner_parameters(
+                       scenario,
+                       context.launch_configurations.get(
+                           "capture_failure_map", "false").lower() == "true")],
+                   remappings=remaps)
     actions = [
         IncludeLaunchDescription(PythonLaunchDescriptionSource(
             str(share / "launch/_includes/simulation_environment.launch.py")),
