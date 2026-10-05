@@ -62,6 +62,10 @@ public:
 		size_t query_calls = 0;
 		size_t cache_hits = 0;
 		double duration_s = 0.0;
+		double step_size_m = 0.0;
+		Eigen::Vector3i pool_dimensions = Eigen::Vector3i::Zero();
+		Eigen::Vector3d pool_center = Eigen::Vector3d::Zero();
+		uint64_t occupancy_generation = 0;
 	};
 private:
 	GridMap::Ptr grid_map_;
@@ -142,7 +146,9 @@ public:
 	}
 	static const char* failureName(Failure failure);
 
-	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
+	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt,
+	                 Eigen::Vector3d end_pt, double max_duration_s = -1.0,
+	                 std::optional<Eigen::Vector3d> center_override = std::nullopt);
 
 	std::vector<Eigen::Vector3d> getPath();
 };

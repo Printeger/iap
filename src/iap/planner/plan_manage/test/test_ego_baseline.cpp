@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 #include <ego_planner/planner_manager.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <iap/util/run_log_manager.hpp>
+#include <filesystem>
+#include <fstream>
+#include <unistd.h>
 
 struct GridMapTestAccess {
   static void markObserved(GridMap& map) {
@@ -27,6 +31,21 @@ struct GridMapTestAccess {
 };
 namespace ego_planner {
 struct EGOPlannerManagerTestAccess {
+  static void setCapture(EGOPlannerManager& manager) {
+    manager.capture_failure_map_ = true;
+    manager.planning_time_s_ = 10.0;
+    manager.planning_motion_.quality = 1;
+    manager.planning_motion_.stamp_s = 10.0;
+    manager.planning_motion_.error_proxy_m = 0.02;
+  }
+  static void capture(EGOPlannerManager& manager, const std::string& kind,
+                      const GridPlanningCell& cell,
+                      const AStar::Result* result = nullptr,
+                      const BsplineOptimizer::SearchFailureContext* context = nullptr) {
+    manager.captureFailureMap(kind, Eigen::Vector3d(0, 0, 1),
+                              Eigen::Vector3d(-1, 0, 1), cell,
+                              result, context);
+  }
   static void setExternalSupportAge(EGOPlannerManager& manager, double age) {
     manager.current_integrity_.current_external_support_age_s = age;
   }
@@ -223,4 +242,74 @@ TEST(EgoBaseline, AdvisoryOnlyViolationBuildsOneGuideAndBendsCurve) {
     displacement = std::max(displacement,
                             std::abs(curve.evaluateDeBoorT(t).y()));
   EXPECT_GT(displacement, 0.3);
+}
+
+TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
+  ASSERT_EQ(glim::RunLogManager::get_if_initialized(), nullptr);
+  char name[] = "/tmp/iap_failure_capture_XXXXXX";
+  const char* temporary = mkdtemp(name);
+  ASSERT_NE(temporary, nullptr);
+  const std::filesystem::path run(temporary);
+  struct Cleanup {
+    std::filesystem::path path;
+    ~Cleanup() { std::filesystem::remove_all(path); }
+  } cleanup{run};
+  ASSERT_EQ(setenv("IAP_RUN_DIR", run.c_str(), 1), 0);
+  glim::RunLogManager::initialize("failure_capture_test");
+  auto node = makeNode();
+  ego_planner::EGOPlannerManager manager;
+  auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager.initPlanModules(node, vis);
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);
+  GridMapTestAccess::input(*manager.grid_map_, {Eigen::Vector3d(0, 0, 1)},
+                           10.0, Eigen::Vector3d(0, 0, 1));
+  ASSERT_GT(manager.grid_map_->occupancyGeneration(), 0u);
+  GridPlanningCell cell;
+  cell.occupancy_generation = manager.grid_map_->occupancyGeneration();
+  cell.execution_reason = GridExecutionReason::PHYSICAL_OBSTACLE;
+  AStar::Result result;
+  result.occupancy_generation = cell.occupancy_generation;
+  result.step_size_m = 0.1;
+  result.pool_dimensions = Eigen::Vector3i(100, 100, 100);
+  result.pool_center = Eigen::Vector3d(-0.5, 0, 1);
+  result.requested_start = Eigen::Vector3d(-1, 0, 1);
+  result.requested_end = Eigen::Vector3d(0, 0, 1);
+  ego_planner::BsplineOptimizer::SearchFailureContext context;
+  context.stage = "initial_control_points";
+  context.control_points = {result.requested_start, result.requested_end};
+  context.segment_start = 0;
+  context.segment_end = 1;
+  const auto root = run / "export/planner/failure_map";
+  for (const auto& item : std::vector<std::pair<std::string, AStar::Failure>>{
+           {"endpoint", AStar::Failure::END_BLOCKED},
+           {"exhausted", AStar::Failure::NO_PATH},
+           {"timeout", AStar::Failure::TIME_BUDGET}}) {
+    result.failure = item.second;
+    ego_planner::EGOPlannerManagerTestAccess::capture(
+        manager, item.first, cell, &result, &context);
+    const auto leaf = root / item.first;
+    EXPECT_TRUE(std::filesystem::exists(leaf / "snapshot.json"));
+    EXPECT_TRUE(std::filesystem::exists(leaf / "queried_risk.csv"));
+    ASSERT_TRUE(std::filesystem::exists(leaf / "cells.bin"));
+    EXPECT_EQ(std::filesystem::file_size(leaf / "cells.bin"),
+              manager.grid_map_->captureFailureSnapshot()->cell_flags.size());
+    EXPECT_TRUE(std::filesystem::exists(
+        run / "metadata/manifests" /
+        ("planner_failure_map_" + item.first + ".json")));
+    const auto validate_snapshot =
+        "python3 -m json.tool " + (leaf / "snapshot.json").string() +
+        " >/dev/null";
+    EXPECT_EQ(std::system(validate_snapshot.c_str()), 0);
+  }
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager, "candidate", cell);
+  ASSERT_TRUE(std::filesystem::exists(root / "candidate/snapshot.json"));
+  const auto before = std::filesystem::last_write_time(root / "endpoint/snapshot.json");
+  ego_planner::EGOPlannerManagerTestAccess::capture(
+      manager, "endpoint", cell, &result, &context);
+  EXPECT_EQ(std::filesystem::last_write_time(root / "endpoint/snapshot.json"),
+            before);
+  size_t count = 0;
+  for (const auto& leaf : std::filesystem::directory_iterator(root))
+    if (leaf.is_directory()) ++count;
+  EXPECT_EQ(count, 4u);
 }

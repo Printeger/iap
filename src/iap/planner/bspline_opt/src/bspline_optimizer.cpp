@@ -618,6 +618,9 @@ namespace ego_planner
                   found ? "used" : "failed");
     }
     if (!found) {
+      reportSearchFailure(a_star_->lastResult(), init_points,
+                          segment_ids.front().first, segment_ids.back().second,
+                          "initial_control_points");
       static rclcpp::Clock failure_clock(RCL_SYSTEM_TIME);
       RCLCPP_WARN_THROTTLE(rclcpp::get_logger("initControlPoints"),
                   failure_clock, 1000,
@@ -1441,6 +1444,9 @@ namespace ego_planner
         found = a_star_->AstarSearch(0.1, in, out);
       }
       if (!found) {
+        reportSearchFailure(a_star_->lastResult(), cps_.points,
+                            segment_ids.front().first, segment_ids.back().second,
+                            "rebound_collision_check");
         static rclcpp::Clock recheck_failure_clock(RCL_SYSTEM_TIME);
         RCLCPP_WARN_THROTTLE(rclcpp::get_logger("reboundCollisionCheck"),
             recheck_failure_clock, 1000,

@@ -1,167 +1,113 @@
 #!/usr/bin/env python3
-"""Check physical/observed reachability in a saved A* failure map.
-
-This offline check uses the saved GridMap flags and the same raw-centre
-clearance rule. Advisory prediction cannot be reconstructed outside the saved
-queried samples, so the report never calls an unqueried voxel low risk.
-"""
+"""Replay a frozen failure map through the planner's C++ clearance and A*."""
 
 import argparse
-from collections import Counter, deque
-from functools import lru_cache
 import json
 import math
+import os
 from pathlib import Path
-import time
-
-import numpy as np
+import shutil
+import subprocess
 
 from replay_failure_map import load_snapshot
 
 
-def inspect(directory, budget_s):
-    directory, meta, flags = load_snapshot(directory)
-    if meta["kind"] != "search":
-        raise ValueError("reachability needs the search snapshot")
-    origin = np.asarray(meta["origin_m"], dtype=float)
-    resolution = float(meta["resolution_m"])
-    required = meta["required_clearance_m"]
-    start = np.asarray(meta["other_endpoint_m"], dtype=float)
-    target = np.asarray(meta["failure_position_m"], dtype=float)
-    result = {"schema_version": "iap_failure_reachability_v1",
-              "snapshot": str(directory), "generation": meta["generation"],
-              "search_failure": meta["search_failure"],
-              "scope": "physical and observed GridMap in original 100^3 A* pool",
-              "advisory": "only saved queried samples; not used as passability truth"}
-    if required is None or not np.isfinite(start).all() or not np.isfinite(target).all():
-        result["classification"] = "INSUFFICIENT_SNAPSHOT_DATA"
-        return result
-    required = float(required)
-    center = (start + target) / 2.0
-    lower = center - 5.0
-    upper = center + 4.9
-    radius_cells = math.ceil(required / resolution) + 1
-    counters = Counter()
+def _backend_path():
+    override = os.environ.get("IAP_FAILURE_MAP_REPLAY_BIN")
+    if override:
+        return Path(override)
+    installed = (Path(__file__).resolve().parents[4] / "install" /
+                 "ego_planner/lib/ego_planner/failure_map_replay")
+    if installed.is_file():
+        return installed
+    executable = shutil.which("failure_map_replay")
+    if executable:
+        return Path(executable)
+    raise FileNotFoundError("build ego_planner to install failure_map_replay")
 
-    def position(index):
-        return center + (np.asarray(index, dtype=float) - 50.0) * 0.1
 
-    @lru_cache(maxsize=None)
-    def query_map(index, exact=None):
-        # exact=None means inspect the centre of this existing map voxel.
-        if any(index[i] < 0 or index[i] >= flags.shape[i] for i in range(3)):
-            return "OUT_OF_MAP"
-        bits = int(flags[index])
-        if not bits & 4 and not bits & 3:
-            return "ENVIRONMENT_UNOBSERVED"
-        if bits & 3:
-            return "PHYSICAL_OBSTACLE"
-        p = origin + (np.asarray(index, dtype=float) + 0.5) * resolution \
-            if exact is None else np.asarray(exact, dtype=float)
-        lo = np.maximum(0, np.asarray(index) - radius_cells)
-        hi = np.minimum(np.asarray(flags.shape), np.asarray(index) + radius_cells + 1)
-        block = flags[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]]
-        raw = np.argwhere((block & 1) != 0)
-        if raw.size:
-            raw = raw + lo
-            xyz = origin + (raw.astype(float) + 0.5) * resolution
-            if np.min(np.sum((xyz - p) ** 2, axis=1)) < required ** 2:
-                return "INSUFFICIENT_CLEARANCE"
-        return "OK"
+def _point(value):
+    if len(value) != 3 or not all(isinstance(x, (int, float)) and
+                                  math.isfinite(x) for x in value):
+        raise ValueError("invalid three-dimensional snapshot coordinate")
+    return " ".join(format(float(x), ".17g") for x in value)
 
-    def query_position(p):
-        index = tuple(np.floor((p - origin) / resolution).astype(int))
-        # Exact-position queries are only used at the two endpoints. Search
-        # lattice positions receive their own cache below.
-        return query_map.__wrapped__(index, tuple(float(v) for v in p))
 
-    @lru_cache(maxsize=None)
-    def query_search(index):
-        return query_position(position(index))
+def _number(value):
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError("snapshot has unavailable motion or time evidence")
+    return format(float(value), ".17g")
 
-    def traversed_cells(a, b):
-        begin = (a - origin) / resolution
-        end = (b - origin) / resolution
-        current = np.floor(begin).astype(int)
-        last = np.floor(end).astype(int)
-        delta = end - begin
-        step = np.sign(delta).astype(int)
-        max_t = np.full(3, np.inf)
-        increment = np.full(3, np.inf)
-        for axis in range(3):
-            if delta[axis] != 0:
-                boundary = current[axis] + (1 if step[axis] > 0 else 0)
-                max_t[axis] = (boundary - begin[axis]) / delta[axis]
-                increment[axis] = abs(1.0 / delta[axis])
-        for _ in range(8):
-            yield tuple(current)
-            if np.array_equal(current, last):
-                break
-            # Match RayCaster's x/y/z tie order (z before y before x).
-            axis = min((2, 1, 0), key=lambda item: (max_t[item], -item))
-            current[axis] += step[axis]
-            max_t[axis] += increment[axis]
 
-    start_index = tuple(np.rint((start - center) / 0.1).astype(int) + 50)
-    end_index = tuple(np.rint((target - center) / 0.1).astype(int) + 50)
-    result["start_reason"] = query_position(start)
-    result["end_reason"] = query_position(target)
-    if result["start_reason"] != "OK":
-        result["classification"] = "START_NOT_EXECUTABLE"
-        return result
-    if result["end_reason"] == "ENVIRONMENT_UNOBSERVED":
-        result["classification"] = "TARGET_UNOBSERVED"
-        return result
-    if result["end_reason"] != "OK":
-        result["classification"] = "TARGET_NOT_EXECUTABLE"
-        return result
-    if not all(1 <= value <= 98 for value in start_index + end_index):
-        result["classification"] = "ENDPOINT_OUTSIDE_SEARCH_POOL"
-        return result
-    directions = [(x, y, z) for x in (-1, 0, 1) for y in (-1, 0, 1)
-                  for z in (-1, 0, 1) if (x, y, z) != (0, 0, 0)]
-    queue = deque([start_index])
-    seen = {start_index}
-    began = time.monotonic()
-    while queue:
-        if time.monotonic() - began > budget_s:
-            result["classification"] = "OFFLINE_BUDGET_EXCEEDED"
-            break
-        current = queue.popleft()
-        if current == end_index:
-            result["classification"] = (
-                "ROUTE_EXISTS_ON_SNAPSHOT_ONLINE_TIMEOUT" if
-                meta["search_failure"] == "TIME_BUDGET" else
-                "ROUTE_EXISTS_ON_SNAPSHOT")
-            break
-        source = position(current)
-        for delta in directions:
-            neighbor = tuple(current[i] + delta[i] for i in range(3))
-            if neighbor in seen or not all(1 <= v <= 98 for v in neighbor):
-                continue
-            seen.add(neighbor)
-            reason = query_search(neighbor)
-            if reason != "OK":
-                counters[reason] += 1
-                continue
-            destination = position(neighbor)
-            blocked = False
-            for map_index in traversed_cells(source, destination):
-                reason = query_map(map_index)
-                if reason != "OK":
-                    counters[reason] += 1
-                    blocked = True
-                    break
-            if not blocked:
-                queue.append(neighbor)
-    else:
-        result["classification"] = "NO_ROUTE_IN_OBSERVED_SEARCH_POOL"
-    result["visited_lattice_cells"] = len(seen)
-    result["rejected_by_reason"] = dict(counters)
-    result["offline_seconds"] = time.monotonic() - began
-    result["search_pool_min_m"] = lower.tolist()
-    result["search_pool_max_m"] = upper.tolist()
-    return result
+def _inconclusive(directory, reason):
+    return {"schema_version": "iap_failure_reachability_v2",
+            "classification": reason, "snapshot": str(directory)}
+
+
+def inspect(directory, budget_s=120.0, backend=None):
+    directory, meta, _ = load_snapshot(directory)
+    if meta.get("schema_version") != "iap_gridmap_failure_v2":
+        raise ValueError("same-rule replay requires a v2 failure snapshot")
+    if meta.get("kind") == "candidate":
+        return _inconclusive(directory, "INCONCLUSIVE_CANDIDATE_ONLY")
+    if not math.isfinite(budget_s) or budget_s <= 0:
+        raise ValueError("budget must be a finite positive number")
+    required = ("planning_time_s", "cloud_stamp_s", "motion_stamp_s",
+                "motion_error_proxy_m", "motion_body_radius_m",
+                "motion_tracking_reserve_m", "motion_budget_m",
+                "motion_max_age_s", "environment_max_age_s")
+    try:
+        motion_values = [_number(meta[name]) for name in required]
+    except (KeyError, ValueError):
+        return _inconclusive(directory,
+                             "INCONCLUSIVE_STALE_OR_INVALID_EVIDENCE")
+    points = meta.get("control_points_m")
+    if (not isinstance(points, list) or not points or
+            meta.get("search_failure") is None):
+        return _inconclusive(directory,
+                             "INCONCLUSIVE_MISSING_SEGMENT_CONTEXT")
+    if len(points) > 100000:
+        raise ValueError("too many control points in failure snapshot")
+    try:
+        lines = [" ".join(str(int(x)) for x in meta["dimensions"]),
+                 _point(meta["origin_m"]), _point(meta["max_boundary_m"]),
+                 " ".join((_number(meta["resolution_m"]),
+                           motion_values[1], str(int(meta["generation"])),
+                           json.dumps(meta["frame_id"]), motion_values[0])),
+                 " ".join((str(int(meta["motion_quality"])),
+                           str(int(bool(meta["motion_allow_bridged"]))),
+                           *motion_values[2:8], motion_values[8])),
+                 " ".join((*map(str, meta["search_pool_dimensions"]),
+                           _number(meta["search_step_size_m"]))),
+                 _point(meta["search_pool_center_m"]),
+                 _point(meta["search_requested_start_m"]),
+                 _point(meta["search_requested_end_m"]),
+                 " ".join((str(int(meta["segment_start_index"])),
+                           str(int(meta["segment_end_index"])),
+                           str(len(points))))]
+        lines.extend(_point(point) for point in points)
+        lines.append(f"{meta['search_failure']} {_number(budget_s)}")
+    except (KeyError, TypeError, ValueError):
+        return _inconclusive(directory,
+                             "INCONCLUSIVE_MISSING_SEGMENT_CONTEXT")
+    binary = Path(backend) if backend else _backend_path()
+    try:
+        completed = subprocess.run(
+            [str(binary), str(directory / meta["cell_flags_file"])],
+            input="\n".join(lines) + "\n", text=True, capture_output=True,
+            check=False, timeout=max(10.0, budget_s + 30.0))
+    except subprocess.TimeoutExpired:
+        return _inconclusive(directory, "INCONCLUSIVE_OFFLINE_BUDGET")
+    if completed.returncode:
+        raise RuntimeError(completed.stderr.strip() or "C++ replay failed")
+    report = json.loads(completed.stdout)
+    report.update(snapshot=str(directory), generation=meta["generation"],
+                  online_failure=meta["search_failure"],
+                  search_stage=meta.get("search_stage"),
+                  required_clearance_m=meta.get("required_clearance_m"),
+                  scope="original A* pool; observed physical map and saved motion",
+                  advisory="saved queried PL samples are diagnostic only")
+    return report
 
 
 def main():

@@ -106,7 +106,7 @@ def main():
             marker.color.r, marker.color.g, marker.color.b = color
             marker.color.a = 1.0
             markers.markers.append(marker)
-        if meta["kind"] == "search":
+        if meta["kind"] != "candidate":
             wire = Marker()
             wire.header = header
             wire.ns = "search_pool"
@@ -117,9 +117,16 @@ def main():
             wire.scale.x = 0.035
             wire.color.r = wire.color.g = wire.color.b = 0.95
             wire.color.a = 0.7
-            middle = (np.asarray(meta["failure_position_m"]) +
-                      np.asarray(meta["other_endpoint_m"])) / 2.0
-            lo, hi = middle - 5.0, middle + 4.9
+            if meta.get("schema_version") == "iap_gridmap_failure_v2":
+                middle = np.asarray(meta["search_pool_center_m"], dtype=float)
+                dimensions = np.asarray(meta["search_pool_dimensions"], dtype=float)
+                step = float(meta["search_step_size_m"])
+                lo = middle - np.floor(dimensions / 2.0) * step
+                hi = middle + (dimensions - np.floor(dimensions / 2.0) - 1) * step
+            else:
+                middle = (np.asarray(meta["failure_position_m"]) +
+                          np.asarray(meta["other_endpoint_m"])) / 2.0
+                lo, hi = middle - 5.0, middle + 4.9
             corners = [np.array([x, y, z]) for x in (lo[0], hi[0])
                        for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
             for i in range(8):

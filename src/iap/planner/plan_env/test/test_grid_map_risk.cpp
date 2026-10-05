@@ -94,6 +94,36 @@ TEST_F(GridRiskTest, FailureSnapshotKeepsOneGenerationAndAllPhysicalLayers) {
             static_cast<uint32_t>(address));
   EXPECT_EQ(saved->queried_risk.front().value.version, version);
 }
+TEST_F(GridRiskTest, FrozenFailureMapUsesSamePlanningCellRule) {
+  Eigen::Vector3i obstacle(1, 3, 0);
+  GridMapTestAccess::setRawAndInflated(map, map.toAddress(obstacle));
+  Eigen::Vector3i unknown(3, 5, 0);
+  GridMapTestAccess::setObserved(map, map.toAddress(unknown), false);
+  const auto saved = map.captureFailureSnapshot();
+  ASSERT_TRUE(saved);
+  auto replay = GridMap::fromFailureSnapshot(*saved);
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 10.0;
+  motion.error_proxy_m = 0.02;
+  motion.body_radius_m = 0.35;
+  motion.tracking_reserve_m = 0.10;
+  GridPlanningRiskPolicy policy;
+  for (const Eigen::Vector3d point : {
+           Eigen::Vector3d(-0.5, 0.5, 0.5),
+           Eigen::Vector3d(0.5, 0.5, 0.5),
+           Eigen::Vector3d(1.5, 2.5, 0.5)}) {
+    const auto original = map.queryPlanningCell(point, 0, 10.0, policy, motion);
+    const auto frozen = replay->queryPlanningCell(point, 0, 10.0, policy, motion);
+    EXPECT_EQ(frozen.execution_reason, original.execution_reason);
+    EXPECT_EQ(frozen.observed, original.observed);
+    EXPECT_EQ(frozen.required_clearance_m, original.required_clearance_m);
+    if (std::isnan(original.raw_center_clearance_m))
+      EXPECT_TRUE(std::isnan(frozen.raw_center_clearance_m));
+    else
+      EXPECT_EQ(frozen.raw_center_clearance_m, original.raw_center_clearance_m);
+  }
+}
 TEST_F(GridRiskTest, AllCellsShareAddressAndBordersReject) {
   const auto version = map.bindRiskContext(context());
   for (int x = 0; x < 4; ++x) for (int y = 0; y < 6; ++y) for (int z = 0; z < 2; ++z) {

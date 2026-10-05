@@ -130,6 +130,29 @@ TEST(AdvisoryAStar, RoundedEndpointNeedsAnExecutableConnector) {
   EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_BLOCKED);
 }
 
+TEST(AdvisoryAStar, MidpointRejectionBendsOtherwiseFreeEdge) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(20, 20, 10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = std::abs(p.x() - 0.15) < 1e-6 &&
+        std::abs(p.y()) < 1e-6
+        ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(0, 0, 1),
+                                 Eigen::Vector3d(0.4, 0, 1)));
+  const auto route = search.getPath();
+  ASSERT_GE(route.size(), 3u);
+  double length = 0.0;
+  for (size_t i = 1; i < route.size(); ++i)
+    length += (route[i] - route[i - 1]).norm();
+  EXPECT_GT(length, 0.4);
+}
+
 TEST(AdvisoryAStar, UnobservedBarrierHasItsOwnFailureReason) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);

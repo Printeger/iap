@@ -22,13 +22,13 @@ namespace ego_planner
   }
 
   void EGOPlannerManager::captureFailureMap(
-      const char* kind, const Eigen::Vector3d& point,
+      const std::string& kind, const Eigen::Vector3d& point,
       const Eigen::Vector3d& other, const GridPlanningCell& cell,
-      const AStar::Result* search)
+      const AStar::Result* search,
+      const BsplineOptimizer::SearchFailureContext* context)
   {
     if (!capture_failure_map_) return;
-    if (std::string(kind) == "candidate" && failure_candidate_captured_) return;
-    if (std::string(kind) == "search" && failure_search_captured_) return;
+    if (captured_failure_kinds_.count(kind)) return;
     auto* artifacts = glim::RunLogManager::get_if_initialized();
     if (!artifacts) {
       RCLCPP_ERROR(node_->get_logger(),
@@ -36,22 +36,22 @@ namespace ego_planner
       return;
     }
     const auto snapshot = grid_map_->captureFailureSnapshot();
-    if (!snapshot || snapshot->generation != cell.occupancy_generation) {
-      RCLCPP_WARN(node_->get_logger(),
-          "planner failure map capture skipped: occupancy generation changed");
+    const uint64_t expected = search ? search->occupancy_generation :
+        cell.occupancy_generation;
+    if (!snapshot || snapshot->generation != expected ||
+        (cell.occupancy_generation != 0 &&
+         snapshot->generation != cell.occupancy_generation)) {
+      RCLCPP_ERROR(node_->get_logger(),
+          "planner failure map %s capture failed: occupancy generation mismatch expected=%lu cell=%lu actual=%lu",
+          kind.c_str(), static_cast<unsigned long>(expected),
+          static_cast<unsigned long>(cell.occupancy_generation),
+          static_cast<unsigned long>(snapshot ? snapshot->generation : 0));
       return;
     }
-    const std::string leaf(kind);
-    const std::string relative = "planner/failure_map/" + leaf;
+    const std::string relative = "planner/failure_map/" + kind;
     const auto directory = artifacts->export_path(relative);
-    if (std::filesystem::exists(directory / "snapshot.json")) {
-      if (leaf == "candidate") failure_candidate_captured_ = true;
-      else failure_search_captured_ = true;
-      RCLCPP_INFO(node_->get_logger(),
-          "planner failure map %s already registered for this run; keeping first snapshot",
-          kind);
-      return;
-    }
+    const auto manifest_path = artifacts->metadata_path(
+        "manifests/planner_failure_map_" + kind + ".json");
     const auto number = [](const double value) {
       if (!std::isfinite(value)) return std::string("null");
       std::ostringstream text;
@@ -63,13 +63,27 @@ namespace ego_planner
           "," + number(value.z()) + "]";
     };
     try {
-      std::filesystem::create_directories(directory);
-      std::ofstream cells(directory / "cells.bin", std::ios::binary);
+      if (std::filesystem::exists(directory)) {
+        if (!std::filesystem::exists(directory / "snapshot.json") ||
+            !std::filesystem::exists(directory / "queried_risk.csv") ||
+            !std::filesystem::exists(directory / "cells.bin") ||
+            std::filesystem::file_size(directory / "cells.bin") !=
+                snapshot->cell_flags.size() ||
+            !std::filesystem::exists(manifest_path))
+          throw std::runtime_error("existing failure map artifact is incomplete");
+        captured_failure_kinds_.insert(kind);
+        return;
+      }
+      const auto pending = artifacts->export_path(relative + ".pending");
+      if (std::filesystem::exists(pending))
+        throw std::runtime_error("previous pending failure map artifact exists");
+      std::filesystem::create_directories(pending);
+      std::ofstream cells(pending / "cells.bin", std::ios::binary);
       cells.write(reinterpret_cast<const char*>(snapshot->cell_flags.data()),
                   snapshot->cell_flags.size());
       cells.close();
       if (!cells) throw std::runtime_error("cells.bin write failed");
-      std::ofstream risk(directory / "queried_risk.csv");
+      std::ofstream risk(pending / "queried_risk.csv");
       risk << "address,hpl_m,vpl_m,status,version\n";
       for (const auto& sample : snapshot->queried_risk)
         risk << sample.address << ',' << sample.value.hpl << ','
@@ -78,9 +92,9 @@ namespace ego_planner
              << sample.value.version << '\n';
       risk.close();
       if (!risk) throw std::runtime_error("queried_risk.csv write failed");
-      std::ofstream metadata(directory / "snapshot.json");
-      metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v1\",\n"
-          << "  \"kind\": " << std::quoted(leaf) << ",\n"
+      std::ofstream metadata(pending / "snapshot.json");
+      metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v2\",\n"
+          << "  \"kind\": " << std::quoted(kind) << ",\n"
           << "  \"frame_id\": " << std::quoted(snapshot->frame_id) << ",\n"
           << "  \"generation\": " << snapshot->generation << ",\n"
           << "  \"cloud_stamp_s\": " << number(snapshot->cloud_stamp_s) << ",\n"
@@ -90,6 +104,7 @@ namespace ego_planner
           << "  \"motion_quality\": "
           << static_cast<unsigned>(planning_motion_.quality) << ",\n"
           << "  \"origin_m\": " << vector(snapshot->origin) << ",\n"
+          << "  \"max_boundary_m\": " << vector(snapshot->max_boundary) << ",\n"
           << "  \"dimensions\": [" << snapshot->dimensions.x() << ','
           << snapshot->dimensions.y() << ',' << snapshot->dimensions.z()
           << "],\n  \"resolution_m\": " << number(snapshot->resolution_m)
@@ -103,6 +118,19 @@ namespace ego_planner
           << "  \"risk_valid_until_s\": "
           << number(snapshot->risk_valid_until_s) << ",\n"
           << "  \"risk_samples_file\": \"queried_risk.csv\",\n"
+          << "  \"motion_allow_bridged\": "
+          << (planning_motion_.allow_bridged ? "true" : "false") << ",\n"
+          << "  \"motion_stamp_s\": " << number(planning_motion_.stamp_s) << ",\n"
+          << "  \"motion_error_proxy_m\": "
+          << number(planning_motion_.error_proxy_m) << ",\n"
+          << "  \"motion_body_radius_m\": "
+          << number(planning_motion_.body_radius_m) << ",\n"
+          << "  \"motion_tracking_reserve_m\": "
+          << number(planning_motion_.tracking_reserve_m) << ",\n"
+          << "  \"motion_budget_m\": "
+          << number(planning_motion_.motion_budget_m) << ",\n"
+          << "  \"motion_max_age_s\": "
+          << number(planning_motion_.max_motion_age_s) << ",\n"
           << "  \"failure_position_m\": " << vector(point) << ",\n"
           << "  \"other_endpoint_m\": " << vector(other) << ",\n"
           << "  \"execution_reason\": "
@@ -116,6 +144,28 @@ namespace ego_planner
           << "  \"search_failure\": "
           << (search ? std::string("\"") + AStar::failureName(search->failure) + "\""
                      : "null") << ",\n"
+          << "  \"search_stage\": "
+          << (context ? std::string("\"") + context->stage + "\"" : "null")
+          << ",\n  \"search_step_size_m\": "
+          << number(search ? search->step_size_m : 0.0)
+          << ",\n  \"search_pool_dimensions\": ["
+          << (search ? search->pool_dimensions.x() : 0) << ','
+          << (search ? search->pool_dimensions.y() : 0) << ','
+          << (search ? search->pool_dimensions.z() : 0) << "],\n"
+          << "  \"search_pool_center_m\": "
+          << vector(search ? search->pool_center : Eigen::Vector3d::Zero())
+          << ",\n  \"search_requested_start_m\": "
+          << vector(search ? search->requested_start : Eigen::Vector3d::Zero())
+          << ",\n  \"search_requested_end_m\": "
+          << vector(search ? search->requested_end : Eigen::Vector3d::Zero())
+          << ",\n  \"segment_start_index\": "
+          << (context ? context->segment_start : -1)
+          << ",\n  \"segment_end_index\": "
+          << (context ? context->segment_end : -1)
+          << ",\n  \"control_points_m\": [";
+      if (context) for (size_t i = 0; i < context->control_points.size(); ++i)
+        metadata << (i ? "," : "") << vector(context->control_points[i]);
+      metadata << "],\n"
           << "  \"search_expanded\": " << (search ? search->expanded : 0)
           << ",\n  \"search_query_calls\": "
           << (search ? search->query_calls : 0) << ",\n"
@@ -131,27 +181,27 @@ namespace ego_planner
                << number(search ? search->duration_s : 0.0) << "\n}\n";
       metadata.close();
       if (!metadata) throw std::runtime_error("snapshot.json write failed");
-      const auto manifest_path = artifacts->metadata_path(
-          "manifests/planner_failure_map_" + leaf + ".json");
+      std::filesystem::rename(pending, directory);
       std::filesystem::create_directories(manifest_path.parent_path());
-      std::ofstream manifest(manifest_path);
-      manifest << "{\"schema_version\":\"iap_planner_failure_artifact_v1\","
-          << "\"kind\":" << std::quoted(leaf) << ","
+      const auto manifest_pending = manifest_path.string() + ".pending";
+      std::ofstream manifest(manifest_pending);
+      manifest << "{\"schema_version\":\"iap_planner_failure_artifact_v2\","
+          << "\"kind\":" << std::quoted(kind) << ","
           << "\"snapshot\":" << std::quoted(relative + "/snapshot.json")
           << ",\"cells\":" << std::quoted(relative + "/cells.bin")
           << ",\"risk_samples\":"
           << std::quoted(relative + "/queried_risk.csv") << "}\n";
       manifest.close();
       if (!manifest) throw std::runtime_error("subordinate manifest write failed");
-      if (leaf == "candidate") failure_candidate_captured_ = true;
-      else failure_search_captured_ = true;
+      std::filesystem::rename(manifest_pending, manifest_path);
+      captured_failure_kinds_.insert(kind);
       RCLCPP_INFO(node_->get_logger(),
           "planner failure map %s saved at %s generation=%lu voxels=%zu",
-          kind, directory.c_str(), static_cast<unsigned long>(snapshot->generation),
+          kind.c_str(), directory.c_str(), static_cast<unsigned long>(snapshot->generation),
           snapshot->cell_flags.size());
     } catch (const std::exception& error) {
       RCLCPP_ERROR(node_->get_logger(),
-          "planner failure map %s save failed: %s", kind, error.what());
+          "planner failure map %s save failed: %s", kind.c_str(), error.what());
     }
   }
 
@@ -195,8 +245,9 @@ namespace ego_planner
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
-    bspline_optimizer_->a_star_->setFailureObserver(
-        [this](const AStar::Result& result) {
+    bspline_optimizer_->setSearchFailureObserver(
+        [this](const AStar::Result& result,
+               const BsplineOptimizer::SearchFailureContext& context) {
           const auto end = grid_map_->queryPlanningCell(
               result.requested_end, planning_risk_version_, planning_time_s_,
               planning_risk_policy_, planning_motion_, true);
@@ -220,11 +271,16 @@ namespace ego_planner
               static_cast<unsigned>(end.advisory.classification),
               static_cast<unsigned long>(end.occupancy_generation),
               end.cloud_stamp_s);
-          if (capture_failure_map_ && !failure_search_captured_ &&
-              (result.end_cell.occupancy_generation == 0 ||
-               result.end_cell.occupancy_generation == end.occupancy_generation))
-            captureFailureMap("search", result.requested_end,
-                              result.requested_start, end, &result);
+          std::string kind = "endpoint";
+          if (result.failure == AStar::Failure::TIME_BUDGET)
+            kind = "timeout";
+          else if (result.failure == AStar::Failure::NO_PATH ||
+                   result.failure == AStar::Failure::NO_PATH_WITH_UNOBSERVED ||
+                   result.failure == AStar::Failure::ADVISORY_NO_PATH)
+            kind = "exhausted";
+          if (capture_failure_map_ && !captured_failure_kinds_.count(kind))
+            captureFailureMap(kind, result.requested_end,
+                              result.requested_start, end, &result, &context);
         });
 
     visualization_ = vis;
@@ -542,7 +598,7 @@ namespace ego_planner
                   static_cast<unsigned long>(detail.occupancy_generation),
                   detail.cloud_stamp_s,
                   static_cast<unsigned>(detail.advisory.classification));
-      if (capture_failure_map_ && !failure_candidate_captured_ &&
+      if (capture_failure_map_ && !captured_failure_kinds_.count("candidate") &&
           assessment.first_execution_position.allFinite() &&
           (assessment.first_execution_cell.occupancy_generation == 0 ||
            assessment.first_execution_cell.occupancy_generation ==

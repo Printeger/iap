@@ -381,7 +381,9 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
     return true;
 }
 
-bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt)
+bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
+                        Vector3d end_pt, const double max_duration_s,
+                        std::optional<Vector3d> center_override)
 {
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
@@ -395,10 +397,14 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     result_.requested_start = start_pt;
     result_.requested_end = end_pt;
     search_generation_ = grid_map_->occupancyGeneration();
+    result_.occupancy_generation = search_generation_;
 
     step_size_ = step_size;
     inv_step_size_ = 1 / step_size;
-    center_ = (start_pt + end_pt) / 2;
+    center_ = center_override.value_or((start_pt + end_pt) / 2);
+    result_.step_size_m = step_size;
+    result_.pool_dimensions = POOL_SIZE_;
+    result_.pool_center = center_;
 
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
@@ -523,7 +529,9 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
                     }
                 }
         rclcpp::Time time_2 = rclcpp::Clock().now();
-        if ((time_2 - time_1).seconds() > (planning_query_ ? 1.0 : 0.2))
+        const double limit = max_duration_s >= 0.0 ? max_duration_s :
+            (planning_query_ ? 1.0 : 0.2);
+        if ((time_2 - time_1).seconds() > limit)
         {
             finishFailure(Failure::TIME_BUDGET, time_1);
             return false;

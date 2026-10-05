@@ -86,6 +86,12 @@ namespace ego_planner
   {
 
   public:
+    struct SearchFailureContext {
+      std::string stage;
+      std::vector<Eigen::Vector3d> control_points;
+      int segment_start = -1;
+      int segment_end = -1;
+    };
     BsplineOptimizer() {}
     ~BsplineOptimizer() {}
 
@@ -116,6 +122,10 @@ namespace ego_planner
       guide_tracking_ = false;
       if (a_star_) a_star_->setPlanningQuery(planning_query_, advisory_fallback);
     }
+    void setSearchFailureObserver(std::function<void(
+        const AStar::Result&, const SearchFailureContext&)> observer) {
+      search_failure_observer_ = std::move(observer);
+    }
     bool initializationFailed() const { return initialization_failed_; }
     bool advisoryFallbackUsed() const { return planning_advisory_fallback_; }
     void setWaypoints(const vector<Eigen::Vector3d> &waypts,
@@ -139,6 +149,21 @@ namespace ego_planner
     inline double getSwarmClearance(void) { return swarm_clearance_; }
 
   private:
+    std::function<void(const AStar::Result&, const SearchFailureContext&)>
+        search_failure_observer_;
+    void reportSearchFailure(const AStar::Result& result,
+                             const Eigen::MatrixXd& points,
+                             int segment_start, int segment_end,
+                             const char* stage) const {
+      if (!search_failure_observer_) return;
+      SearchFailureContext context;
+      context.stage = stage;
+      context.segment_start = segment_start;
+      context.segment_end = segment_end;
+      for (int i = 0; i < points.cols(); ++i)
+        context.control_points.emplace_back(points.col(i));
+      search_failure_observer_(result, context);
+    }
     GridMap::Ptr grid_map_;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
     bool planning_advisory_fallback_ = false;

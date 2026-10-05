@@ -202,6 +202,7 @@ struct GridPlanningCell {
 
 struct GridMapFailureSnapshot {
   Eigen::Vector3d origin = Eigen::Vector3d::Zero();
+  Eigen::Vector3d max_boundary = Eigen::Vector3d::Zero();
   Eigen::Vector3i dimensions = Eigen::Vector3i::Zero();
   double resolution_m = std::numeric_limits<double>::quiet_NaN();
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
@@ -393,6 +394,7 @@ struct OccupancyCollisionDeltaHistory
 class GridMap : public std::enable_shared_from_this<GridMap>
 {
 public:
+  using Ptr = std::shared_ptr<GridMap>;
   GridMap() {}
   ~GridMap() {}
 
@@ -421,6 +423,7 @@ public:
                                     const GridMotionContext& motion,
                                     bool include_rejected_clearance = false);
   std::optional<GridMapFailureSnapshot> captureFailureSnapshot() const;
+  static Ptr fromFailureSnapshot(const GridMapFailureSnapshot& snapshot);
   std::string getFrameId() const { return mp_.frame_id_; }
 
   // occupancy map management
@@ -483,7 +486,6 @@ public:
   int getVoxelNum();
   bool getOdomDepthTimeout() { return md_.flag_depth_odom_timeout_; }
 
-  typedef std::shared_ptr<GridMap> Ptr;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 

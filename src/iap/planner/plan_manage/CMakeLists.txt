@@ -81,6 +81,11 @@ target_link_libraries(ego_planner_node
 
 add_executable(traj_server src/traj_server.cpp)
 
+add_executable(failure_map_replay src/failure_map_replay.cpp)
+ament_target_dependencies(failure_map_replay
+  plan_env path_searching rclcpp Eigen3 nav_msgs visualization_msgs
+  geometry_msgs sensor_msgs iap cv_bridge pcl_conversions)
+
 ament_target_dependencies(traj_server
                           rclcpp nav_msgs
                           visualization_msgs geometry_msgs
@@ -96,6 +101,8 @@ if(BUILD_TESTING)
   set_tests_properties(test_ego_pipeline PROPERTIES TIMEOUT 40)
   add_test(NAME test_failure_map_tools COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/test_failure_map_tools.py)
+  set_tests_properties(test_failure_map_tools PROPERTIES ENVIRONMENT
+    "IAP_FAILURE_MAP_REPLAY_BIN=$<TARGET_FILE:failure_map_replay>")
   ament_add_gtest(test_ego_baseline test/test_ego_baseline.cpp
     src/planner_manager.cpp src/planner_risk.cpp src/planner_risk_viz.cpp)
   ament_target_dependencies(test_ego_baseline rclcpp nav_msgs geometry_msgs
@@ -106,7 +113,7 @@ endif()
 
 # Install targets
 install(
-  TARGETS ego_planner_node traj_server
+  TARGETS ego_planner_node traj_server failure_map_replay
   DESTINATION lib/${PROJECT_NAME}
 )
 

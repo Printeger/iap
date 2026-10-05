@@ -6,6 +6,7 @@
 #include <limits>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <gnss_comm/gnss_ros.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -119,15 +120,15 @@ namespace ego_planner
     double motion_max_age_s_ = 0.5;
     double environment_max_age_s_ = 0.5;
     bool capture_failure_map_ = false;
-    bool failure_candidate_captured_ = false;
-    bool failure_search_captured_ = false;
+    std::unordered_set<std::string> captured_failure_kinds_;
     uint64_t planning_risk_version_ = 0;
     double planning_time_s_ = 0.0;
     GridMotionContext planning_motion_;
-    void captureFailureMap(const char* kind, const Eigen::Vector3d& point,
+    void captureFailureMap(const std::string& kind, const Eigen::Vector3d& point,
                            const Eigen::Vector3d& other,
                            const GridPlanningCell& cell,
-                           const AStar::Result* search = nullptr);
+                           const AStar::Result* search = nullptr,
+                           const BsplineOptimizer::SearchFailureContext* context = nullptr);
     double last_runtime_advisory_query_s_ =
         -std::numeric_limits<double>::infinity();
     iap::CurrentIntegrityState current_integrity_;

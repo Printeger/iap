@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 uint64_t GridMap::bindRiskContext(GridRiskContext context)
 {
@@ -282,6 +283,7 @@ std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot() const
   const auto sequence = occupancy_update_sequence_.load(std::memory_order_acquire);
   if (sequence == 0 || (sequence & 1u) != 0u) return std::nullopt;
   snapshot.origin = mp_.map_origin_;
+  snapshot.max_boundary = mp_.map_max_boundary_;
   snapshot.dimensions = mp_.map_voxel_num_;
   snapshot.resolution_m = mp_.resolution_;
   snapshot.cloud_stamp_s = occupancy_cloud_stamp_s_.load(
@@ -317,4 +319,42 @@ std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot() const
           {static_cast<uint32_t>(i), risk});
   }
   return snapshot;
+}
+
+GridMap::Ptr GridMap::fromFailureSnapshot(const GridMapFailureSnapshot& snapshot)
+{
+  const auto dims = snapshot.dimensions;
+  if ((dims.array() <= 0).any() || !std::isfinite(snapshot.resolution_m) ||
+      snapshot.resolution_m <= 0.0 || !snapshot.origin.allFinite() ||
+      !snapshot.max_boundary.allFinite() || snapshot.generation == 0 ||
+      snapshot.generation > std::numeric_limits<uint64_t>::max() / 2u)
+    throw std::invalid_argument("invalid failure map geometry or generation");
+  const size_t count = static_cast<size_t>(dims.x()) * dims.y() * dims.z();
+  if (snapshot.cell_flags.size() != count)
+    throw std::invalid_argument("failure map flag count differs from dimensions");
+  auto map = std::make_shared<GridMap>();
+  map->mp_.map_origin_ = snapshot.origin;
+  map->mp_.map_min_boundary_ = snapshot.origin;
+  map->mp_.map_max_boundary_ = snapshot.max_boundary;
+  map->mp_.map_size_ = snapshot.max_boundary - snapshot.origin;
+  map->mp_.map_voxel_num_ = dims;
+  map->mp_.resolution_ = snapshot.resolution_m;
+  map->mp_.resolution_inv_ = 1.0 / snapshot.resolution_m;
+  map->mp_.frame_id_ = snapshot.frame_id;
+  map->mp_.min_occupancy_log_ = 0.5;
+  map->md_.occupancy_buffer_.assign(count, 0.0);
+  map->md_.occupancy_buffer_raw_cloud_.resize(count);
+  map->md_.occupancy_buffer_inflate_.resize(count);
+  map->md_.observed_buffer_.resize(count);
+  for (size_t i = 0; i < count; ++i) {
+    const auto flags = snapshot.cell_flags[i];
+    if (flags & ~static_cast<uint8_t>(7))
+      throw std::invalid_argument("failure map contains unknown flag bits");
+    map->md_.occupancy_buffer_raw_cloud_[i] = flags & 1;
+    map->md_.occupancy_buffer_inflate_[i] = flags & 2;
+    map->md_.observed_buffer_[i] = flags & 4;
+  }
+  map->occupancy_update_sequence_.store(snapshot.generation * 2u);
+  map->occupancy_cloud_stamp_s_.store(snapshot.cloud_stamp_s);
+  return map;
 }
