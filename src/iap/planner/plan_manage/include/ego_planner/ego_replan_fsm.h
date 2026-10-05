@@ -4,6 +4,11 @@
 #include <Eigen/Eigen>
 #include <algorithm>
 #include <limits>
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <atomic>
+#include <quadrotor_msgs/msg/position_command.hpp>
 #include <iostream>
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -70,6 +75,15 @@ namespace ego_planner
     bool require_observed_reference_prefix_ = false;
     uint64_t observed_prefix_failure_generation_ = 0;
     double search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
+    bool waiting_for_spatial_evidence_ = false;
+    uint64_t waiting_evidence_generation_ = 0;
+    uint64_t waiting_evidence_hash_ = 0;
+    uint8_t waiting_motion_quality_ = 0;
+    double waiting_motion_error_proxy_m_ = 0.0;
+    GridExecutionReason waiting_target_reason_ = GridExecutionReason::OK;
+    Eigen::Vector3d waiting_start_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d waiting_target_ = Eigen::Vector3d::Zero();
+    double stall_started_s_ = -1.0;
     bool flag_realworld_experiment_;
     bool enable_fail_safe_;
 
@@ -79,6 +93,12 @@ namespace ego_planner
     int continously_called_times_{0};
 
     Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_; // odometry state
+    std::shared_ptr<const nav_msgs::msg::Odometry> pending_odom_;
+    double applied_odom_stamp_s_ =
+        -std::numeric_limits<double>::infinity();
+    std::atomic<double> last_command_time_s_{
+        -std::numeric_limits<double>::infinity()};
+    rclcpp::CallbackGroup::SharedPtr odom_callback_group_;
     Eigen::Quaterniond odom_orient_;
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state
@@ -95,6 +115,8 @@ namespace ego_planner
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr
+        command_sub_;
     rclcpp::Subscription<traj_utils::msg::MultiBsplines>::SharedPtr swarm_trajs_sub_;
     rclcpp::Subscription<traj_utils::msg::Bspline>::SharedPtr broadcast_bspline_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr trigger_sub_;
@@ -119,7 +141,7 @@ namespace ego_planner
 
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
-    bool getLocalTarget();
+    bool getLocalTarget(double target_distance_m);
 
     /* ROS functions */
     void execFSMCallback();
@@ -127,6 +149,7 @@ namespace ego_planner
     void waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg);
+    void applyLatestOdometry();
     void swarmTrajsCallback(const std::shared_ptr<const traj_utils::msg::MultiBsplines> &msg);
     void BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg);
 

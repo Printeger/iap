@@ -197,6 +197,9 @@ struct GridPlanningCell {
   uint64_t occupancy_generation = 0;
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   bool observed = false;
+  double occupancy_query_s = 0.0;
+  double clearance_query_s = 0.0;
+  double advisory_query_s = 0.0;
   bool executable() const { return execution_reason == GridExecutionReason::OK; }
 };
 

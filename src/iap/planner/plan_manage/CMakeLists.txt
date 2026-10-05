@@ -95,6 +95,7 @@ ament_target_dependencies(traj_server
 
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  find_package(ZLIB REQUIRED)
   add_test(NAME test_ego_pipeline COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_pipeline.py
     --planner $<TARGET_FILE:ego_planner_node> --server $<TARGET_FILE:traj_server>)
@@ -109,6 +110,9 @@ if(BUILD_TESTING)
     visualization_msgs quadrotor_msgs plan_env path_searching bspline_opt
     traj_utils cv_bridge pcl_conversions iap gnss_comm sensor_msgs)
   target_link_libraries(test_ego_baseline iap::iap ${TRAJ_UTILS_LIB} ${IAP_MSGS_TYPESUPPORT_CPP})
+  target_link_libraries(test_ego_baseline ZLIB::ZLIB)
+  target_compile_definitions(test_ego_baseline PRIVATE
+    IAP_FAILURE_REGRESSION_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/20261005T163036Z_646_endpoint")
 endif()
 
 # Install targets

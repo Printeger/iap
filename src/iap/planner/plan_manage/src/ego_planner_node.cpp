@@ -21,7 +21,12 @@ int main(int argc, char **argv)
 
   rebo_replan.init(node);
 
-  rclcpp::spin(node);
+  // Mapping and the lightweight odometry latch have independent callback
+  // groups, so a bounded A* call cannot starve sensor intake.
+  rclcpp::executors::MultiThreadedExecutor executor(
+      rclcpp::ExecutorOptions(), 4);
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
 
   return 0;

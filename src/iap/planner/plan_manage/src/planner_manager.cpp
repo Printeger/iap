@@ -177,6 +177,12 @@ namespace ego_planner
             (search ? search->rejected_execution[i] : 0);
       metadata << "],\n  \"search_rejected_advisory\": "
                << (search ? search->rejected_advisory : 0) << ",\n"
+               << "  \"search_occupancy_query_s\": "
+               << number(search ? search->occupancy_query_s : 0.0) << ",\n"
+               << "  \"search_clearance_query_s\": "
+               << number(search ? search->clearance_query_s : 0.0) << ",\n"
+               << "  \"search_advisory_query_s\": "
+               << number(search ? search->advisory_query_s : 0.0) << ",\n"
                << "  \"search_duration_s\": "
                << number(search ? search->duration_s : 0.0) << "\n}\n";
       metadata.close();
@@ -190,7 +196,11 @@ namespace ego_planner
           << "\"snapshot\":" << std::quoted(relative + "/snapshot.json")
           << ",\"cells\":" << std::quoted(relative + "/cells.bin")
           << ",\"risk_samples\":"
-          << std::quoted(relative + "/queried_risk.csv") << "}\n";
+          << std::quoted(relative + "/queried_risk.csv");
+      if (kind == "stall" || kind == "tracking_error" ||
+          kind == "remaining_failure" || kind == "remaining_stop")
+        manifest << ",\"state\":" << std::quoted(relative + "/state.json");
+      manifest << "}\n";
       manifest.close();
       if (!manifest) throw std::runtime_error("subordinate manifest write failed");
       std::filesystem::rename(manifest_pending, manifest_path);
@@ -202,6 +212,81 @@ namespace ego_planner
     } catch (const std::exception& error) {
       RCLCPP_ERROR(node_->get_logger(),
           "planner failure map %s save failed: %s", kind.c_str(), error.what());
+    }
+  }
+
+  void EGOPlannerManager::capturePlanningStall(
+      const Eigen::Vector3d& start, const Eigen::Vector3d& target) {
+    if (!capture_failure_map_ || captured_failure_kinds_.count("stall")) return;
+    planning_time_s_ = node_->now().seconds();
+    planning_motion_ = currentMotionContext();
+    planning_risk_version_ = 0;
+    const auto cell = grid_map_->queryPlanningCell(target, 0,
+        planning_time_s_, planning_risk_policy_, planning_motion_, true);
+    captureFailureMap("stall", target, start, cell);
+    if (!captured_failure_kinds_.count("stall")) return;
+    auto* artifacts = glim::RunLogManager::get_if_initialized();
+    if (!artifacts) return;
+    const auto path = artifacts->export_path(
+        "planner/failure_map/stall/state.json");
+    const auto fingerprint = planningEvidenceFingerprint(start, target);
+    std::ofstream state(path.string() + ".pending");
+    state << std::setprecision(17)
+          << "{\"schema_version\":\"iap_planner_stall_state_v1\","
+          << "\"target_reason\":"
+          << std::quoted(gridExecutionReasonName(cell.execution_reason))
+          << ",\"evidence_hash\":" << (fingerprint ? *fingerprint : 0)
+          << ",\"search_pool_margin_m\":5.0}\n";
+    state.close();
+    if (state) std::filesystem::rename(path.string() + ".pending", path);
+    else {
+      captured_failure_kinds_.erase("stall");
+      RCLCPP_ERROR(node_->get_logger(), "planner stall state write failed");
+    }
+  }
+
+  void EGOPlannerManager::captureRemainingFailure(
+      const std::string& kind, const Eigen::Vector3d& expected,
+      const Eigen::Vector3d& actual, const double error_m,
+      const int trajectory_id, const double command_time_s,
+      const double odom_age_s, const double map_age_s,
+      const GridExecutionReason reason) {
+    if (!capture_failure_map_ || captured_failure_kinds_.count(kind)) return;
+    planning_time_s_ = node_->now().seconds();
+    planning_motion_ = currentMotionContext();
+    planning_risk_version_ = 0;
+    const auto cell = grid_map_->queryPlanningCell(actual, 0,
+        planning_time_s_, planning_risk_policy_, planning_motion_, true);
+    captureFailureMap(kind, actual, expected, cell);
+    if (!captured_failure_kinds_.count(kind)) return;
+    auto* artifacts = glim::RunLogManager::get_if_initialized();
+    if (!artifacts) return;
+    const auto path = artifacts->export_path(
+        "planner/failure_map/" + kind + "/state.json");
+    std::ofstream state(path.string() + ".pending");
+    state << std::setprecision(17)
+          << "{\"schema_version\":\"iap_planner_stop_state_v1\","
+          << "\"reason\":" << std::quoted(gridExecutionReasonName(reason))
+          << ",\"time_s\":" << planning_time_s_
+          << ",\"expected_position_m\":[" << expected.x() << ','
+          << expected.y() << ',' << expected.z() << ']'
+          << ",\"glio_position_m\":[" << actual.x() << ','
+          << actual.y() << ',' << actual.z() << ']'
+          << ",\"error_m\":" << error_m
+          << ",\"trajectory_id\":" << trajectory_id
+          << ",\"last_command_time_s\":"
+          << (std::isfinite(command_time_s) ? command_time_s : -1.0)
+          << ",\"command_age_s\":"
+          << (std::isfinite(command_time_s)
+              ? planning_time_s_ - command_time_s : -1.0)
+          << ",\"glio_age_s\":" << odom_age_s
+          << ",\"map_age_s\":" << map_age_s << "}\n";
+    state.close();
+    if (state) std::filesystem::rename(path.string() + ".pending", path);
+    else {
+      captured_failure_kinds_.erase(kind);
+      RCLCPP_ERROR(node_->get_logger(), "planner %s state write failed",
+                   kind.c_str());
     }
   }
 
@@ -245,6 +330,8 @@ namespace ego_planner
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
+    bspline_optimizer_->a_star_->setLiveGenerationProvider(
+        [this]() { return grid_map_->occupancyGeneration(); });
     bspline_optimizer_->setSearchFailureObserver(
         [this](const AStar::Result& result,
                const BsplineOptimizer::SearchFailureContext& context) {
@@ -291,16 +378,23 @@ namespace ego_planner
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
     bspline_optimizer_->a_star_->clearLastResult();
-    const auto risk_version = beginRiskQuery();
-    const double planning_time_s = node_->now().seconds();
-    const auto motion = currentMotionContext();
+    const bool own_view = !planning_view_;
+    if (own_view && !beginPlanningView()) return false;
+    struct ViewReset {
+      EGOPlannerManager* manager;
+      bool own;
+      ~ViewReset() { if (own) manager->endPlanningView(); }
+    } reset{this, own_view};
+    const auto risk_version = planning_view_->risk_version;
+    const double planning_time_s = planning_view_->time_s;
+    const auto motion = planning_view_->motion;
+    bspline_optimizer_->a_star_->setSearchMap(planning_view_->physical);
     planning_risk_version_ = risk_version;
     planning_time_s_ = planning_time_s;
     planning_motion_ = motion;
-    const auto planning_query = [this, risk_version, planning_time_s, motion](
+    const auto planning_query = [this](
         const Eigen::Vector3d& position) {
-      return grid_map_->queryPlanningCell(position, risk_version,
-          planning_time_s, planning_risk_policy_, motion);
+      return queryPlanningViewCell(position);
     };
     const auto start_cell = planning_query(start_pt);
     if (!start_cell.executable()) {
@@ -640,6 +734,32 @@ namespace ego_planner
       RCLCPP_INFO(node_->get_logger(),
                   "Candidate advisory coverage incomplete: %zu/%zu samples",
                   assessment.advisory_unknown_samples, assessment.sampled_points);
+    // Recheck the actual curve against the newest map, motion report and GLIO
+    // position after all optimization and advisory correction work.
+    const auto release_check = assessTrajectory(pos, 0,
+                                                 node_->now().seconds());
+    const auto release_motion = currentMotionContext();
+    if (!release_check.executable() ||
+        grid_map_->occupancyGeneration() !=
+            release_check.evaluated_generation ||
+        release_motion.quality !=
+            release_check.evaluated_motion_quality ||
+        !std::isfinite(release_motion.error_proxy_m) ||
+        release_motion.error_proxy_m >
+            release_check.evaluated_motion_error_proxy_m + 1e-9) {
+      RCLCPP_WARN(node_->get_logger(),
+          "Candidate withheld at publication gate: %s generation=%lu current=%lu",
+          gridExecutionReasonName(release_check.execution_reason),
+          static_cast<unsigned long>(release_check.evaluated_generation),
+          static_cast<unsigned long>(grid_map_->occupancyGeneration()));
+      if (release_check.first_execution_position.allFinite() &&
+          !captured_failure_kinds_.count("candidate"))
+        captureFailureMap("candidate",
+            release_check.first_execution_position, local_target_pt,
+            release_check.first_execution_cell);
+      ++continous_failures_count_;
+      return false;
+    }
     // Commit is the only write to local_data_ on the success path.
     updateTrajInfo(pos, node_->now());
 

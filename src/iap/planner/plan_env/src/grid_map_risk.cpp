@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <stdexcept>
 
 uint64_t GridMap::bindRiskContext(GridRiskContext context)
@@ -178,7 +179,10 @@ GridPlanningCell GridMap::queryPlanningCell(
     const GridMotionContext& motion, const bool include_rejected_clearance)
 {
   GridPlanningCell cell;
+  const auto occupancy_started = std::chrono::steady_clock::now();
   const auto observed = queryOccupancyDiagnostic(position);
+  cell.occupancy_query_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - occupancy_started).count();
   cell.voxel_index = observed.voxel_index;
   cell.occupancy_generation = observed.generation;
   cell.cloud_stamp_s = observed.cloud_stamp_s;
@@ -189,6 +193,7 @@ GridPlanningCell GridMap::queryPlanningCell(
         motion.tracking_reserve_m + motion.error_proxy_m +
         std::sqrt(3.0) * observed.resolution_m / 2.0;
   const auto measure_clearance = [&]() {
+    const auto clearance_started = std::chrono::steady_clock::now();
     if (!observed.available || !std::isfinite(cell.required_clearance_m) ||
         !std::isfinite(observed.resolution_m) || observed.resolution_m <= 0.0)
       return;
@@ -226,6 +231,8 @@ GridPlanningCell GridMap::queryPlanningCell(
     if (occupancyGeneration() != observed.generation) return;
     cell.raw_center_clearance_m = closest;
     cell.nearest_raw_center = nearest;
+    cell.clearance_query_s += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - clearance_started).count();
   };
   if (!observed.available) return cell;
   if (!observed.observed) {
@@ -272,7 +279,10 @@ GridPlanningCell GridMap::queryPlanningCell(
     return cell;
   }
   cell.execution_reason = GridExecutionReason::OK;
+  const auto advisory_started = std::chrono::steady_clock::now();
   cell.advisory = queryPlanningRisk(position, version, now, risk_policy);
+  cell.advisory_query_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - advisory_started).count();
   return cell;
 }
 

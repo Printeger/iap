@@ -92,6 +92,13 @@ namespace ego_planner
       int segment_start = -1;
       int segment_end = -1;
     };
+    struct RepairEndpoints {
+      Eigen::Vector3d entry, exit;
+      std::vector<Eigen::Vector3d> prefix, suffix;
+    };
+    std::optional<RepairEndpoints> chooseRepairEndpoints(
+        const Eigen::MatrixXd& points, int segment_start, int segment_end,
+        AStar::Failure& failure) const;
     BsplineOptimizer() {}
     ~BsplineOptimizer() {}
 

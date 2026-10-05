@@ -19,8 +19,19 @@ const char* AStar::failureName(const Failure failure) {
     case Failure::NO_PATH_WITH_UNOBSERVED: return "NO_PATH_WITH_UNOBSERVED";
     case Failure::TIME_BUDGET: return "TIME_BUDGET";
     case Failure::ADVISORY_NO_PATH: return "ADVISORY_NO_PATH";
+    case Failure::NO_VALID_REPAIR_ENTRY: return "NO_VALID_REPAIR_ENTRY";
+    case Failure::NO_VALID_REPAIR_EXIT: return "NO_VALID_REPAIR_EXIT";
     }
     return "UNKNOWN";
+}
+
+GridPlanningCell AStar::timedPlanningQuery(const Vector3d& position) {
+    ++result_.query_calls;
+    auto cell = planning_query_(position);
+    result_.occupancy_query_s += cell.occupancy_query_s;
+    result_.clearance_query_s += cell.clearance_query_s;
+    result_.advisory_query_s += cell.advisory_query_s;
+    return cell;
 }
 
 GridPlanningCell AStar::queryVoxelCenter(const Vector3d& position) {
@@ -38,8 +49,7 @@ GridPlanningCell AStar::queryVoxelCenter(const Vector3d& position) {
         ++result_.cache_hits;
         return cached->second;
     }
-    ++result_.query_calls;
-    cell = planning_query_ ? planning_query_(position) : GridPlanningCell{};
+    cell = planning_query_ ? timedPlanningQuery(position) : GridPlanningCell{};
     if (!planning_query_)
         cell.execution_reason = grid_map_->getInflateOccupancy(position)
             ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
@@ -60,10 +70,9 @@ GridPlanningCell AStar::queryLatticePoint(const Vector3i& index) {
         ++result_.cache_hits;
         return cached->second;
     }
-    ++result_.query_calls;
     const auto position = Index2Coord(index);
     GridPlanningCell cell;
-    if (planning_query_) cell = planning_query_(position);
+    if (planning_query_) cell = timedPlanningQuery(position);
     else cell.execution_reason = grid_map_->getInflateOccupancy(position)
         ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
     lattice_cache_.emplace(address, cell);
@@ -71,12 +80,14 @@ GridPlanningCell AStar::queryLatticePoint(const Vector3i& index) {
 }
 
 void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
-    result_.failure = failure;
+    result_.failure = live_generation_provider_ &&
+        live_generation_provider_() != search_generation_
+        ? Failure::MAP_STALE : failure;
     result_.duration_s = (rclcpp::Clock().now() - started).seconds();
     static rclcpp::Clock log_clock(RCL_SYSTEM_TIME);
     RCLCPP_WARN_THROTTLE(rclcpp::get_logger("AstarSearch"), log_clock, 1000,
-        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs",
-        failureName(failure), result_.requested_start.x(), result_.requested_start.y(),
+        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs",
+        failureName(result_.failure), result_.requested_start.x(), result_.requested_start.y(),
         result_.requested_start.z(), result_.requested_end.x(),
         result_.requested_end.y(), result_.requested_end.z(),
         gridExecutionReasonName(result_.start_cell.execution_reason),
@@ -90,7 +101,9 @@ void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
         result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_UNAVAILABLE)],
         result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_STALE)],
         result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_BUDGET)],
-        result_.rejected_advisory, result_.duration_s);
+        result_.rejected_advisory, result_.duration_s,
+        result_.occupancy_query_s, result_.clearance_query_s,
+        result_.advisory_query_s);
     if (failure_observer_) failure_observer_(result_);
 }
 
@@ -157,8 +170,8 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
         (2 * POOL_SIZE_.z()) + mid_key.z();
     auto mid = midpoint_cache_.find(mid_address);
     if (mid == midpoint_cache_.end()) {
-        ++result_.query_calls;
-        mid = midpoint_cache_.emplace(mid_address, planning_query_((from + to) / 2.0)).first;
+        mid = midpoint_cache_.emplace(mid_address,
+            timedPlanningQuery((from + to) / 2.0)).first;
     } else {
         ++result_.cache_hits;
     }
@@ -263,10 +276,9 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
         return false;
     }
 
-    if (planning_query_) result_.query_calls += 2;
-    result_.start_cell = planning_query_ ? planning_query_(start_pt)
+    result_.start_cell = planning_query_ ? timedPlanningQuery(start_pt)
         : queryLatticePoint(start_idx);
-    result_.end_cell = planning_query_ ? planning_query_(end_pt)
+    result_.end_cell = planning_query_ ? timedPlanningQuery(end_pt)
         : queryLatticePoint(end_idx);
     if (!result_.start_cell.executable()) {
         result_.failure = Failure::START_BLOCKED;
@@ -285,22 +297,6 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
                   reason == GridExecutionReason::CURRENT_MOTION_BUDGET
                     ? Failure::CURRENT_MOTION : Failure::END_BLOCKED;
         return false;
-    }
-
-    // A warning at the requested endpoint is not a physical obstacle to
-    // move the endpoint through. Let the normal attempt fail so the bounded
-    // advisory fallback can search to the actual local target.
-    if (planning_query_ && !advisory_fallback_) {
-        const auto end_cell = result_.end_cell;
-        if (end_cell.executable() &&
-            (end_cell.advisory.classification == GridAdvisoryClass::AVOID ||
-             end_cell.advisory.classification ==
-                 GridAdvisoryClass::PREDICTED_DEGRADED)) {
-            rejected_advisory_ = true;
-            result_.rejected_advisory++;
-            result_.failure = Failure::ADVISORY_NO_PATH;
-            return false;
-        }
     }
 
     if (!queryLatticePoint(start_idx).executable()) {
@@ -328,8 +324,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
                 for (int i = 0; i <= samples; ++i) {
                     const auto p = end_pt + (candidate_position - end_pt) *
                         (static_cast<double>(i) / samples);
-                    if (planning_query_) ++result_.query_calls;
-                    if (planning_query_ ? !planning_query_(p).executable()
+                    if (planning_query_ ? !timedPlanningQuery(p).executable()
                                         : grid_map_->getInflateOccupancy(p) != 0) {
                         connected = false;
                         break;
@@ -354,8 +349,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
             (a - b).norm() / (grid_map_->getResolution() * 0.5))));
         for (int i = 0; i <= samples; ++i) {
             const auto point = a + (b - a) * (static_cast<double>(i) / samples);
-            ++result_.query_calls;
-            const auto cell = planning_query_(point);
+            const auto cell = timedPlanningQuery(point);
             if (!cell.executable()) return false;
             const auto cls = cell.advisory.classification;
             if (!advisory_fallback_ &&
@@ -462,6 +456,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
             result_.duration_s = (rclcpp::Clock().now() - time_1).seconds();
+            RCLCPP_INFO(rclcpp::get_logger("AstarSearch"),
+                "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs",
+                result_.expanded, result_.query_calls, result_.cache_hits,
+                result_.duration_s, result_.occupancy_query_s,
+                result_.clearance_query_s, result_.advisory_query_s);
             return true;
         }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.
@@ -544,11 +543,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
         RCLCPP_WARN(rclcpp::get_logger("AstarSearch"),
                     "Time consume in A star path finding is %.3fs, iter=%d", (time_2 - time_1).seconds(), num_iter);
 
-    finishFailure(result_.rejected_advisory != 0 && !advisory_fallback_
-        ? Failure::ADVISORY_NO_PATH
-        : result_.rejected_execution[static_cast<size_t>(
-              GridExecutionReason::ENVIRONMENT_UNOBSERVED)] != 0
-            ? Failure::NO_PATH_WITH_UNOBSERVED : Failure::NO_PATH, time_1);
+    const bool unknown_rejected = result_.rejected_execution[
+        static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)] != 0;
+    finishFailure(unknown_rejected ? Failure::NO_PATH_WITH_UNOBSERVED :
+        result_.rejected_advisory != 0 && !advisory_fallback_
+            ? Failure::ADVISORY_NO_PATH : Failure::NO_PATH, time_1);
     return false;
 }
 

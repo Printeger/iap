@@ -66,7 +66,11 @@ class EgoPipelineTest(unittest.TestCase):
         parameters = module.planner_parameters({"map_size": [12, 12, 5], "goal": [2, 0, 1],
             "max_velocity_mps": 1.0, "integrity_profile": "lidar_only", "manual_goal": True})
         parameters.update({"grid_map/registered_lidar_window_enabled": False,
-                           "grid_map/resolution": 0.2})
+                           "grid_map/resolution": 0.2,
+                           # GNSS measurements are deliberately absent here;
+                           # the denser free-space LiDAR rays only establish
+                           # physical observation, not valid advisory PL.
+                           "risk/source": "gnss"})
         with tempfile.TemporaryDirectory(prefix="ego_pipeline_") as directory:
             root = Path(directory)
             config = root / "parameters.yaml"
@@ -109,18 +113,25 @@ class EgoPipelineTest(unittest.TestCase):
                 changed_metric=False
                 metric_future=None
                 start=time.monotonic()
+                last_cloud_time=0.0
                 while time.monotonic()<deadline:
                     stamp=node.get_clock().now().to_msg()
                     odom=Odometry(); odom.header.stamp=stamp; odom.header.frame_id="map"
                     odom.pose.pose.position.x=-2.; odom.pose.pose.position.z=1.
                     odom.pose.pose.orientation.w=1.
                     odom_pub.publish(odom); map_odom_pub.publish(odom)
-                    # A known free ray through the planned corridor, ending
-                    # beyond the local goal, is physical evidence for this
-                    # CPU-only pipeline fixture.
-                    cloud=point_cloud2.create_cloud_xyz32(
-                        odom.header, [(3.4, y, 1.0) for y in (-0.2, 0.0, 0.2)])
-                    cloud_pub.publish(cloud)
+                    # Cover the three-dimensional short trajectory, including
+                    # its B-spline control polygon, with observed free rays.
+                    # Sparse rays through the centre do not observe that
+                    # volume and correctly fail the planner's unknown test.
+                    if time.monotonic()-last_cloud_time>0.2:
+                        cloud=point_cloud2.create_cloud_xyz32(
+                            odom.header,
+                            [(3.4, y, z)
+                             for y in np.arange(-1.2, 1.21, 0.2)
+                             for z in np.arange(0.4, 1.81, 0.2)])
+                        cloud_pub.publish(cloud)
+                        last_cloud_time=time.monotonic()
                     report=IntegrityReport(); report.header=odom.header
                     report.current_motion_quality=IntegrityReport.CURRENT_MOTION_SUPPORTED
                     report.current_motion_error_proxy_m=0.05

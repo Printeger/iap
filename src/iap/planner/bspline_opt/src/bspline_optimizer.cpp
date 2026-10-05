@@ -504,12 +504,126 @@ namespace ego_planner
    * It was written separately, just because I did it once and it has been running stably since March 2020.
    * But I will merge then someday.*/
   // 初始化控制点
+  std::optional<BsplineOptimizer::RepairEndpoints>
+  BsplineOptimizer::chooseRepairEndpoints(const Eigen::MatrixXd& points,
+      const int segment_start, const int segment_end,
+      AStar::Failure& failure) const
+  {
+    failure = AStar::Failure::NONE;
+    if (!planning_query_ || points.cols() < 2 || segment_start < 0 ||
+        segment_end >= points.cols() || segment_start >= segment_end)
+      return std::nullopt;
+    const double spacing = grid_map_->getResolution() * 0.5;
+    std::vector<Eigen::Vector3d> samples;
+    std::vector<int> control_sample(points.cols());
+    samples.emplace_back(points.col(0));
+    control_sample[0] = 0;
+    for (int j = 1; j < points.cols(); ++j) {
+      const Eigen::Vector3d a = points.col(j - 1), b = points.col(j);
+      const int count = std::max(1, static_cast<int>(std::ceil(
+          (b - a).norm() / spacing)));
+      for (int k = 1; k <= count; ++k)
+        samples.push_back(a + (b - a) * (static_cast<double>(k) / count));
+      control_sample[j] = static_cast<int>(samples.size()) - 1;
+    }
+    const auto original_center =
+        (points.col(segment_start) + points.col(segment_end)) / 2.0;
+    const auto in_pool = [&](const Eigen::Vector3d& p) {
+      return ((p - original_center).array().abs() < 4.9).all();
+    };
+    const auto lattice_connector_valid = [&](const Eigen::Vector3d& p) {
+      Eigen::Vector3i index;
+      for (int axis = 0; axis < 3; ++axis) {
+        index[axis] = static_cast<int>((p[axis] - original_center[axis]) /
+            0.1 + 0.5) + 50;
+        if (index[axis] < 1 || index[axis] >= 99) return false;
+      }
+      const Eigen::Vector3d lattice = original_center +
+          (index - Eigen::Vector3i::Constant(50)).cast<double>() * 0.1;
+      const int count = std::max(1, static_cast<int>(std::ceil(
+          (lattice - p).norm() / spacing)));
+      for (int k = 0; k <= count; ++k)
+        if (!planning_query_(p + (lattice - p) *
+            (static_cast<double>(k) / count)).executable()) return false;
+      return true;
+    };
+    std::vector<bool> clear(samples.size()), prefix(samples.size()),
+        suffix(samples.size());
+    bool unknown_exit = false;
+    for (size_t i = 0; i < samples.size(); ++i) {
+      const auto cell = planning_query_(samples[i]);
+      clear[i] = in_pool(samples[i]) && cell.executable();
+      if (i + 1 == samples.size() &&
+          (cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+           cell.execution_reason == GridExecutionReason::OUT_OF_MAP))
+        unknown_exit = true;
+      prefix[i] = clear[i] && (i == 0 || prefix[i - 1]);
+    }
+    for (size_t i = samples.size(); i-- > 0;)
+      suffix[i] = clear[i] && (i + 1 == samples.size() || suffix[i + 1]);
+    int entry = -1, exit = -1;
+    for (int i = control_sample[segment_start]; i >= 0; --i)
+      if (prefix[i] && lattice_connector_valid(samples[i])) {
+        entry = i; break;
+      }
+    for (size_t i = control_sample[segment_end]; i < samples.size(); ++i)
+      if (suffix[i] && lattice_connector_valid(samples[i])) {
+        exit = static_cast<int>(i); break;
+      }
+    if (entry < 0) failure = AStar::Failure::NO_VALID_REPAIR_ENTRY;
+    else if (exit < 0) failure = unknown_exit
+        ? AStar::Failure::END_UNOBSERVED
+        : AStar::Failure::NO_VALID_REPAIR_EXIT;
+    if (failure != AStar::Failure::NONE) return std::nullopt;
+    RepairEndpoints result;
+    result.entry = samples[entry];
+    result.exit = samples[exit];
+    for (int j = 0; j < points.cols(); ++j) {
+      if (control_sample[j] < entry)
+        result.prefix.emplace_back(points.col(j));
+      if (control_sample[j] > exit)
+        result.suffix.emplace_back(points.col(j));
+    }
+    return result;
+  }
+
   std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
+
+    if (planning_query_) {
+      for (int i = 0; i < init_points.cols(); ++i) {
+        const auto cell = planning_query_(init_points.col(i));
+        if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+            cell.execution_reason == GridExecutionReason::OUT_OF_MAP ||
+            cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
+          RCLCPP_WARN(rclcpp::get_logger("initControlPoints"),
+              "Initial control point %d/%d rejected before A*: %s at (%.3f %.3f %.3f)",
+              i, static_cast<int>(init_points.cols()) - 1,
+              gridExecutionReasonName(cell.execution_reason),
+              init_points(0, i), init_points(1, i), init_points(2, i));
+          const auto failure = cell.execution_reason ==
+              GridExecutionReason::ENVIRONMENT_STALE
+              ? AStar::Failure::END_STALE : AStar::Failure::END_UNOBSERVED;
+          a_star_->recordPresearchFailure(failure, init_points.col(i),
+                                          init_points.col(init_points.cols() - 1));
+          reportSearchFailure(a_star_->lastResult(), init_points, i,
+                              init_points.cols() - 1,
+                              "initial_control_points_unobserved");
+          initialization_failed_ = true;
+          return {};
+        }
+      }
+    }
 
     if (flag_first_init)
     {
       cps_.clearance = dist0_;
+      if (planning_query_) {
+        const auto start_cell = planning_query_(init_points.col(0));
+        if (std::isfinite(start_cell.required_clearance_m))
+          cps_.clearance = std::max(cps_.clearance,
+                                    start_cell.required_clearance_m);
+      }
       cps_.resize(init_points.cols());
       cps_.points = init_points;
     }
@@ -603,14 +717,29 @@ namespace ego_planner
     /*** a star search ***/
     // 在每个无障碍片段 segment_ids 的起点和终点之间寻找一条路径
     vector<vector<Eigen::Vector3d>> a_star_pathes;
-    const Eigen::Vector3d in(init_points.col(segment_ids.front().first));
-    const Eigen::Vector3d out(init_points.col(segment_ids.back().second));
-    bool found = a_star_->AstarSearch(0.1, in, out);
+    const Eigen::Vector3d original_in(init_points.col(segment_ids.front().first));
+    const Eigen::Vector3d original_out(init_points.col(segment_ids.back().second));
+    AStar::Failure endpoint_failure;
+    const auto endpoints = chooseRepairEndpoints(init_points,
+        segment_ids.front().first, segment_ids.back().second,
+        endpoint_failure);
+    if (planning_query_ && !endpoints) {
+      a_star_->recordPresearchFailure(endpoint_failure, original_in, original_out);
+      reportSearchFailure(a_star_->lastResult(), init_points,
+          segment_ids.front().first, segment_ids.back().second,
+          "initial_control_points");
+      initialization_failed_ = true;
+      return {};
+    }
+    const Eigen::Vector3d in = endpoints ? endpoints->entry : original_in;
+    const Eigen::Vector3d out = endpoints ? endpoints->exit : original_out;
+    const Eigen::Vector3d pool_center = (original_in + original_out) / 2.0;
+    bool found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
     if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
         !planning_advisory_fallback_) {
       planning_advisory_fallback_ = true;
       a_star_->setPlanningQuery(planning_query_, true);
-      found = a_star_->AstarSearch(0.1, in, out);
+      found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
       static rclcpp::Clock fallback_clock(RCL_SYSTEM_TIME);
       RCLCPP_WARN_THROTTLE(rclcpp::get_logger("initControlPoints"),
                   fallback_clock, 1000,
@@ -638,10 +767,14 @@ namespace ego_planner
       return {};
     }
     vector<Eigen::Vector3d> full_guide;
-    for (int j = 0; j < segment_ids.front().first; ++j)
+    if (endpoints) full_guide = endpoints->prefix;
+    else for (int j = 0; j < segment_ids.front().first; ++j)
       full_guide.push_back(init_points.col(j));
     full_guide.insert(full_guide.end(), one_guide.begin(), one_guide.end());
-    for (int j = segment_ids.back().second + 1; j < init_points.cols(); ++j)
+    if (endpoints)
+      full_guide.insert(full_guide.end(), endpoints->suffix.begin(),
+                        endpoints->suffix.end());
+    else for (int j = segment_ids.back().second + 1; j < init_points.cols(); ++j)
       full_guide.push_back(init_points.col(j));
     setGuidePath(full_guide);
     a_star_pathes.assign(segment_ids.size(), one_guide);
@@ -1434,14 +1567,31 @@ namespace ego_planner
     if (flag_new_obs_valid)
     {
       vector<vector<Eigen::Vector3d>> a_star_pathes;
-      const Eigen::Vector3d in(cps_.points.col(segment_ids.front().first));
-      const Eigen::Vector3d out(cps_.points.col(segment_ids.back().second));
-      bool found = a_star_->AstarSearch(0.1, in, out);
+      const Eigen::Vector3d original_in(cps_.points.col(segment_ids.front().first));
+      const Eigen::Vector3d original_out(cps_.points.col(segment_ids.back().second));
+      AStar::Failure endpoint_failure;
+      const auto endpoints = chooseRepairEndpoints(cps_.points,
+          segment_ids.front().first, segment_ids.back().second,
+          endpoint_failure);
+      if (planning_query_ && !endpoints) {
+        a_star_->recordPresearchFailure(endpoint_failure, original_in,
+                                        original_out);
+        reportSearchFailure(a_star_->lastResult(), cps_.points,
+                            segment_ids.front().first,
+                            segment_ids.back().second,
+                            "rebound_collision_check");
+        force_stop_type_ = STOP_FOR_ERROR;
+        return false;
+      }
+      const Eigen::Vector3d in = endpoints ? endpoints->entry : original_in;
+      const Eigen::Vector3d out = endpoints ? endpoints->exit : original_out;
+      const Eigen::Vector3d pool_center = (original_in + original_out) / 2.0;
+      bool found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
       if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
           !planning_advisory_fallback_) {
         planning_advisory_fallback_ = true;
         a_star_->setPlanningQuery(planning_query_, true);
-        found = a_star_->AstarSearch(0.1, in, out);
+        found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
       }
       if (!found) {
         reportSearchFailure(a_star_->lastResult(), cps_.points,
@@ -1462,10 +1612,14 @@ namespace ego_planner
         return false;
       }
       vector<Eigen::Vector3d> full_guide;
-      for (int j = 0; j < segment_ids.front().first; ++j)
+      if (endpoints) full_guide = endpoints->prefix;
+      else for (int j = 0; j < segment_ids.front().first; ++j)
         full_guide.push_back(cps_.points.col(j));
       full_guide.insert(full_guide.end(), one_guide.begin(), one_guide.end());
-      for (int j = segment_ids.back().second + 1; j < cps_.size; ++j)
+      if (endpoints)
+        full_guide.insert(full_guide.end(), endpoints->suffix.begin(),
+                          endpoints->suffix.end());
+      else for (int j = segment_ids.back().second + 1; j < cps_.size; ++j)
         full_guide.push_back(cps_.points.col(j));
       setGuidePath(full_guide);
       a_star_pathes.assign(segment_ids.size(), one_guide);

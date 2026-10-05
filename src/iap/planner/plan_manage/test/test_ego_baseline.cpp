@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
+#include <zlib.h>
+#include <sstream>
 
 struct GridMapTestAccess {
   static void markObserved(GridMap& map) {
@@ -244,6 +246,78 @@ TEST(EgoBaseline, AdvisoryOnlyViolationBuildsOneGuideAndBendsCurve) {
   EXPECT_GT(displacement, 0.3);
 }
 
+TEST(EgoBaseline, CapturedV2FailureHasNoExecutableRepairExit) {
+  const std::filesystem::path fixture(IAP_FAILURE_REGRESSION_FIXTURE_DIR);
+  std::ifstream metadata_file(fixture / "snapshot.json");
+  ASSERT_TRUE(metadata_file.good());
+  const std::string metadata((std::istreambuf_iterator<char>(metadata_file)),
+                             std::istreambuf_iterator<char>());
+  ASSERT_NE(metadata.find("iap_gridmap_failure_v2"), std::string::npos);
+  ASSERT_NE(metadata.find("\"generation\": 3"), std::string::npos);
+  constexpr size_t cell_count = 420U * 220U * 80U;
+  std::ifstream compressed_file(fixture / "cells.bin.z", std::ios::binary);
+  ASSERT_TRUE(compressed_file.good());
+  const std::vector<unsigned char> compressed(
+      (std::istreambuf_iterator<char>(compressed_file)),
+      std::istreambuf_iterator<char>());
+  GridMapFailureSnapshot snapshot;
+  snapshot.origin = Eigen::Vector3d(-21, -11, 0);
+  snapshot.max_boundary = Eigen::Vector3d(21, 11, 8);
+  snapshot.dimensions = Eigen::Vector3i(420, 220, 80);
+  snapshot.resolution_m = 0.1;
+  snapshot.cloud_stamp_s = 1791217848.0012021;
+  snapshot.generation = 3;
+  snapshot.frame_id = "map";
+  snapshot.cell_flags.resize(cell_count);
+  uLongf decoded_size = cell_count;
+  ASSERT_EQ(uncompress(snapshot.cell_flags.data(), &decoded_size,
+                       compressed.data(), compressed.size()), Z_OK);
+  ASSERT_EQ(decoded_size, cell_count);
+  auto map = GridMap::fromFailureSnapshot(snapshot);
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 1791217848.1002069;
+  motion.error_proxy_m = 0.013711049951773135;
+  motion.max_environment_age_s = 0.5;
+  motion.max_motion_age_s = 0.5;
+  const double time_s = 1791217848.3936348;
+  const GridPlanningRiskPolicy policy;
+  std::ifstream points_file(fixture / "control_points.csv");
+  ASSERT_TRUE(points_file.good());
+  Eigen::MatrixXd points(3, 16);
+  std::string line;
+  for (int i = 0; i < 16; ++i) {
+    ASSERT_TRUE(static_cast<bool>(std::getline(points_file, line)));
+    std::replace(line.begin(), line.end(), ',', ' ');
+    std::istringstream coordinates(line);
+    ASSERT_TRUE(static_cast<bool>(coordinates >> points(0, i) >>
+                                  points(1, i) >> points(2, i)));
+  }
+  EXPECT_EQ(map->queryPlanningCell(points.col(5), 0, time_s, policy,
+                                   motion).execution_reason,
+            GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  ego_planner::BsplineOptimizer optimizer;
+  auto node = makeNode();
+  optimizer.setParam(node);
+  optimizer.setEnvironment(map);
+  optimizer.a_star_ = std::make_shared<AStar>();
+  optimizer.a_star_->initGridMap(map, Eigen::Vector3i(100, 100, 100));
+  optimizer.setPlanningQuery([&](const Eigen::Vector3d& p) {
+    return map->queryPlanningCell(p, 0, time_s, policy, motion);
+  });
+  AStar::Failure failure = AStar::Failure::NONE;
+  const auto endpoints = optimizer.chooseRepairEndpoints(points, 5, 6,
+                                                         failure);
+  EXPECT_FALSE(endpoints.has_value());
+  EXPECT_EQ(failure, AStar::Failure::NO_VALID_REPAIR_EXIT);
+  const auto segments = optimizer.initControlPoints(points, true);
+  EXPECT_TRUE(segments.empty());
+  EXPECT_TRUE(optimizer.initializationFailed());
+  EXPECT_EQ(optimizer.a_star_->lastResult().failure,
+            AStar::Failure::END_UNOBSERVED);
+  EXPECT_EQ(optimizer.a_star_->lastResult().expanded, 0U);
+}
+
 TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   ASSERT_EQ(glim::RunLogManager::get_if_initialized(), nullptr);
   char name[] = "/tmp/iap_failure_capture_XXXXXX";
@@ -301,6 +375,29 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
         " >/dev/null";
     EXPECT_EQ(std::system(validate_snapshot.c_str()), 0);
   }
+  manager.capturePlanningStall(Eigen::Vector3d(-1, 0, 1),
+                               Eigen::Vector3d(0, 0, 1));
+  manager.captureRemainingFailure("tracking_error",
+      Eigen::Vector3d(0, 0, 1), Eigen::Vector3d(-0.4, 0, 1),
+      0.4, 7, 9.9, 0.1, 0.2, GridExecutionReason::TRACKING_ERROR);
+  manager.captureRemainingFailure("remaining_failure",
+      Eigen::Vector3d(0, 0, 1), Eigen::Vector3d(-0.4, 0, 1),
+      0.4, 7, 9.9, 0.1, 0.2, GridExecutionReason::PHYSICAL_OBSTACLE);
+  manager.captureRemainingFailure("remaining_stop",
+      Eigen::Vector3d(0, 0, 1), Eigen::Vector3d(-0.4, 0, 1),
+      0.4, 7, 9.9, 0.1, 0.2, GridExecutionReason::TRACKING_ERROR);
+  for (const char* kind : {"stall", "tracking_error",
+                           "remaining_failure", "remaining_stop"}) {
+    const auto leaf = root / kind;
+    EXPECT_TRUE(std::filesystem::exists(leaf / "snapshot.json"));
+    EXPECT_TRUE(std::filesystem::exists(leaf / "cells.bin"));
+    EXPECT_TRUE(std::filesystem::exists(leaf / "state.json"));
+    const auto validate_state = "python3 -m json.tool " +
+        (leaf / "state.json").string() + " >/dev/null";
+    EXPECT_EQ(std::system(validate_state.c_str()), 0);
+    EXPECT_TRUE(std::filesystem::exists(run / "metadata/manifests" /
+        (std::string("planner_failure_map_") + kind + ".json")));
+  }
   ego_planner::EGOPlannerManagerTestAccess::capture(manager, "candidate", cell);
   ASSERT_TRUE(std::filesystem::exists(root / "candidate/snapshot.json"));
   const auto before = std::filesystem::last_write_time(root / "endpoint/snapshot.json");
@@ -311,5 +408,5 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   size_t count = 0;
   for (const auto& leaf : std::filesystem::directory_iterator(root))
     if (leaf.is_directory()) ++count;
-  EXPECT_EQ(count, 4u);
+  EXPECT_EQ(count, 8u);
 }

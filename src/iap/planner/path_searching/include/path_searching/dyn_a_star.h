@@ -49,7 +49,7 @@ public:
 		NONE, START_OUT_OF_POOL, END_OUT_OF_POOL, START_BLOCKED,
 		END_UNOBSERVED, END_STALE, MAP_STALE, END_BLOCKED, CURRENT_MOTION,
 		NO_PATH, NO_PATH_WITH_UNOBSERVED, TIME_BUDGET, ADVISORY_NO_PATH,
-		END_OUT_OF_MAP
+		END_OUT_OF_MAP, NO_VALID_REPAIR_ENTRY, NO_VALID_REPAIR_EXIT
 	};
 	struct Result {
 		Failure failure = Failure::NONE;
@@ -62,6 +62,9 @@ public:
 		size_t query_calls = 0;
 		size_t cache_hits = 0;
 		double duration_s = 0.0;
+		double occupancy_query_s = 0.0;
+		double clearance_query_s = 0.0;
+		double advisory_query_s = 0.0;
 		double step_size_m = 0.0;
 		Eigen::Vector3i pool_dimensions = Eigen::Vector3i::Zero();
 		Eigen::Vector3d pool_center = Eigen::Vector3d::Zero();
@@ -79,8 +82,10 @@ private:
 	std::unordered_map<int, GridPlanningCell> midpoint_cache_;
 	uint64_t search_generation_ = 0;
 	std::function<void(const Result&)> failure_observer_;
+	std::function<uint64_t()> live_generation_provider_;
 	GridPlanningCell queryVoxelCenter(const Eigen::Vector3d& position);
 	GridPlanningCell queryLatticePoint(const Eigen::Vector3i& index);
+	GridPlanningCell timedPlanningQuery(const Eigen::Vector3d& position);
 	void finishFailure(Failure failure, const rclcpp::Time& started);
 	std::optional<double> edgeMultiplier(const Eigen::Vector3d& from,
 	                                     const Eigen::Vector3d& to,
@@ -133,6 +138,10 @@ public:
 	~AStar();
 
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
+	void setSearchMap(GridMap::Ptr frozen_map) { grid_map_ = std::move(frozen_map); }
+	void setLiveGenerationProvider(std::function<uint64_t()> provider) {
+		live_generation_provider_ = std::move(provider);
+	}
 	void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
 	                      bool advisory_fallback = false) {
 		planning_query_ = std::move(query);
@@ -141,6 +150,17 @@ public:
 	bool rejectedAdvisory() const { return rejected_advisory_; }
 	const Result& lastResult() const { return result_; }
 	void clearLastResult() { result_ = Result{}; }
+	void recordPresearchFailure(Failure failure, const Eigen::Vector3d& start,
+	                            const Eigen::Vector3d& end) {
+		result_ = Result{};
+		result_.failure = failure;
+		result_.requested_start = start;
+		result_.requested_end = end;
+		result_.step_size_m = 0.1;
+		result_.pool_dimensions = POOL_SIZE_;
+		result_.pool_center = (start + end) / 2.0;
+		result_.occupancy_generation = grid_map_->occupancyGeneration();
+	}
 	void setFailureObserver(std::function<void(const Result&)> observer) {
 		failure_observer_ = std::move(observer);
 	}

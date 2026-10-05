@@ -56,6 +56,9 @@ namespace ego_planner
     planner_manager_.reset(new EGOPlannerManager);
 
     planner_manager_->initPlanModules(node_, visualization_);
+    planner_manager_->setLatestOdometryProvider([this]() {
+      return std::atomic_load(&pending_odom_);
+    });
 
     planner_manager_->deliverTrajToOptimizer(); // store trajectories
     planner_manager_->setDroneIdtoOpt();
@@ -67,13 +70,25 @@ namespace ego_planner
     safety_timer_ = node_->create_wall_timer(std::chrono::milliseconds(200),
                                              std::bind(&EGOReplanFSM::checkCollisionCallback, this));
 
+    odom_callback_group_ = node_->create_callback_group(
+        rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::SubscriptionOptions odom_options;
+    odom_options.callback_group = odom_callback_group_;
     odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
         "odom_world",
         1,
         [this](const std::shared_ptr<const nav_msgs::msg::Odometry> &msg)
         {
           this->odometryCallback(msg);
-        });
+        }, odom_options);
+    command_sub_ =
+        node_->create_subscription<quadrotor_msgs::msg::PositionCommand>(
+            "/position_cmd", rclcpp::QoS(1),
+            [this](quadrotor_msgs::msg::PositionCommand::ConstSharedPtr msg) {
+              last_command_time_s_.store(
+                  rclcpp::Time(msg->header.stamp).seconds(),
+                  std::memory_order_relaxed);
+            }, odom_options);
     // std::bind(&EGOReplanFSM::odometryCallback, this, std::placeholders::_1));
 
     if (planner_manager_->pp_.drone_id >= 1)
@@ -253,6 +268,14 @@ namespace ego_planner
 
   void EGOReplanFSM::odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg)
   {
+    std::atomic_store(&pending_odom_, msg);
+  }
+
+  void EGOReplanFSM::applyLatestOdometry()
+  {
+    const auto msg = std::atomic_load(&pending_odom_);
+    if (!msg) return;
+    applied_odom_stamp_s_ = rclcpp::Time(msg->header.stamp).seconds();
     odom_pos_(0) = msg->pose.pose.position.x;
     odom_pos_(1) = msg->pose.pose.position.y;
     odom_pos_(2) = msg->pose.pose.position.z;
@@ -442,8 +465,8 @@ namespace ego_planner
 
   void EGOReplanFSM::changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call)
   {
-
-    if (new_state == exec_state_)
+    const bool changed = new_state != exec_state_;
+    if (!changed)
       continously_called_times_++;
     else
       continously_called_times_ = 1;
@@ -451,7 +474,8 @@ namespace ego_planner
     static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
     int pre_s = int(exec_state_);
     exec_state_ = new_state;
-    cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
+    if (changed)
+      cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
   }
 
   std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> EGOReplanFSM::timesOfConsecutiveStateCalls()
@@ -468,6 +492,7 @@ namespace ego_planner
 
   void EGOReplanFSM::execFSMCallback()
   {
+    applyLatestOdometry();
     exec_timer_->cancel(); // To avoid blockage
 
     static int fsm_num = 0;
@@ -703,6 +728,7 @@ namespace ego_planner
 
   void EGOReplanFSM::checkCollisionCallback()
   {
+    applyLatestOdometry();
     auto& info = planner_manager_->local_data_;
     // A failed rolling replan must not silence supervision of the trajectory
     // still being executed. In particular, its first violation may move from
@@ -714,11 +740,29 @@ namespace ego_planner
     const double elapsed = std::max(0.0, now - info.start_time_.seconds());
     if (elapsed >= info.duration_) return;
     auto assessment = planner_manager_->assessRemainingTrajectory(now);
-    const auto expected = info.position_traj_.evaluateDeBoorT(elapsed);
+    // Compare the command curve and GLIO at the same measurement time.
+    const double measured_elapsed = std::clamp(
+        applied_odom_stamp_s_ - info.start_time_.seconds(), 0.0,
+        info.duration_);
+    const auto expected = info.position_traj_.evaluateDeBoorT(
+        measured_elapsed);
     if ((expected - odom_pos_).norm() > tracking_error_limit_m_) {
       assessment.execution_reason = GridExecutionReason::TRACKING_ERROR;
-      assessment.first_execution_time_s = elapsed;
+      assessment.first_execution_time_s = measured_elapsed;
     }
+    const auto capture_remaining = [&](const std::string& kind,
+                                       const GridExecutionReason reason) {
+      const double odom_age = std::isfinite(applied_odom_stamp_s_)
+          ? now - applied_odom_stamp_s_ : -1.0;
+      const auto map_cell = planner_manager_->queryLocalTargetCell(
+          odom_pos_, now);
+      const double map_age = std::isfinite(map_cell.cloud_stamp_s)
+          ? now - map_cell.cloud_stamp_s : -1.0;
+      planner_manager_->captureRemainingFailure(kind, expected, odom_pos_,
+          (expected - odom_pos_).norm(), info.traj_id_,
+          last_command_time_s_.load(std::memory_order_relaxed),
+          odom_age, map_age, reason);
+    };
 
     // Swarm separation retains its physical execution meaning.
     const double swarm_clearance = planner_manager_->getSwarmClearance();
@@ -740,6 +784,9 @@ namespace ego_planner
     }
 
     if (!assessment.executable()) {
+      capture_remaining(assessment.execution_reason ==
+          GridExecutionReason::TRACKING_ERROR ? "tracking_error" :
+          "remaining_failure", assessment.execution_reason);
       const double lead = assessment.first_execution_time_s - elapsed;
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                            "Remaining trajectory %s, lead=%.2fs",
@@ -752,6 +799,7 @@ namespace ego_planner
         changeFSMExecState(EXEC_TRAJ, "SAFETY");
         publishSwarmTrajs(false);
       } else {
+        capture_remaining("remaining_stop", assessment.execution_reason);
         changeFSMExecState(EMERGENCY_STOP, "SAFETY");
       }
       return;
@@ -773,22 +821,119 @@ namespace ego_planner
     const double now = node_->now().seconds();
     if (now - last_failed_plan_time_s_ < 0.25) return false;
 
-    if (wait_for_map_reason_ != GridExecutionReason::OK &&
-        planner_manager_->grid_map_->occupancyGeneration() ==
-            wait_for_map_generation_)
-      return false;
+    const auto current_motion = planner_manager_->currentMotionContext();
+    const auto unchanged = [this](double a, double b) {
+      return (std::isfinite(a) && std::isfinite(b) &&
+              std::abs(a - b) <
+                  planner_manager_->grid_map_->getResolution() * 0.5) ||
+             (!std::isfinite(a) && !std::isfinite(b));
+    };
+    if (waiting_for_spatial_evidence_ && !have_new_target_ &&
+        (start_pt_ - waiting_start_).norm() <
+            planner_manager_->grid_map_->getResolution() * 0.5 &&
+        current_motion.quality == waiting_motion_quality_ &&
+        unchanged(current_motion.error_proxy_m,
+                  waiting_motion_error_proxy_m_)) {
+      const auto generation = planner_manager_->grid_map_->occupancyGeneration();
+      if (generation == waiting_evidence_generation_) {
+        if (stall_started_s_ > 0.0 && now - stall_started_s_ > 1.0)
+          planner_manager_->capturePlanningStall(start_pt_, waiting_target_);
+        return false;
+      }
+      const auto hash = planner_manager_->planningEvidenceFingerprint(
+          waiting_start_, waiting_target_);
+      if (hash && *hash == waiting_evidence_hash_ &&
+          waiting_target_reason_ != GridExecutionReason::ENVIRONMENT_STALE) {
+        waiting_evidence_generation_ = generation;
+        if (stall_started_s_ > 0.0 && now - stall_started_s_ > 1.0)
+          planner_manager_->capturePlanningStall(start_pt_, waiting_target_);
+        return false;
+      }
+    }
+    waiting_for_spatial_evidence_ = false;
+
+    const auto wait_for_evidence = [this, now]() {
+      const auto hash = planner_manager_->planningEvidenceFingerprint(
+          start_pt_, local_target_pt_);
+      if (!hash) return;
+      waiting_for_spatial_evidence_ = true;
+      waiting_evidence_generation_ =
+          planner_manager_->grid_map_->occupancyGeneration();
+      waiting_evidence_hash_ = *hash;
+      const auto motion = planner_manager_->currentMotionContext();
+      waiting_motion_quality_ = motion.quality;
+      waiting_motion_error_proxy_m_ = motion.error_proxy_m;
+      waiting_target_reason_ = planner_manager_->queryLocalTargetCell(
+          local_target_pt_, now).execution_reason;
+      waiting_start_ = start_pt_;
+      waiting_target_ = local_target_pt_;
+      if (stall_started_s_ < 0.0) stall_started_s_ = now;
+    };
+
     wait_for_map_reason_ = GridExecutionReason::OK;
 
-    if (!getLocalTarget()) {
+    if (!planner_manager_->beginPlanningView()) {
       last_failed_plan_time_s_ = now;
       return false;
     }
-
-    bool plan_and_refine_success =
-        planner_manager_->reboundReplan(start_pt_, start_vel_, start_acc_, local_target_pt_, local_target_vel_, (have_new_target_ || flag_use_poly_init), flag_randomPolyTraj);
+    struct EndView {
+      EGOPlannerManager* manager;
+      ~EndView() { manager->endPlanningView(); }
+    } end_view{planner_manager_.get()};
+    const double previous_progress =
+        planner_manager_->global_data_.last_progress_time_;
+    const double min_distance = std::max(0.2,
+        start_vel_.squaredNorm() /
+            (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) +
+        2.0 * planner_manager_->grid_map_->getResolution());
+    bool plan_and_refine_success = false;
+    bool target_selected = false;
+    std::optional<Eigen::Vector3d> attempted_target;
+    const auto planning_started = std::chrono::steady_clock::now();
+    for (const double fraction : {1.0, 0.65, 0.35}) {
+      const double distance = std::min(planning_horizen_ * fraction,
+                                       search_pool_target_limit_m_);
+      if (distance < min_distance ||
+          std::chrono::duration<double>(std::chrono::steady_clock::now() -
+              planning_started).count() > 1.5) break;
+      planner_manager_->global_data_.last_progress_time_ = previous_progress;
+      if (!getLocalTarget(distance)) continue;
+      if (attempted_target &&
+          (local_target_pt_ - *attempted_target).norm() <
+              planner_manager_->grid_map_->getResolution() * 0.5)
+        continue;
+      attempted_target = local_target_pt_;
+      target_selected = true;
+      plan_and_refine_success = planner_manager_->reboundReplan(
+          start_pt_, start_vel_, start_acc_, local_target_pt_,
+          local_target_vel_, (have_new_target_ || flag_use_poly_init),
+          flag_randomPolyTraj);
+      if (plan_and_refine_success) break;
+      const auto failure = planner_manager_->lastSearchFailure();
+      if (failure == AStar::Failure::TIME_BUDGET ||
+          failure == AStar::Failure::MAP_STALE ||
+          failure == AStar::Failure::END_STALE) break;
+    }
+    if (!plan_and_refine_success)
+      planner_manager_->global_data_.last_progress_time_ = previous_progress;
+    if (!target_selected && !plan_and_refine_success) {
+      last_failed_plan_time_s_ = now;
+      wait_for_evidence();
+      return false;
+    }
     have_new_target_ = false;
     if (!plan_and_refine_success) {
       last_failed_plan_time_s_ = now;
+      const auto immediate_failure = planner_manager_->lastSearchFailure();
+      if (immediate_failure == AStar::Failure::END_UNOBSERVED ||
+          immediate_failure == AStar::Failure::NO_VALID_REPAIR_ENTRY ||
+          immediate_failure == AStar::Failure::NO_VALID_REPAIR_EXIT ||
+          immediate_failure == AStar::Failure::START_BLOCKED ||
+          immediate_failure == AStar::Failure::END_BLOCKED ||
+          immediate_failure == AStar::Failure::NO_PATH_WITH_UNOBSERVED ||
+          immediate_failure == AStar::Failure::NO_PATH ||
+          immediate_failure == AStar::Failure::CURRENT_MOTION)
+        wait_for_evidence();
       const auto start_cell = planner_manager_->queryLocalTargetCell(
           start_pt_, node_->now().seconds());
       if (start_cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
@@ -818,6 +963,7 @@ namespace ego_planner
       }
     } else {
       search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
+      stall_started_s_ = -1.0;
     }
 
     cout << "refine_success=" << plan_and_refine_success << endl;
@@ -956,14 +1102,14 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOReplanFSM::getLocalTarget()
+  bool EGOReplanFSM::getLocalTarget(const double target_distance_m)
   {
     double t;
     bool target_selected = false;
 
     const double previous_progress = planner_manager_->global_data_.last_progress_time_;
     const double target_distance = std::min(
-        planning_horizen_, search_pool_target_limit_m_);
+        target_distance_m, search_pool_target_limit_m_);
 
     double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;
     double dist_min = 9999, dist_min_t = 0.0;
@@ -1065,7 +1211,10 @@ namespace ego_planner
       } else {
         if (encountered_stale || !std::isfinite(last_free_t) ||
             (planner_manager_->global_data_.getPosition(last_free_t) -
-             start_pt_).norm() < 0.8) {
+             start_pt_).norm() < std::max(0.2,
+               start_vel_.squaredNorm() /
+                   (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) +
+               2.0 * planner_manager_->grid_map_->getResolution())) {
           planner_manager_->global_data_.last_progress_time_ = previous_progress;
           wait_for_map_generation_ = nominal.occupancy_generation;
           wait_for_map_reason_ = encountered_stale
@@ -1074,7 +1223,7 @@ namespace ego_planner
           RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
               "Local target deferred: %s generation=%lu",
               encountered_stale ? "environment stale" :
-                  "observed corridor shorter than 0.8m",
+              "observed corridor shorter than stopping allowance",
               static_cast<unsigned long>(wait_for_map_generation_));
           return false;
         }

@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 #include <deque>
+#include <map>
+#include <tuple>
 #include <limits>
 #include <optional>
 #include <unordered_map>
@@ -77,6 +79,11 @@ namespace ego_planner
       size_t advisory_avoid_samples = 0;
       size_t advisory_unknown_samples = 0;
       size_t sampled_points = 0;
+      bool map_changed = false;
+      uint64_t evaluated_generation = 0;
+      uint8_t evaluated_motion_quality = 0;
+      double evaluated_motion_error_proxy_m =
+          std::numeric_limits<double>::quiet_NaN();
       bool executable() const { return execution_reason == GridExecutionReason::OK; }
     };
     GridMotionContext currentMotionContext(bool allow_bridged = false) const;
@@ -89,6 +96,22 @@ namespace ego_planner
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
+    bool beginPlanningView();
+    void endPlanningView();
+    void setLatestOdometryProvider(std::function<
+        nav_msgs::msg::Odometry::ConstSharedPtr()> provider) {
+      latest_odom_provider_ = std::move(provider);
+    }
+    GridPlanningCell queryPlanningViewCell(const Eigen::Vector3d& position) const;
+    std::optional<uint64_t> planningEvidenceFingerprint(
+        const Eigen::Vector3d& start, const Eigen::Vector3d& target) const;
+    void capturePlanningStall(const Eigen::Vector3d& start,
+                              const Eigen::Vector3d& target);
+    void captureRemainingFailure(const std::string& kind,
+        const Eigen::Vector3d& expected, const Eigen::Vector3d& actual,
+        double error_m, int trajectory_id, double command_time_s,
+        double odom_age_s, double map_age_s,
+        GridExecutionReason reason);
     AStar::Failure lastSearchFailure() const {
       return bspline_optimizer_->a_star_->lastResult().failure;
     }
@@ -124,6 +147,18 @@ namespace ego_planner
     uint64_t planning_risk_version_ = 0;
     double planning_time_s_ = 0.0;
     GridMotionContext planning_motion_;
+    struct PlanningView {
+      GridMap::Ptr physical;
+      uint64_t risk_version = 0;
+      uint64_t generation = 0;
+      double time_s = 0.0;
+      GridMotionContext motion;
+      mutable std::map<std::tuple<double, double, double>, GridPlanningCell>
+          physical_cache;
+    };
+    std::optional<PlanningView> planning_view_;
+    std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>
+        latest_odom_provider_;
     void captureFailureMap(const std::string& kind, const Eigen::Vector3d& point,
                            const Eigen::Vector3d& other,
                            const GridPlanningCell& cell,
@@ -132,6 +167,8 @@ namespace ego_planner
     double last_runtime_advisory_query_s_ =
         -std::numeric_limits<double>::infinity();
     iap::CurrentIntegrityState current_integrity_;
+    std::shared_ptr<const iap::msg::IntegrityReport> pending_integrity_;
+    rclcpp::CallbackGroup::SharedPtr integrity_callback_group_;
     nav_msgs::msg::Odometry::ConstSharedPtr risk_odom_;
     bool risk_frame_valid_ = false;
     bool origin_set_ = false;
