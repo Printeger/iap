@@ -175,6 +175,14 @@ endif(ENABLE_CUDA)
 install(TARGETS pcl_render_node
   DESTINATION lib/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME test_beam_evidence_transport COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../test/test_beam_evidence_transport.py
+    --renderer $<TARGET_FILE:pcl_render_node>)
+  set_tests_properties(test_beam_evidence_transport PROPERTIES TIMEOUT 20)
+endif()
+
 install(TARGETS first_hit_lidar_renderer
   EXPORT export_first_hit_lidar_renderer
   ARCHIVE DESTINATION lib

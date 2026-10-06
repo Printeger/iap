@@ -110,6 +110,7 @@ def _setup(context):
     remaps = [("odom_world", "/drone_0_visual_slam/odom"),
               ("grid_map/odom", "/drone_0_visual_slam/odom"),
               ("planning/bspline", "/drone_0_planning/bspline"),
+              ("/position_cmd", "/drone_0_planning/pos_cmd"),
               ("risk/integrity", "/iap/integrity")]
     for local, remote in [("range", "range_meas"), ("ephem", "ephem"),
                           ("glo_ephem", "glo_ephem"), ("receiver_lla", "receiver_lla"),

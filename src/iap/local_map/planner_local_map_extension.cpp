@@ -226,9 +226,11 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
             [this](const iap::msg::IntegrityReport::ConstSharedPtr report) {
               rememberIntegrity(report);
             });
+    // Complete scans authorize physical free space. Reliable bounded delivery
+    // permits fragmented/late evidence to reach the existing exact-scan binder.
     beam_evidence_subscription_ =
         node.create_subscription<iap::msg::LidarBeamEvidence>(
-            beam_evidence_topic_, rclcpp::SensorDataQoS().keep_last(8),
+            beam_evidence_topic_, rclcpp::QoS(8).reliable(),
             [this](const iap::msg::LidarBeamEvidence::ConstSharedPtr evidence) {
               received_beam_evidence_count_.fetch_add(1U, std::memory_order_relaxed);
               if (!evidence ||

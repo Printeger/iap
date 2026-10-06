@@ -121,6 +121,34 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             manifest=json.loads((run / "metadata/run_manifest.json").read_text())
             self.assertIn("metadata/config/iap",manifest["config_snapshots"])
 
+    def test_installed_full_stack_connects_command_feedback_to_the_server(self):
+        from ament_index_python.packages import get_package_share_directory
+        share = Path(get_package_share_directory("iap"))
+        path = share / "launch/_includes/full_stack_runtime.py"
+        spec = importlib.util.spec_from_file_location("installed_full_stack", path)
+        runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime)
+        runs = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+                run = runs.resolve_run_directory(entrypoint="feedback_contract")
+            context = LaunchContext()
+            context.launch_configurations.update({
+                "scenario": "icra_dense_forest_four_fork_v2",
+                "start_rviz": "false", "start_grid_map_visualizer": "false",
+                "planner_start_delay_s": "0", "run_duration_s": "0"})
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}):
+                with mock.patch.object(runtime, "Node", wraps=runtime.Node) as nodes:
+                    runtime._setup(context)
+            declarations = {call.kwargs["executable"]: call.kwargs
+                            for call in nodes.call_args_list}
+            planner = dict(declarations["ego_planner_node"]["remappings"])
+            server = dict(declarations["traj_server"]["remappings"])
+            self.assertEqual(planner.get("/position_cmd"),
+                             server["/position_cmd"])
+            self.assertEqual(planner["planning/bspline"],
+                             server["planning/bspline"])
+
     def test_sim_controller_and_rviz_use_the_current_grid_map(self):
         for filename in ("iap_sim.launch.py", "_includes/simulation_environment.launch.py"):
             self.assertIn(

@@ -558,8 +558,11 @@ launch 会在本次 run 中生成运行时配置和快照。修改源配置后�
 | `/iap/integrity` | `iap/msg/IntegrityReport`，当前完整性 |
 | `odometry_topic`（飞行） | `nav_msgs/msg/Odometry`，规划使用的车辆状态 |
 | `beam_evidence_topic`（飞行） | `iap/msg/LidarBeamEvidence`，硬件射线/回波证据 |
+| `/drone_0_planning/pos_cmd` | `quadrotor_msgs/msg/PositionCommand`，执行指令及轨迹 ID 反馈 |
 
 GNSS 扩展使用上表的固定订阅名称；IMU/LiDAR 的 launch 参数不会同时重命名 GNSS 接口。具体证据字段见 [msg/](msg/)。
+
+完整扫描证据使用 Reliable / KeepLast(8)；硬件证据发布端需提供兼容 QoS，并保留与注册帧精确一致的扫描时间和内容 hash。仿真 renderer 使用相同策略。canonical 完整 launch 将 planner 的 `/position_cmd` 与 traj_server 的命令输出统一重映射到 `/drone_0_planning/pos_cmd`，通过既有轨迹 ID 确认未来接续。
 
 接入传感器时核对时间戳、点云时间/强度/ring 字段、`T_lidar_imu`、GNSS lever arm、frame/TF 和 QoS。距离使用 m，角速度使用 rad/s；IMU 加速度单位与 `acc_scale` 必须匹配，SI 输入按配置明确使用 `1.0`。bag 回放或仿真使用时钟时，参与处理的节点应采用一致时间源。
 

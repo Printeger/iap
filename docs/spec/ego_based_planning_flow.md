@@ -7,6 +7,20 @@
 阶段 1 已恢复 EGO 主线、同一个 GridMap 的空间 PL 缓存与真实 PredictorModule 接入；阶段 1a 已实测 GLIO 驱动的仿真和同图显示。本次实施把当前融合运动质量、物理环境与 advisory 预测分开查询，在原 EGO 触发点做完整性避让，并在写入 `local_data` 前检查实际曲线。以下「当前阶段」描述代码；新行为尚无四分叉现场验收记录，不能把旧运行结果当作本次功能的成功证据。原版流程图保持固定基线。
 从本轮起，`iap_sim.launch.py` 默认且统一使用 `icra_dense_forest_four_fork_v2` 做完整仿真和可视化回归；单元测试可以保留小型定向 fixture，历史 `fused_nominal` 运行记录保持原场景身份，不迁写为四分叉结论。
 
+## 执行反馈接线与完整扫描传输（当前修正）
+
+基线 `9cccb56` 的现场记录 `20261006T103803Z_118` 暴露完整 launch 的反馈漏接：traj_server 发布 `/drone_0_planning/pos_cmd`，planner 的 `/position_cmd` 未重映射。服务端已切换、规划器未确认，同步窗口结束后进入已有检查制动。现在 canonical `_includes/full_stack_runtime.py` 对 planner 与服务端使用同一位置命令话题；生效时刻、0.1 s 确认检查和制动机制不变。
+
+回归加载实际安装的 launch 声明并比较两端 remap，原代码明确失败、补齐后通过。`test_ego_full_stack_feedback` 从同一安装声明启动真实 planner/server，使用明确标为合成的 CPU 里程计、质量与自由射线输入；验证实际 AT_TIME 切换 ID 被 FSM 确认，切换后持续命令，且不发生 missing-ID 误制动。这是完整接线及执行链回归，不是完整 GLIO/森林现场运行；独立服务端测试继续保留。
+
+候选快照 frame 144 的扫描时间 `1791283102.680392`，当时接收历史最新扫描为 `1791283102.5824025`，没有该扫描内容。已保存原始快照不变；用其扫描起止时间及明确合成的 20,480 束内容复现 `scan_start_mismatch`，正确证据晚到后按原精确时间和内容 hash 绑定，当前帧补发、活动帧 remove+add 及不回滚较新帧均通过。匹配容差仍为 1e-6 s，邻帧证据不能借用。
+
+另确认完整射线源与接收端此前均为 Best Effort，而这些约 348 KB 的分片消息是必要自由空间证据。两端改为 Reliable / KeepLast(8)，仍用原 64 帧历史及串行 worker，不新增地图、重试状态或放宽观测规则。真实 CPU renderer 的 UDP 进程测试收到三份 20,480 束完整数组，起止时间与各自点云一致，发送和接收 QoS 均有运行期检查。原 late refresh 逻辑已能正确补齐，不改写时间来源。现场接收落后与丢失的具体比例尚未由包级抓取证明，Reliable 修正不等于所有观测空洞已消失。
+
+对原日志复核得到 97 轮规划、16 条 A* `NO_PATH_WITH_UNOBSERVED`、14 条 `TIME_BUDGET`、53 轮修复配额拒绝；冻结 advisory avoid 和回退计数均为零。本轮没有放宽未知、净空、单次 A* / 总轮预算，也不把搜索超时解释为无路或 PL 禁入。剩余问题仍须分别核对真实遮挡、缺失观测证据和计算资源。
+
+本轮证据在 `log/20261006T104511Z_975/runtime/`：`feedback_red.log` / `feedback_green.log`、`beam_red2.log` / `beam_green.log`、`full_stack_feedback4.log`、`renderer_transport.log`。三个相关包 Release 构建通过（`build.log`）；IAP 29 项、EGO 5 项、GridMap 4 项与 local_sensing 2 项行为 CTest 通过（对应 `*_tests.log`），新 Python 回归 flake8 通过。传输测试为父探针和子 renderer 固定已安装 `fastdds_udp_only.xml` 与 `rmw_fastrtps_cpp`，修正后复测记录为 `local_sensing_final_tests.log`。相关接口已修正；新四分叉运行仍受 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE` 阻挡，验收契约为 Draft，不报告正式 PASS。
+
 ## 合法前方目标集合、单条 guide 与未来接续（当前实现）
 
 本次变更基线为 `749e5be509ae6e35f7a8773547415108bcb2ee1f`。正常规划已取消原初值合法前缀/尾部作为恢复入口的要求：先检查完整实际初始曲线，无违反保留 EGO 快路径；有违反从真实接续状态向合法目标集合搜索一条 guide。以下历史阶段保留原实验身份，涉及旧修补入口或立即替换执行曲线的描述已由本节及当前流程图取代。
@@ -179,7 +193,8 @@ flowchart TD
     Release -->|拒绝| Keep
     Release -->|通过| Publish[立即发布或保存唯一待生效曲线]
     Publish --> Server[traj_server：切换前持续旧命令，指定时刻切换]
-    Server --> Confirm[position_cmd ID 确认规划端切换]
+    Server --> Feedback[canonical pos_cmd：两端同话题 remap]
+    Feedback --> Confirm[position_cmd ID 确认规划端切换]
     Confirm --> Monitor[两段轨迹、新证据与当前质量监督]
     Monitor --> Round
     Monitor -->|执行条件失效| Keep
@@ -190,14 +205,14 @@ flowchart TD
 
 | 接口 | 当前行为 |
 |---|---|
-| registered beam 绑定 / active delta | 入站完整性、内容 hash 和 sensor frame 校验通过后进入原有 64 帧历史；匹配必须同时满足扫描起止时间，不能借邻帧。合法证据到达唤醒原序列化 worker：只补发仍为最新的当前扫描，保留活动帧按原 remove+add 事务更新；已提交来源的 beam/运动健康证据不因输入历史淘汰而丢失，incomplete 窗口不能被补证据操作提升为 complete。匹配已校验历史只比较时间，不重复计算 beam hash。未收到匹配证据时保持真实未知。 |
+| registered beam 绑定 / active delta | 完整扫描 Reliable / KeepLast(8)，原 64 帧历史；入站完整性、内容 hash 和 sensor frame 校验通过后进入原有 64 帧历史；匹配必须同时满足扫描起止时间，不能借邻帧。合法证据到达唤醒原序列化 worker：只补发仍为最新的当前扫描，保留活动帧按原 remove+add 事务更新；已提交来源的 beam/运动健康证据不因输入历史淘汰而丢失，incomplete 窗口不能被补证据操作提升为 complete。匹配已校验历史只比较时间，不重复计算 beam hash。未收到匹配证据时保持真实未知。 |
 | `beginPlanningView` / `queryPlanningViewCell` / `endPlanningView` | FSM 一事件一份 1.5 s / 三动作预算，预测分类与代价绑定冻结输入、策略和评估时间；普通地图更新不撤销本轮，发布时另核对最新走廊和预测有效性。 |
 | `getLocalTarget` / `setLocalTargets` / `terminalSpeedLimit` | 同一 GridMap 的 1 m 球内合法中心，确定性排序最多 16 个；原参考分支弧长前进量，已观测减速余量限速，实际进度不随目标移动；最终任务坐标不替换。 |
 | `AstarSearchGoals` / `AstarSearch` | 集合最小距离启发式，返回 selected_goal 和一条含真实起点/精确终点的 guide；单点接口转调同一实现。完整边物理未知禁止穿越；明确区分 exhausted 与 TIME_BUDGET。正常规划不依赖 chooseRepairEndpoints；它只保留在无绑定状态的历史离线优化器入口。 |
 | `curveViolates` / `searchRecoveryGuide` / `initializeFromGuide` | 完整初值含短尾段检查；从绑定起点搜索目标集合，沿 guide 初始化、建立 rebound 和跟踪；后端违反走同一恢复入口，不拼接坏初值尾部。 |
 | `enforceBoundaryStates` / `assessTrajectory` | 三次均匀样条硬绑定两端 p/v/a；时间调整后恢复边界并复查动力学、完整实际曲线及终端制动空间；控制多边形不代替曲线检查。预算耗尽独立记录。 |
 | `commitFrozenCorridor` / `publicationStillTimely` | 原地图锁内比较相关 raw/inflate/observed、时效和运动条件，GLIO 按测量时刻对齐，曲线按未来接续时刻对齐；序列化后再次检查发布时间余量，失败不覆盖执行轨迹。 |
-| `Bspline.start_mode` / `observeExecutingTrajectory` | IMMEDIATE=0；AT_TIME=1，默认提前 1.6 s，迟到拒绝；执行与待生效各一条，位置命令 ID 确认切换，立即恢复取消队列。 |
+| `Bspline.start_mode` / `observeExecutingTrajectory` | canonical 位置命令发布/订阅均为 `/drone_0_planning/pos_cmd`；IMMEDIATE=0；AT_TIME=1，默认提前 1.6 s，迟到拒绝；执行与待生效各一条，位置命令 ID 确认切换，立即恢复取消队列。 |
 | `assessRemainingTrajectory` / `checkCollisionCallback` | 监督旧段至切换及新段，合并 pending 的物理与 advisory 发现；待生效存在不能视为恢复成功，物理授权撤销进入检查恢复；advisory 缺失降级、有效警告请求重新规划。失败/未知尾段取证继续使用原有运行目录接口。 |
 
 `captureFailureSnapshot(include_observation_evidence)` 在同一个 occupancy 锁内拷贝完整物理/观测层、当前 registered frame 和 current/active 的 hit/free 贡献；仅显式取证时保留每体素最近一次 observed→unknown 的 producer（当前帧替换、活动 delta、活动 recovery）。`RegisteredLidarWindow::unthinnedObservationMask` 重用原遍历，只在诊断中关闭端点去重，锁释放后执行，结果只写文件。`analyze_curve_observation.py` 先按实际 B-spline 和保存的采样区间重放首个未知点，检查地图/当前帧年龄，再对照原始帧、实际 mask 与未去重诊断 mask；缺失证据或不一致不能给出空间可执行授权。保存后的 assessment 持有同代快照，后续 live 地图更新不把失败曲线拼到另一代地图；无法取得同代证据时记录采集失败。

@@ -53,7 +53,7 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
       "/beam_test/delta", rclcpp::QoS(128).reliable(),
       [&deltas](const iap::msg::ActiveLidarWindowDelta& value) { deltas.push_back(value); });
   auto publisher = node->create_publisher<iap::msg::LidarBeamEvidence>(
-      "/beam_test/evidence", rclcpp::SensorDataQoS());
+      "/beam_test/evidence", rclcpp::QoS(8).reliable());
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node);
   const auto until = [&](const auto& predicate) {
@@ -66,6 +66,13 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
     return false;
   };
   ASSERT_TRUE(until([&] { return publisher->get_subscription_count() == 1U; }));
+  const auto receivers=node->get_subscriptions_info_by_topic("/beam_test/evidence");
+  ASSERT_EQ(receivers.size(),1u);
+  EXPECT_EQ(receivers.front().qos_profile().reliability(), rclcpp::ReliabilityPolicy::Reliable);
+  // Timing from 20261006T103803Z_118/candidate, with explicitly labelled
+  // full-size synthetic content. The snapshot did not save the missing payload.
+  constexpr double captured_scan=1791283102.680392;
+  constexpr double previous_scan=1791283102.5824025;
   const auto scan = [](int id, double stamp) {
     auto points = std::make_shared<glim::RawPoints>();
     points->stamp = stamp;
@@ -89,7 +96,7 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
     value.header.frame_id = "iap_lidar_reference";
     value.scan_end_stamp_s = stamp;
     value.sensor_model_id = "test-first-hit";
-    value.horizontal_samples = 2;
+    value.horizontal_samples = 20480;
     value.vertical_samples = 1;
     value.horizontal_fov_rad = 1;
     value.min_range_m = 0.1;
@@ -100,10 +107,16 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
     value.direction_y = {0, 1};
     value.direction_z = {0, 0};
     value.ranges_m = {3, 8};
+    // Same row count as the captured renderer: exercise fragmented DDS payloads.
+    value.outcomes.resize(value.horizontal_samples,2);
+    value.direction_x.resize(value.horizontal_samples,1);
+    value.direction_y.resize(value.horizontal_samples,0);
+    value.direction_z.resize(value.horizontal_samples,0);
+    value.ranges_m.resize(value.horizontal_samples,8);
     value.content_hash = iap::local_map::beamEvidenceContentHash(value);
     return value;
   };
-  auto frame89 = scan(89, 42.25);
+  auto frame89 = scan(89, captured_scan);
   glim::OdometryEstimationCallbacks::on_update_keyframes(
       std::vector<glim::EstimationFrame::ConstPtr>{frame89});
   ASSERT_TRUE(until([&] { return !current.empty() && !deltas.empty(); }));
@@ -111,12 +124,18 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   EXPECT_EQ(current.back().beam_binding_reason, "no_valid_received_evidence");
   ASSERT_EQ(deltas.back().added.size(), 1U);
   EXPECT_FALSE(deltas.back().added.front().beam_evidence_complete);
-  publisher->publish(evidence(42.3));
-  auto invalid = evidence(42.25);
+  publisher->publish(evidence(previous_scan));
+  ASSERT_TRUE(until([&] {
+    glim::OdometryEstimationCallbacks::on_update_new_frame(frame89);
+    return current.back().beam_received_count>=1u;
+  }));
+  EXPECT_FALSE(current.back().beam_evidence_complete);
+  EXPECT_EQ(current.back().beam_binding_reason,"scan_start_mismatch");
+  auto invalid = evidence(captured_scan);
   invalid.content_hash = "corrupt";
   publisher->publish(invalid);
   executor.spin_some();
-  publisher->publish(evidence(42.25));
+  publisher->publish(evidence(captured_scan));
   ASSERT_TRUE(until([&] {
     return current.back().beam_evidence_complete && deltas.back().generation == 2U;
   }));
@@ -124,20 +143,20 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   EXPECT_EQ(current.back().beam_binding_reason, "matched_exact_scan");
   EXPECT_GE(current.back().beam_received_count, 3u);
   EXPECT_GE(current.back().beam_invalid_count, 1u);
-  EXPECT_DOUBLE_EQ(current.back().beam_same_start_end_stamp_s, 42.25);
+  EXPECT_DOUBLE_EQ(current.back().beam_same_start_end_stamp_s, captured_scan);
   EXPECT_TRUE(current.back().source_health_valid);
   EXPECT_EQ(deltas.back().removed_frame_ids, (std::vector<int64_t>{89}));
   ASSERT_EQ(deltas.back().added.size(), 1U);
   EXPECT_TRUE(deltas.back().added.front().beam_evidence_complete);
   EXPECT_TRUE(deltas.back().added.front().source_health_valid);
-  EXPECT_DOUBLE_EQ(deltas.back().added.front().scan_end_stamp_s, 42.25);
-  auto frame90 = scan(90, 42.4);
+  EXPECT_DOUBLE_EQ(deltas.back().added.front().scan_end_stamp_s, captured_scan);
+  auto frame90 = scan(90, (captured_scan+.1));
   glim::OdometryEstimationCallbacks::on_update_keyframes(
       std::vector<glim::EstimationFrame::ConstPtr>{frame89, frame90});
   ASSERT_TRUE(until([&] { return current.back().frame_id == 90 && deltas.back().generation == 3U; }));
-  scan(91, 42.5);
+  scan(91, (captured_scan+.2));
   ASSERT_TRUE(until([&] { return current.back().frame_id == 91; }));
-  publisher->publish(evidence(42.4));
+  publisher->publish(evidence((captured_scan+.1)));
   ASSERT_TRUE(until([&] { return deltas.back().generation == 4U; }));
   EXPECT_EQ(current.back().frame_id, 91);
   EXPECT_FALSE(current.back().beam_evidence_complete);

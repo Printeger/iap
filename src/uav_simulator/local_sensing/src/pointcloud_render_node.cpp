@@ -389,8 +389,10 @@ int main(int argc, char** argv) {
 
   // 发布者：点云数据
   pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("pcl_render_node/cloud", 10);
+  // Complete beam arrays are the free-space observation source, including
+  // fragmented scans. Match the registered-map reliable, bounded receiver.
   pub_beams = node->create_publisher<iap::msg::LidarBeamEvidence>(
-    "/iap/simulator/lidar_beam_evidence", rclcpp::SensorDataQoS().keep_last(4));
+    "/iap/simulator/lidar_beam_evidence", rclcpp::QoS(8).reliable());
   RCLCPP_INFO(
       node->get_logger(),
       "pcl_render ready cloud_topic=pcl_render_node/cloud renderer=%s sensing_horizon=%.3f sensing_rate=%.3f map_resolution=%.3f rays=%d",
