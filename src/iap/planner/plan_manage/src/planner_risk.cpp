@@ -8,6 +8,8 @@
 #include <atomic>
 #include <unordered_set>
 #include <plan_env/local_evidence_snapshot.h>
+#include <iap/util/run_log_manager.hpp>
+#include <unistd.h>
 
 namespace ego_planner {
 namespace {
@@ -131,8 +133,7 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   const auto qos = rclcpp::QoS(50);
   risk_odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>("odom_world", qos,
       [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
-        risk_odom_ = msg;
-        updateGlioPath(*msg);
+        std::atomic_store(&risk_odom_, msg);
         grid_map_->invalidateRiskContext();
       });
   integrity_callback_group_ = node->create_callback_group(
@@ -173,9 +174,9 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
 
 void EGOPlannerManager::rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg) {
   grid_map_->invalidateRiskContext();
-  if (!origin_set_) { epochs_.clear(); return; }
+  if (!origin_set_) { std::lock_guard<std::mutex> lock(epochs_mutex_); epochs_.clear(); return; }
   const auto obs_list = gnss_comm::msg2meas(msg);
-  if (obs_list.empty() || !obs_list.front()) { epochs_.clear(); return; }
+  if (obs_list.empty() || !obs_list.front()) { std::lock_guard<std::mutex> lock(epochs_mutex_); epochs_.clear(); return; }
   const auto origin_ecef = origin_ecef_;
   const auto& ephem_cache = ephem_cache_;
   const auto& glo_ephem_cache = glo_ephem_cache_;
@@ -273,32 +274,27 @@ void EGOPlannerManager::rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSh
       sat.svddt = svddt;
       epoch.sats.push_back(sat);
     }
-    if (!epochs_.empty() && epoch.stamp < epochs_.back().stamp) epochs_.clear();
+  std::lock_guard<std::mutex> lock(epochs_mutex_);
+  if (!epochs_.empty() && epoch.stamp < epochs_.back().stamp) epochs_.clear();
   epochs_.push_back(std::move(epoch));
   while (epochs_.size() > 64 || (!epochs_.empty() &&
          epochs_.back().stamp - epochs_.front().stamp > predictor_params_.freshness.max_gnss_age_s))
     epochs_.pop_front();
 }
 
-uint64_t EGOPlannerManager::beginRiskQuery() {
-  const double now = node_->now().seconds();
+iap::IntegritySnapshot EGOPlannerManager::capturePredictionSnapshot(const double now) const {
   const auto pending = std::atomic_load(&pending_integrity_);
-  if (pending) {
-    current_integrity_ = currentFromMsg(*pending);
-    risk_frame_valid_ = pending->header.frame_id == grid_map_->getFrameId();
-  }
+  const auto current = pending ? currentFromMsg(*pending) : current_integrity_;
+  const bool frame_valid = pending ? pending->header.frame_id == grid_map_->getFrameId() : risk_frame_valid_;
   const auto latest_odom = latest_odom_provider_
-      ? latest_odom_provider_() : risk_odom_;
-  if (!latest_odom || !risk_frame_valid_ ||
+      ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
+  if (!latest_odom || !frame_valid ||
       latest_odom->header.frame_id != grid_map_->getFrameId()) {
-    GridRiskContext invalid;
-    invalid.frame_id = "";
-    invalid.occupancy_generation = grid_map_->occupancyGeneration();
-    return grid_map_->bindRiskContext(std::move(invalid));
+    return {};
   }
   iap::IntegritySnapshotBuilderInput input;
   input.stamp = now;
-  input.current = current_integrity_;
+  input.current = current;
   input.pose_stamp = stampToSec(latest_odom->header.stamp);
   const auto& p = latest_odom->pose.pose.position;
   const auto& q = latest_odom->pose.pose.orientation;
@@ -308,13 +304,16 @@ uint64_t EGOPlannerManager::beginRiskQuery() {
                    input.q_wb.norm() > 1e-6;
   if (input.has_pose) input.q_wb.normalize();
   std::optional<iap::GnssEpoch> epoch;
+  {
+  std::lock_guard<std::mutex> lock(epochs_mutex_);
   for (auto it = epochs_.rbegin(); it != epochs_.rend(); ++it) {
-    if (it->stamp <= now && iap::gnss_epoch_identity(*it, current_integrity_.excluded_prns) ==
-        current_integrity_.gnss_epoch_identity) { epoch = *it; break; }
+    if (it->stamp <= now && iap::gnss_epoch_identity(*it, current.excluded_prns) ==
+        current.gnss_epoch_identity) { epoch = *it; break; }
+  }
   }
   if (epoch) {
-    const std::unordered_set<int> excluded(current_integrity_.excluded_prns.begin(),
-                                           current_integrity_.excluded_prns.end());
+    const std::unordered_set<int> excluded(current.excluded_prns.begin(),
+                                           current.excluded_prns.end());
     for (auto& sat : epoch->sats) sat.excluded = sat.excluded || excluded.count(sat.sat_id);
     input.gnss_epoch = &*epoch;
   }
@@ -322,14 +321,19 @@ uint64_t EGOPlannerManager::beginRiskQuery() {
   // a diagonal position prior. The source-max monitor PL is not a fused
   // posterior and must not be interpreted as one.
   Eigen::Matrix3d prior = Eigen::Matrix3d::Zero();
-  if (current_integrity_.valid &&
-      current_integrity_.current_motion_error_proxy_m > 0) {
+  if (current.valid &&
+      current.current_motion_error_proxy_m > 0) {
     const double information = std::pow(
-        3.0 / current_integrity_.current_motion_error_proxy_m, 2);
+        3.0 / current.current_motion_error_proxy_m, 2);
     prior.diagonal().setConstant(information);
     input.lambda_base_pos = &prior;
   }
-  return bindRiskPrediction(iap::IntegritySnapshotBuilder().build_from_latest(input), now);
+  return iap::IntegritySnapshotBuilder().build_from_latest(input);
+}
+
+uint64_t EGOPlannerManager::beginRiskQuery() {
+  const double now=node_->now().seconds();
+  return bindRiskPrediction(capturePredictionSnapshot(now),now);
 }
 
 GridMotionContext EGOPlannerManager::currentMotionContext(
@@ -342,7 +346,7 @@ GridMotionContext EGOPlannerManager::currentMotionContext(
       ? pending->header.frame_id == grid_map_->getFrameId()
       : risk_frame_valid_;
   const auto latest_odom = latest_odom_provider_
-      ? latest_odom_provider_() : risk_odom_;
+      ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
   const double odom_age_s = latest_odom
       ? now_s - stampToSec(latest_odom->header.stamp)
       : std::numeric_limits<double>::infinity();
@@ -376,7 +380,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   auto curve = trajectory;
   const double duration = curve.getTimeSum();
   const auto latest_odom = latest_odom_provider_
-      ? latest_odom_provider_() : risk_odom_;
+      ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
   if (from_time_s <= 0.0 && latest_odom) {
     const auto& p = latest_odom->pose.pose.position;
     const Eigen::Vector3d actual = physical_context && planning_view_ &&
@@ -413,10 +417,13 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   GridPlanningContext corridor_context;
   if (!physical_context) {
     std::vector<Eigen::Vector3d> positions; positions.reserve(intervals+1);
-    for (size_t sample=0;sample<=intervals;++sample)
+    const auto budget=planning_view_ && from_time_s<=0.0 ? planning_budget_ : PlanningBudget::Ptr{};
+    for (size_t sample=0;sample<=intervals;++sample) {
+      if (budget && budget->expired()) { assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment; }
       positions.push_back(curve.evaluateDeBoorT(std::min(end,assessment.checked_from_time_s+sample*step)));
+    }
     const auto prepared = grid_map_->preparePlanningQuery(now_s,motion);
-    const auto corridor = grid_map_->captureFrozenCorridor(positions,prepared.required_clearance_m);
+    const auto corridor = grid_map_->captureFrozenCorridor(positions,prepared.required_clearance_m,budget,capture_failure_map_);
     if (!corridor) { assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment; }
     corridor_context = grid_map_->preparePlanningQuery(now_s,motion,corridor);
     physical_context = &corridor_context;
@@ -474,10 +481,15 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
          !captured_failure_kinds_.count("remaining_stop"));
   if (capture_failure_map_ && !assessment.executable() &&
       (need_unknown || need_failure)) {
-    const auto snapshot = grid_map_->captureFailureSnapshot(true);
-    if (snapshot && snapshot->generation == generation)
-      assessment.failure_snapshot =
-          std::make_shared<const GridMapFailureSnapshot>(*snapshot);
+    if (assessment.physical_epoch && assessment.physical_epoch->failure_evidence)
+      assessment.failure_snapshot=assessment.physical_epoch->failure_evidence;
+    else if (planning_view_ && physical_context==&planning_view_->physical_context)
+      assessment.failure_snapshot=planning_view_->snapshot;
+    else {
+      const auto snapshot = grid_map_->captureFailureSnapshot(true);
+      if (snapshot && snapshot->generation == generation)
+        assessment.failure_snapshot = std::make_shared<const GridMapFailureSnapshot>(*snapshot);
+    }
   }
   return assessment;
 }
@@ -491,15 +503,19 @@ GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
 }
 
 bool EGOPlannerManager::beginPlanningView() {
-  const auto freeze_started = std::chrono::steady_clock::now();
   planning_view_.reset();
   planning_budget_ = std::make_shared<PlanningBudget>();
+  planning_calls_at_start_=predictor_calls_->load();
+  planning_timings_.freeze_s=planning_timings_.prediction_preparation_s=0;
+  planning_timings_.backend_s=planning_timings_.final_checks_s=0;
   for (int attempt = 0; attempt < 2; ++attempt) {
     const double time_s = node_->now().seconds();
     const auto motion = currentMotionContext();
-    const auto risk_version = beginRiskQuery();
+    const auto freeze_started=std::chrono::steady_clock::now();
     const auto epoch = grid_map_->captureFrozenOccupancyEpoch();
+    planning_timings_.freeze_s+=std::chrono::duration<double>(std::chrono::steady_clock::now()-freeze_started).count();
     if (!epoch) continue;
+    const auto risk_version = bindRiskPrediction(capturePredictionSnapshot(time_s),time_s,epoch);
     PlanningView view;
     view.physical = epoch;
     view.generation = epoch->generation;
@@ -510,8 +526,8 @@ bool EGOPlannerManager::beginPlanningView() {
     }
     view.time_s = time_s;
     view.motion = motion;
-    const auto odom = latest_odom_provider_ ? latest_odom_provider_() : risk_odom_;
-    if (odom && odom->header.frame_id == grid_map_->getFrameId()) {
+    const auto odom = latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
+    if (odom && odom->header.frame_id == epoch->frame_id) {
       const auto& p = odom->pose.pose.position;
       Eigen::Vector3d position(p.x, p.y, p.z);
       if (position.allFinite()) view.reference_position = position;
@@ -520,8 +536,6 @@ bool EGOPlannerManager::beginPlanningView() {
     // The bound PL context has to refer to this same occupancy generation.
     view.risk_version = epoch->generation == grid_map_->occupancyGeneration() ? risk_version : 0;
     planning_view_ = std::move(view);
-    planning_timings_.freeze_s = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - freeze_started).count();
     return true;
   }
   RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
@@ -529,7 +543,19 @@ bool EGOPlannerManager::beginPlanningView() {
   return false;
 }
 
-void EGOPlannerManager::endPlanningView() { planning_view_.reset(); }
+void EGOPlannerManager::endPlanningView() {
+  if(planning_view_ && planning_budget_ && planning_metrics_) {
+    const auto& b=*planning_budget_; const auto& a=b.searches;
+    planning_metrics_<<std::setprecision(12)<<planning_view_->time_s<<','<<planning_view_->generation<<','
+      <<b.elapsed()<<','<<planning_timings_.freeze_s<<','<<planning_timings_.prediction_preparation_s<<','
+      <<planning_timings_.searcher_initialization_s<<','<<a.seconds<<','<<planning_timings_.backend_s<<','
+      <<planning_timings_.final_checks_s<<','<<a.calls<<','<<a.expanded<<','<<a.pushes<<','<<a.pops<<','<<a.queries<<','
+      <<predictor_calls_->load()-planning_calls_at_start_<<','<<b.used()<<','<<b.expired()<<','<<b.denied()<<','
+      <<a.hits[0]+a.hits[1]+a.hits[2]<<','<<a.misses[0]+a.misses[1]+a.misses[2]<<','
+      <<a.peak_cache_bytes[0]+a.peak_cache_bytes[1]+a.peak_cache_bytes[2]<<'\n'; planning_metrics_.flush();
+  }
+  planning_view_.reset();
+}
 
 GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
     const Eigen::Vector3d& position) const {
@@ -614,72 +640,49 @@ EGOPlannerManager::assessRemainingTrajectory(const double now_s) {
 }
 
 uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
-                                             const double now) {
-  GridRiskContext context;
-  context.reference_time_s = now;
-  context.reference_position = snapshot.p_wb;
-  context.frame_id = grid_map_->getFrameId();
-  const auto occupancy = grid_map_->captureFrozenOccupancyEpoch();
-  if (!occupancy) {
-    context.occupancy_generation = grid_map_->occupancyGeneration();
-    return grid_map_->bindRiskContext(std::move(context));
-  }
-  context.occupancy_generation = occupancy->generation;
-  if (!snapshot.valid || !snapshot.has_pose || !snapshot.current.valid ||
-      !std::isfinite(snapshot.pose_stamp) || !std::isfinite(snapshot.current.stamp) ||
-      !std::isfinite(occupancy->cloud_stamp_s) || snapshot.pose_stamp > now ||
-      snapshot.current.stamp > now || occupancy->cloud_stamp_s > now) {
-    return grid_map_->bindRiskContext(std::move(context));
-  }
-  context.valid_until_s = std::min({now + risk_validity_s_,
-      snapshot.pose_stamp + risk_validity_s_, snapshot.current.stamp + risk_validity_s_,
-      occupancy->cloud_stamp_s + risk_validity_s_});
-  if (predictor_params_.source_mode != iap::PredictorSourceMode::LidarOnly) {
-    if (!snapshot.has_epoch) context.valid_until_s = std::numeric_limits<double>::quiet_NaN();
-    else context.valid_until_s = std::min(context.valid_until_s,
-        snapshot.gnss_epoch.stamp + predictor_params_.freshness.max_gnss_age_s);
-  }
-  iap::PredictorModule predictor(predictor_params_);
-  predictor.set_occupancy_query([occupancy](const Eigen::Vector3d& p) {
-    return occupancy->diagnostic_query(p).raw_occupied;
-  }, occupancy->resolution_m);
-  predictor.set_support_query([occupancy, now](const Eigen::Vector3d& p, double, double) {
-    iap::LocalMapSupportQuery support;
-    support.status = iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
-    if (occupancy->local_evidence_snapshot) {
-      const auto evidence = occupancy->local_evidence_snapshot->queryVoxel(p, now);
-      support.observation_stamp_s = evidence.observation_timestamp_s;
-      support.observation_age_s = evidence.age_s;
-      if (evidence.reason == LocalEvidenceReason::OK && evidence.state != EvidenceVoxelState::UNKNOWN)
-        support.status = iap::LocalMapSupportStatus::MODEL_COMPLETE;
-      else if (evidence.reason == LocalEvidenceReason::STALE_OBSERVATION)
-        support.status = iap::LocalMapSupportStatus::EXPIRED;
-    } else {
-      const auto voxel = occupancy->diagnostic_query(p);
-      if (voxel.available && voxel.observed)
-        support.status = iap::LocalMapSupportStatus::MODEL_COMPLETE;
-    }
-    return support;
-  });
-  if (occupancy->raw_occupied_voxel_centers) {
-    predictor.set_lidar_map_points(occupancy->raw_occupied_voxel_centers);
-    predictor.set_lidar_fim_primitives(iap::make_lidar_fim_primitives(*occupancy->raw_occupied_voxel_centers));
-  }
-  context.predict = [predictor = std::move(predictor), snapshot, now,
-                     frame = context.frame_id](const Eigen::Vector3d& center) {
-    GridRiskVoxel voxel;
-    const auto result = predictor.query(iap::PredictorQueryInput(center, snapshot, now, 0.0, frame, now));
-    voxel.status = result.freshness_status == iap::PredictorFreshnessStatus::STALE
-        ? GridRiskStatus::STALE : GridRiskStatus::INVALID;
-    if (result.available && result.valid && result.fused.valid && !result.fallback) {
-      voxel.status = GridRiskStatus::VALID;
-      voxel.hpl = result.fused.hpl;
-      voxel.vpl = result.fused.vpl;
-    } else if (result.fallback_reason == "singular_advisory_fim") {
-      voxel.status = GridRiskStatus::PREDICTED_DEGRADED;
-    }
-    return voxel;
-  };
+                                             const double now, std::shared_ptr<const FrozenOccupancyEpoch> occupancy) {
+  PredictionInput input;
+  input.occupancy=occupancy ? std::move(occupancy) : grid_map_->captureFrozenOccupancyEpoch();
+  input.integrity=snapshot; input.params=predictor_params_;
+  input.reference_time_s=now; input.validity_s=risk_validity_s_;
+  const auto started=std::chrono::steady_clock::now();
+  auto context=makeRiskPrediction(input,predictor_calls_);
+  if(planning_budget_) planning_timings_.prediction_preparation_s+=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
   return grid_map_->bindRiskContext(std::move(context));
+
+}
+void EGOPlannerManager::initPredictionExport() {
+  if (const auto log=glim::RunLogManager::get_if_initialized(); log && std::filesystem::exists(log->run_dir())) {
+    const auto name="planner_flow_"+std::to_string(getpid());
+    planning_metrics_.open(log->profiling_path(name+".csv"));
+    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes\n";
+    export_metrics_.open(log->profiling_path(name+"_export.csv"));
+    export_metrics_<<"reference_time,generation,total_s,payload_bytes,predictor_queries_before,predictor_queries_after\n";
+    std::ofstream manifest(log->metadata_path("manifests/"+name+".json"));
+    manifest<<"{\"schema\":\"iap_planner_flow_metrics_v1\",\"module\":\"ego_planner\",\"artifacts\":[\"profiling/"<<name<<".csv\",\"profiling/"<<name<<"_export.csv\"]}\n";
+  }
+  export_callback_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  prediction_export_service_ = node_->create_service<iap::srv::GetGridMapPredictionInput>(
+      "grid_map/prediction_input",
+      [this](const std::shared_ptr<iap::srv::GetGridMapPredictionInput::Request>,
+             std::shared_ptr<iap::srv::GetGridMapPredictionInput::Response> response) {
+        const auto started=std::chrono::steady_clock::now();
+        const auto calls_before=predictor_calls_->load();
+        try {
+          PredictionInput input; input.occupancy=grid_map_->captureFrozenOccupancyEpoch();
+          if (!input.occupancy) { response->reason="physical epoch unavailable"; return; }
+          input.reference_time_s=node_->now().seconds(); input.validity_s=risk_validity_s_;
+          input.integrity=capturePredictionSnapshot(input.reference_time_s); input.params=predictor_params_;
+          response->payload=encodePredictionInput(input); response->available=true;
+          response->frame_id=input.occupancy->frame_id; response->geometry_id=input.occupancy->geometry_id;
+          response->generation=input.occupancy->generation;
+          if(export_metrics_) { export_metrics_<<std::setprecision(12)<<input.reference_time_s<<','<<input.occupancy->generation<<','
+              <<std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()<<','<<response->payload.size()<<','
+              <<calls_before<<','<<predictor_calls_->load()<<'\n'; export_metrics_.flush(); }
+          RCLCPP_DEBUG(node_->get_logger(),"display export generation=%lu bytes=%zu seconds=%.6f predictor_calls=%lu",
+              input.occupancy->generation,response->payload.size(),
+              std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count(),predictor_calls_->load());
+        } catch (const std::exception& e) { response->reason=e.what(); }
+      }, rmw_qos_profile_services_default, export_callback_group_);
 }
 } // namespace ego_planner

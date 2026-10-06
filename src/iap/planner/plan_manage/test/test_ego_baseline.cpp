@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 #include <ego_planner/planner_manager.h>
 #include <ego_planner/ego_replan_fsm.h>
+#include <ego_planner/risk_display.h>
+#include <iap/srv/get_grid_map_prediction_input.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <iap/util/run_log_manager.hpp>
 #include <filesystem>
+#include <future>
 #include <fstream>
 #include <unistd.h>
 #include <zlib.h>
@@ -11,6 +14,7 @@
 #include <rcl/time.h>
 
 struct GridMapTestAccess {
+  static uint64_t riskVersion(const GridMap& map) { return map.risk_version_; }
   static void attachRegisteredSource(GridMap& map) {
     RegisteredLidarWindow::Geometry geometry;
     geometry.origin = map.mp_.map_origin_;
@@ -93,6 +97,12 @@ struct EGOPlannerManagerTestAccess {
   }
   static double lastSearchSeconds(const EGOPlannerManager& manager) {
     return manager.bspline_optimizer_->a_star_->lastResult().duration_s;
+  }
+  static void interceptOdom(EGOPlannerManager& manager, std::function<void()> update) {
+    manager.latest_odom_provider_ = [&manager, update=std::move(update), done=false]() mutable {
+      if (!done) { done=true; update(); }
+      return std::atomic_load(&manager.risk_odom_);
+    };
   }
   static void setCapture(EGOPlannerManager& manager) {
     manager.capture_failure_map_ = true;
@@ -765,4 +775,200 @@ TEST(EgoBaseline, CorridorCommitChecksObservationInflationRawFreshnessAndGeometr
   GridMapTestAccess::changeFrame(*map);
   EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,commit),GridMap::CorridorCommit::Invalid);
   EXPECT_EQ(writes,1u);
+}
+
+TEST(EgoBaseline, NativeBoundaryIndexExpressionIsPreservedInEpochAndCorridor) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{},10,Eigen::Vector3d(-2,0,1)); GridMapTestAccess::markObserved(*map);
+  for(double x=-2;x<2;x+=.4) GridMapTestAccess::clearObserved(*map,Eigen::Vector3d(x,0,1));
+  auto epoch=map->captureFrozenOccupancyEpoch(); ASSERT_TRUE(epoch);
+  GridMotionContext motion; motion.quality=1; motion.stamp_s=10; motion.error_proxy_m=.05;
+  auto context=map->preparePlanningQuery(10.1,motion,epoch);
+  for(int i=1;i<50;++i) {
+    const double x=epoch->lattice_origin.x()+i*epoch->resolution_m;
+    for(double value:{std::nextafter(x,-INFINITY),x,std::nextafter(x,INFINITY)}) {
+      const Eigen::Vector3d p(value,0,1);
+      auto exact=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,true);
+      auto frozen=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&context);
+      EXPECT_EQ(exact.voxel_index,frozen.voxel_index); EXPECT_EQ(exact.execution_reason,frozen.execution_reason);
+      auto corridor=map->captureFrozenCorridor({p},context.required_clearance_m); ASSERT_TRUE(corridor);
+      auto scope=map->preparePlanningQuery(10.1,motion,corridor);
+      auto latest=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&scope);
+      EXPECT_EQ(exact.voxel_index,latest.voxel_index); EXPECT_EQ(exact.execution_reason,latest.execution_reason);
+    }
+  }
+  EXPECT_FALSE(map->captureFrozenCorridor({Eigen::Vector3d(-2,0,1)},.3,std::make_shared<PlanningBudget>(0)));
+}
+
+TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  std::vector<Eigen::Vector3d> obstacles;
+  for (int i=0;i<80;++i) {
+    const double angle=i*.34;
+    obstacles.emplace_back(2.5*std::cos(angle),2.5*std::sin(angle),.4+.1*(i%20));
+  }
+  GridMapTestAccess::input(*map,obstacles,10,Eigen::Vector3d(0,0,1)); GridMapTestAccess::markObserved(*map);
+  ego_planner::PredictionInput input; input.occupancy=map->captureFrozenOccupancyEpoch(); ASSERT_TRUE(input.occupancy);
+  input.reference_time_s=10.1; input.params.source_mode=iap::PredictorSourceMode::LidarOnly;
+  input.params.lidar.enable_legacy_observability=false;
+  input.integrity.valid=input.integrity.has_pose=input.integrity.current.valid=true;
+  input.integrity.stamp=10.1; input.integrity.pose_stamp=input.integrity.current.stamp=10;
+  input.integrity.p_wb=Eigen::Vector3d(0,0,1); input.integrity.current.current_motion_quality=1;
+  input.integrity.current.current_motion_error_proxy_m=.05;
+  input.integrity.current.hpl=input.integrity.current.vpl=.3;
+  input.integrity.has_lambda_base=true; input.integrity.lambda_base_pos=Eigen::Matrix3d::Identity()*1000;
+  const auto previous_version=GridMapTestAccess::riskVersion(*map);
+  const auto payload=ego_planner::encodePredictionInput(input);
+  auto restored=ego_planner::decodePredictionInput(payload);
+  EXPECT_EQ(input.occupancy->cells->flags,restored.occupancy->cells->flags);
+  EXPECT_EQ(input.occupancy->geometry_id,restored.occupancy->geometry_id);
+  EXPECT_DOUBLE_EQ(input.occupancy->resolution_inv,restored.occupancy->resolution_inv);
+  auto calls=std::make_shared<std::atomic<uint64_t>>(0);
+  auto original=ego_planner::makeRiskPrediction(input,calls);
+  auto replay=ego_planner::makeRiskPrediction(restored);
+  ASSERT_TRUE(original.predict); ASSERT_TRUE(replay.predict);
+  size_t valid=0;
+  for(int i=0;i<20;++i) {
+    const Eigen::Vector3d p(-.4+.04*i,.1,1.1);
+    const auto a=original.predict(p), b=replay.predict(p);
+    EXPECT_EQ(a.status,b.status);
+    if(a.status==GridRiskStatus::VALID) {++valid; EXPECT_DOUBLE_EQ(a.hpl,b.hpl); EXPECT_DOUBLE_EQ(a.vpl,b.vpl);}
+  }
+  EXPECT_GT(valid,0u); EXPECT_EQ(calls->load(),20u); EXPECT_EQ(previous_version,GridMapTestAccess::riskVersion(*map));
+  auto later=input; later.reference_time_s=10.2; later.integrity.stamp=10.2;
+  EXPECT_EQ(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(later));
+  later.integrity.current.current_motion_error_proxy_m=.06;
+  EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(later));
+  EXPECT_THROW(ego_planner::decodePredictionInput({1,2,3}),std::runtime_error);
+  if (std::getenv("IAP_TEST_PREDICTION_BENCHMARK")) {
+    using Clock=std::chrono::steady_clock;
+    for(int round=-1;round<7;++round) {
+      auto started=Clock::now(); const auto encoded=ego_planner::encodePredictionInput(input);
+      auto exported=Clock::now(); const auto decoded=ego_planner::decodePredictionInput(encoded);
+      auto count=std::make_shared<std::atomic<uint64_t>>(0);
+      const auto model=ego_planner::makeRiskPrediction(decoded,count); auto prepared=Clock::now();
+      std::vector<double> points; size_t valid_count=0;
+      for(int i=0;i<100;++i) { auto begin=Clock::now();
+        const auto value=model.predict(Eigen::Vector3d(-.4+.008*i,.1,1.1));
+        valid_count+=value.status==GridRiskStatus::VALID;
+        points.push_back(std::chrono::duration<double>(Clock::now()-begin).count());
+      }
+      std::sort(points.begin(),points.end());
+      if(round>=0) std::cout << std::setprecision(12) << "PREDICTOR_BENCHMARK round="<<round
+          <<" export_s="<<std::chrono::duration<double>(exported-started).count()
+          <<" preparation_s="<<std::chrono::duration<double>(prepared-exported).count()
+          <<" point_median_s="<<(points[49]+points[50])/2<<" point_p95_s="<<points[94]
+          <<" actual_queries="<<count->load()<<" valid="<<valid_count<<" payload_bytes="<<encoded.size()<<std::endl;
+    }
+  }
+  if (const char* fixture=std::getenv("IAP_TEST_PREDICTION_PAYLOAD")) {
+    // The process test owns and cleans this temporary fixture directory.
+    const auto time=node->now().seconds();
+    auto epoch=std::make_shared<FrozenOccupancyEpoch>(*input.occupancy); epoch->cloud_stamp_s=time;
+    input.occupancy=epoch; input.reference_time_s=input.integrity.stamp=time;
+    input.integrity.pose_stamp=input.integrity.current.stamp=time;
+    const auto bytes=ego_planner::encodePredictionInput(input);
+    std::ofstream stream(fixture,std::ios::binary); stream.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
+    ASSERT_TRUE(stream.good());
+  }
+}
+
+TEST(EgoBaseline, DisplayInterpolationRejectsInteriorHolesAndNeverRenewsHistory) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{},10,Eigen::Vector3d(-2,0,1)); GridMapTestAccess::markObserved(*map);
+  const Eigen::Vector3d a(-2,-1,1),d(0,1,1);
+  auto epoch=map->captureFrozenOccupancyEpoch(); ASSERT_TRUE(epoch);
+  EXPECT_TRUE(ego_planner::observedSurfaceRectangle(*epoch,a,d));
+  GridMapTestAccess::clearObserved(*map,Eigen::Vector3d(-.7,.3,1));
+  epoch=map->captureFrozenOccupancyEpoch(); ASSERT_TRUE(epoch);
+  EXPECT_FALSE(ego_planner::observedSurfaceRectangle(*epoch,a,d));
+  ego_planner::RiskDisplayFrame frame; frame.reference_time_s=10; frame.valid_until_s=10.5; frame.expires_at_s=70; frame.generation=3;
+  EXPECT_TRUE(frame.current(10.2,3)); EXPECT_FALSE(frame.current(10.6,3)); EXPECT_FALSE(frame.current(10.2,4));
+  EXPECT_DOUBLE_EQ(frame.expires_at_s,70);
+  EXPECT_DOUBLE_EQ(ego_planner::visualizationBudget({.001},{.0001}),.02);
+  EXPECT_DOUBLE_EQ(ego_planner::visualizationBudget({.02},{.003}),.2);
+  EXPECT_NEAR(ego_planner::visualizationBudget({.01},{.001}),.11,1e-12);
+}
+
+TEST(EgoBaseline, ActualPublicationAllowsRemoteUpdatesAndRejectsRelevantRevocation) {
+  for (int change=0;change<4;++change) {
+    auto node=makeNode(); ego_planner::EGOPlannerManager manager;
+    manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+    manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
+    const Eigen::Vector3d start(-2,0,1),goal(-1,0,1),zero=Eigen::Vector3d::Zero();
+    const auto now=node->now().seconds();
+    GridMapTestAccess::input(*manager.grid_map_,{Eigen::Vector3d(4,4,1)},now,start);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,start);
+    ASSERT_TRUE(manager.beginPlanningView());
+    Eigen::MatrixXd old(3,6); for(int i=0;i<6;++i) old.col(i)=start;
+    manager.local_data_.position_traj_=ego_planner::UniformBspline(old,3,.2);
+    manager.local_data_.traj_id_=77;
+    ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
+    ego_planner::EGOPlannerManagerTestAccess::interceptOdom(manager,[&](){
+      if(change==0) GridMapTestAccess::changeEvidence(*manager.grid_map_,Eigen::Vector3d(4,3,1),true,true,true);
+      if(change==1) GridMapTestAccess::changeEvidence(*manager.grid_map_,start,false,false,false);
+      if(change==2) GridMapTestAccess::changeEvidence(*manager.grid_map_,start,true,true,true);
+      if(change==3) GridMapTestAccess::changeFrame(*manager.grid_map_);
+    });
+    const bool success=manager.reboundReplan(start,zero,zero,goal,zero,true,false);
+    EXPECT_EQ(success,change==0) << "change=" << change;
+    if(change==0) EXPECT_GT(manager.local_data_.traj_id_,77);
+    else { EXPECT_EQ(manager.local_data_.traj_id_,77); EXPECT_EQ(manager.local_data_.position_traj_.getControlPoint(),old); }
+    manager.endPlanningView();
+  }
+}
+
+TEST(EgoBaseline, ReadOnlyExportPreservesOneBasedObservationProvenanceAndExpiry) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{},10,Eigen::Vector3d(-2,0,1));
+  auto epoch=std::make_shared<FrozenOccupancyEpoch>(*map->captureFrozenOccupancyEpoch());
+  LocalEvidenceSnapshot::ReadOnlyData data;
+  data.geometry.origin=epoch->lattice_origin; data.geometry.dimensions=epoch->voxel_dimensions;
+  data.geometry.resolution_m=epoch->resolution_m; data.freshness_s=.5;
+  data.identity.occupancy_generation=epoch->generation;
+  data.sources.push_back({42,10,"lidar","beam-content"});
+  const size_t count=epoch->cells->flags.size();
+  data.packed_states.assign((count+3)/4,0x55); data.source_indices.assign(count,1);
+  epoch->local_evidence_snapshot=LocalEvidenceSnapshot::fromReadOnlyData(data); ASSERT_TRUE(epoch->local_evidence_snapshot);
+  ego_planner::PredictionInput input; input.occupancy=epoch;
+  const auto restored=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(input));
+  ASSERT_TRUE(restored.occupancy->local_evidence_snapshot);
+  for(const double time : {10.2,10.6}) {
+    const auto a=epoch->local_evidence_snapshot->queryVoxel(Eigen::Vector3d(-2,0,1),time);
+    const auto b=restored.occupancy->local_evidence_snapshot->queryVoxel(Eigen::Vector3d(-2,0,1),time);
+    EXPECT_EQ(a.state,b.state); EXPECT_EQ(a.reason,b.reason); EXPECT_EQ(a.source_frame_id,b.source_frame_id);
+    EXPECT_DOUBLE_EQ(a.observation_timestamp_s,b.observation_timestamp_s);
+  }
+  data.source_indices[0]=2; EXPECT_FALSE(LocalEvidenceSnapshot::fromReadOnlyData(data));
+}
+
+TEST(EgoBaseline, ActualReadOnlyServiceDoesNotChangePredictionVersion) {
+  auto node=makeNode(); ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const auto now=node->now().seconds(); const Eigen::Vector3d start(-2,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},now,start); GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,start);
+  ASSERT_TRUE(manager.beginPlanningView());
+  const auto version=GridMapTestAccess::riskVersion(*manager.grid_map_);
+  auto client=node->create_client<iap::srv::GetGridMapPredictionInput>("grid_map/prediction_input");
+  ASSERT_TRUE(client->wait_for_service(std::chrono::seconds(2)));
+  auto future=client->async_send_request(std::make_shared<iap::srv::GetGridMapPredictionInput::Request>());
+  rclcpp::executors::SingleThreadedExecutor executor; executor.add_node(node);
+  ASSERT_EQ(executor.spin_until_future_complete(future,std::chrono::seconds(2)),rclcpp::FutureReturnCode::SUCCESS);
+  const auto response=future.get(); ASSERT_TRUE(response->available) << response->reason;
+  const auto decoded=ego_planner::decodePredictionInput(response->payload);
+  EXPECT_EQ(response->generation,decoded.occupancy->generation);
+  EXPECT_EQ(response->frame_id,decoded.occupancy->frame_id);
+  EXPECT_EQ(version,GridMapTestAccess::riskVersion(*manager.grid_map_));
+}
+
+TEST(EgoBaseline, ConcurrentReadOnlyAndPlanningFreezeShareOneEpoch) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{},10,Eigen::Vector3d(-2,0,1)); GridMapTestAccess::markObserved(*map);
+  std::vector<std::future<std::shared_ptr<const FrozenOccupancyEpoch>>> futures;
+  std::promise<void> start; auto ready=start.get_future().share();
+  for(int i=0;i<8;++i) futures.push_back(std::async(std::launch::async,[&](){ready.wait();return map->captureFrozenOccupancyEpoch();}));
+  start.set_value(); const auto epoch=futures[0].get(); ASSERT_TRUE(epoch);
+  for(size_t i=1;i<futures.size();++i) EXPECT_EQ(futures[i].get(),epoch);
 }

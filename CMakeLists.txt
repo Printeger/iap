@@ -365,6 +365,7 @@ if(DEFINED ENV{ROS_VERSION})
       "msg/LidarBeamEvidence.msg"
       "msg/ActiveLidarWindowDelta.msg"
       "srv/GetActiveLidarWindow.srv"
+      "srv/GetGridMapPredictionInput.srv"
       LIBRARY_NAME ${PROJECT_NAME}
       DEPENDENCIES std_msgs sensor_msgs geometry_msgs
     )

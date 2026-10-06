@@ -67,7 +67,7 @@ namespace ego_planner
         planning_view_->generation == search->occupancy_generation) {
       first_rejection_detail = grid_map_->queryPlanningCell(
           search->first_rejection_position, 0, planning_view_->time_s,
-          planning_risk_policy_, planning_view_->motion, true);
+          planning_risk_policy_, planning_view_->motion, true, &planning_view_->physical_context);
     }
     const auto& capture_motion = assessment ? assessment->evaluated_motion :
         (search && planning_view_ ? planning_view_->motion : planning_motion_);
@@ -512,7 +512,7 @@ namespace ego_planner
     grid_map_->initMap(node);
     node_ = node;
     initRiskInputs(node);
-    initRiskVisualization(node);
+    initPredictionExport();
     capture_failure_map_ = node->declare_parameter(
         "planning/capture_failure_map", false);
     grid_map_->setFailureEvidenceCapture(capture_failure_map_);
@@ -942,11 +942,12 @@ namespace ego_planner
     if (!assessment.executable()) {
       auto detail = assessment.first_execution_cell;
       if (assessment.first_execution_position.allFinite() &&
-          !std::isfinite(detail.raw_center_clearance_m))
-        detail = grid_map_->queryPlanningCell(
-            assessment.first_execution_position, risk_version,
-            node_->now().seconds(), planning_risk_policy_,
-            currentMotionContext(), true);
+          !std::isfinite(detail.raw_center_clearance_m)) {
+        const auto context=grid_map_->preparePlanningQuery(assessment.evaluation_time_s,
+            assessment.evaluated_motion,assessment.physical_epoch);
+        detail = grid_map_->queryPlanningCell(assessment.first_execution_position,0,
+            assessment.evaluation_time_s,planning_risk_policy_,assessment.evaluated_motion,true,&context);
+      }
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                   "Candidate rejected before commit: %s at t=%.3f pos=(%.3f %.3f %.3f) required=%s nearest=%s nearest_raw=(%.3f %.3f %.3f) generation=%lu cloud=%.3f advisory=%u",
                   gridExecutionReasonName(assessment.execution_reason),
@@ -1023,20 +1024,26 @@ namespace ego_planner
     TrajectoryAssessment release_check;
     GridMap::CorridorCommit gate = GridMap::CorridorCommit::Invalid;
     for (int capture = 0; capture < 2; ++capture) {
-      if (planning_budget_->expired()) break;
+      if (planning_budget_->expired() || !grid_map_->geometryMatches(*planning_view_->physical)) break;
       release_check = assessTrajectory(pos, 0, node_->now().seconds());
       if (!release_check.executable() || !release_check.physical_epoch) break;
       gate = grid_map_->commitFrozenCorridor(*release_check.physical_epoch,
           node_->now().seconds(), release_check.evaluated_motion.max_environment_age_s,
           [&]() {
             const auto now = node_->now();
+            const auto& planned=*planning_view_->physical;
+            const auto& captured=*release_check.physical_epoch;
+            if (planned.frame_id!=captured.frame_id || planned.lattice_origin!=captured.lattice_origin ||
+                planned.voxel_dimensions!=captured.voxel_dimensions || planned.extent_m!=captured.extent_m || planned.resolution_m!=captured.resolution_m ||
+                !std::isfinite(captured.cloud_stamp_s) || now.seconds()<captured.cloud_stamp_s ||
+                now.seconds()-captured.cloud_stamp_s>release_check.evaluated_motion.max_environment_age_s) return false;
             const auto latest = currentMotionContext();
             if (planning_budget_->expired() || latest.quality != release_check.evaluated_motion_quality ||
                 !std::isfinite(latest.error_proxy_m) || latest.error_proxy_m >
                     release_check.evaluated_motion_error_proxy_m + 1e-9 ||
                 !std::isfinite(latest.stamp_s) || now.seconds() < latest.stamp_s ||
                 now.seconds()-latest.stamp_s > latest.max_motion_age_s) return false;
-            const auto odom = latest_odom_provider_ ? latest_odom_provider_() : risk_odom_;
+            const auto odom = latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
             if (!odom || odom->header.frame_id != release_check.physical_epoch->frame_id) return false;
             const auto& p = odom->pose.pose.position;
             const Eigen::Vector3d actual(p.x,p.y,p.z);
@@ -1044,7 +1051,7 @@ namespace ego_planner
             // Relevant physical evidence and freshness remain locked through
             // the only write to local_data_. Remote generations are harmless.
             updateTrajInfo(pos, now); return true;
-          });
+          }, planning_budget_);
       if (gate == GridMap::CorridorCommit::Committed) { committed = true; break; }
       if (gate != GridMap::CorridorCommit::Changed || capture != 0 ||
           !planning_budget_->tryRepair(PlanningBudget::Repair::PublicationRecheck)) break;
@@ -1056,6 +1063,12 @@ namespace ego_planner
           "Candidate withheld: corridor=%u physical=%s repairs=%u deadline=%d",
           static_cast<unsigned>(gate), gridExecutionReasonName(release_check.execution_reason),
           planning_budget_->used(), planning_budget_->expired());
+      if (release_check.first_execution_position.allFinite())
+        captureFailureMap("candidate", release_check.first_execution_position,local_target_pt,
+            release_check.first_execution_cell,nullptr,nullptr,&pos,&release_check);
+      if (std::isfinite(release_check.first_unobserved_time_s))
+        captureFailureMap("curve_unobserved",release_check.first_unobserved_position,local_target_pt,
+            release_check.first_unobserved_cell,nullptr,nullptr,&pos,&release_check);
       ++continous_failures_count_; return false;
     }
 

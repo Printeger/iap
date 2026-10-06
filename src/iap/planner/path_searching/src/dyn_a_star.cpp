@@ -28,6 +28,7 @@ const char* AStar::failureName(const Failure failure) {
 }
 
 GridSearchCell AStar::timedPlanningQuery(const Vector3d& position) {
+    if (deadlineExpired()) { GridSearchCell cell; cell.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return cell; }
     const auto started = performance_diagnostics_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     ++result_.query_calls;
     auto cell = planning_query_(position);
@@ -70,8 +71,9 @@ uint64_t AStar::latticeKey(const Vector3i& index) const {
 GridSearchCell AStar::querySample(const uint64_t key,
                                  const Vector3d& position, const size_t kind) {
     GridSearchCell cell;
-    if (deadlineExpired()) { cell.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return cell; }
-    if ((frozen_epoch_ ? !grid_map_->geometryMatches(*frozen_epoch_) : grid_map_->occupancyGeneration() != search_generation_)) {
+    // Frozen samples use immutable geometry. The expanded-node boundary checks
+    // live geometry/deadline; actual callbacks below also check the deadline.
+    if (!frozen_epoch_ && grid_map_->occupancyGeneration() != search_generation_) {
         cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
         return cell;
     }
@@ -101,10 +103,20 @@ GridSearchCell AStar::querySample(const uint64_t key,
 }
 
 GridSearchCell AStar::queryVoxelCenter(const Vector3d& position) {
-    if (!grid_map_->isInMap(position)) return {};
     Vector3i index;
-    grid_map_->posToIndex(position, index);
-    return querySample((uint64_t{1} << 63) | grid_map_->toAddress(index), position, 0);
+    int address;
+    if (frozen_epoch_) {
+        const auto relative=position-frozen_epoch_->lattice_origin;
+        if ((relative.array()<1e-4).any() ||
+            (relative.array()>frozen_epoch_->extent_m.array()-1e-4).any()) return {};
+        index=(relative*frozen_epoch_->resolution_inv).array().floor().cast<int>();
+        if ((index.array()<0).any() || (index.array()>=frozen_epoch_->voxel_dimensions.array()).any()) return {};
+        address=(index.x()*frozen_epoch_->voxel_dimensions.y()+index.y())*frozen_epoch_->voxel_dimensions.z()+index.z();
+    } else {
+        if (!grid_map_->isInMap(position)) return {};
+        grid_map_->posToIndex(position,index); address=grid_map_->toAddress(index);
+    }
+    return querySample((uint64_t{1} << 63) | address,position,0);
 }
 
 GridSearchCell AStar::queryLatticePoint(const Vector3i& index) {
@@ -117,6 +129,18 @@ void AStar::recordMapAtFinish() {
         ? live_generation_provider_() : grid_map_->occupancyGeneration();
     result_.map_changed = result_.live_generation_at_finish !=
         result_.occupancy_generation || map_changed_;
+    if (active_search_ && budget_) {
+      auto& totals=budget_->searches;
+      ++totals.calls; totals.seconds+=std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
+      totals.queries+=result_.query_calls; totals.expanded+=result_.expanded;
+      totals.pushes+=result_.queue_pushes; totals.pops+=result_.queue_pops;
+      for(size_t i=0;i<3;++i) {
+        totals.hits[i]+=result_.sample_hits[i]; totals.misses[i]+=result_.sample_misses[i];
+        totals.peak_cache_bytes[i]=std::max(totals.peak_cache_bytes[i],result_.cache_bytes[i]);
+      }
+    }
+    active_search_=false;
+
 }
 
 void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
@@ -124,9 +148,9 @@ void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
     // online update must not erase a frozen search's TIME_BUDGET result.
     result_.failure = deadlineExpired() ? Failure::TIME_BUDGET : failure;
     recordMapAtFinish();
-    result_.duration_s = (rclcpp::Clock().now() - started).seconds();
+    result_.duration_s = std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
     const auto now = std::chrono::steady_clock::now();
-    const auto reason_index = static_cast<size_t>(failure);
+    const auto reason_index = static_cast<size_t>(result_.failure);
     if (!reported_failures_[reason_index] || now - last_failure_log_ >= std::chrono::seconds(1)) {
       reported_failures_[reason_index] = true;
       last_failure_log_ = now;
@@ -160,7 +184,7 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
                                             const Vector3i& from_index,
                                             const Vector3i& to_index)
 {
-    if ((frozen_epoch_ ? !grid_map_->geometryMatches(*frozen_epoch_) : grid_map_->occupancyGeneration() != search_generation_)) {
+    if (!frozen_epoch_ && grid_map_->occupancyGeneration() != search_generation_) {
         map_changed_ = true;
         return std::nullopt;
     }
@@ -169,8 +193,8 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
     }
     // Traverse the same GridMap voxel lattice as the physical and PL layers.
     RayCaster ray;
-    const auto origin = grid_map_->getOrigin();
-    const double resolution = grid_map_->getResolution();
+    const auto origin = frozen_epoch_ ? frozen_epoch_->lattice_origin : grid_map_->getOrigin();
+    const double resolution = frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution();
     const auto begin = (from - origin) / resolution;
     const auto end = (to - origin) / resolution;
     const Vector3i first_voxel = begin.array().floor().cast<int>();
@@ -371,7 +395,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
                 const auto candidate_position = Index2Coord(candidate_index);
                 const int samples = std::max(1, static_cast<int>(std::ceil(
                     (candidate_position - end_pt).norm() /
-                    (grid_map_->getResolution() * 0.5))));
+                    ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * 0.5))));
                 bool connected = true;
                 for (int i = 0; i <= samples; ++i) {
                     const auto p = end_pt + (candidate_position - end_pt) *
@@ -398,7 +422,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
     const auto connector_ok = [this](const Vector3d& a, const Vector3d& b) {
         if (!planning_query_) return true;
         const int samples = std::max(1, static_cast<int>(std::ceil(
-            (a - b).norm() / (grid_map_->getResolution() * 0.5))));
+            (a - b).norm() / ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * 0.5))));
         for (int i = 0; i <= samples; ++i) {
             const auto point = a + (b - a) * (static_cast<double>(i) / samples);
             const auto cell = timedPlanningQuery(point);
@@ -432,6 +456,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         std::optional<Vector3d> center_override)
 {
     const auto steady_start = PlanningBudget::Clock::now();
+    search_started_=steady_start; active_search_=true;
     const double limit = max_duration_s >= 0.0 ? max_duration_s : (planning_query_ ? 1.0 : .2);
     search_deadline_ = steady_start + std::chrono::duration_cast<PlanningBudget::Clock::duration>(
         std::chrono::duration<double>(limit));
@@ -519,7 +544,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
             gridPath_ = retrievePath(current);
             result_.path_cost = current->gScore;
             recordMapAtFinish();
-            result_.duration_s = (rclcpp::Clock().now() - time_1).seconds();
+            result_.duration_s = std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
             RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"),
                 "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
                 result_.expanded, result_.query_calls, result_.cache_hits,

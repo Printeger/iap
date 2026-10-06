@@ -5,7 +5,7 @@
 #include <utility>
 
 LocalEvidenceSnapshot::LocalEvidenceSnapshot(
-    std::shared_ptr<const Storage> storage)
+    std::shared_ptr<const ReadOnlyData> storage)
     : storage_(std::move(storage)) {}
 
 const LocalEvidenceIdentity& LocalEvidenceSnapshot::identity() const {
@@ -202,4 +202,22 @@ LocalEvidenceCoverage LocalEvidenceSnapshot::coverage(
             static_cast<double>(out.voxel_count)
       : 1.0;
   return out;
+}
+
+std::shared_ptr<const LocalEvidenceSnapshot> LocalEvidenceSnapshot::fromReadOnlyData(ReadOnlyData data) {
+  if (!data.geometry.origin.allFinite() || !(data.geometry.resolution_m>0) ||
+      !std::isfinite(data.geometry.resolution_m) || (data.geometry.dimensions.array()<=0).any()) return {};
+  uint64_t count=1;
+  for (int axis=0; axis<3; ++axis) {
+    const auto size=static_cast<uint64_t>(data.geometry.dimensions[axis]);
+    if (size>50000000/count) return {};
+    count*=size;
+  }
+  if (count>50000000 || data.packed_states.size()!=(count+3)/4 ||
+      data.source_indices.size()!=count || data.sources.size()>65535 ||
+      !std::isfinite(data.freshness_s) || data.freshness_s<0) return {};
+  for (const auto index:data.source_indices)
+    if (index>data.sources.size()) return {};
+  return std::shared_ptr<const LocalEvidenceSnapshot>(new LocalEvidenceSnapshot(
+      std::make_shared<const ReadOnlyData>(std::move(data))));
 }

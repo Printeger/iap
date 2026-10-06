@@ -35,13 +35,15 @@ bool sourceStampSeconds(const builtin_interfaces::msg::Time &stamp,
 std::string geometryIdentity(const std::string &frame_id,
                              const Eigen::Vector3d &origin,
                              const Eigen::Vector3i &dimensions,
-                             const double resolution)
+                             const double resolution,
+                             const Eigen::Vector3d* extent = nullptr)
 {
   std::ostringstream canonical;
   canonical << std::setprecision(17) << frame_id << '|'
             << origin.x() << ',' << origin.y() << ',' << origin.z() << '|'
             << dimensions.x() << ',' << dimensions.y() << ','
             << dimensions.z() << '|' << resolution;
+  if (extent) canonical << '|' << extent->x() << ',' << extent->y() << ',' << extent->z();
   // Stable FNV-1a is sufficient for an identity token; the canonical fields
   // remain present alongside it and are always validated independently.
   std::uint64_t hash = 1469598103934665603ULL;
@@ -2970,9 +2972,13 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
 std::shared_ptr<const FrozenOccupancyEpoch>
 GridMap::captureFrozenOccupancyEpoch() const
 {
+  // Export and planning share one preparation per generation. Mapping only
+  // holds occupancy_epoch_mutex_ for the consistent copy, not index assembly.
+  std::lock_guard<std::mutex> freeze_lock(physical_freeze_mutex_);
   struct FrozenBuffers
   {
     Eigen::Vector3d map_origin = Eigen::Vector3d::Zero();
+    Eigen::Vector3d map_size = Eigen::Vector3d::Zero();
     Eigen::Vector3i map_voxel_num = Eigen::Vector3i::Zero();
     double resolution = std::numeric_limits<double>::quiet_NaN();
     double resolution_inv = std::numeric_limits<double>::quiet_NaN();
@@ -3022,7 +3028,8 @@ GridMap::captureFrozenOccupancyEpoch() const
         cached_physical_epoch_->frame_id == mp_.frame_id_ &&
         cached_physical_epoch_->lattice_origin == mp_.map_origin_ &&
         cached_physical_epoch_->voxel_dimensions == mp_.map_voxel_num_ &&
-        cached_physical_epoch_->resolution_m == mp_.resolution_)
+        cached_physical_epoch_->resolution_m == mp_.resolution_ &&
+        cached_physical_epoch_->extent_m == mp_.map_size_)
       return cached_physical_epoch_;
     const std::size_t nx = static_cast<std::size_t>(mp_.map_voxel_num_(0));
     const std::size_t ny = static_cast<std::size_t>(mp_.map_voxel_num_(1));
@@ -3037,6 +3044,7 @@ GridMap::captureFrozenOccupancyEpoch() const
         md_.observed_buffer_.size() != cell_count)
       return nullptr;
     buffers->map_origin = mp_.map_origin_;
+    buffers->map_size = mp_.map_size_;
     buffers->map_voxel_num = mp_.map_voxel_num_;
     buffers->resolution = mp_.resolution_;
     buffers->resolution_inv = mp_.resolution_inv_;
@@ -3182,14 +3190,16 @@ GridMap::captureFrozenOccupancyEpoch() const
       ? buffers->environment_hits : epoch->raw_occupied_voxel_centers;
   epoch->lattice_origin = frozen_buffers->map_origin;
   epoch->voxel_dimensions = frozen_buffers->map_voxel_num;
-  epoch->extent_m = frozen_buffers->map_voxel_num.cast<double>() *
-      frozen_buffers->resolution;
+  epoch->extent_m = frozen_buffers->map_size;
   epoch->resolution_m = frozen_buffers->resolution;
+  epoch->resolution_inv = frozen_buffers->resolution_inv;
   epoch->virtual_ceiling_height_m = buffers->virtual_ceiling_height;
   epoch->frame_id = frozen_buffers->frame_id;
   epoch->geometry_id = geometryIdentity(
       frozen_buffers->frame_id, frozen_buffers->map_origin,
-      frozen_buffers->map_voxel_num, frozen_buffers->resolution);
+      frozen_buffers->map_voxel_num, frozen_buffers->resolution,
+      frozen_buffers->map_size == frozen_buffers->map_voxel_num.cast<double>() * frozen_buffers->resolution
+          ? nullptr : &frozen_buffers->map_size);
   epoch->cloud_stamp_s = frozen_buffers->cloud_stamp_s;
   epoch->generation = frozen_buffers->generation;
   epoch->active_window_generation =

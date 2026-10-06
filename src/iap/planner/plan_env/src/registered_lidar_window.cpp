@@ -534,7 +534,7 @@ RegisteredLidarWindow::captureLocalEvidenceSnapshot(
     return nullptr;
   }
 
-  auto storage = std::make_shared<LocalEvidenceSnapshot::Storage>();
+  auto storage = std::make_shared<LocalEvidenceSnapshot::ReadOnlyData>();
   storage->identity.occupancy_generation = occupancy_generation;
   storage->identity.active_window_generation = active_generation_;
   storage->identity.coordinate_contract = geometry_.frame_contract_id;

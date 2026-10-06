@@ -76,7 +76,15 @@ def planner_parameters(scenario, capture_failure_map=False):
         "planning/capture_failure_map": capture_failure_map,
         "risk/gnss_max_age_s": 2.0,
         "risk/source": {"lidar_only": "lidar", "gnss_only": "gnss"}.get(profile, "fusion"),
-        "risk_viz/enabled": True,
+    }
+    for i, axis in enumerate("xyz"):
+        params[f"grid_map/map_size_{axis}"] = size[i]
+        params[f"fsm/waypoint0_{axis}"] = goal[i]
+    return params
+
+
+def visualizer_parameters():
+    return {
         "risk_viz/metric": "hpl",
         "risk_viz/z_mode": "follow",
         "risk_viz/hpl_min_m": 0.25,
@@ -86,10 +94,6 @@ def planner_parameters(scenario, capture_failure_map=False):
         "risk_viz/surface_lifetime_s": 60.0,
         "risk_viz/surface_snapshot_step_m": 4.0,
     }
-    for i, axis in enumerate("xyz"):
-        params[f"grid_map/map_size_{axis}"] = size[i]
-        params[f"fsm/waypoint0_{axis}"] = goal[i]
-    return params
 
 
 def _setup(context):
@@ -132,6 +136,11 @@ def _setup(context):
              remappings=[("planning/bspline", "/drone_0_planning/bspline"),
                          ("/position_cmd", "/drone_0_planning/pos_cmd")]),
     ]
+    if context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true":
+        actions.append(Node(package="ego_planner", executable="grid_map_visualizer",
+                            name="grid_map_visualizer", output="screen",
+                            parameters=[visualizer_parameters()],
+                            remappings=[("odom_world", "/drone_0_visual_slam/odom")]))
     if context.launch_configurations.get("start_rviz", "true").lower() == "true":
         actions.append(Node(package="rviz2", executable="rviz2", name="iap_rviz",
                             arguments=["-d", str(share / "config/sim_ego/grid_map_stage1.rviz")]))

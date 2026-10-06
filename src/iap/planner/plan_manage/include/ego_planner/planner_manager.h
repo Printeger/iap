@@ -1,6 +1,10 @@
 #ifndef _PLANNER_MANAGER_H_
 #define _PLANNER_MANAGER_H_
 
+#include <fstream>
+#include <ego_planner/prediction_input.h>
+#include <iap/srv/get_grid_map_prediction_input.hpp>
+
 #include <stdlib.h>
 #include <deque>
 #include <limits>
@@ -41,6 +45,7 @@ namespace ego_planner
 
     struct PlanningTimings {
       double freeze_s = 0.0;
+      double prediction_preparation_s = 0.0;
       double searcher_initialization_s = 0.0; // Startup allocation, not per round.
       double backend_s = 0.0;
       double final_checks_s = 0.0;
@@ -55,7 +60,7 @@ namespace ego_planner
     // Freeze one spatial prediction round. The returned version is required
     // by GridMap::queryRisk; binding failure is represented by query status.
     uint64_t bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
-                                double reference_time_s);
+                                double reference_time_s, std::shared_ptr<const FrozenOccupancyEpoch> occupancy = {});
     bool EmergencyStop(Eigen::Vector3d stop_pos);
     bool planCheckedBrake(const Eigen::Vector3d& position,
                           const Eigen::Vector3d& velocity,
@@ -152,9 +157,6 @@ namespace ego_planner
   private:
     // Input callbacks and planning run on the original serial executor.
     void initRiskInputs(const rclcpp::Node::SharedPtr& node);
-    void initRiskVisualization(const rclcpp::Node::SharedPtr& node);
-    void publishRiskSlice();
-    void updateGlioPath(const nav_msgs::msg::Odometry& odom);
     uint64_t beginRiskQuery();
     void rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg);
     rclcpp::Node::SharedPtr node_;
@@ -216,29 +218,14 @@ namespace ego_planner
     rclcpp::Subscription<gnss_comm::msg::GnssGloEphemMsg>::SharedPtr glo_ephem_sub_;
     rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr receiver_lla_sub_;
     rclcpp::Subscription<gnss_comm::msg::GnssIonosphereParameter>::SharedPtr iono_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr risk_slice_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr risk_status_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr risk_surface_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr risk_legend_pub_;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr glio_path_pub_;
-    nav_msgs::msg::Path glio_path_;
-    size_t glio_path_publish_count_ = 0;
-    Eigen::Vector3d risk_surface_anchor_ = Eigen::Vector3d::Constant(
-        std::numeric_limits<double>::quiet_NaN());
-    int risk_surface_id_ = 0;
-    bool risk_surface_clear_pending_ = false;
-    rclcpp::TimerBase::SharedPtr risk_viz_timer_;
-    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr risk_viz_param_callback_;
-    std::string risk_viz_metric_ = "hpl";
-    std::string risk_viz_z_mode_ = "follow";
-    double risk_viz_fixed_z_m_ = 1.5;
-    double risk_viz_hpl_min_m_ = 0.25;
-    double risk_viz_hpl_max_m_ = 0.65;
-    double risk_viz_vpl_min_m_ = 0.20;
-    double risk_viz_vpl_max_m_ = 0.55;
-    double risk_viz_surface_lifetime_s_ = 60.0;
-    double risk_viz_surface_snapshot_step_m_ = 4.0;
-    bool risk_viz_enabled_ = false;
+    std::ofstream planning_metrics_, export_metrics_;
+    uint64_t planning_calls_at_start_=0;
+    mutable std::mutex epochs_mutex_;
+    rclcpp::CallbackGroup::SharedPtr export_callback_group_;
+    rclcpp::Service<iap::srv::GetGridMapPredictionInput>::SharedPtr prediction_export_service_;
+    std::shared_ptr<std::atomic<uint64_t>> predictor_calls_ = std::make_shared<std::atomic<uint64_t>>(0);
+    iap::IntegritySnapshot capturePredictionSnapshot(double now) const;
+    void initPredictionExport();
 
     /* main planning algorithms & modules */
     PlanningVisualization::Ptr visualization_;

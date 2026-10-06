@@ -1,0 +1,9 @@
+# Read-only unique-GridMap export; no PL query or predictor cache mutation.
+---
+bool available
+string reason
+string frame_id
+string geometry_id
+uint64 generation
+# iap_prediction_input_v1: zlib-compressed field-wise binary archive.
+uint8[] payload

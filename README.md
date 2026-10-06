@@ -4,7 +4,7 @@ IAP 是基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图与完整�
 
 系统采用因子图估计和优化规划。目标闭环将输出通过检查的可执行轨迹，或明确的失败原因；当前阶段能力见下文。
 
-本 README 是当前编译、运行、日志和分析的主要参考。规划器已进入 **EGO 重建阶段 1**：同一 GridMap 的空间 PL 缓存已接入，主动风险搜索和完整性执行检查尚未实现；`iap_flight` 暂不可用。流程与开发顺序见 [EGO 规划流程](docs/spec/ego_based_planning_flow.md)。
+本 README 是当前编译、运行、日志和分析的主要参考。规划器已接入同一 GridMap 的 advisory 绕行、统一有限恢复、完整实际曲线检查及最新走廊发布闸门；PL 补算显示已迁到独立进程，当前修订尚未取得四分叉闭环证据；`iap_flight` 暂不可用。流程与开发顺序见 [EGO 规划流程](docs/spec/ego_based_planning_flow.md)。
 
 日常运行使用四个正式 launch：`glio.launch.py`、`glio_integrity.launch.py`、`iap_sim.launch.py`、`iap_flight.launch.py`。旧 Demo1–11 和阶段实验入口保留在 `launch/bp/`，用途见[历史入口说明](launch/bp/README.md)。
 
@@ -28,7 +28,7 @@ IAP 是基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图与完整�
 | GLIO | GNSS 伪距/多普勒、IMU 与 LiDAR 的滑窗/因子图融合估计 | 位姿、地图及估计诊断 |
 | Current Integrity Monitor | 基于 GNSS/LiDAR 证据监测当前位姿完整性 | 当前 PL、AL、IM、来源与有效性状态 |
 | Advisory Integrity Evaluator | 预测未来位置的 GNSS/LiDAR 完整性与风险 | 同一 GridMap 中的空间 HPL/VPL、查询状态与版本 |
-| Safety-aware planner | 当前按原版 EGO 生成物理避障轨迹；完整性搜索与检查按阶段开发 | EGO B-spline、位置指令及 PL 查询状态 |
+| Safety-aware planner | 原 EGO 后端、物理与 advisory 引导、实际曲线及发布检查 | EGO B-spline、位置指令及 PL 查询状态 |
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ flowchart LR
     GLIO --> Map[局部地图与观测证据]
     Monitor --> Advisory[未来完整性预测]
     Map --> Advisory
-    Goal[任务目标] --> Planner[EGO 物理规划：阶段 1]
+    Goal[任务目标] --> Planner[EGO 规划与实际曲线检查]
     GLIO --> Planner
     Monitor --> Planner
     Map --> Planner
@@ -57,7 +57,7 @@ flowchart LR
 | HAL / VAL | 水平 / 垂直告警限，单位 m |
 | IM（Integrity Margin） | 当前监测中的 `min(HAL - HPL, VAL - VPL)` |
 
-正裕度需要结合报告有效性、来源和新鲜度解释。目标设计中预测风险引导路径，最终检查实际轨迹；阶段 1 的 PL 查询尚不影响路线或执行授权。完整消息定义见 [IntegrityReport.msg](msg/IntegrityReport.msg)。
+正裕度需要结合报告有效性、来源和新鲜度解释。当前有效预测用于路径偏好；物理环境、当前运动质量与整条实际轨迹检查共同决定执行，缺失 advisory 不单独禁入。完整消息定义见 [IntegrityReport.msg](msg/IntegrityReport.msg)。
 
 ## 2. 环境与依赖
 
@@ -291,6 +291,7 @@ ros2 launch iap iap_sim.launch.py \
 |---|---|---|
 | `scenario` | `icra_dense_forest_four_fork_v2` | 统一的四分叉测试场景；仍可显式选择目录中的其他场景 |
 | `start_rviz` | `true` | 启动 RViz |
+| `start_grid_map_visualizer` | `true` | 独立 PL 显示进程；设 false 做显示关闭对照，规划规则不变 |
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
 | `capture_failure_map` | `false` | 四分叉故障诊断时按端点、穷尽、超时、曲线拒绝、持续无可执行局部目标、跟踪误差、剩余轨迹失败、最终停止、实际曲线首个未观测点和地图变化各保存首份 GridMap 快照，最多十份 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
@@ -331,11 +332,13 @@ python3 src/iap/scripts/dev_planner/analyze_curve_observation.py \
 运行时切换色彩依据：
 
 ```bash
-ros2 param set /drone_0_ego_planner_node risk_viz/metric vpl
-ros2 param set /drone_0_ego_planner_node risk_viz/metric hpl
+ros2 param set /grid_map_visualizer risk_viz/metric vpl
+ros2 param set /grid_map_visualizer risk_viz/metric hpl
 ```
 
-点云分别发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；RViz 还显示 `/iap/local_map/current_hits_map` 中 GLIO 注册到 `map` 坐标的最新 LiDAR 帧，显示留存仅 0.2 秒，停止输入后自动消失。PL 插值面统一发布到 `/grid_map/risk_surface`：RViz 的 MarkerArray 没有 PointCloud2 的 Decay Time 属性，规划器通过 marker 的 60 秒 lifetime 留存经过区域，每移动约 4 m 固定一幅面，相近位置的更新覆盖同一个 marker，避免重复叠加。带米数刻度的图例在 `/grid_map/risk_legend`，状态文字在 `/grid_map/risk_status`，实际曲线在 `/planning/trajectory_curve`，白色连续轨迹在 `/grid_map/glio_path`。HPL 默认色标 0.25–0.65 m、VPL 0.20–0.55 m，采用蓝、青、黄、红连续色带；这些只是显示范围，可在 planner 启动参数调整。小点是实际预测，面内颜色仅是显示插值，不会写回 GridMap 或用于规划。单点预测无效显示紫色，预测上下文过期、坐标不匹配或 HPL/VPL 切换会清除留存面。`risk_viz/z_mode:=fixed` 配合 `risk_viz/fixed_z_m` 可在规划器参数配置中固定高度。仿真的物理占据和膨胀点云以 `grid_map/visualization_period_s=1.0` 发布供 RViz 留存，地图更新和规划查询仍使用原频率。
+点云仍发布到 `/grid_map/occupancy`、`/grid_map/occupancy_inflate`、`/grid_map/risk_slice`；原障碍显示只读 GridMap。独立 `grid_map_visualizer` 每秒从 `grid_map/prediction_input` 获取完整只读物理和对齐预测输入，复用相同 Predictor，单线程、至多一个任务加一份最新待处理输入；不改 planner PL 缓存。自有预算为准备 p95 加 100 次单点 p95，限制在 20–200 ms，最多 100 点；不可中断调用超额单独记录。首版没有 CPU 限额或绑核，机器资源仍共享。
+
+`/grid_map/risk_surface` 保留最多 60 秒历史；参考时间、年龄和 historical/current 在状态/年龄文字中区分。普通地图代数变化或失效不清历史，HPL/VPL 切换只重着色、不补算、不续期。插值仅覆盖同输入有效四角及真实已观测、无物理障碍的内部区域。图例、状态、GLIO 历史仍为 `/grid_map/risk_legend`、`/grid_map/risk_status`、`/grid_map/glio_path`；实际曲线为 `/planning/trajectory_curve`。所有 `risk_viz/*` 参数仅归新进程；固定高度及色标在 `visualizer_parameters()` 配置，planner 不保留参数兼容层。显式清除使用 `ros2 service call /grid_map/clear_risk_history std_srvs/srv/Trigger '{}'`；几何变化、时间回退和显式清除同时清空点云、路径及不适用面。物理发布周期仍为 1 秒。
 
 `risk_status` 同时显示 Current Integrity Monitor 的状态与 HPL/VPL。Advisory 空间 PL 只是冻结时刻的预测：当前监测报告 `UNSAFE` 时，即使切片有有效颜色，也不能据此认定当前定位或轨迹安全。状态中的 `cost` 是整轮耗时，`bind` 是冻结输入和预测器准备耗时；逐点采样另受 20 ms 预算限制。
 
@@ -363,7 +366,7 @@ ros2 launch iap iap_sim.launch.py \
 
 全部名称和参数见 [config/scenarios/catalog.json](config/scenarios/catalog.json)。其中论文、开发和 fixture 场景有各自用途；场景存在不代表已获得正式实验结论。
 
-表中任务模式保留为场景元数据；阶段 1 不据此授权完整性运动。只有物理避障链路已经恢复，空旷环境中的主动风险绕行将在阶段 2 开发。
+表中任务模式仍为场景元数据；有效 advisory 可独立触发绕行，执行授权依据最新物理证据、当前运动质量和完整实际曲线。
 
 ### 5.4 真实飞行
 
@@ -724,7 +727,7 @@ python3 src/iap/tools/ana_log.py \
 
 ### 如何判断系统已运行正常？
 
-按入口检查输入、估计初始化、当前完整性、注册地图和 EGO 轨迹/命令输出。阶段 1 的 PL 状态可从 GridMap 查询；轨迹尚未经过目标设计中的完整性检查。顶层 launch 返回 0 或 RViz 有画面不能单独证明闭环成功。
+按入口检查输入、估计初始化、当前完整性、注册地图和 EGO 轨迹/命令输出。检查当前运动质量、物理证据新鲜度、统一预算及完整曲线/走廊拒绝原因。顶层 launch 返回 0 或 RViz 有画面不能单独证明闭环成功。
 
 ```bash
 ros2 node list
@@ -765,7 +768,7 @@ ros2 pkg prefix ego_planner
 
 ### 规划器未生成轨迹
 
-检查 FSM 是否收到有效里程计与目标、GridMap 是否收到注册点云，以及 EGO 优化是否失败。阶段 1 的 PL 无效不会伪装成零风险，但也尚不触发后续阶段的完整性执行检查。
+检查 FSM 是否收到有效里程计与目标、GridMap 是否收到注册点云，以及 EGO 优化是否失败。PL 缺失保持有限 advisory 代价；真实 unknown、过期环境或运动质量不可用仍阻止执行。
 
 ## 10. 目录与专题文档
 

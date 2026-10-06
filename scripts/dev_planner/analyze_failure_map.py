@@ -44,7 +44,7 @@ def _inconclusive(directory, reason):
             "classification": reason, "snapshot": str(directory)}
 
 
-def inspect(directory, budget_s=120.0, backend=None, benchmark_repeats=None, benchmark_diagnostics=True, differential=False):
+def inspect(directory, budget_s=120.0, backend=None, benchmark_repeats=None, benchmark_diagnostics=True, differential=False, full_epoch=False):
     directory, meta, _ = load_snapshot(directory)
     if meta.get("schema_version") not in ("iap_gridmap_failure_v2", "iap_gridmap_failure_v3"):
         raise ValueError("same-rule replay requires a v2 failure snapshot")
@@ -94,6 +94,8 @@ def inspect(directory, budget_s=120.0, backend=None, benchmark_repeats=None, ben
     command = [str(binary), str(directory / meta["cell_flags_file"])]
     if benchmark_repeats is not None:
         command.extend((str(benchmark_repeats), str(int(benchmark_diagnostics)), str(int(differential))))
+        if full_epoch:
+            command.append("1")
     try:
         completed = subprocess.run(
             command,

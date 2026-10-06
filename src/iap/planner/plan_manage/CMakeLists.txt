@@ -26,8 +26,11 @@ find_package(cv_bridge REQUIRED)
 find_package(iap REQUIRED)
 find_package(gnss_comm REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_library(IAP_MSGS_TYPESUPPORT_CPP NAMES iap__rosidl_typesupport_cpp REQUIRED)
 
+find_package(Boost REQUIRED COMPONENTS serialization)
+find_package(ZLIB REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -52,17 +55,20 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
 )
 
+add_library(prediction_input src/prediction_input.cpp src/prediction_input_codec.cpp)
+ament_target_dependencies(prediction_input plan_env rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs iap cv_bridge pcl_conversions)
+target_link_libraries(prediction_input iap::iap Boost::serialization ZLIB::ZLIB)
+add_executable(grid_map_visualizer src/grid_map_visualizer.cpp)
+ament_target_dependencies(grid_map_visualizer std_srvs plan_env rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs iap cv_bridge pcl_conversions)
+target_link_libraries(grid_map_visualizer prediction_input iap::iap ${IAP_MSGS_TYPESUPPORT_CPP})
+
 add_executable(ego_planner_node
   src/ego_planner_node.cpp
   src/ego_replan_fsm.cpp
   src/planner_manager.cpp
   src/planner_risk.cpp
-  src/planner_risk_viz.cpp
 )
 
-# target_link_libraries(ego_planner_node
-#   traj_utils_lib
-# )
 
 ament_target_dependencies(ego_planner_node
                           rclcpp nav_msgs visualization_msgs
@@ -74,6 +80,7 @@ ament_target_dependencies(ego_planner_node
 find_library(TRAJ_UTILS_LIB traj_utils_lib PATHS ${traj_utils_LIBRARY_DIRS})
 
 target_link_libraries(ego_planner_node
+    prediction_input
     ${TRAJ_UTILS_LIB}
     iap::iap
     ${IAP_MSGS_TYPESUPPORT_CPP}
@@ -98,18 +105,20 @@ if(BUILD_TESTING)
   find_package(ZLIB REQUIRED)
   add_test(NAME test_ego_pipeline COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_pipeline.py
-    --planner $<TARGET_FILE:ego_planner_node> --server $<TARGET_FILE:traj_server>)
+    --planner $<TARGET_FILE:ego_planner_node> --server $<TARGET_FILE:traj_server>
+    --visualizer $<TARGET_FILE:grid_map_visualizer>
+    --baseline $<TARGET_FILE:test_ego_baseline>)
   set_tests_properties(test_ego_pipeline PROPERTIES TIMEOUT 40)
   add_test(NAME test_failure_map_tools COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/test_failure_map_tools.py)
   set_tests_properties(test_failure_map_tools PROPERTIES ENVIRONMENT
     "IAP_FAILURE_MAP_REPLAY_BIN=$<TARGET_FILE:failure_map_replay>")
   ament_add_gtest(test_ego_baseline test/test_ego_baseline.cpp
-    src/planner_manager.cpp src/planner_risk.cpp src/planner_risk_viz.cpp src/ego_replan_fsm.cpp)
+    src/planner_manager.cpp src/planner_risk.cpp src/ego_replan_fsm.cpp)
   ament_target_dependencies(test_ego_baseline rclcpp nav_msgs geometry_msgs
     visualization_msgs quadrotor_msgs plan_env path_searching bspline_opt
     traj_utils cv_bridge pcl_conversions iap gnss_comm sensor_msgs)
-  target_link_libraries(test_ego_baseline iap::iap ${TRAJ_UTILS_LIB} ${IAP_MSGS_TYPESUPPORT_CPP})
+  target_link_libraries(test_ego_baseline prediction_input iap::iap ${TRAJ_UTILS_LIB} ${IAP_MSGS_TYPESUPPORT_CPP})
   target_link_libraries(test_ego_baseline ZLIB::ZLIB)
   target_compile_definitions(test_ego_baseline PRIVATE
     IAP_CURVE_OBSERVATION_ANALYZER="${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/analyze_curve_observation.py"
@@ -118,7 +127,7 @@ endif()
 
 # Install targets
 install(
-  TARGETS ego_planner_node traj_server failure_map_replay
+  TARGETS ego_planner_node grid_map_visualizer traj_server failure_map_replay
   DESTINATION lib/${PROJECT_NAME}
 )
 

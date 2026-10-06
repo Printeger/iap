@@ -16,6 +16,8 @@ import yaml
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("--planner", required=True)
 PARSER.add_argument("--server", required=True)
+PARSER.add_argument("--visualizer", required=True)
+PARSER.add_argument("--baseline", required=True)
 ARGS, EXTRA = PARSER.parse_known_args()
 os.environ["ROS_DOMAIN_ID"] = str(100 + os.getpid() % 100)
 import rclpy
@@ -24,8 +26,10 @@ from nav_msgs.msg import Odometry, Path as NavPath
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
 from iap.msg import IntegrityReport
+from iap.srv import GetGridMapPredictionInput
 from visualization_msgs.msg import Marker, MarkerArray
 from rcl_interfaces.srv import SetParameters
+from std_srvs.srv import Trigger
 from rclpy.parameter import Parameter
 from quadrotor_msgs.msg import PositionCommand
 from traj_utils.msg import Bspline
@@ -58,6 +62,61 @@ def evaluate(knots, points, degree, t, derivative=0):
 
 
 class EgoPipelineTest(unittest.TestCase):
+    def test_valid_history_reuses_predictions_and_clears_all_topics(self):
+        with tempfile.TemporaryDirectory(prefix="ego_display_") as directory:
+            root=Path(directory); payload=root/"input.bin"
+            env={**os.environ,"ROS_LOG_DIR":str(root/"ros"),"IAP_TEST_PREDICTION_PAYLOAD":str(payload)}
+            # Produce wire input with the real shared codec and Predictor fixture.
+            subprocess.run([ARGS.baseline,"--gtest_filter=EgoBaseline.ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache"],
+                           env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            wire=payload.read_bytes()
+            rclpy.init(args=[]); node=rclpy.create_node("readonly_display_fixture")
+            clouds, surfaces, statuses, paths=[],[],[],[]; exports=[]
+            def export(request,response):
+                exports.append(time.monotonic())
+                response.available=True; response.frame_id="map"; response.geometry_id="fixture"; response.generation=1
+                response.payload=wire; return response
+            service=node.create_service(GetGridMapPredictionInput,"/grid_map/prediction_input",export)
+            subscriptions=[
+                node.create_subscription(PointCloud2,"/grid_map/risk_slice",clouds.append,10),
+                node.create_subscription(MarkerArray,"/grid_map/risk_surface",surfaces.append,10),
+                node.create_subscription(Marker,"/grid_map/risk_status",statuses.append,10),
+                node.create_subscription(NavPath,"/grid_map/glio_path",paths.append,10)]
+            log=open(root/"visualizer.log","w+")
+            process=subprocess.Popen([ARGS.visualizer],env=env,stdout=log,stderr=subprocess.STDOUT)
+            try:
+                end=time.monotonic()+5
+                while time.monotonic()<end and not (any(c.width for c in clouds) and any(m.points for a in surfaces for m in a.markers if m.ns=="risk_surface") and any("ref=" in m.text for m in statuses)): rclpy.spin_once(node,timeout_sec=.02)
+                self.assertTrue(any(c.width for c in clouds),"ongoing input starved current display task")
+                self.assertTrue(any(m.points for a in surfaces for m in a.markers if m.ns=="risk_surface"))
+                references={m.text.split("ref=")[-1].split(" age=")[0] for m in statuses if "ref=" in m.text}
+                client=node.create_client(SetParameters,"/grid_map_visualizer/set_parameters")
+                self.assertTrue(client.wait_for_service(timeout_sec=2))
+                future=client.call_async(SetParameters.Request(parameters=[Parameter("risk_viz/metric",value="vpl").to_parameter_msg()]))
+                end=time.monotonic()+2.2
+                while time.monotonic()<end: rclpy.spin_once(node,timeout_sec=.02)
+                self.assertTrue(future.result().results[0].successful)
+                # Identical input is queried once; metric refresh repaints exactly
+                # one cloud without creating a new prediction reference.
+                self.assertEqual(len([c for c in clouds if c.width]),2)
+                self.assertEqual(len({seconds(c.header.stamp) for c in clouds if c.width}),1)
+                self.assertGreaterEqual(len(exports),2)
+                self.assertTrue(any(" vpl historical " in m.text for m in statuses))
+                self.assertEqual(references,{m.text.split("ref=")[-1].split(" age=")[0] for m in statuses if "ref=" in m.text})
+                clear=node.create_client(Trigger,"/grid_map/clear_risk_history")
+                self.assertTrue(clear.wait_for_service(timeout_sec=2))
+                future=clear.call_async(Trigger.Request()); end=time.monotonic()+1
+                while time.monotonic()<end and not (future.done() and paths and not paths[-1].poses and clouds and not clouds[-1].width): rclpy.spin_once(node,timeout_sec=.02)
+                self.assertTrue(future.result().success)
+                self.assertTrue(any(m.action==Marker.DELETEALL for a in surfaces for m in a.markers))
+                self.assertEqual(clouds[-1].width,0); self.assertFalse(paths[-1].poses)
+            except Exception:
+                log.flush(); log.seek(0); print(log.read()); raise
+            finally:
+                process.send_signal(signal.SIGINT); process.wait(timeout=5); log.close()
+                node.destroy_node(); rclpy.shutdown()
+                self.assertEqual(process.returncode,0)
+
     def test_goal_publishes_curve_and_matching_commands(self):
         repo = Path(__file__).resolve().parents[1]
         spec = importlib.util.spec_from_file_location("ego_launch", repo / "launch/_includes/full_stack_simulation.launch.py")
@@ -98,10 +157,11 @@ class EgoPipelineTest(unittest.TestCase):
                 node.create_subscription(MarkerArray, "/grid_map/risk_legend", risk_legends.append, 10),
                 node.create_subscription(NavPath, "/grid_map/glio_path", glio_paths.append, 10),
             ]
-            parameter_client = node.create_client(SetParameters, "/ego_planner_node/set_parameters")
+            parameter_client = node.create_client(SetParameters, "/grid_map_visualizer/set_parameters")
             try:
                 for label, command in [
                     ("planner", [ARGS.planner,"--ros-args","--params-file",str(config)]),
+                    ("visualizer", [ARGS.visualizer,"--ros-args","-p","risk_viz/metric:=hpl"]),
                     ("server", [ARGS.server,"--ros-args","-p","frame_id:=map","-p","traj_server/time_forward:=1.0"]),
                 ]:
                     log = open(root / f"{label}.log", "w+")
@@ -170,8 +230,8 @@ class EgoPipelineTest(unittest.TestCase):
                     for i in range(cloud.width * cloud.height)),
                     "missing spatial advisory input must not be shown as valid PL")
                 self.assertTrue(risk_surfaces)
-                self.assertTrue(all(m.markers[0].action == Marker.DELETEALL for m in risk_surfaces),
-                                "invalid PL must clear all retained heatmap surfaces")
+                self.assertFalse(any(marker.action == Marker.DELETEALL for message in risk_surfaces for marker in message.markers),
+                                 "ordinary missing PL must preserve historical surfaces")
                 self.assertTrue(risk_legends)
                 self.assertTrue(glio_paths)
                 self.assertEqual(glio_paths[-1].header.frame_id, "map")
@@ -195,6 +255,24 @@ class EgoPipelineTest(unittest.TestCase):
                         np.testing.assert_allclose(actual,evaluate(curve.knots,points,curve.order,t,order),atol=2e-5,rtol=1e-5)
                     checked+=1
                 self.assertGreaterEqual(checked,10)
+                # Clearing invalidates every retained display transport, and
+                # loss of the independent display process leaves commands live.
+                clear_client=node.create_client(Trigger, "/grid_map/clear_risk_history")
+                self.assertTrue(clear_client.wait_for_service(timeout_sec=2))
+                clear_future=clear_client.call_async(Trigger.Request())
+                stop=time.monotonic()+2
+                while time.monotonic()<stop and not clear_future.done():
+                    rclpy.spin_once(node,timeout_sec=.02)
+                self.assertTrue(clear_future.result().success)
+                processes[1].send_signal(signal.SIGINT)
+                processes[1].wait(timeout=5)
+                count=len(commands)
+                stop=time.monotonic()+.3
+                while time.monotonic()<stop:
+                    rclpy.spin_once(node,timeout_sec=.02)
+                self.assertGreater(len(commands),count+5)
+                self.assertIsNone(processes[0].poll())
+
             except Exception:
                 for log in logs:
                     log.flush(); log.seek(0); print(log.read()[-6000:])

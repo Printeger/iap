@@ -1,3 +1,4 @@
+#include <plan_env/planning_budget.h>
 #ifndef _GRID_MAP_H
 #define _GRID_MAP_H
 
@@ -374,6 +375,8 @@ struct FrozenOccupancyCells {
 struct FrozenOccupancyEpoch
 {
   std::shared_ptr<const FrozenOccupancyCells> cells;
+  // Opt-in forensics only; never read as the planning authority.
+  std::shared_ptr<const GridMapFailureSnapshot> failure_evidence;
   GridMapOccupancyDiagnosticQuery diagnostic_query;
   // Immutable accumulated beam evidence. This is the sole formal GNSS LOS
   // support authority; the trusted FOV envelope below is diagnostic only.
@@ -406,6 +409,7 @@ struct FrozenOccupancyEpoch
       std::numeric_limits<double>::quiet_NaN());
   Eigen::Vector3i voxel_dimensions = Eigen::Vector3i::Zero();
   double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  double resolution_inv = std::numeric_limits<double>::quiet_NaN();
   double virtual_ceiling_height_m = -1.0;
   std::string frame_id;
   std::string geometry_id;
@@ -517,10 +521,12 @@ public:
       const FrozenOccupancyEpoch& epoch, const Eigen::Vector3d& position,
       bool detailed = false);
   std::shared_ptr<const FrozenOccupancyEpoch> captureFrozenCorridor(
-      const std::vector<Eigen::Vector3d>& positions, double required_clearance) const;
+      const std::vector<Eigen::Vector3d>& positions, double required_clearance,
+      PlanningBudget::Ptr budget = {}, bool include_failure_evidence = false) const;
   enum class CorridorCommit { Committed, Changed, Invalid };
   CorridorCommit commitFrozenCorridor(const FrozenOccupancyEpoch& corridor,
-      double now, double max_environment_age, const std::function<bool()>& commit);
+      double now, double max_environment_age, const std::function<bool()>& commit,
+      PlanningBudget::Ptr budget = {});
   bool geometryMatches(const FrozenOccupancyEpoch& epoch) const;
 
   // Registered-map execution checks need immutable obstacle/support evidence,
@@ -582,6 +588,7 @@ private:
   double frozen_clearance_radius_m_ = -1.0;
   uint64_t clearance_bounds_generation_ = 0;
   mutable std::shared_ptr<const FrozenOccupancyEpoch> cached_physical_epoch_;
+  mutable std::mutex physical_freeze_mutex_;
   double measureRawClearance(const Eigen::Vector3d& position,
                             const Eigen::Vector3i& index, double required,
                             bool decision_only, Eigen::Vector3d* nearest,
@@ -589,6 +596,7 @@ private:
   bool hasRequiredClearance(const Eigen::Vector3d& position,
                             const Eigen::Vector3i& index, double required,
                             const FrozenOccupancyEpoch* epoch = nullptr);
+  std::optional<GridMapFailureSnapshot> captureFailureSnapshotUnlocked(bool include_observation_evidence) const;
   uint64_t frozen_raw_index_generation_ = 0;
   std::vector<int> frozen_raw_addresses_;
   std::vector<size_t> frozen_raw_row_offsets_;

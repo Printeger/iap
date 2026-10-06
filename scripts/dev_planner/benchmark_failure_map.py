@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--budget-s", type=float, default=120.0)
     parser.add_argument("--no-diagnostics", action="store_true")
     parser.add_argument("--differential", action="store_true")
+    parser.add_argument("--full-epoch", action="store_true", help="exercise the current shared FrozenOccupancyEpoch path")
     args = parser.parse_args()
     if args.repeats < 3:
         parser.error("at least three measured repetitions required")
@@ -40,8 +41,8 @@ def main():
     os.environ["ROS_LOG_DIR"] = str(run / "runtime" / "ros")
     try:
         binary = _backend_path()
-        report = inspect(args.snapshot, args.budget_s, binary, args.repeats, not args.no_diagnostics, args.differential)
-        report.update(label=args.label, differential=args.differential, diagnostics=not args.no_diagnostics, warmup_rounds=1,
+        report = inspect(args.snapshot, args.budget_s, binary, args.repeats, not args.no_diagnostics, args.differential, args.full_epoch)
+        report.update(label=args.label, differential=args.differential, full_epoch=args.full_epoch, diagnostics=not args.no_diagnostics, warmup_rounds=1,
                       budget_s=args.budget_s,
                       backend_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                       snapshot_sha256={name: hashlib.sha256(
@@ -49,7 +50,7 @@ def main():
                           for name in ("snapshot.json", "cells.bin")},
                       revision=subprocess.check_output(
                           ["git", "rev-parse", "HEAD"], text=True).strip(),
-                      timing="input file decode excluded; freeze includes copy and index; init includes pool allocation; search includes result logging; backend/final check not run",
+                      timing="input file decode excluded; freeze includes reconstructed map copy/index and optional complete epoch capture; init includes pool allocation; search includes result logging; backend/final check not run",
                       cache_memory="estimated payload/key/links/buckets, excludes allocator; sizes reported in hit/miss counters: voxel/lattice/midpoint; after consolidation entry/byte slot 0 contains the shared cache",
                       advisory="physical replay only; zero real predictor calls")
         saved = json.loads((args.snapshot / "snapshot.json").read_text())

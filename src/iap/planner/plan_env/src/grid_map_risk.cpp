@@ -438,8 +438,13 @@ GridPlanningCell GridMap::queryPlanningCell(
 std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot(
     const bool include_observation_evidence) const
 {
-  GridMapFailureSnapshot snapshot;
   std::lock_guard<std::mutex> map_lock(occupancy_epoch_mutex_);
+  return captureFailureSnapshotUnlocked(include_observation_evidence);
+}
+
+std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshotUnlocked(
+    const bool include_observation_evidence) const {
+  GridMapFailureSnapshot snapshot;
   const auto sequence = occupancy_update_sequence_.load(std::memory_order_acquire);
   if (sequence == 0 || (sequence & 1u) != 0u) return std::nullopt;
   snapshot.origin = mp_.map_origin_;
@@ -545,7 +550,7 @@ GridMapOccupancyDiagnostic GridMap::queryFrozenOccupancy(
   out.cloud_stamp_s = epoch.cloud_stamp_s; out.generation = epoch.generation;
   if (detailed) out.frame_id = epoch.frame_id;
   if (!epoch.cells || !position.allFinite() || !(epoch.resolution_m > 0)) return out;
-  out.voxel_index = ((position - epoch.lattice_origin) / epoch.resolution_m).array().floor().cast<int>();
+  out.voxel_index = ((position - epoch.lattice_origin) * epoch.resolution_inv).array().floor().cast<int>();
   if ((out.voxel_index.array() < 0).any() ||
       (out.voxel_index.array() >= epoch.voxel_dimensions.array()).any()) return out;
   const int address = (out.voxel_index.x() * epoch.voxel_dimensions.y() + out.voxel_index.y()) *
@@ -567,44 +572,61 @@ GridMapOccupancyDiagnostic GridMap::queryFrozenOccupancy(
 bool GridMap::geometryMatches(const FrozenOccupancyEpoch& epoch) const {
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   return epoch.frame_id == mp_.frame_id_ && epoch.lattice_origin == mp_.map_origin_ &&
-      epoch.voxel_dimensions == mp_.map_voxel_num_ && epoch.resolution_m == mp_.resolution_;
+      epoch.voxel_dimensions == mp_.map_voxel_num_ && epoch.resolution_m == mp_.resolution_ && epoch.extent_m == mp_.map_size_;
 }
 
 std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
-    const std::vector<Eigen::Vector3d>& positions, const double required) const {
+    const std::vector<Eigen::Vector3d>& positions, const double required, PlanningBudget::Ptr budget, const bool include_failure_evidence) const {
   if (!std::isfinite(required) || required < 0) return {};
-  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
-  const auto sequence = occupancy_update_sequence_.load();
-  if (!sequence || (sequence & 1u) ||
-      (registered_lidar_window_enabled_ && (!registered_active_window_healthy_ || !registered_current_frame_healthy_))) return {};
+  const auto expired=[&](){ return budget && budget->expired(); };
+  if (expired()) return {};
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
-  epoch->lattice_origin = mp_.map_origin_; epoch->voxel_dimensions = mp_.map_voxel_num_;
-  epoch->resolution_m = mp_.resolution_; epoch->extent_m = mp_.map_size_;
-  epoch->frame_id = mp_.frame_id_; epoch->map_inflation_m = mp_.obstacles_inflation_;
-  epoch->generation = sequence/2u; epoch->cloud_stamp_s = occupancy_cloud_stamp_s_.load();
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    epoch->lattice_origin = mp_.map_origin_; epoch->voxel_dimensions = mp_.map_voxel_num_;
+    epoch->resolution_m = mp_.resolution_; epoch->resolution_inv = mp_.resolution_inv_;
+    epoch->extent_m = mp_.map_size_; epoch->frame_id = mp_.frame_id_;
+    epoch->map_inflation_m = mp_.obstacles_inflation_;
+  }
   auto cells = std::make_shared<FrozenOccupancyCells>();
   std::unordered_map<int,uint8_t> masks;
-  const int radius = std::ceil(required / mp_.resolution_) + 1;
-  const auto dims = mp_.map_voxel_num_;
+  const int radius = std::ceil(required / epoch->resolution_m) + 1;
+  const auto dims = epoch->voxel_dimensions;
   for (const auto& p : positions) {
+    if (expired()) return {};
     if (!p.allFinite()) continue;
-    const Eigen::Vector3i index = ((p-mp_.map_origin_)/mp_.resolution_).array().floor().cast<int>();
+    const Eigen::Vector3i index = ((p-epoch->lattice_origin)*epoch->resolution_inv).array().floor().cast<int>();
     if ((index.array()<0).any() || (index.array()>=dims.array()).any()) continue;
     masks[(index.x()*dims.y()+index.y())*dims.z()+index.z()] |= 7;
     for (int x=std::max(0,index.x()-radius); x<=std::min(dims.x()-1,index.x()+radius); ++x)
       for (int y=std::max(0,index.y()-radius); y<=std::min(dims.y()-1,index.y()+radius); ++y)
-        for (int z=std::max(0,index.z()-radius); z<=std::min(dims.z()-1,index.z()+radius); ++z)
+        for (int z=std::max(0,index.z()-radius); z<=std::min(dims.z()-1,index.z()+radius); ++z) {
+          if (expired()) return {};
           masks[(x*dims.y()+y)*dims.z()+z] |= 1;
+        }
   }
   cells->addresses.reserve(masks.size());
   for (const auto& [address,mask] : masks) cells->addresses.push_back(address);
   std::sort(cells->addresses.begin(),cells->addresses.end());
   cells->raw_row_offsets.resize(static_cast<size_t>(dims.x())*dims.y()+1,0);
+  {
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  const auto sequence = occupancy_update_sequence_.load();
+  if (expired() || !sequence || (sequence&1u) || epoch->lattice_origin!=mp_.map_origin_ ||
+      epoch->voxel_dimensions!=mp_.map_voxel_num_ || epoch->extent_m!=mp_.map_size_ || epoch->resolution_m!=mp_.resolution_ || epoch->frame_id!=mp_.frame_id_ ||
+      (registered_lidar_window_enabled_ && (!registered_active_window_healthy_ || !registered_current_frame_healthy_))) return {};
+  epoch->generation=sequence/2u; epoch->cloud_stamp_s=occupancy_cloud_stamp_s_.load();
   for (const auto address : cells->addresses) {
+    if (expired()) return {};
     const bool raw = md_.occupancy_buffer_raw_cloud_[address] || md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
     cells->flags.push_back((raw?1:0) | (md_.occupancy_buffer_inflate_[address]?2:0) | (md_.observed_buffer_[address]?4:0));
     cells->comparison_masks.push_back(masks[address]);
     if (raw) { cells->raw_addresses.push_back(address); ++cells->raw_row_offsets[address/dims.z()+1]; }
+  }
+    if (include_failure_evidence) {
+      const auto evidence=captureFailureSnapshotUnlocked(true);
+      if(evidence) epoch->failure_evidence=std::make_shared<const GridMapFailureSnapshot>(std::move(*evidence));
+    }
   }
   for (size_t i=1;i<cells->raw_row_offsets.size();++i) cells->raw_row_offsets[i]+=cells->raw_row_offsets[i-1];
   epoch->cells = cells;
@@ -613,18 +635,19 @@ std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
 
 GridMap::CorridorCommit GridMap::commitFrozenCorridor(
     const FrozenOccupancyEpoch& epoch, const double now, const double max_age,
-    const std::function<bool()>& commit) {
+    const std::function<bool()>& commit, PlanningBudget::Ptr budget) {
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   const auto sequence = occupancy_update_sequence_.load();
   const double stamp = occupancy_cloud_stamp_s_.load();
-  if (!epoch.cells || epoch.cells->addresses.empty() || !sequence || (sequence&1u) ||
+  if ((budget && budget->expired()) || !epoch.cells || epoch.cells->addresses.empty() || !sequence || (sequence&1u) ||
       epoch.frame_id != mp_.frame_id_ || epoch.lattice_origin != mp_.map_origin_ ||
-      epoch.voxel_dimensions != mp_.map_voxel_num_ || epoch.resolution_m != mp_.resolution_ ||
+      epoch.voxel_dimensions != mp_.map_voxel_num_ || epoch.extent_m != mp_.map_size_ || epoch.resolution_m != mp_.resolution_ ||
       !std::isfinite(now) || !std::isfinite(stamp) || now < stamp || now-stamp > max_age ||
       !std::isfinite(epoch.cloud_stamp_s) || now < epoch.cloud_stamp_s || now-epoch.cloud_stamp_s > max_age ||
       (registered_lidar_window_enabled_ && (!registered_active_window_healthy_ || !registered_current_frame_healthy_)))
     return CorridorCommit::Invalid;
   for (size_t i=0;i<epoch.cells->addresses.size();++i) {
+    if (budget && budget->expired()) return CorridorCommit::Invalid;
     const int address = epoch.cells->addresses[i];
     if (address<0 || static_cast<size_t>(address)>=md_.observed_buffer_.size()) return CorridorCommit::Invalid;
     const bool raw = md_.occupancy_buffer_raw_cloud_[address] || md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;

@@ -13,6 +13,9 @@
   <depend>iap</depend>
   <depend>gnss_comm</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>boost</depend>
+  <depend>zlib</depend>
   <depend>ament_cmake</depend>
   <depend>geometry_msgs</depend>
   <depend>quadrotor_msgs</depend>

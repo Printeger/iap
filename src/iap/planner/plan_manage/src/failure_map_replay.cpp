@@ -186,18 +186,20 @@ void report(const std::string& classification, const AStar::Result& original,
         << alternative_end->y() << ',' << alternative_end->z() << ']';
   std::cout << "}\n";
 }
-void benchmark(const Input& in, int repeats, bool diagnostics, bool differential) {
+void benchmark(const Input& in, int repeats, bool diagnostics, bool differential, bool full_epoch) {
   for (int round = -1; round < repeats; ++round) {
     const auto began = Clock::now();
     auto map = GridMap::fromFailureSnapshot(in.snapshot);
     const auto reference = differential ? GridMap::fromFailureSnapshot(in.snapshot) : nullptr;
+    const auto epoch = full_epoch ? map->captureFrozenOccupancyEpoch() : nullptr;
     const auto frozen = Clock::now();
     AStar search;
     search.initGridMap(map, in.pool);
+    search.setFrozenEpoch(epoch);
     search.setPerformanceDiagnostics(diagnostics);
     GridPlanningRiskPolicy policy;
     policy.unknown_multiplier = 1.0;
-    const auto context = map->preparePlanningQuery(in.planning_time_s, in.motion);
+    const auto context = map->preparePlanningQuery(in.planning_time_s, in.motion, epoch);
     size_t compared = 0;
     search.setPlanningQuery([&](const Point& p) {
       const auto cell = map->queryPlanningCell(p, 0, in.planning_time_s, policy,
@@ -261,9 +263,9 @@ void benchmark(const Input& in, int repeats, bool diagnostics, bool differential
 
 int main(int argc, char** argv) {
   try {
-    if (argc < 2 || argc > 5) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
+    if (argc < 2 || argc > 6) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
-    if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc == 5 && std::string(argv[4]) == "1"); return 0; }
+    if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc >= 5 && std::string(argv[4]) == "1", argc >= 6 && std::string(argv[5]) == "1"); return 0; }
     const auto began = Clock::now();
     auto elapsed = [&]() {
       return std::chrono::duration<double>(Clock::now() - began).count();

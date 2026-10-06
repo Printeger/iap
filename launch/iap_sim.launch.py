@@ -67,8 +67,10 @@ def _setup(context):
             "GLIO",
             "Current Integrity Monitor",
             "GridMap spatial PL (PredictorModule)",
-            "EGO baseline planner (stage 1)",
+            "EGO planner with frozen curve/corridor checks",
+            *(["Independent GridMap PL visualizer"] if context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true" else []),
         ],
+        "grid_map_visualizer_enabled": context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
             "config/sim_ego/grid_map_stage1.rviz"
@@ -105,6 +107,7 @@ def _setup(context):
             launch_arguments={
                 "scenario": scenario,
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
+                "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
                 "runtime_root_dir": str(output_dir / "metadata" / "config" / "full_stack"),
                 "export_root_dir": str(output_dir / "export" / "planner"),
                 "iap_log_root": str(output_dir / "runtime"),
@@ -126,6 +129,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
+            DeclareLaunchArgument("start_grid_map_visualizer", default_value="true"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
             DeclareLaunchArgument("capture_failure_map", default_value="false"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),

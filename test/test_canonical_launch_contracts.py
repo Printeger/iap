@@ -72,13 +72,14 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertTrue(params["grid_map/registered_lidar_window_enabled"])
             self.assertEqual(params["grid_map/frame_id"], "map")
             self.assertEqual(params["grid_map/visualization_period_s"], 1.0)
-            self.assertTrue(params["risk_viz/enabled"])
-            self.assertEqual(params["risk_viz/metric"], "hpl")
-            self.assertLess(params["risk_viz/hpl_max_m"], 1.0)
-            self.assertEqual(params["risk_viz/vpl_min_m"], 0.20)
-            self.assertEqual(params["risk_viz/vpl_max_m"], 0.55)
-            self.assertEqual(params["risk_viz/surface_lifetime_s"], 60.0)
-            self.assertEqual(params["risk_viz/surface_snapshot_step_m"], 4.0)
+            self.assertFalse(any(key.startswith("risk_viz/") for key in params))
+            display = runtime.visualizer_parameters()
+            self.assertEqual(display["risk_viz/metric"], "hpl")
+            self.assertLess(display["risk_viz/hpl_max_m"], 1.0)
+            self.assertEqual(display["risk_viz/vpl_min_m"], 0.20)
+            self.assertEqual(display["risk_viz/vpl_max_m"], 0.55)
+            self.assertEqual(display["risk_viz/surface_lifetime_s"], 60.0)
+            self.assertEqual(display["risk_viz/surface_snapshot_step_m"], 4.0)
             self.assertFalse(params["planning/capture_failure_map"])
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)
@@ -97,9 +98,13 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
                 context = LaunchContext()
                 context.launch_configurations.update({"scenario": "icra_dense_forest_four_fork_v2", "start_rviz": "false",
+                    "start_grid_map_visualizer": "true",
                     "planner_start_delay_s": "0", "run_duration_s": "0", "p0.enable_risk_grid": "true"})
                 actions = runtime._setup(context)
-            self.assertEqual(len(actions), 4)
+            self.assertEqual(len(actions), 5)
+            context.launch_configurations["start_grid_map_visualizer"] = "false"
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
+                self.assertEqual(len(runtime._setup(context)), 4)
             ros = json.loads((run / "metadata/config/iap/config_ros.json").read_text())["glim_ros"]
             local = ros["planner_local_map"]
             params = runtime.planner_parameters(catalog["icra_dense_forest_four_fork_v2"])
@@ -400,6 +405,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 {
                     "scenario": "lidar_corridor_degenerate",
                     "start_rviz": "true",
+                    "start_grid_map_visualizer": "true",
                     "planner_start_delay_s": "10.0",
                     "run_duration_s": "60.0",
                 }
@@ -776,6 +782,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 {
                     "scenario": "icra_dense_forest_four_fork_v2",
                     "start_rviz": "false",
+                    "start_grid_map_visualizer": "true",
                     "planner_start_delay_s": "0",
                     "run_duration_s": "0",
                 }

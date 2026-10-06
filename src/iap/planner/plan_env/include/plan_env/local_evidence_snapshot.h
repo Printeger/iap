@@ -93,6 +93,17 @@ class LocalEvidenceSnapshot {
     double resolution_m = 0.0;
   };
 
+  struct ReadOnlyData {
+    LocalEvidenceIdentity identity;
+    Geometry geometry;
+    std::vector<std::uint8_t> packed_states;
+    std::vector<std::uint16_t> source_indices;
+    std::vector<LocalEvidenceSource> sources;
+    double freshness_s = 1.0;
+  };
+  const ReadOnlyData& readOnlyData() const { return *storage_; }
+  static std::shared_ptr<const LocalEvidenceSnapshot> fromReadOnlyData(ReadOnlyData data);
+
   const LocalEvidenceIdentity& identity() const;
   const Geometry& geometry() const;
   const std::vector<LocalEvidenceSource>& sources() const;
@@ -122,14 +133,6 @@ class LocalEvidenceSnapshot {
 
  private:
   friend class RegisteredLidarWindow;
-  struct Storage {
-    LocalEvidenceIdentity identity;
-    Geometry geometry;
-    std::vector<std::uint8_t> packed_states;
-    std::vector<std::uint16_t> source_indices;
-    std::vector<LocalEvidenceSource> sources;
-    double freshness_s = 1.0;
-  };
-  explicit LocalEvidenceSnapshot(std::shared_ptr<const Storage> storage);
-  std::shared_ptr<const Storage> storage_;
+  explicit LocalEvidenceSnapshot(std::shared_ptr<const ReadOnlyData> storage);
+  std::shared_ptr<const ReadOnlyData> storage_;
 };

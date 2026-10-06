@@ -87,6 +87,8 @@ public:
 private:
 	GridMap::Ptr grid_map_;
     PlanningBudget::Ptr budget_;
+    bool active_search_=false;
+    PlanningBudget::Clock::time_point search_started_;
     PlanningBudget::Clock::time_point search_deadline_ = PlanningBudget::Clock::time_point::max();
     bool deadlineExpired() const { return PlanningBudget::Clock::now() >= search_deadline_ ||
         (budget_ && budget_->expired()); }
