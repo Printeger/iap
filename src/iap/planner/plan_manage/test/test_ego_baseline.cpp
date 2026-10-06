@@ -28,12 +28,29 @@ struct GridMapTestAccess {
     ASSERT_TRUE(map.registered_lidar_window_->applyCurrentFrame(frame).accepted);
     map.setFailureEvidenceCapture(true);
   }
+  static void changeEvidence(GridMap& map, const Eigen::Vector3d& point,
+                             bool raw, bool inflate, bool observed) {
+    std::lock_guard<std::mutex> lock(map.occupancy_epoch_mutex_);
+    Eigen::Vector3i index; map.posToIndex(point,index);
+    const auto address=map.toAddress(index);
+    map.md_.occupancy_buffer_raw_cloud_[address]=raw;
+    map.md_.occupancy_buffer_inflate_[address]=inflate;
+    map.md_.observed_buffer_[address]=observed;
+    map.occupancy_update_sequence_.fetch_add(2);
+  }
+  static void changeFrame(GridMap& map) {
+    std::lock_guard<std::mutex> lock(map.occupancy_epoch_mutex_);
+    map.mp_.frame_id_="changed";
+    map.occupancy_update_sequence_.fetch_add(2);
+  }
   static void clearObserved(GridMap& map, const Eigen::Vector3d& point) {
     Eigen::Vector3i index;
     map.posToIndex(point, index);
     map.md_.observed_buffer_[map.toAddress(index)] = 0;
+    map.cached_physical_epoch_.reset();
   }
   static void markObserved(GridMap& map) {
+    map.cached_physical_epoch_.reset();
     std::fill(map.md_.observed_buffer_.begin(),
               map.md_.observed_buffer_.end(), 1);
   }
@@ -691,4 +708,61 @@ TEST(EgoBaseline, UnknownGuessCanSearchObservedBypassUsingActualEndpoints) {
   EXPECT_TRUE(budget->tryRepair(PlanningBudget::Repair::Reinitialize));
   optimizer.initializeFromGuide(points);
   EXPECT_FALSE(optimizer.needsGuideReinitialization());
+}
+
+TEST(EgoBaseline, FullEpochMatchesExactQueriesAndSurvivesRemoteGenerations) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{Eigen::Vector3d(.5,.5,1)},10,Eigen::Vector3d(-2,0,1));
+  GridMapTestAccess::markObserved(*map);
+  GridMotionContext motion; motion.quality=1; motion.stamp_s=10; motion.error_proxy_m=.05;
+  const auto epoch=map->captureFrozenOccupancyEpoch(); ASSERT_TRUE(epoch);
+  EXPECT_EQ(epoch,map->captureFrozenOccupancyEpoch());
+  const auto context=map->preparePlanningQuery(10.1,motion,epoch);
+  for (int i=0;i<600;++i) {
+    const Eigen::Vector3d p(-1.0+.0037*i, -.5+.0031*(i%313), .93+.007*(i%21));
+    const auto exact=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,true);
+    const auto frozen=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&context);
+    EXPECT_EQ(exact.execution_reason,frozen.execution_reason) << p.transpose();
+    EXPECT_EQ(exact.observed,frozen.observed);
+  }
+  const Eigen::Vector3d point(-2,0,1);
+  const auto before=map->queryPlanningCell(point,0,10.1,GridPlanningRiskPolicy{},motion,false,&context);
+  GridMapTestAccess::changeEvidence(*map,Eigen::Vector3d(5,5,1),true,true,true);
+  EXPECT_EQ(before.execution_reason,map->queryPlanningCell(point,0,10.1,GridPlanningRiskPolicy{},motion,false,&context).execution_reason);
+  EXPECT_NE(epoch,map->captureFrozenOccupancyEpoch());
+  AStar search; search.initGridMap(map,Eigen::Vector3i(100,100,100)); search.setFrozenEpoch(epoch);
+  search.setLiveGenerationProvider([&](){return map->occupancyGeneration();});
+  bool updated=false;
+  search.setPlanningQuery([&](const Eigen::Vector3d& p){
+    if(!updated) { updated=true; GridMapTestAccess::changeEvidence(*map,Eigen::Vector3d(5,4,1),true,true,true); }
+    return map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&context);
+  });
+  EXPECT_TRUE(search.AstarSearch(.1,point,Eigen::Vector3d(-1,0,1)));
+  EXPECT_TRUE(search.lastResult().map_changed);
+}
+
+TEST(EgoBaseline, CorridorCommitChecksObservationInflationRawFreshnessAndGeometry) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{},10,Eigen::Vector3d(-2,0,1)); GridMapTestAccess::markObserved(*map);
+  const Eigen::Vector3d p(-2,0,1); unsigned writes=0;
+  const auto commit=[&](){++writes;return true;};
+  auto corridor=map->captureFrozenCorridor({p},.3); ASSERT_TRUE(corridor);
+  GridMapTestAccess::changeEvidence(*map,Eigen::Vector3d(5,5,1),true,true,true);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,commit),GridMap::CorridorCommit::Committed);
+  EXPECT_EQ(writes,1u);
+  GridMapTestAccess::changeEvidence(*map,p,false,false,false);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,commit),GridMap::CorridorCommit::Changed);
+  EXPECT_EQ(writes,1u);
+  corridor=map->captureFrozenCorridor({p},.3);
+  GridMapTestAccess::changeEvidence(*map,p,false,true,false);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,commit),GridMap::CorridorCommit::Changed);
+  corridor=map->captureFrozenCorridor({p},.3);
+  GridMapTestAccess::changeEvidence(*map,p+Eigen::Vector3d(.3,0,0),true,false,true);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,commit),GridMap::CorridorCommit::Changed);
+  corridor=map->captureFrozenCorridor({p},.3);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.6,.5,commit),GridMap::CorridorCommit::Invalid);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,[](){return false;}),GridMap::CorridorCommit::Invalid);
+  GridMapTestAccess::changeFrame(*map);
+  EXPECT_EQ(map->commitFrozenCorridor(*corridor,10.1,.5,commit),GridMap::CorridorCommit::Invalid);
+  EXPECT_EQ(writes,1u);
 }

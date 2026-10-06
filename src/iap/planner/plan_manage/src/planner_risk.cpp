@@ -371,7 +371,7 @@ GridMotionContext EGOPlannerManager::currentMotionContext(
 EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     const UniformBspline& trajectory, const uint64_t risk_version,
     const double now_s, const bool allow_bridged, const double from_time_s,
-    const double to_time_s) {
+    const double to_time_s, const GridPlanningContext* physical_context) {
   TrajectoryAssessment assessment;
   auto curve = trajectory;
   const double duration = curve.getTimeSum();
@@ -379,7 +379,9 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       ? latest_odom_provider_() : risk_odom_;
   if (from_time_s <= 0.0 && latest_odom) {
     const auto& p = latest_odom->pose.pose.position;
-    const Eigen::Vector3d actual(p.x, p.y, p.z);
+    const Eigen::Vector3d actual = physical_context && planning_view_ &&
+        physical_context == &planning_view_->physical_context && planning_view_->reference_position
+            ? *planning_view_->reference_position : Eigen::Vector3d(p.x, p.y, p.z);
     if (!actual.allFinite() ||
         (curve.evaluateDeBoorT(0.0) - actual).norm() >
             motion_start_tolerance_m_) {
@@ -392,13 +394,14 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     }
   }
   const double end = std::min(duration, to_time_s);
-  const auto motion = currentMotionContext(allow_bridged);
+  const auto motion = physical_context && planning_view_ &&
+      physical_context == &planning_view_->physical_context
+          ? planning_view_->motion : currentMotionContext(allow_bridged);
   assessment.evaluated_motion_quality = motion.quality;
   assessment.evaluated_motion_error_proxy_m = motion.error_proxy_m;
   assessment.evaluated_motion = motion;
   assessment.evaluation_time_s = now_s;
-  const auto generation = grid_map_->occupancyGeneration();
-  assessment.evaluated_generation = generation;
+  uint64_t generation = 0;
   const double step = std::min(0.02, grid_map_->getResolution() /
                                       (2.0 * std::max(0.1, pp_.max_vel_)));
   assessment.checked_from_time_s = std::clamp(from_time_s, 0.0, duration);
@@ -407,21 +410,34 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   if (end < assessment.checked_from_time_s) return assessment;
   const size_t intervals = static_cast<size_t>(std::ceil(
       (end - assessment.checked_from_time_s) / step));
+  GridPlanningContext corridor_context;
+  if (!physical_context) {
+    std::vector<Eigen::Vector3d> positions; positions.reserve(intervals+1);
+    for (size_t sample=0;sample<=intervals;++sample)
+      positions.push_back(curve.evaluateDeBoorT(std::min(end,assessment.checked_from_time_s+sample*step)));
+    const auto prepared = grid_map_->preparePlanningQuery(now_s,motion);
+    const auto corridor = grid_map_->captureFrozenCorridor(positions,prepared.required_clearance_m);
+    if (!corridor) { assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment; }
+    corridor_context = grid_map_->preparePlanningQuery(now_s,motion,corridor);
+    physical_context = &corridor_context;
+  }
+  assessment.physical_epoch = physical_context->epoch;
+  generation = physical_context->generation;
+  assessment.evaluated_generation = generation;
   // Always visit the actual interval endpoint, including a tail shorter
   // than half a sampling step. Store effective curve time, never an overshoot.
   for (size_t sample = 0; sample <= intervals; ++sample) {
     const double t = std::min(end, assessment.checked_from_time_s + sample * step);
     const auto p = curve.evaluateDeBoorT(t);
-    const auto cell = grid_map_->queryPlanningCell(
-        p, risk_version, now_s, planning_risk_policy_, motion);
-    if (cell.occupancy_generation != generation ||
-        grid_map_->occupancyGeneration() != generation) {
-      assessment.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
-      assessment.first_execution_time_s = t;
-      assessment.first_execution_position = p;
-      assessment.first_execution_cell = cell;
-      assessment.map_changed = true;
-      return assessment;
+    if (planning_view_ && planning_budget_ && planning_budget_->expired() && from_time_s<=0.0) {
+      assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment;
+    }
+    auto cell = grid_map_->queryPlanningCell(
+        p, 0, now_s, planning_risk_policy_, motion, false, physical_context);
+    if (cell.executable() && risk_version) {
+      cell.advisory = planning_view_ && risk_version==planning_view_->risk_version
+          ? queryPlanningViewAdvisory(p)
+          : grid_map_->queryPlanningRisk(p,risk_version,now_s,planning_risk_policy_);
     }
     ++assessment.sampled_points;
     if (sample == 0 && assessment.execution_reason == GridExecutionReason::TRACKING_ERROR)
@@ -482,14 +498,16 @@ bool EGOPlannerManager::beginPlanningView() {
     const double time_s = node_->now().seconds();
     const auto motion = currentMotionContext();
     const auto risk_version = beginRiskQuery();
-    const auto snapshot = grid_map_->captureFailureSnapshot(capture_failure_map_);
-    if (!snapshot) continue;
-    if (snapshot->generation != grid_map_->occupancyGeneration()) continue;
+    const auto epoch = grid_map_->captureFrozenOccupancyEpoch();
+    if (!epoch) continue;
     PlanningView view;
-    view.physical = GridMap::fromFailureSnapshot(*snapshot);
-    if (capture_failure_map_)
-      view.snapshot = std::make_shared<const GridMapFailureSnapshot>(*snapshot);
-    view.generation = snapshot->generation;
+    view.physical = epoch;
+    view.generation = epoch->generation;
+    if (capture_failure_map_) {
+      const auto evidence = grid_map_->captureFailureSnapshot(true);
+      if (evidence && evidence->generation == epoch->generation)
+        view.snapshot = std::make_shared<const GridMapFailureSnapshot>(*evidence);
+    }
     view.time_s = time_s;
     view.motion = motion;
     const auto odom = latest_odom_provider_ ? latest_odom_provider_() : risk_odom_;
@@ -498,9 +516,9 @@ bool EGOPlannerManager::beginPlanningView() {
       Eigen::Vector3d position(p.x, p.y, p.z);
       if (position.allFinite()) view.reference_position = position;
     }
-    view.physical_context = view.physical->preparePlanningQuery(time_s, motion);
+    view.physical_context = grid_map_->preparePlanningQuery(time_s, motion, epoch);
     // The bound PL context has to refer to this same occupancy generation.
-    view.risk_version = snapshot->risk_context_matches_map ? risk_version : 0;
+    view.risk_version = epoch->generation == grid_map_->occupancyGeneration() ? risk_version : 0;
     planning_view_ = std::move(view);
     planning_timings_.freeze_s = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - freeze_started).count();
@@ -517,7 +535,7 @@ GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
     const Eigen::Vector3d& position) const {
   if (!planning_view_) return queryLocalTargetCell(position, node_->now().seconds());
   const auto& view = *planning_view_;
-  auto cell = view.physical->queryPlanningCell(position, 0, view.time_s,
+  auto cell = grid_map_->queryPlanningCell(position, 0, view.time_s,
       planning_risk_policy_, view.motion, false, &view.physical_context,
       search_performance_diagnostics_);
   if (cell.executable()) cell.advisory = queryPlanningViewAdvisory(position);
@@ -601,7 +619,7 @@ uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& sna
   context.reference_time_s = now;
   context.reference_position = snapshot.p_wb;
   context.frame_id = grid_map_->getFrameId();
-  const auto occupancy = grid_map_->captureFrozenExecutionOccupancyEpoch();
+  const auto occupancy = grid_map_->captureFrozenOccupancyEpoch();
   if (!occupancy) {
     context.occupancy_generation = grid_map_->occupancyGeneration();
     return grid_map_->bindRiskContext(std::move(context));

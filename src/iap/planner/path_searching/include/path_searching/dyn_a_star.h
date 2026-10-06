@@ -87,6 +87,10 @@ public:
 private:
 	GridMap::Ptr grid_map_;
     PlanningBudget::Ptr budget_;
+    PlanningBudget::Clock::time_point search_deadline_ = PlanningBudget::Clock::time_point::max();
+    bool deadlineExpired() const { return PlanningBudget::Clock::now() >= search_deadline_ ||
+        (budget_ && budget_->expired()); }
+    std::shared_ptr<const FrozenOccupancyEpoch> frozen_epoch_;
 	std::function<GridSearchCell(const Eigen::Vector3d&)> planning_query_;
 	bool advisory_fallback_ = false;
 	bool rejected_advisory_ = false;
@@ -162,6 +166,7 @@ public:
 	~AStar();
 
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
+	void setFrozenEpoch(std::shared_ptr<const FrozenOccupancyEpoch> epoch) { frozen_epoch_ = std::move(epoch); }
 	void setSearchMap(GridMap::Ptr frozen_map) { grid_map_ = std::move(frozen_map); }
 	void setLiveGenerationProvider(std::function<uint64_t()> provider) {
 		live_generation_provider_ = std::move(provider);

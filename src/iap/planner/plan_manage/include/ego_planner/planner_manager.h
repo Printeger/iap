@@ -97,6 +97,7 @@ namespace ego_planner
       size_t advisory_unknown_samples = 0;
       size_t sampled_points = 0;
       bool map_changed = false;
+      std::shared_ptr<const FrozenOccupancyEpoch> physical_epoch;
       uint64_t evaluated_generation = 0;
       uint8_t evaluated_motion_quality = 0;
       double evaluated_motion_error_proxy_m =
@@ -109,7 +110,8 @@ namespace ego_planner
                                           bool allow_bridged = false,
                                           double from_time_s = 0.0,
                                           double to_time_s =
-                                              std::numeric_limits<double>::infinity());
+                                              std::numeric_limits<double>::infinity(),
+                                          const GridPlanningContext* physical_context = nullptr);
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
@@ -173,7 +175,7 @@ namespace ego_planner
     double planning_time_s_ = 0.0;
     GridMotionContext planning_motion_;
     struct PlanningView {
-      GridMap::Ptr physical;
+      std::shared_ptr<const FrozenOccupancyEpoch> physical;
       std::shared_ptr<const GridMapFailureSnapshot> snapshot;
       uint64_t risk_version = 0;
       uint64_t generation = 0;

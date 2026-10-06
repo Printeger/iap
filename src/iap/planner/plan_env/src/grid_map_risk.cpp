@@ -174,16 +174,18 @@ GridPlanningRisk GridMap::queryPlanningRisk(const Eigen::Vector3d& position,
 }
 
 GridPlanningContext GridMap::preparePlanningQuery(
-    const double now, const GridMotionContext& motion) const {
+    const double now, const GridMotionContext& motion,
+    std::shared_ptr<const FrozenOccupancyEpoch> epoch) const {
   GridPlanningContext context;
-  context.generation = occupancyGeneration();
-  const double stamp = occupancy_cloud_stamp_s_.load();
+  context.epoch = std::move(epoch);
+  context.generation = context.epoch ? context.epoch->generation : occupancyGeneration();
+  const double stamp = context.epoch ? context.epoch->cloud_stamp_s : occupancy_cloud_stamp_s_.load();
   if (!std::isfinite(stamp) || !std::isfinite(now) || now < stamp ||
       now - stamp > motion.max_environment_age_s)
     context.environment_reason = GridExecutionReason::ENVIRONMENT_STALE;
   context.required_clearance_m = motion.body_radius_m +
       motion.tracking_reserve_m + motion.error_proxy_m +
-      std::sqrt(3.0) * mp_.resolution_ / 2.0;
+      std::sqrt(3.0) * (context.epoch ? context.epoch->resolution_m : mp_.resolution_) / 2.0;
   if (motion.quality == 0 || (motion.quality == 2 && !motion.allow_bridged) ||
       !std::isfinite(motion.error_proxy_m) ||
       !std::isfinite(context.required_clearance_m) ||
@@ -200,16 +202,21 @@ GridPlanningContext GridMap::preparePlanningQuery(
 
 double GridMap::measureRawClearance(const Eigen::Vector3d& position,
     const Eigen::Vector3i& index, const double required,
-    const bool decision_only, Eigen::Vector3d* nearest) {
-  const int radius_cells = static_cast<int>(std::ceil(required / mp_.resolution_)) + 1;
+    const bool decision_only, Eigen::Vector3d* nearest,
+    const FrozenOccupancyEpoch* epoch) {
+  const double resolution = epoch ? epoch->resolution_m : mp_.resolution_;
+  const int radius_cells = static_cast<int>(std::ceil(required / resolution)) + 1;
   double closest = std::numeric_limits<double>::infinity();
-  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
-  const auto dims = mp_.map_voxel_num_;
-  const bool indexed = frozen_raw_index_generation_ == occupancyGeneration() &&
-      !frozen_raw_row_offsets_.empty();
+  std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_, std::defer_lock);
+  if (!epoch) lock.lock();
+  const auto dims = epoch ? epoch->voxel_dimensions : mp_.map_voxel_num_;
+  const auto& addresses = epoch ? epoch->cells->raw_addresses : frozen_raw_addresses_;
+  const auto& offsets = epoch ? epoch->cells->raw_row_offsets : frozen_raw_row_offsets_;
+  const bool indexed = epoch || (frozen_raw_index_generation_ == occupancyGeneration() && !offsets.empty());
   const auto examine_raw = [&](const Eigen::Vector3i& index) {
     Eigen::Vector3d center;
-    indexToPos(index, center);
+    if (epoch) center = epoch->lattice_origin + (index.cast<double>().array() + .5).matrix() * resolution;
+    else indexToPos(index, center);
     const double distance = (position - center).norm();
     if (distance < closest) {
       closest = distance;
@@ -225,8 +232,8 @@ double GridMap::measureRawClearance(const Eigen::Vector3d& position,
       if (indexed) {
         const size_t row = static_cast<size_t>(x) * dims.y() + y;
         const int base = static_cast<int>(row) * dims.z();
-        const auto begin = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row];
-        const auto end = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row + 1];
+        const auto begin = addresses.begin() + offsets[row];
+        const auto end = addresses.begin() + offsets[row + 1];
         for (auto it = std::lower_bound(begin, end, base + first_z);
              it != end && *it <= base + last_z; ++it) {
           examine_raw(Eigen::Vector3i(x, y, *it - base));
@@ -251,25 +258,30 @@ double GridMap::measureRawClearance(const Eigen::Vector3d& position,
 }
 
 bool GridMap::hasRequiredClearance(const Eigen::Vector3d& position,
-    const Eigen::Vector3i& index, const double required) {
-  if (frozen_raw_index_generation_ != occupancyGeneration() ||
-      frozen_raw_row_offsets_.empty())
-    return measureRawClearance(position, index, required, true, nullptr) >= required;
-  if (frozen_clearance_radius_m_ != required) {
+    const Eigen::Vector3i& index, const double required,
+    const FrozenOccupancyEpoch* epoch) {
+  if (!epoch && (frozen_raw_index_generation_ != occupancyGeneration() ||
+      frozen_raw_row_offsets_.empty()))
+    return measureRawClearance(position, index, required, true, nullptr, epoch) >= required;
+  const auto generation = epoch ? epoch->generation : occupancyGeneration();
+  const double resolution = epoch ? epoch->resolution_m : mp_.resolution_;
+  if (frozen_clearance_radius_m_ != required || clearance_bounds_generation_ != generation) {
+    clearance_bounds_generation_ = generation;
     frozen_clearance_bounds_.clear();
     frozen_clearance_radius_m_ = required;
   }
-  const int address = toAddress(index);
+  const int address = epoch ? (index.x()*epoch->voxel_dimensions.y()+index.y())*epoch->voxel_dimensions.z()+index.z() : toAddress(index);
   auto found = frozen_clearance_bounds_.find(address);
   Eigen::Vector3d center;
-  indexToPos(index, center);
+  if (epoch) center = epoch->lattice_origin + (index.cast<double>().array() + .5).matrix() * resolution;
+  else indexToPos(index, center);
   if (found == frozen_clearance_bounds_.end()) {
     ++planning_query_stats_.bounds_misses;
-    const double nearest = measureRawClearance(center, index, required, false, nullptr);
-    const int radius = static_cast<int>(std::ceil(required / mp_.resolution_)) + 1;
+    const double nearest = measureRawClearance(center, index, required, false, nullptr, epoch);
+    const int radius = static_cast<int>(std::ceil(required / resolution)) + 1;
     // All unscanned raw centers lie at least this far from the voxel center.
     // No hit in the finite cube gives a finite lower bound, never infinity.
-    const double outside = (radius + 0.5) * mp_.resolution_;
+    const double outside = (radius + 0.5) * resolution;
     found = frozen_clearance_bounds_.emplace(address,
         ClearanceBounds{std::min(nearest, outside), nearest}).first;
   }
@@ -285,7 +297,7 @@ bool GridMap::hasRequiredClearance(const Eigen::Vector3d& position,
     return false;
   }
   ++planning_query_stats_.exact_decisions;
-  return measureRawClearance(position, index, required, true, nullptr) >= required;
+  return measureRawClearance(position, index, required, true, nullptr, epoch) >= required;
 }
 
 GridPlanningQueryStats GridMap::planningQueryStats() const {
@@ -322,8 +334,9 @@ GridPlanningCell GridMap::queryPlanningCell(
     if (include_rejected_clearance) ++planning_query_stats_.detailed_queries;
   }
   const auto occupancy_started = performance_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-  const auto observed = queryOccupancyDiagnostic(position,
-      !context || include_rejected_clearance);
+  const auto* epoch = context && context->epoch ? context->epoch.get() : nullptr;
+  const auto observed = epoch ? queryFrozenOccupancy(*epoch, position, include_rejected_clearance) :
+      queryOccupancyDiagnostic(position, !context || include_rejected_clearance);
   if (performance_diagnostics) cell.occupancy_query_s = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - occupancy_started).count();
   cell.voxel_index = observed.voxel_index;
@@ -342,8 +355,8 @@ GridPlanningCell GridMap::queryPlanningCell(
         !std::isfinite(observed.resolution_m) || observed.resolution_m <= 0.0)
       return;
     const double closest = measureRawClearance(position, observed.voxel_index,
-        cell.required_clearance_m, false, &cell.nearest_raw_center);
-    if (occupancyGeneration() != observed.generation) return;
+        cell.required_clearance_m, false, &cell.nearest_raw_center, epoch);
+    if (!epoch && occupancyGeneration() != observed.generation) return;
     cell.raw_center_clearance_m = closest;
     if (performance_diagnostics) cell.clearance_query_s += std::chrono::duration<double>(
         std::chrono::steady_clock::now() - clearance_started).count();
@@ -395,13 +408,13 @@ GridPlanningCell GridMap::queryPlanningCell(
   bool clearance_ok = true;
   if (context && !include_rejected_clearance) {
     const auto started = performance_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    clearance_ok = hasRequiredClearance(position, observed.voxel_index, cell.required_clearance_m);
+    clearance_ok = hasRequiredClearance(position, observed.voxel_index, cell.required_clearance_m, epoch);
     if (performance_diagnostics) cell.clearance_query_s = std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
   } else {
     measure_clearance();
     clearance_ok = !(cell.raw_center_clearance_m < cell.required_clearance_m);
   }
-  if (occupancyGeneration() != observed.generation) {
+  if (!epoch && occupancyGeneration() != observed.generation) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
     return cell;
   }
@@ -522,4 +535,101 @@ GridMap::Ptr GridMap::fromFailureSnapshot(const GridMapFailureSnapshot& snapshot
   map->occupancy_update_sequence_.store(snapshot.generation * 2u);
   map->occupancy_cloud_stamp_s_.store(snapshot.cloud_stamp_s);
   return map;
+}
+
+GridMapOccupancyDiagnostic GridMap::queryFrozenOccupancy(
+    const FrozenOccupancyEpoch& epoch, const Eigen::Vector3d& position,
+    const bool detailed) {
+  GridMapOccupancyDiagnostic out;
+  out.resolution_m = epoch.resolution_m; out.inflation_m = epoch.map_inflation_m;
+  out.cloud_stamp_s = epoch.cloud_stamp_s; out.generation = epoch.generation;
+  if (detailed) out.frame_id = epoch.frame_id;
+  if (!epoch.cells || !position.allFinite() || !(epoch.resolution_m > 0)) return out;
+  out.voxel_index = ((position - epoch.lattice_origin) / epoch.resolution_m).array().floor().cast<int>();
+  if ((out.voxel_index.array() < 0).any() ||
+      (out.voxel_index.array() >= epoch.voxel_dimensions.array()).any()) return out;
+  const int address = (out.voxel_index.x() * epoch.voxel_dimensions.y() + out.voxel_index.y()) *
+      epoch.voxel_dimensions.z() + out.voxel_index.z();
+  const auto flags = epoch.cells->at(address);
+  out.raw_occupied = flags & 1; out.inflated_occupied = flags & 2;
+  out.observed = (flags & 4) || out.raw_occupied || out.inflated_occupied;
+  out.available = true;
+  out.state = out.raw_occupied || out.inflated_occupied ? GridMapObservationState::OCCUPIED :
+      out.observed ? GridMapObservationState::OBSERVED_FREE : GridMapObservationState::UNKNOWN;
+  if (detailed) {
+    out.voxel_center = epoch.lattice_origin + (out.voxel_index.cast<double>().array()+.5).matrix() * epoch.resolution_m;
+    out.source = out.raw_occupied ? ((flags & 8) ? "fused_depth" : "raw_cloud") : out.inflated_occupied ? "inflated_neighbor" :
+        out.observed ? "observed_free" : "unknown";
+  }
+  return out;
+}
+
+bool GridMap::geometryMatches(const FrozenOccupancyEpoch& epoch) const {
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  return epoch.frame_id == mp_.frame_id_ && epoch.lattice_origin == mp_.map_origin_ &&
+      epoch.voxel_dimensions == mp_.map_voxel_num_ && epoch.resolution_m == mp_.resolution_;
+}
+
+std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
+    const std::vector<Eigen::Vector3d>& positions, const double required) const {
+  if (!std::isfinite(required) || required < 0) return {};
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  const auto sequence = occupancy_update_sequence_.load();
+  if (!sequence || (sequence & 1u) ||
+      (registered_lidar_window_enabled_ && (!registered_active_window_healthy_ || !registered_current_frame_healthy_))) return {};
+  auto epoch = std::make_shared<FrozenOccupancyEpoch>();
+  epoch->lattice_origin = mp_.map_origin_; epoch->voxel_dimensions = mp_.map_voxel_num_;
+  epoch->resolution_m = mp_.resolution_; epoch->extent_m = mp_.map_size_;
+  epoch->frame_id = mp_.frame_id_; epoch->map_inflation_m = mp_.obstacles_inflation_;
+  epoch->generation = sequence/2u; epoch->cloud_stamp_s = occupancy_cloud_stamp_s_.load();
+  auto cells = std::make_shared<FrozenOccupancyCells>();
+  std::unordered_map<int,uint8_t> masks;
+  const int radius = std::ceil(required / mp_.resolution_) + 1;
+  const auto dims = mp_.map_voxel_num_;
+  for (const auto& p : positions) {
+    if (!p.allFinite()) continue;
+    const Eigen::Vector3i index = ((p-mp_.map_origin_)/mp_.resolution_).array().floor().cast<int>();
+    if ((index.array()<0).any() || (index.array()>=dims.array()).any()) continue;
+    masks[(index.x()*dims.y()+index.y())*dims.z()+index.z()] |= 7;
+    for (int x=std::max(0,index.x()-radius); x<=std::min(dims.x()-1,index.x()+radius); ++x)
+      for (int y=std::max(0,index.y()-radius); y<=std::min(dims.y()-1,index.y()+radius); ++y)
+        for (int z=std::max(0,index.z()-radius); z<=std::min(dims.z()-1,index.z()+radius); ++z)
+          masks[(x*dims.y()+y)*dims.z()+z] |= 1;
+  }
+  cells->addresses.reserve(masks.size());
+  for (const auto& [address,mask] : masks) cells->addresses.push_back(address);
+  std::sort(cells->addresses.begin(),cells->addresses.end());
+  cells->raw_row_offsets.resize(static_cast<size_t>(dims.x())*dims.y()+1,0);
+  for (const auto address : cells->addresses) {
+    const bool raw = md_.occupancy_buffer_raw_cloud_[address] || md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
+    cells->flags.push_back((raw?1:0) | (md_.occupancy_buffer_inflate_[address]?2:0) | (md_.observed_buffer_[address]?4:0));
+    cells->comparison_masks.push_back(masks[address]);
+    if (raw) { cells->raw_addresses.push_back(address); ++cells->raw_row_offsets[address/dims.z()+1]; }
+  }
+  for (size_t i=1;i<cells->raw_row_offsets.size();++i) cells->raw_row_offsets[i]+=cells->raw_row_offsets[i-1];
+  epoch->cells = cells;
+  return epoch;
+}
+
+GridMap::CorridorCommit GridMap::commitFrozenCorridor(
+    const FrozenOccupancyEpoch& epoch, const double now, const double max_age,
+    const std::function<bool()>& commit) {
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  const auto sequence = occupancy_update_sequence_.load();
+  const double stamp = occupancy_cloud_stamp_s_.load();
+  if (!epoch.cells || epoch.cells->addresses.empty() || !sequence || (sequence&1u) ||
+      epoch.frame_id != mp_.frame_id_ || epoch.lattice_origin != mp_.map_origin_ ||
+      epoch.voxel_dimensions != mp_.map_voxel_num_ || epoch.resolution_m != mp_.resolution_ ||
+      !std::isfinite(now) || !std::isfinite(stamp) || now < stamp || now-stamp > max_age ||
+      !std::isfinite(epoch.cloud_stamp_s) || now < epoch.cloud_stamp_s || now-epoch.cloud_stamp_s > max_age ||
+      (registered_lidar_window_enabled_ && (!registered_active_window_healthy_ || !registered_current_frame_healthy_)))
+    return CorridorCommit::Invalid;
+  for (size_t i=0;i<epoch.cells->addresses.size();++i) {
+    const int address = epoch.cells->addresses[i];
+    if (address<0 || static_cast<size_t>(address)>=md_.observed_buffer_.size()) return CorridorCommit::Invalid;
+    const bool raw = md_.occupancy_buffer_raw_cloud_[address] || md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
+    const uint8_t flags=(raw?1:0) | (md_.occupancy_buffer_inflate_[address]?2:0) | (md_.observed_buffer_[address]?4:0);
+    if ((flags ^ epoch.cells->flags[i]) & epoch.cells->comparison_masks[i]) return CorridorCommit::Changed;
+  }
+  return commit() ? CorridorCommit::Committed : CorridorCommit::Invalid;
 }

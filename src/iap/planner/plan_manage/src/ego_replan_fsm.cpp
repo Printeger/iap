@@ -894,7 +894,10 @@ namespace ego_planner
           budget->expired()) break;
       if (fraction != 1.0 &&
           !budget->tryRepair(PlanningBudget::Repair::TargetShortening)) break;
-      if (!getLocalTarget(distance)) continue;
+      if (!getLocalTarget(distance)) {
+        if (wait_for_map_reason_ == GridExecutionReason::ENVIRONMENT_STALE) break;
+        continue;
+      }
       if (attempted_target &&
           (local_target_pt_ - *attempted_target).norm() <
               planner_manager_->grid_map_->getResolution() * 0.5)
@@ -906,10 +909,8 @@ namespace ego_planner
           local_target_vel_, (have_new_target_ || flag_use_poly_init),
           flag_randomPolyTraj);
       if (plan_and_refine_success) break;
-      const auto failure = planner_manager_->lastSearchFailure();
-      if (failure == AStar::Failure::TIME_BUDGET ||
-          failure == AStar::Failure::MAP_STALE ||
-          failure == AStar::Failure::END_STALE) break;
+      // A failed search/curve is not evidence that the endpoint is unknown.
+      break;
     }
     if (!target_selected && !plan_and_refine_success) {
       last_failed_plan_time_s_ = now;
@@ -1092,6 +1093,8 @@ namespace ego_planner
 
   bool EGOReplanFSM::getLocalTarget(const double target_distance_m)
   {
+    const auto budget = planner_manager_->planningBudget();
+    const auto expired = [&]() { return budget && budget->expired(); };
     auto& reference = planner_manager_->global_data_;
     const double resolution = planner_manager_->grid_map_->getResolution();
     const double velocity = std::max(0.1, planner_manager_->pp_.max_vel_);
@@ -1105,27 +1108,33 @@ namespace ego_planner
     // Prefer the first near-minimum on a self-intersecting reference.
     double minimum = std::numeric_limits<double>::infinity();
     const double old_progress = reference.last_progress_time_;
-    for (double t = old_progress; t <= reference.global_duration_ + step; t += step)
+    for (double t = old_progress; t <= reference.global_duration_ + step; t += step) {
+      if (expired()) return false;
       minimum = std::min(minimum, (reference.getPosition(
           std::min(t, reference.global_duration_)) - position).norm());
+    }
     double projection = old_progress;
-    for (double t = old_progress; t <= reference.global_duration_ + step; t += step)
+    for (double t = old_progress; t <= reference.global_duration_ + step; t += step) {
+      if (expired()) return false;
       if ((reference.getPosition(std::min(t, reference.global_duration_)) -
            position).norm() <= minimum + resolution * 0.5) {
         projection = std::min(t, reference.global_duration_);
         break;
       }
+    }
     reference.last_progress_time_ = std::max(old_progress, projection);
     projection = reference.last_progress_time_;
     if (projection >= reference.global_duration_ - 1e-9) return false;
 
     const double distance = std::min(target_distance_m, search_pool_target_limit_m_);
     double target_t = reference.global_duration_;
-    for (double t = projection + step; t < reference.global_duration_; t += step)
+    for (double t = projection + step; t < reference.global_duration_; t += step) {
+      if (expired()) return false;
       if ((reference.getPosition(t) - start_pt_).norm() >= distance) {
         target_t = t;
         break;
       }
+    }
     local_target_pt_ = reference.getPosition(target_t);
     const auto nominal = planner_manager_->queryLocalTargetCell(
         local_target_pt_, node_->now().seconds());
@@ -1143,6 +1152,7 @@ namespace ego_planner
       double last_t = std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d previous = reference.getPosition(projection);
       for (double t = projection; t <= target_t + step; t += step) {
+        if (expired()) return false;
         const double sample_t = std::min(t, target_t);
         const auto probe = reference.getPosition(sample_t);
         arc += (probe - previous).norm();

@@ -510,6 +510,10 @@ namespace ego_planner
       const int segment_start, const int segment_end,
       AStar::Failure& failure) const
   {
+    const auto expired = [&]() {
+      if (budget_ && budget_->expired()) { failure = AStar::Failure::TIME_BUDGET; return true; }
+      return false;
+    };
     failure = AStar::Failure::NONE;
     if (!planning_query_ || points.cols() < 2 || segment_start < 0 ||
         segment_end >= points.cols() || segment_start >= segment_end)
@@ -520,11 +524,14 @@ namespace ego_planner
     samples.emplace_back(points.col(0));
     control_sample[0] = 0;
     for (int j = 1; j < points.cols(); ++j) {
+      if (expired()) return std::nullopt;
       const Eigen::Vector3d a = points.col(j - 1), b = points.col(j);
       const int count = std::max(1, static_cast<int>(std::ceil(
           (b - a).norm() / spacing)));
-      for (int k = 1; k <= count; ++k)
+      for (int k = 1; k <= count; ++k) {
+        if (expired()) return std::nullopt;
         samples.push_back(a + (b - a) * (static_cast<double>(k) / count));
+      }
       control_sample[j] = static_cast<int>(samples.size()) - 1;
     }
     const auto original_center =
@@ -543,15 +550,18 @@ namespace ego_planner
           (index - Eigen::Vector3i::Constant(50)).cast<double>() * 0.1;
       const int count = std::max(1, static_cast<int>(std::ceil(
           (lattice - p).norm() / spacing)));
-      for (int k = 0; k <= count; ++k)
+      for (int k = 0; k <= count; ++k) {
+        if (expired()) return false;
         if (!planning_query_(p + (lattice - p) *
             (static_cast<double>(k) / count)).executable()) return false;
+      }
       return true;
     };
     std::vector<bool> clear(samples.size()), prefix(samples.size()),
         suffix(samples.size());
     bool unknown_exit = false;
     for (size_t i = 0; i < samples.size(); ++i) {
+      if (expired()) return std::nullopt;
       const auto cell = planning_query_(samples[i]);
       clear[i] = in_pool(samples[i]) && cell.executable();
       if (i + 1 == samples.size() &&
@@ -571,6 +581,7 @@ namespace ego_planner
       if (suffix[i] && lattice_connector_valid(samples[i])) {
         exit = static_cast<int>(i); break;
       }
+    if (expired()) return std::nullopt;
     if (entry < 0) failure = AStar::Failure::NO_VALID_REPAIR_ENTRY;
     else if (exit < 0) failure = unknown_exit
         ? AStar::Failure::END_UNOBSERVED
@@ -725,7 +736,8 @@ namespace ego_planner
     auto endpoints = chooseRepairEndpoints(init_points,
         segment_ids.front().first, segment_ids.back().second,
         endpoint_failure);
-    if (!endpoints && unknown_guess && planning_endpoints_) {
+    if (!endpoints && endpoint_failure != AStar::Failure::TIME_BUDGET &&
+        unknown_guess && planning_endpoints_) {
       const auto& [start, target] = *planning_endpoints_;
       if (planning_query_(start).executable() && planning_query_(target).executable()) {
         RepairEndpoints whole;

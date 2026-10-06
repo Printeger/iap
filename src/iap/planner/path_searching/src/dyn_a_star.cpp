@@ -70,7 +70,8 @@ uint64_t AStar::latticeKey(const Vector3i& index) const {
 GridSearchCell AStar::querySample(const uint64_t key,
                                  const Vector3d& position, const size_t kind) {
     GridSearchCell cell;
-    if (grid_map_->occupancyGeneration() != search_generation_) {
+    if (deadlineExpired()) { cell.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return cell; }
+    if ((frozen_epoch_ ? !grid_map_->geometryMatches(*frozen_epoch_) : grid_map_->occupancyGeneration() != search_generation_)) {
         cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
         return cell;
     }
@@ -121,7 +122,7 @@ void AStar::recordMapAtFinish() {
 void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
     // Termination and evidence freshness are independent. In particular an
     // online update must not erase a frozen search's TIME_BUDGET result.
-    result_.failure = failure;
+    result_.failure = deadlineExpired() ? Failure::TIME_BUDGET : failure;
     recordMapAtFinish();
     result_.duration_s = (rclcpp::Clock().now() - started).seconds();
     const auto now = std::chrono::steady_clock::now();
@@ -159,7 +160,7 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
                                             const Vector3i& from_index,
                                             const Vector3i& to_index)
 {
-    if (grid_map_->occupancyGeneration() != search_generation_) {
+    if ((frozen_epoch_ ? !grid_map_->geometryMatches(*frozen_epoch_) : grid_map_->occupancyGeneration() != search_generation_)) {
         map_changed_ = true;
         return std::nullopt;
     }
@@ -431,6 +432,9 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         std::optional<Vector3d> center_override)
 {
     const auto steady_start = PlanningBudget::Clock::now();
+    const double limit = max_duration_s >= 0.0 ? max_duration_s : (planning_query_ ? 1.0 : .2);
+    search_deadline_ = steady_start + std::chrono::duration_cast<PlanningBudget::Clock::duration>(
+        std::chrono::duration<double>(limit));
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
     rejected_advisory_ = false;
@@ -443,7 +447,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     result_.requested_end = end_pt;
     query_stats_at_start_ = grid_map_->planningQueryStats();
     advisory_stats_at_start_ = advisory_statistics_ ? advisory_statistics_() : GridPlanningQueryStats{};
-    search_generation_ = grid_map_->occupancyGeneration();
+    search_generation_ = frozen_epoch_ ? frozen_epoch_->generation : grid_map_->occupancyGeneration();
     result_.occupancy_generation = search_generation_;
 
     step_size_ = step_size;
@@ -490,7 +494,8 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     int num_iter = 0;
     while (!openSet_.empty())
     {
-        if (grid_map_->occupancyGeneration() != search_generation_) {
+        if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET,time_1); return false; }
+        if ((frozen_epoch_ ? !grid_map_->geometryMatches(*frozen_epoch_) : grid_map_->occupancyGeneration() != search_generation_)) {
             finishFailure(Failure::MAP_STALE, time_1);
             return false;
         }
@@ -594,11 +599,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
                 }
-        rclcpp::Time time_2 = rclcpp::Clock().now();
-        const double limit = max_duration_s >= 0.0 ? max_duration_s :
-            (planning_query_ ? 1.0 : 0.2);
-        if (std::chrono::duration<double>(PlanningBudget::Clock::now() - steady_start).count() > limit ||
-            (budget_ && budget_->expired()))
+        if (deadlineExpired())
         {
             finishFailure(Failure::TIME_BUDGET, time_1);
             return false;

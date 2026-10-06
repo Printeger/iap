@@ -205,7 +205,9 @@ struct GridPlanningCell {
 
 // Fixed physical conditions for one frozen PlanningView. Spatial rejection
 // precedence remains out-of-map, unobserved, stale, obstacle, then motion.
+struct FrozenOccupancyEpoch;
 struct GridPlanningContext {
+  std::shared_ptr<const FrozenOccupancyEpoch> epoch;
   uint64_t generation = 0;
   GridExecutionReason environment_reason = GridExecutionReason::OK;
   GridExecutionReason motion_reason = GridExecutionReason::OK;
@@ -355,8 +357,23 @@ struct GridMapOccupancyDiagnostic
 using GridMapOccupancyDiagnosticQuery =
     std::function<GridMapOccupancyDiagnostic(const Eigen::Vector3d &)>;
 
+struct FrozenOccupancyCells {
+  // Dense full-map export, or sorted scoped corridor addresses; both store
+  // producer-native raw/inflate/observed flags, not a second map authority.
+  std::vector<uint8_t> flags;
+  std::vector<int> addresses;
+  std::vector<uint8_t> comparison_masks;
+  std::vector<int> raw_addresses;
+  std::vector<size_t> raw_row_offsets;
+  uint8_t at(int address) const {
+    if (addresses.empty()) return address >= 0 && static_cast<size_t>(address) < flags.size() ? flags[address] : 0;
+    const auto it = std::lower_bound(addresses.begin(), addresses.end(), address);
+    return it != addresses.end() && *it == address ? flags[it-addresses.begin()] : 0;
+  }
+};
 struct FrozenOccupancyEpoch
 {
+  std::shared_ptr<const FrozenOccupancyCells> cells;
   GridMapOccupancyDiagnosticQuery diagnostic_query;
   // Immutable accumulated beam evidence. This is the sole formal GNSS LOS
   // support authority; the trusted FOV envelope below is diagnostic only.
@@ -467,7 +484,8 @@ public:
                                     bool performance_diagnostics = false);
   GridPlanningQueryStats planningQueryStats() const;
   GridPlanningContext preparePlanningQuery(double now,
-                                          const GridMotionContext& motion) const;
+                                          const GridMotionContext& motion,
+      std::shared_ptr<const FrozenOccupancyEpoch> epoch = {}) const;
   std::optional<GridMapFailureSnapshot> captureFailureSnapshot(
       bool include_observation_evidence = false) const;
   void setFailureEvidenceCapture(bool enabled);
@@ -495,6 +513,16 @@ public:
   OccupancyDiagnosticQuery captureOccupancyDiagnosticQuery() const;
   std::shared_ptr<const FrozenOccupancyEpoch>
   captureFrozenOccupancyEpoch() const;
+  static GridMapOccupancyDiagnostic queryFrozenOccupancy(
+      const FrozenOccupancyEpoch& epoch, const Eigen::Vector3d& position,
+      bool detailed = false);
+  std::shared_ptr<const FrozenOccupancyEpoch> captureFrozenCorridor(
+      const std::vector<Eigen::Vector3d>& positions, double required_clearance) const;
+  enum class CorridorCommit { Committed, Changed, Invalid };
+  CorridorCommit commitFrozenCorridor(const FrozenOccupancyEpoch& corridor,
+      double now, double max_environment_age, const std::function<bool()>& commit);
+  bool geometryMatches(const FrozenOccupancyEpoch& epoch) const;
+
   // Registered-map execution checks need immutable obstacle/support evidence,
   // but not a copy of every dense lattice byte.  This sparse capture keeps the
   // same generation and geometry identity while leaving the full dense freeze
@@ -552,11 +580,15 @@ private:
   std::unordered_map<int, ClearanceBounds> frozen_clearance_bounds_;
   GridPlanningQueryStats planning_query_stats_;
   double frozen_clearance_radius_m_ = -1.0;
+  uint64_t clearance_bounds_generation_ = 0;
+  mutable std::shared_ptr<const FrozenOccupancyEpoch> cached_physical_epoch_;
   double measureRawClearance(const Eigen::Vector3d& position,
                             const Eigen::Vector3i& index, double required,
-                            bool decision_only, Eigen::Vector3d* nearest);
+                            bool decision_only, Eigen::Vector3d* nearest,
+                            const FrozenOccupancyEpoch* epoch = nullptr);
   bool hasRequiredClearance(const Eigen::Vector3d& position,
-                            const Eigen::Vector3i& index, double required);
+                            const Eigen::Vector3i& index, double required,
+                            const FrozenOccupancyEpoch* epoch = nullptr);
   uint64_t frozen_raw_index_generation_ = 0;
   std::vector<int> frozen_raw_addresses_;
   std::vector<size_t> frozen_raw_row_offsets_;

@@ -3017,6 +3017,13 @@ GridMap::captureFrozenOccupancyEpoch() const
         mp_.resolution_inv_ <= 0.0 || mp_.frame_id_.empty() ||
         (mp_.map_voxel_num_.array() <= 0).any())
       return nullptr;
+    if (cached_physical_epoch_ && cached_physical_epoch_->generation == sequence/2u &&
+        cached_physical_epoch_->cloud_stamp_s == cloud_stamp_s &&
+        cached_physical_epoch_->frame_id == mp_.frame_id_ &&
+        cached_physical_epoch_->lattice_origin == mp_.map_origin_ &&
+        cached_physical_epoch_->voxel_dimensions == mp_.map_voxel_num_ &&
+        cached_physical_epoch_->resolution_m == mp_.resolution_)
+      return cached_physical_epoch_;
     const std::size_t nx = static_cast<std::size_t>(mp_.map_voxel_num_(0));
     const std::size_t ny = static_cast<std::size_t>(mp_.map_voxel_num_(1));
     const std::size_t nz = static_cast<std::size_t>(mp_.map_voxel_num_(2));
@@ -3143,63 +3150,27 @@ GridMap::captureFrozenOccupancyEpoch() const
   }
 
   const std::shared_ptr<const FrozenBuffers> frozen_buffers = buffers;
-  OccupancyDiagnosticQuery diagnostic_query =
-      [frozen_buffers](const Eigen::Vector3d &pos) {
-    OccupancyDiagnostic out;
-    out.resolution_m = frozen_buffers->resolution;
-    out.inflation_m = frozen_buffers->inflation;
-    out.frame_id = frozen_buffers->frame_id;
-    out.cloud_stamp_s = frozen_buffers->cloud_stamp_s;
-    out.generation = frozen_buffers->generation;
-    if (!pos.allFinite())
-      return out;
-    for (int axis = 0; axis < 3; ++axis)
-      out.voxel_index(axis) = static_cast<int>(std::floor(
-          (pos(axis) - frozen_buffers->map_origin(axis)) *
-          frozen_buffers->resolution_inv));
-    for (int axis = 0; axis < 3; ++axis)
-    {
-      if (out.voxel_index(axis) < 0 ||
-          out.voxel_index(axis) >= frozen_buffers->map_voxel_num(axis))
-      {
-        out.source = "position_out_of_map";
-        return out;
-      }
-    }
-    const std::size_t address =
-        static_cast<std::size_t>(out.voxel_index(0)) *
-            static_cast<std::size_t>(frozen_buffers->map_voxel_num(1)) *
-            static_cast<std::size_t>(frozen_buffers->map_voxel_num(2)) +
-        static_cast<std::size_t>(out.voxel_index(1)) *
-            static_cast<std::size_t>(frozen_buffers->map_voxel_num(2)) +
-        static_cast<std::size_t>(out.voxel_index(2));
-    out.voxel_center =
-        (out.voxel_index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
-            frozen_buffers->resolution + frozen_buffers->map_origin;
-    const bool raw_cloud = address < frozen_buffers->raw_cloud.size() &&
-        frozen_buffers->raw_cloud[address] != 0;
-    const bool raw_fused = address < frozen_buffers->fused.size() &&
-        frozen_buffers->fused[address] >
-            frozen_buffers->min_occupancy_log;
-    out.raw_occupied = raw_cloud || raw_fused;
-    out.inflated_occupied = address < frozen_buffers->inflated.size() &&
-        frozen_buffers->inflated[address] != 0;
-    out.observed = out.raw_occupied || out.inflated_occupied ||
-        (address < frozen_buffers->observed.size() &&
-         frozen_buffers->observed[address] != 0);
-    out.state = (out.raw_occupied || out.inflated_occupied)
-        ? GridMapObservationState::OCCUPIED
-        : out.observed ? GridMapObservationState::OBSERVED_FREE
-                       : GridMapObservationState::UNKNOWN;
-    out.available = true;
-    out.source = raw_cloud ? "raw_cloud" : raw_fused ? "fused_depth" :
-        out.inflated_occupied ? "inflated_neighbor" :
-        out.observed ? "observed_free" : "unknown";
-    return out;
-  };
-
+  auto cells = std::make_shared<FrozenOccupancyCells>();
+  cells->flags.resize(buffers->raw_cloud.size());
+  const size_t rows = static_cast<size_t>(buffers->map_voxel_num.x()) * buffers->map_voxel_num.y();
+  cells->raw_row_offsets.resize(rows + 1, 0);
+  for (size_t address = 0; address < cells->flags.size(); ++address) {
+    const bool raw = buffers->raw_cloud[address] ||
+        (address < buffers->fused.size() && buffers->fused[address] > buffers->min_occupancy_log);
+    cells->flags[address] = (raw ? 1 : 0) | (raw && !buffers->raw_cloud[address] ? 8 : 0) | (buffers->inflated[address] ? 2 : 0) |
+                           (buffers->observed[address] ? 4 : 0);
+    if (raw) { cells->raw_addresses.push_back(address);
+      ++cells->raw_row_offsets[address / buffers->map_voxel_num.z() + 1]; }
+  }
+  for (size_t row=1; row<cells->raw_row_offsets.size(); ++row)
+    cells->raw_row_offsets[row] += cells->raw_row_offsets[row-1];
+  // Keep one compact immutable physical representation after freezing.
+  std::vector<double>().swap(buffers->fused);
+  std::vector<char>().swap(buffers->raw_cloud);
+  std::vector<char>().swap(buffers->inflated);
+  std::vector<char>().swap(buffers->observed);
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
-  epoch->diagnostic_query = std::move(diagnostic_query);
+  epoch->cells = std::move(cells);
   epoch->local_evidence_snapshot = buffers->local_evidence_snapshot;
   epoch->map_inflation_m = frozen_buffers->inflation;
   epoch->raw_occupied_voxel_centers = std::move(centers);
@@ -3292,6 +3263,16 @@ GridMap::captureFrozenOccupancyEpoch() const
     support->model_version += ";coverage_history_v1";
     if (support->valid())
       epoch->trusted_local_map_support = std::move(support);
+  }
+  // The closure owns only immutable data, without an epoch->closure cycle.
+  FrozenOccupancyEpoch query_epoch = *epoch;
+  epoch->diagnostic_query = [query_epoch](const Eigen::Vector3d& position) {
+    return GridMap::queryFrozenOccupancy(query_epoch, position, true);
+  };
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    if (occupancy_update_sequence_.load() == epoch->generation*2u)
+      cached_physical_epoch_ = epoch;
   }
   return epoch;
 }
