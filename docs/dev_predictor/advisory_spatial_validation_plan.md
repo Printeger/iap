@@ -224,3 +224,12 @@ python3 src/iap/scripts/dev_predictor/advisory_validation.py fixture \
 ```
 
 同名证据拒绝覆盖，不在这份正式 run 上重复执行写入命令。现场 record/replay 入口存在并通过 CPU mock 服务测试，本轮没有真实 record/replay 执行命令，不能把它们列为已完成的现场复现。
+
+
+## 本轮：Advisory 后验先验默认关闭（2026-10-06）
+
+本轮接续 HEAD `9b03f36`，没有回退版本。默认关闭 shared FGO posterior proxy，只读启动开关 `risk/use_posterior_prior` / 仿真 `advisory_posterior_prior`；ON 仅旧行为复现。OFF 冻结输入 has_lambda_base=false，当前监测、误差代理、运动质量保留。当前输出为“基于观测条件的融合 Advisory”，没有未来 GLIO 误差保证。开关及 A/B 合同见 [工具契约](../spec/advisory_validation_contract.md)，实际 launch 命令见 README。
+
+新 run 为 `log/20261006T141611Z_756`。同物理地图/源观测/时间/参数/候选的 S0–S5 双组工具已经实现；完整编码配对只移除先验标志/矩阵，来源诊断及正则化证据另存。关闭组不重新引入 S4 alpha 先验。CPU 弱墙恢复曲线出图仍被原物理检查拒绝，需分别记录规划覆盖和预测机制；缺 GNSS 的准入差异不在本轮放宽。正式提交绑定复跑与图文报告将在新 run 登记；旧报告及产物保持原身份。现场三份输入、固定合法路线、配对 seed 至少三次运行和实际误差校准仍待测，不将机制测试写成真实森林验收。
+
+回归已执行：6 项新 A/B 合同、9 项原冻结工具合同、33 项 EGO baseline、独立可视化/规划进程管线、35 项 canonical launch 合同及 PredictorModule CTest 通过；已安装 launch 的 --show-args 确认默认 false。产物契约检查通过。日志在本轮 runtime/ros。

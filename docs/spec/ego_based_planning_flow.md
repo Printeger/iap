@@ -401,3 +401,12 @@ ctest --test-dir build/ego_planner -R '^test_ego_baseline$|^test_ego_pipeline$' 
 ## 文档维护规则
 
 每次本轮规划开发在同一提交更新阶段流程图、接口、阶段状态和对应验证结果。未开发节点继续标记 EGO 基线。原版流程固定，目标图不作为已实现能力声明。无需为无关改动追加历史流水账。
+
+
+## 本轮：Advisory 后验先验默认关闭（2026-10-06）
+
+共享 snapshot 构造默认不再将 FGO 后验误差代理 `(3/e)^2 I` 加入 Advisory。`risk/use_posterior_prior` 为只读启动参数，仿真 `advisory_posterior_prior:=true` 仅复现旧行为。planner 与独立可视化使用同一导出输入；OFF has_lambda_base=false，当前质量/代理与运动、物理、B-spline/发布检查保持原语义。输入 identity 包含参与标志/矩阵，绑定 risk version 更新。GNSS 缺失的包装器/模块准入差异单独保留。
+
+同输入 A/B 工具增加完整 codec 配对校验、S0–S5、正则化/弱方向诊断和来源矩阵报告；当前输出定位为“基于观测条件的融合 Advisory”。CPU 弱墙场景在 OFF 下暴露 Advisory 恢复曲线出图，被原物理检查拒绝；旧成功曲线测试显式绑定 ON，另加 OFF 拒绝回归。没有调整阈值、色标、预算或恢复代价。真实三份森林输入和至少三次配对运行仍待测；提交后需记录工作树与 GPU 预检，机制结果不能替代实际误差校准。正式报告绑定提交后登记。
+
+回归已执行：6 项新 A/B 合同、9 项原冻结工具合同、33 项 EGO baseline、独立可视化/规划进程管线、35 项 canonical launch 合同及 PredictorModule CTest 通过；已安装 launch 的 --show-args 确认默认 false。产物契约检查通过。日志在本轮 runtime/ros。

@@ -101,6 +101,9 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static iap::IntegritySnapshot snapshot(const EGOPlannerManager& manager, double now) {
+    return manager.capturePredictionSnapshot(now);
+  }
   static AStar::Result lastSearchResult(const EGOPlannerManager& manager) {
     return manager.bspline_optimizer_->a_star_->lastResult();
   }
@@ -164,7 +167,8 @@ struct EGOPlannerManagerTestAccess {
 };
 }
 namespace {
-rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double smooth_weight = 1.0) {
+rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double smooth_weight = 1.0,
+                               bool posterior_prior = false) {
   if (!rclcpp::ok()) rclcpp::init(0,nullptr);
   rclcpp::NodeOptions opts;
   opts.parameter_overrides({
@@ -183,6 +187,7 @@ rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double sm
     {"optimization/dist0",0.5}, {"optimization/swarm_clearance",0.5},
     {"optimization/max_vel",1.0}, {"optimization/max_acc",2.0}
   });
+  if (posterior_prior) opts.append_parameter_override("risk/use_posterior_prior",true);
   return std::make_shared<rclcpp::Node>("ego_baseline_test",opts);
 }
 }
@@ -220,7 +225,9 @@ TEST(EgoBaseline, RealPredictorUsesSameMapAndRejectsStaleInputs) {
   EXPECT_EQ(map->queryRisk(Eigen::Vector3d(0,0,1),stale,10).status,GridRiskStatus::STALE);
 }
 TEST(EgoBaseline, PhysicalPlanningProducesFiniteCurveAndObstacleDetour) {
-  auto node=makeNode(true);
+  // Preserve the original physical-planning fixture's legacy input assumption.
+  // Observation-only behavior with its weak wall is exercised separately below.
+  auto node=makeNode(true,1.,true);
   ego_planner::EGOPlannerManager manager;
   auto vis=std::make_shared<ego_planner::PlanningVisualization>(node);
   manager.initPlanModules(node,vis);
@@ -1088,6 +1095,14 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
     const auto bytes=ego_planner::encodePredictionInput(input);
     std::ofstream stream(fixture,std::ios::binary); stream.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
     ASSERT_TRUE(stream.good());
+    for (const bool enabled : {true, false}) {
+      auto variant=input;
+      ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
+      const auto paired=ego_planner::encodePredictionInput(variant);
+      std::ofstream output(std::string(fixture)+(enabled?"_on":"_off"),std::ios::binary);
+      output.write(reinterpret_cast<const char*>(paired.data()),paired.size());
+      ASSERT_TRUE(output.good());
+    }
   }
 }
 
@@ -1321,6 +1336,70 @@ TEST(EgoBaseline, ActualReadOnlyServiceDoesNotChangePredictionVersion) {
   EXPECT_EQ(response->generation,decoded.occupancy->generation);
   EXPECT_EQ(response->frame_id,decoded.occupancy->frame_id);
   EXPECT_EQ(version,GridMapTestAccess::riskVersion(*manager.grid_map_));
+  EXPECT_FALSE(decoded.integrity.has_lambda_base);
+  EXPECT_EQ(decoded.integrity.current.current_motion_quality,1);
+  EXPECT_DOUBLE_EQ(decoded.integrity.current.current_motion_error_proxy_m,.05);
+}
+
+TEST(EgoBaseline, AdvisoryPriorToggleSharesExportAndPreservesMotionAuthority) {
+  for (const bool enabled : {false, true}) {
+    auto node=makeNode(false,1.,enabled); ego_planner::EGOPlannerManager manager;
+    manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+    const double now=node->now().seconds(); const Eigen::Vector3d start(-2,0,1);
+    GridMapTestAccess::input(*manager.grid_map_,{},now,start);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,start);
+    const auto motion=manager.currentMotionContext();
+    const auto snapshot=ego_planner::EGOPlannerManagerTestAccess::snapshot(manager,now);
+    EXPECT_EQ(snapshot.has_lambda_base,enabled);
+    EXPECT_DOUBLE_EQ(snapshot.lambda_base_pos(0,0),enabled?3600.:0.);
+    auto client=node->create_client<iap::srv::GetGridMapPredictionInput>("grid_map/prediction_input");
+    auto future=client->async_send_request(std::make_shared<iap::srv::GetGridMapPredictionInput::Request>());
+    rclcpp::executors::SingleThreadedExecutor executor; executor.add_node(node);
+    ASSERT_EQ(executor.spin_until_future_complete(future,std::chrono::seconds(2)),rclcpp::FutureReturnCode::SUCCESS);
+    const auto response=future.get();
+    ASSERT_TRUE(response->available);
+    auto exported=ego_planner::decodePredictionInput(response->payload);
+    EXPECT_EQ(exported.integrity.has_lambda_base,enabled);
+    EXPECT_EQ(exported.integrity.lambda_base_pos,snapshot.lambda_base_pos);
+    EXPECT_EQ(exported.integrity.current.current_motion_quality,motion.quality);
+    EXPECT_DOUBLE_EQ(exported.integrity.current.current_motion_error_proxy_m,motion.error_proxy_m);
+    const auto cell=manager.grid_map_->queryPlanningCell(start,0,now,GridPlanningRiskPolicy{},motion);
+    EXPECT_TRUE(cell.executable());
+    EXPECT_FALSE(node->set_parameter(rclcpp::Parameter("risk/use_posterior_prior",!enabled)).successful);
+    const auto unchanged=manager.currentMotionContext();
+    EXPECT_EQ(unchanged.quality,motion.quality);
+    EXPECT_DOUBLE_EQ(unchanged.error_proxy_m,motion.error_proxy_m);
+    const auto identity=ego_planner::predictionInputIdentity(exported);
+    ego_planner::setAdvisoryPosteriorPrior(exported.integrity,!enabled);
+    EXPECT_NE(identity,ego_planner::predictionInputIdentity(exported));
+    const auto first=manager.bindRiskPrediction(snapshot,now,exported.occupancy);
+    const auto second=manager.bindRiskPrediction(exported.integrity,now,exported.occupancy);
+    EXPECT_GT(second,first);
+  }
+}
+
+TEST(EgoBaseline, ObservationOnlyWeakWallCannotBypassPhysicalCurveCheck) {
+  auto node=makeNode(true); ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  std::vector<Eigen::Vector3d> wall;
+  for(double y=-.6;y<=.6;y+=.1) for(double z=.1;z<=2.4;z+=.1) wall.emplace_back(0,y,z);
+  const double now=node->now().seconds();
+  GridMapTestAccess::input(*manager.grid_map_,wall,now,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1);
+  const auto motion=manager.currentMotionContext();
+  ASSERT_EQ(motion.quality,1);
+  ASSERT_TRUE(manager.grid_map_->queryPlanningCell(start,0,now,GridPlanningRiskPolicy{},motion).executable());
+  const auto id=manager.local_data_.traj_id_;
+  ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
+  // This single weak wall drives the unchanged Advisory recovery outside the
+  // map. The production final check must reject, rather than publish it.
+  EXPECT_FALSE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+  EXPECT_FALSE(manager.hasPendingTrajectory());
+  EXPECT_EQ(manager.local_data_.traj_id_,id);
 }
 
 TEST(EgoBaseline, ConcurrentReadOnlyAndPlanningFreezeShareOneEpoch) {

@@ -81,6 +81,7 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(display["risk_viz/surface_lifetime_s"], 60.0)
             self.assertEqual(display["risk_viz/surface_snapshot_step_m"], 4.0)
             self.assertFalse(params["planning/capture_failure_map"])
+            self.assertFalse(params["risk/use_posterior_prior"])
             self.assertFalse(any(key.startswith(("p0.", "p1.", "p2.", "p3.", "p4.", "p5.")) for key in params))
             self.assertNotIn("manager/use_distinctive_trajs", params)
             for i, axis in enumerate("xyz"):
@@ -88,6 +89,15 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertTrue(runtime.planner_parameters(
             catalog["icra_dense_forest_four_fork_v2"], True)[
                 "planning/capture_failure_map"])
+
+    def test_advisory_prior_explicit_enable_changes_only_shared_input_parameter(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        scene = json.loads((REPO / "config/scenarios/catalog.json").read_text())["icra_dense_forest_four_fork_v2"]
+        off = runtime.planner_parameters(scene)
+        on = runtime.planner_parameters(scene, advisory_posterior_prior=True)
+        self.assertEqual([key for key in off if off[key] != on[key]], ["risk/use_posterior_prior"])
+        self.assertTrue(on["risk/use_posterior_prior"])
+        self.assertNotIn("risk/use_posterior_prior", runtime.visualizer_parameters())
 
     def test_stage1_graph_materializes_same_registered_lattice_and_preserves_artifacts(self):
         runtime = self._load_launch("_includes/full_stack_runtime.py")

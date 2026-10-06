@@ -12,6 +12,9 @@ struct PredictionInput {
   double reference_time_s = 0.0;
   double validity_s = .5;
 };
+// Shared input authority. This only controls the Advisory posterior proxy;
+// Current Monitor fields and GLIO/FGO state are never changed.
+void setAdvisoryPosteriorPrior(iap::IntegritySnapshot& snapshot, bool enabled);
 GridRiskContext makeRiskPrediction(const PredictionInput& input,
     std::shared_ptr<std::atomic<uint64_t>> calls = {},
     std::string* rejection_reason = nullptr);

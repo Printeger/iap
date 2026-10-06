@@ -96,7 +96,7 @@ def compare(run, contract_path=None):
     odom = [r for p in sorted((run / "export/advisory/validation/recordings").glob("*_odometry.csv")) for r in rows(p)]
     truth = [r for r in odom if r["source"] == "truth"]
     result = []
-    for p in sorted((run / "export/advisory/validation").glob("*_current/points.csv")):
+    for p in sorted((run / "export/advisory/validation").rglob("*_current/points.csv")):
         meta = json.loads(p.with_name("input.json").read_text())
         for row in rows(p):
             if row["identity"] != "REAL_REPLAY":

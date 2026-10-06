@@ -1,5 +1,15 @@
 #include <ego_planner/prediction_input.h>
 namespace ego_planner {
+void setAdvisoryPosteriorPrior(iap::IntegritySnapshot& snapshot, const bool enabled) {
+  snapshot.has_lambda_base = false;
+  snapshot.lambda_base_pos.setZero();
+  const double error = snapshot.current.current_motion_error_proxy_m;
+  if (!enabled || !snapshot.current.valid || !std::isfinite(error) || error <= 0.) return;
+  const double information = std::pow(3.0 / error, 2);
+  if (!std::isfinite(information)) return;
+  snapshot.lambda_base_pos.diagonal().setConstant(information);
+  snapshot.has_lambda_base = true;
+}
 GridRiskContext makeRiskPrediction(const PredictionInput& input,
     std::shared_ptr<std::atomic<uint64_t>> calls, std::string* rejection_reason) {
   if (rejection_reason) rejection_reason->clear();

@@ -23,7 +23,7 @@ from profile_runtime import materialize_profile
 from run_directory import register_config_snapshot
 
 
-def planner_parameters(scenario, capture_failure_map=False):
+def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_prior=False):
     size = [float(v) for v in scenario["map_size"]]
     goal = [float(v) for v in scenario["goal"]]
     velocity = float(scenario["max_velocity_mps"])
@@ -75,6 +75,7 @@ def planner_parameters(scenario, capture_failure_map=False):
         "planning/tracking_error_limit_m": 0.30,
         "planning/capture_failure_map": capture_failure_map,
         "risk/gnss_max_age_s": 2.0,
+        "risk/use_posterior_prior": advisory_posterior_prior,
         "risk/source": {"lidar_only": "lidar", "gnss_only": "gnss"}.get(profile, "fusion"),
     }
     for i, axis in enumerate("xyz"):
@@ -121,7 +122,9 @@ def _setup(context):
                    parameters=[planner_parameters(
                        scenario,
                        context.launch_configurations.get(
-                           "capture_failure_map", "false").lower() == "true")],
+                           "capture_failure_map", "false").lower() == "true",
+                       context.launch_configurations.get(
+                           "advisory_posterior_prior", "false").lower() == "true")],
                    remappings=remaps)
     actions = [
         IncludeLaunchDescription(PythonLaunchDescriptionSource(

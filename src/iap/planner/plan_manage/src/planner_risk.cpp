@@ -79,6 +79,11 @@ iap::CurrentIntegrityState currentFromMsg(
 
 void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   risk_validity_s_ = node->declare_parameter("risk/validity_s", 0.5);
+  rcl_interfaces::msg::ParameterDescriptor prior_descriptor;
+  prior_descriptor.read_only = true;
+  prior_descriptor.description = "Advisory FGO posterior proxy; restart to change; false uses observation information only";
+  advisory_posterior_prior_enabled_ = node->declare_parameter(
+      "risk/use_posterior_prior", false, prior_descriptor);
   planning_risk_policy_.hpl_budget_m = node->declare_parameter("planning/advisory_hpl_budget_m", 0.55);
   planning_risk_policy_.vpl_budget_m = node->declare_parameter("planning/advisory_vpl_budget_m", 0.60);
   planning_risk_policy_.reserve_h_m = node->declare_parameter("planning/advisory_hpl_reserve_m", 0.10);
@@ -317,18 +322,12 @@ iap::IntegritySnapshot EGOPlannerManager::capturePredictionSnapshot(const double
     for (auto& sat : epoch->sats) sat.excluded = sat.excluded || excluded.count(sat.sat_id);
     input.gnss_epoch = &*epoch;
   }
-  // Advisory approximation: use the same-frame FGO posterior error proxy as
-  // a diagonal position prior. The source-max monitor PL is not a fused
-  // posterior and must not be interpreted as one.
-  Eigen::Matrix3d prior = Eigen::Matrix3d::Zero();
-  if (current.valid &&
-      current.current_motion_error_proxy_m > 0) {
-    const double information = std::pow(
-        3.0 / current.current_motion_error_proxy_m, 2);
-    prior.diagonal().setConstant(information);
-    input.lambda_base_pos = &prior;
-  }
-  return iap::IntegritySnapshotBuilder().build_from_latest(input);
+  // Advisory approximation retained only for explicit legacy A/B runs.
+  // Planner binding and independent visualization export consume this same
+  // snapshot. Current-motion authority remains currentMotionContext().
+  auto snapshot = iap::IntegritySnapshotBuilder().build_from_latest(input);
+  setAdvisoryPosteriorPrior(snapshot, advisory_posterior_prior_enabled_);
+  return snapshot;
 }
 
 uint64_t EGOPlannerManager::beginRiskQuery() {

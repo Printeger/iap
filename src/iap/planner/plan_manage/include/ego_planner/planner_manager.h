@@ -183,6 +183,7 @@ namespace ego_planner
     rclcpp::Node::SharedPtr node_;
     iap::PredictorParams predictor_params_;
     double risk_validity_s_ = 0.5;
+    bool advisory_posterior_prior_enabled_ = false;
     GridPlanningRiskPolicy planning_risk_policy_;
     double motion_body_radius_m_ = 0.35;
     double motion_tracking_reserve_m_ = 0.10;

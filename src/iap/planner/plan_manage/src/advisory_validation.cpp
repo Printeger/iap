@@ -1,6 +1,7 @@
 // Offline experiments use the production module and frozen input codec.
 // No diagnostics are written back to GridMap or an execution authority.
 #include <ego_planner/prediction_input.h>
+#include <ego_planner/risk_display.h>
 #include <iap/util/run_log_manager.hpp>
 #include <Eigen/Eigenvalues>
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <set>
 #include <stdexcept>
 
@@ -18,6 +20,8 @@ using Input = ego_planner::PredictionInput;
 using Clock = std::chrono::steady_clock;
 using Point = Eigen::Vector3d;
 std::string campaign_namespace;
+int pair_phase = 0;
+std::map<std::string, std::vector<uint8_t>> paired_observations;
 double seconds(Clock::time_point start) {
   return std::chrono::duration<double>(Clock::now()-start).count();
 }
@@ -121,6 +125,11 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o << ",\"prior_generation\":" << s.prior_source_generation << ",\"position\":"; array(o,s.p_wb);
   o << ",\"quaternion_xyzw\":"; array(o,s.q_wb.coeffs());
   o << ",\"prior_row_major\":"; array(o,s.lambda_base_pos);
+  o << ",\"has_lambda_base\":" << (s.has_lambda_base?"true":"false");
+  o << ",\"current_motion_quality\":" << unsigned(s.current.current_motion_quality);
+  o << ",\"current_motion_error_proxy_m\":"; number(o,s.current.current_motion_error_proxy_m);
+  o << ",\"prediction_input_identity\":";
+  if (in.occupancy) o << ego_planner::predictionInputIdentity(in); else o << "null";
   o << ",\"source_mode\":" << static_cast<int>(in.params.source_mode);
   o << ",\"gnss_epoch_policy\":" << static_cast<int>(in.params.gnss_epoch_policy);
   o << ",\"gnss_sigma\": [";
@@ -141,10 +150,27 @@ void describe(const Input& in,const std::filesystem::path& path) {
 }
 
 void evaluate(const Input& source,const std::string& label,const std::string& identity,
-              bool scan,double budget_s,glim::RunLogManager& log,bool weak_normals=false) {
+              bool scan,double budget_s,glim::RunLogManager& log,bool weak_normals=false,
+              const std::string& request_failure={}) {
   const auto dir=log.export_path("advisory/validation/"+campaign_namespace+label+"/points.csv").parent_path();
   std::filesystem::create_directories(dir);
   if(std::filesystem::exists(dir/"points.csv")) throw std::runtime_error("refusing to overwrite experiment: "+label);
+  // Compare the complete codec, including map cells/support, sources, current
+  // assessment, reference time and every PredictorParams field. Only the
+  // Advisory prior participation/matrix may differ between paired campaigns.
+  if (pair_phase) {
+    auto observations = source;
+    observations.integrity.has_lambda_base = false;
+    observations.integrity.lambda_base_pos.setZero();
+    const auto payload = source.occupancy ? ego_planner::encodePredictionInput(observations)
+                                         : std::vector<uint8_t>{};
+    if (pair_phase == 1) {
+      paired_observations.emplace(label, payload);
+      if (source.occupancy) bytes(dir/"observation_input.bin",payload);
+    }
+    else if (paired_observations.at(label) != payload)
+      throw std::runtime_error("unpaired observation input: " + label);
+  }
   const auto codec_start=Clock::now();
   Input in=source;
   if(source.occupancy) {
@@ -157,6 +183,7 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
   {std::ofstream variant(dir/"variant.json");
    variant<<"{\"identity\":"<<std::quoted(identity)<<",\"label\":"<<std::quoted(label)
      <<",\"weak_normal_support_override\":"<<(weak_normals?"true":"false")
+     <<",\"paired_observation_codec_equal\":"<<(pair_phase==2&&source.occupancy?"true":"null")
      <<",\"support_rule\":\""<<(weak_normals?"derive default PCA then retain abs(normal_w.x)<0.1":"default production derivation")<<"\"}\n";}
   std::ofstream csv(dir/"points.csv"), matrices(dir/"matrices.jsonl");
   std::string timing_label=campaign_namespace+label;
@@ -180,7 +207,7 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     }
   }
   const double preparation=seconds(started);
-  std::string input_reason=coordinateReason(in);
+  std::string input_reason=request_failure.empty()?coordinateReason(in):request_failure;
   if(preparation>budget_s) input_reason="preparation_budget_exceeded";
   std::vector<Point> points;
   Point p=in.integrity.p_wb;
@@ -264,6 +291,11 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
       const Point weak=eig.eigenvectors().col(0);const double total_info=weak.dot(f.lambda_pred*weak);
       number(matrices,total_info>0?weak.dot(f.lambda_prior*weak)/total_info:NAN);
     } else matrices<<"null";
+    matrices<<",\"fusion_epsilon\":";number(matrices,in.params.fusion.fim_epsilon);
+    matrices<<",\"epsilon_applied\":"<<(f.epsilon_applied?"true":"false")
+      <<",\"degeneracy_regularized\":"<<(f.degeneracy_regularized?"true":"false")
+      <<",\"gnss_regularized\":"<<(result.gnss.fim_regularized?"true":"false")
+      <<",\"lidar_regularized\":"<<(result.lidar.fim_regularized?"true":"false");
     matrices<<"}\n";
   }
   timing<<label<<','<<std::setprecision(17)<<codec_s<<','<<preparation<<','<<query_total<<','<<seconds(total)+codec_s<<','<<points.size()<<','<<calls->load()<<','<<direct_calls<<'\n';
@@ -272,6 +304,8 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
 
 void campaign(const Input& original,const std::string& identity,double budget,glim::RunLogManager& log) {
   evaluate(original,"S0",identity,true,budget,log);
+  const auto diagnostic_identity=identity=="REAL_REPLAY"?"REAL_INPUT_DIAGNOSTIC":identity;
+  if (pair_phase) evaluate(original,"S0_current",identity,false,budget,log);
   for(const std::string group:{"S1","S2","S3","S4"})
     for(int level=0;level<3;++level) {
       auto in=original; const double scale=level==0?1.:level==1?10.:100.;
@@ -284,7 +318,7 @@ void campaign(const Input& original,const std::string& identity,double budget,gl
         in.integrity.lambda_base_pos*=level==0?1.:level==1?.1:0.;
         if(level==2) in.integrity.has_lambda_base=false;
       }
-      evaluate(in,group+"_"+std::to_string(level),identity,false,budget,log);
+      evaluate(in,group+"_"+std::to_string(level),diagnostic_identity,false,budget,log);
     }
   // Paired prior-free dual-source degradation for the signal-retention ratio.
   for(int level=0;level<3;++level) {
@@ -293,15 +327,25 @@ void campaign(const Input& original,const std::string& identity,double budget,gl
     for(auto& sat:in.integrity.gnss_epoch.sats) sat.pr_sigma*=scale;
     in.integrity.current.gnss_epoch_identity=iap::gnss_epoch_identity(in.integrity.gnss_epoch,in.integrity.current.excluded_prns);
     in.params.lidar.fim_params.fim_range_sigma_base*=scale;
-    evaluate(in,"S3_no_prior_"+std::to_string(level),identity,false,budget,log);
+    evaluate(in,"S3_no_prior_"+std::to_string(level),diagnostic_identity,false,budget,log);
   }
-  evaluate(original,"S2_weak_normal_support",identity,false,budget,log,true);
+  evaluate(original,"S2_weak_normal_support",diagnostic_identity,false,budget,log,true);
+  if (pair_phase) {
+    auto weak=original; weak.params.source_mode=iap::PredictorSourceMode::LidarOnly;
+    evaluate(weak,"weak_lidar_only",diagnostic_identity,false,budget,log,true);
+    auto limit=original;
+    for(auto& sat:limit.integrity.gnss_epoch.sats) sat.pr_sigma*=1.e6;
+    limit.integrity.current.gnss_epoch_identity=iap::gnss_epoch_identity(limit.integrity.gnss_epoch,limit.integrity.current.excluded_prns);
+    limit.params.lidar.fim_params.fim_range_sigma_base*=1.e6;
+    evaluate(limit,"S3_regularization_limit",diagnostic_identity,false,budget,log);
+  }
   for(const std::string mode:{"gnss","lidar"}) {
     auto in=original;in.params.source_mode=mode=="gnss"?iap::PredictorSourceMode::GnssOnly:iap::PredictorSourceMode::LidarOnly;
-    evaluate(in,"source_"+mode,identity,false,budget,log);
+    evaluate(in,"source_"+mode,diagnostic_identity,false,budget,log);
   }
   for(const std::string name:{"missing_gnss","stale_gnss","missing_lidar","both_missing","no_observations","missing_physical","stale_pose","stale_current","stale_snapshot","stale_cloud","missing_pose","invalid_current","wrong_frame","out_of_map","physical_occupied","physical_unobserved","preparation_budget"}) {
     auto in=original;
+    std::string request_failure;
     if(name=="missing_gnss" || name=="both_missing") in.integrity.has_epoch=false;
     if(name=="missing_lidar" || name=="both_missing" || name=="no_observations") {
       auto e=std::make_shared<FrozenOccupancyEpoch>(*in.occupancy);
@@ -317,7 +361,11 @@ void campaign(const Input& original,const std::string& identity,double budget,gl
     if(name=="wrong_frame") {auto e=std::make_shared<FrozenOccupancyEpoch>(*in.occupancy);e->frame_id="wrong_frame";in.occupancy=e;}
     if(name=="out_of_map") in.integrity.p_wb.x()=1000.;
     if(name=="no_observations") {in.integrity.gnss_epoch.sats.clear();in.integrity.current.gnss_valid=false;}
-    if(name=="physical_occupied") in.integrity.p_wb=in.occupancy->raw_occupied_voxel_centers->front();
+    if(name=="physical_occupied") {
+      if(in.occupancy->raw_occupied_voxel_centers && !in.occupancy->raw_occupied_voxel_centers->empty())
+        in.integrity.p_wb=in.occupancy->raw_occupied_voxel_centers->front();
+      else request_failure="diagnostic_requires_occupied_voxel";
+    }
     if(name=="physical_unobserved") {
       auto e=std::make_shared<FrozenOccupancyEpoch>(*in.occupancy);
       auto cells=std::make_shared<FrozenOccupancyCells>(*e->cells);
@@ -326,22 +374,31 @@ void campaign(const Input& original,const std::string& identity,double budget,gl
       e->cells=cells;in.occupancy=e;
     }
     if(name=="missing_physical") in.occupancy.reset();
-    evaluate(in,"S5_"+name,identity,false,name=="preparation_budget"?0.:budget,log);
+    evaluate(in,"S5_"+name,diagnostic_identity,false,name=="preparation_budget"?0.:budget,log,false,request_failure);
+  }
+  if (pair_phase) {
+    auto invalid=original;
+    auto e=std::make_shared<FrozenOccupancyEpoch>(*invalid.occupancy);
+    e->raw_occupied_voxel_centers=std::make_shared<const std::vector<Point>>();invalid.occupancy=e;
+    for(auto& sat:invalid.integrity.gnss_epoch.sats) sat.pr_sigma=NAN;
+    invalid.integrity.current.gnss_valid=false;
+    invalid.integrity.current.gnss_epoch_identity=iap::gnss_epoch_identity(invalid.integrity.gnss_epoch,invalid.integrity.current.excluded_prns);
+    evaluate(invalid,"S5_nonfinite_observations",diagnostic_identity,false,budget,log);
   }
 }
 } // namespace
 
 int main(int argc,char** argv) {
   try {
-    if(argc<3) throw std::invalid_argument("advisory_validation fixture|replay LABEL [PAYLOAD] [BUDGET_S] [campaign]");
+    if(argc<3) throw std::invalid_argument("advisory_validation fixture|fixture_ab|replay|replay_ab LABEL [PAYLOAD] [BUDGET_S]");
     if(!std::getenv("IAP_RUN_DIR")) throw std::runtime_error("IAP_RUN_DIR must be allocated by the Python owner");
     const std::string mode=argv[1],label=argv[2];
     if(label.empty() || label.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos)
       throw std::invalid_argument("unsafe label");
     auto& log=glim::RunLogManager::initialize("advisory_validation");
     Input in; double budget=120.;
-    if(mode=="fixture") in=fixture();
-    else if(mode=="replay" && argc>=4) {
+    if(mode=="fixture" || mode=="fixture_ab") in=fixture();
+    else if((mode=="replay" || mode=="replay_ab") && argc>=4) {
       std::ifstream file(argv[3],std::ios::binary|std::ios::ate);
       if(!file || file.tellg()<=0 || file.tellg()>256*1024*1024) throw std::runtime_error("invalid payload file");
       const size_t size=file.tellg();file.seekg(0);std::vector<uint8_t> data(size);
@@ -350,7 +407,17 @@ int main(int argc,char** argv) {
     } else throw std::invalid_argument("invalid validation mode");
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
-    if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
+    if(mode=="fixture_ab" || mode=="replay_ab") {
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":"REAL_REPLAY";
+      for (const bool enabled : {true, false}) {
+        auto variant=in;
+        ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
+        pair_phase=enabled?1:2;
+        campaign_namespace=label+(enabled?"_on/":"_off/");
+        campaign(variant,identity,budget,log);
+      }
+    }
+    else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
       evaluate(in,label,"REAL_REPLAY",true,budget,log);
       evaluate(in,label+"_current","REAL_REPLAY",false,budget,log);

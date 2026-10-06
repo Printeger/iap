@@ -69,7 +69,7 @@ class EgoPipelineTest(unittest.TestCase):
             # Produce wire input with the real shared codec and Predictor fixture.
             subprocess.run([ARGS.baseline,"--gtest_filter=EgoBaseline.ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache"],
                            env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            wire=payload.read_bytes()
+            wire=Path(str(payload)+"_on").read_bytes()
             rclpy.init(args=[]); node=rclpy.create_node("readonly_display_fixture")
             clouds, surfaces, statuses, paths=[],[],[],[]; exports=[]
             def export(request,response):
@@ -103,6 +103,23 @@ class EgoPipelineTest(unittest.TestCase):
                 self.assertGreaterEqual(len(exports),2)
                 self.assertTrue(any(" vpl historical " in m.text for m in statuses))
                 self.assertEqual(references,{m.text.split("ref=")[-1].split(" age=")[0] for m in statuses if "ref=" in m.text})
+                on_cloud=next(c for c in clouds if c.width)
+                def valid_hpl(cloud):
+                    values=point_cloud2.read_points(cloud,field_names=("hpl","status"),skip_nans=True)
+                    return np.asarray(values["hpl"][values["status"]==1],dtype=float)
+                on_hpl=valid_hpl(on_cloud)
+                self.assertGreater(len(on_hpl),0)
+                # Same time/map/observations, only shared input prior changed.
+                # The existing identity must invalidate historical PL reuse.
+                wire=Path(str(payload)+"_off").read_bytes()
+                end=time.monotonic()+3
+                while time.monotonic()<end and len([c for c in clouds if c.width])<3:
+                    rclpy.spin_once(node,timeout_sec=.02)
+                off_cloud=[c for c in clouds if c.width][-1]
+                self.assertEqual(seconds(off_cloud.header.stamp),seconds(on_cloud.header.stamp))
+                off_hpl=valid_hpl(off_cloud)
+                self.assertGreater(len(off_hpl),0)
+                self.assertGreater(np.median(off_hpl),np.median(on_hpl)*2)
                 clear=node.create_client(Trigger,"/grid_map/clear_risk_history")
                 self.assertTrue(clear.wait_for_service(timeout_sec=2))
                 future=clear.call_async(Trigger.Request()); end=time.monotonic()+1

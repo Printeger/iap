@@ -71,6 +71,7 @@ def _setup(context):
             *(["Independent GridMap PL visualizer"] if context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true" else []),
         ],
         "grid_map_visualizer_enabled": context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true",
+        "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
             "config/sim_ego/grid_map_stage1.rviz"
@@ -106,6 +107,7 @@ def _setup(context):
             ),
             launch_arguments={
                 "scenario": scenario,
+                "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
                 "runtime_root_dir": str(output_dir / "metadata" / "config" / "full_stack"),
@@ -130,6 +132,9 @@ def generate_launch_description():
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("start_grid_map_visualizer", default_value="true"),
+            DeclareLaunchArgument("advisory_posterior_prior", default_value="false",
+                                 choices=["true", "false"],
+                                 description="Include FGO posterior proxy in Advisory (legacy A/B only)"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
             DeclareLaunchArgument("capture_failure_map", default_value="false"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),

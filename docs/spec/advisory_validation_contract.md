@@ -2,6 +2,12 @@
 
 本工具仅录制、离线诊断和生成报告；不创建风险地图，不写 GridMap 风险缓存，不授予运动权限。生产的净空、PL 预警线、执行条件与最终曲线检查不变。
 
+Advisory 后验代理参与由 planner 启动只读参数 `risk/use_posterior_prior` 控制，默认 false；仿真 `advisory_posterior_prior:=true` 仅复现旧 `(3/e)^2 I`。共享 `setAdvisoryPosteriorPrior()` 在捕获 snapshot 时执行，planner 和导出服务使用同一结果，独立可视化无独立判断。OFF 清除 has_lambda_base 与矩阵，保留当前监测质量、误差代理、时间与 GLIO/FGO 内部信息。codec v1 无需换版：已有参与标志/矩阵就是完整输入语义；输入 identity 序列化二者，planner 绑定新 risk version。启动参数不能运行中伪切换。
+
+`scripts/dev_predictor/advisory_prior_ab_validation.py fixture|replay --binary ... --label LABEL` 将相同冻结输入的 ON/OFF S0–S5 分存 LABEL_on/LABEL_off。只清除 ON 的先验标志/矩阵后完整编码 observation_input.bin，其 SHA256 必须等于 OFF input.bin；逐点坐标、时间、物理状态与源 PL 也必须相等。OFF 的 S4 alpha 不重新引入先验。缺物理输入不能编码，配对 codec 检查为 N/A 并保留失败。真实 S0/receiver 为 REAL_REPLAY，受控变体为 REAL_INPUT_DIAGNOSTIC；合成夹具全部为 SYNTHETIC_MECHANISM。矩阵额外导出 epsilon、源正则化标志和弱方向占比。弱法向单源与极端噪声是离线诊断，不改生产正则化或准入。
+
+当前输出定位为“基于观测条件的融合 Advisory”；消除这条 FGO 后验再加入路径，不等于证明 GNSS/LiDAR 独立或校准实际误差。缺 GNSS 的包装器/模块准入差异仍记录，正则化下秩亏仍可能成为有限高 PL，分别列为后续问题。实际误差工具递归读取 receiver 结果，多个 A/B 点仍属于同一运行块，不算独立试验。
+
 `PredictionInput` 的只读服务 `grid_map/prediction_input` 和现有 `iap_prediction_input_v1` codec 是完整输入权威。payload 包含全图 flags、观测证据、raw/environment 点、位姿、时间、当前监测、GNSS epoch/排除集合、先验和全部 PredictorParams。LiDAR primitives 按生产默认 PCA 派生，不使用 failure_map 或旧 query probe 替代输入。
 
 `makeFrozenPredictor()` 是生产包装器与离线工具共享的地图、观测支持和 primitive 准备入口。`predictionRiskVoxel()` 是结果状态映射权威。`makeRiskPrediction()` 新增可选拒绝原因输出，原来源准入与有效期计算保持不变。直接模块诊断必须同时保留包装器是否绑定/是否调用，不能把模块诊断回填成正式 PL。

@@ -111,6 +111,10 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_validation.py
     --binary $<TARGET_FILE:advisory_validation>)
   set_tests_properties(test_advisory_validation PROPERTIES TIMEOUT 120)
+  add_test(NAME test_advisory_prior_ab COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_prior_ab.py
+    --binary $<TARGET_FILE:advisory_validation>)
+  set_tests_properties(test_advisory_prior_ab PROPERTIES TIMEOUT 120)
   add_test(NAME test_ego_pipeline COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_pipeline.py
     --planner $<TARGET_FILE:ego_planner_node> --server $<TARGET_FILE:traj_server>

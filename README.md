@@ -794,6 +794,26 @@ ros2 pkg prefix ego_planner
 
 检查 FSM 是否收到有效里程计与目标、GridMap 是否收到注册点云，以及 EGO 优化是否失败。PL 缺失保持有限 advisory 代价；真实 unknown、过期环境或运动质量不可用仍阻止执行。
 
+### Advisory 后验先验开关与 A/B 验证
+
+四分叉仿真默认关闭 FGO 后验误差代理在 Advisory 中的再次参与。输出暂为“基于观测条件的融合 Advisory”，尚未取得实际误差尺度校准或未来误差保证。Current Monitor 与 GLIO/FGO 的内部融合保持原语义。
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+# 默认关闭；等价于 advisory_posterior_prior:=false
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2
+# 仅复现旧行为 / A/B
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 advisory_posterior_prior:=true
+# 离线机制实验，由 artifact resolver 分配新 run
+python3 src/iap/scripts/dev_predictor/advisory_prior_ab_validation.py fixture \
+  --binary build/ego_planner/advisory_validation --label committed_ab
+ctest --test-dir build/ego_planner \
+  -R '^(test_advisory_prior_ab|test_advisory_validation|test_ego_baseline|test_ego_pipeline)$' --output-on-failure
+```
+
+节点参数 `risk/use_posterior_prior` 默认 false，启动时读取且只读，修改需重启；独立可视化只消费共享导出的 `PredictionInput`，没有另一开关。OFF 输入 `has_lambda_base=false`，当前质量/误差代理仍保留。身份包含先验参与标志及矩阵；planner 每次绑定新版本。完整真实输入录制沿用 `advisory_validation.py record`，校验后可用新工具 `replay --payload ... --binary ... --label start_ab` 做同输入对照。所有变体均离线，不回写执行授权。实验契约与状态见 [验证方案](docs/dev_predictor/advisory_spatial_validation_plan.md)。现场须先提交任务代码、检查工作树和 GPU；未提交用户修改仍阻止现场，离线结果不替代森林验收。
+
 ## 10. 目录与专题文档
 
 ```text
