@@ -191,12 +191,36 @@ IAP_RUN_DIR/
 
 已完成共享生产冻结准备入口、只读服务完整录制、原 codec 重放、逐点状态/原因、来源 PL、矩阵/eigen/weak direction、耗时、checksum/版本及图文报告。没有替换模型、放宽有效性或改在线准入；包装器只新增可选拒绝原因。工具语义见 [契约](../spec/advisory_validation_contract.md)。
 
-本轮 run：`log/20261006T123756Z_794`。提交前合成证据见 [候选报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/verified/report.md)，正式提交绑定复跑将在同 run 的 `committed/` 子目录登记。候选报告不能替代真实扫描；旧解析示意图仍保留原身份。
+本轮实验代码提交：`21f692ed329c653793469f987cbdb1b9c034b618`。同一个 run 为 `log/20261006T123756Z_794`；[正式图文报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/committed/report.md)、[summary.json](../../log/20261006T123756Z_794/export/analysis/advisory_validation/committed/summary.json)、[版本/参数权威/hash 登记](../../log/20261006T123756Z_794/metadata/manifests/advisory_fixture_committed.json) 已生成并核验。正式输入位于 `export/advisory/validation/committed/`，全部明确标为合成机制；没有取得三份森林真实输入。提交前候选证据单独留在 `verified/` 与根目录，旧解析示意图仍保留原身份，不作为本轮真实扫描。
 
-合成六平面夹具采用完整 v1 payload 和真实 PredictorModule，S0 查询 100 个唯一中心，S1–S5/来源诊断共 135 个请求。双源 sigma 1→100 时，alpha=1 的 HPL 约 0.0199696→0.0200000 m，alpha=0 则 0.362424→36.22181 m；基线弱方向先验占比约 99.6965%。这是先验主导的机制证据，不能直接写成森林实测的空间 FAIL/PASS。
+合成六平面夹具采用完整 v1 payload 和真实 PredictorModule，S0 查询 100 个唯一中心，含 S1–S5/来源诊断共 135 个请求。双源 sigma 1→100 时，alpha=1 的 HPL 为 0.0199696167→0.0199999970 m，alpha=0 则 0.362424369→36.2218096 m；HPL 信号保留比约 `8.472e-7`，基线弱方向先验占比约 99.6965%。S1/S2/S3/S4 及无先验双源组均通过固定 1e-12 容差的单调机制检查，这是先验主导的机制证据，不能直接写成森林实测的空间 FAIL/PASS。原始数值见 [双源基线](../../log/20261006T123756Z_794/export/advisory/validation/committed/S3_0/points.csv)、[双源严重退化](../../log/20261006T123756Z_794/export/advisory/validation/committed/S3_2/points.csv)、[去先验严重退化](../../log/20261006T123756Z_794/export/advisory/validation/committed/S3_no_prior_2/points.csv) 及各目录矩阵。
 
-缺 GNSS 的 S5 复现包装器未绑定、模块仍可使用有效 LiDAR；prior-only 且两源均不可用没有得到有效预测。FGO smoother 后验被缩成对角先验后又加入空间观测，未见交叉协方差或来源去重；实际因子重叠和数值偏差仍未量化。证据及建议见报告，不在本任务擅自修正生产模型。
+缺 GNSS 的 S5 复现包装器未绑定、模块仍可使用有效 LiDAR；[逐点准入证据](../../log/20261006T123756Z_794/export/advisory/validation/committed/S5_missing_gnss/points.csv) 中 wrapper_called=0、module_valid=1、fused_hpl 留空。prior-only 且两源均不可用没有得到有效预测，见 [无观测请求](../../log/20261006T123756Z_794/export/advisory/validation/committed/S5_no_observations/points.csv)。FGO smoother 后验被缩成对角先验后又加入空间观测，未见交叉协方差或来源去重；[带行号与 hash 的代码证据](../../log/20261006T123756Z_794/metadata/manifests/advisory_model_audit_committed.json) 记录该结构，实际因子重叠和数值偏差仍未量化。修正建议见报告，不在本任务擅自修正生产模型。
 
-独立结论暂为：真实输入可用性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；真实空间敏感性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；实际误差符合性 `INCONCLUSIVE_LIVE_NOT_RUN`。合成单调性和源准入回归已通过，并不把准入矛盾当成生产能力已修复。
+独立结论为：真实输入可用性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；真实空间敏感性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；实际误差符合性 `INCONCLUSIVE_LIVE_NOT_RUN`。合成单调性及源准入矛盾的检测回归通过，并不把准入矛盾当成生产能力已修复。实际误差请求 CSV 仅有表头，[误差状态 JSON](../../log/20261006T123756Z_794/export/analysis/advisory_validation/error_summary.json) 的 independent_runs=0；报告误差图明确 NOT RUN。
 
-现场仍为 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`。提交后需记录干净工作树检查与 GPU 预检，再登记提交绑定的离线重跑；三份真实输入、合法固定路线、至少三次配对重复和 GLIO 误差校准保持待测。
+代码提交后工作树仅剩原有 RViz 修改；[现场预检 JSON](../../log/20261006T123756Z_794/metadata/manifests/advisory_preflight.json) 记录 revision、dirty、nvidia-smi=0、cuInit=0、device_count=1、live_started=false。GPU READY，现场仍为 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，未启动现场。三份真实输入、合法固定路线、至少三次配对重复和 GLIO 误差校准保持待测。
+
+已执行检查：ego_planner 构建；新增 9 项 CPU 合同测试；EGO baseline（含 GNSS/排除集合/先验/参数 codec 测试）、EGO 进程管线及 PredictorModule CTest；产物契约检查、所有正式 CSV/JSON/图的 hash 与 Markdown 链接检查。日志在本 run 的 `runtime/ros/acceptance_tests.log`、`runtime/ros/final_python_contract_tests.log`、`runtime/ros/predictor_tests.log` 和 `runtime/ros/build_commit.log`。
+
+已实际执行的复现命令（重新产物时不设置 IAP_RUN_DIR，让 resolver 分配新 run；下面采用本轮同 run 的命令已执行）：
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+export IAP_RUN_DIR=/home/dev/ws_iap/src/iap/log/20261006T123756Z_794
+export ROS_LOG_DIR="$IAP_RUN_DIR/runtime/ros"
+colcon --log-base log build --paths src/iap/src/iap/planner/plan_manage \
+  --packages-select ego_planner --build-base build --install-base install \
+  --symlink-install --cmake-args -DBUILD_TESTING=ON
+ctest --test-dir build/ego_planner \
+  -R '^(test_advisory_validation|test_ego_baseline|test_ego_pipeline)$' --output-on-failure
+ctest --test-dir build/iap -R '^test_predictor_module$' --output-on-failure
+python3 src/iap/scripts/dev_predictor/advisory_validation.py preflight
+python3 src/iap/scripts/dev_predictor/compare_advisory_error.py
+python3 src/iap/scripts/dev_predictor/advisory_validation.py fixture \
+  --binary build/ego_planner/advisory_validation --label committed
+```
+
+同名证据拒绝覆盖，不在这份正式 run 上重复执行写入命令。现场 record/replay 入口存在并通过 CPU mock 服务测试，本轮没有真实 record/replay 执行命令，不能把它们列为已完成的现场复现。
