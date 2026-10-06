@@ -373,7 +373,7 @@ TEST(EgoBaseline, CapturedV2FailureHasNoExecutableRepairExit) {
   EXPECT_TRUE(segments.empty());
   EXPECT_TRUE(optimizer.initializationFailed());
   EXPECT_EQ(optimizer.a_star_->lastResult().failure,
-            AStar::Failure::END_UNOBSERVED);
+            AStar::Failure::NO_VALID_REPAIR_EXIT);
   EXPECT_EQ(optimizer.a_star_->lastResult().expanded, 0U);
 }
 
@@ -641,4 +641,54 @@ TEST(EgoBaseline, CurvedReferenceUsesForwardArcAndFirstSelfIntersection) {
   ASSERT_TRUE(manager->beginPlanningView());
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 1));
   EXPECT_LT(manager->global_data_.last_progress_time_, 0.1);
+}
+
+TEST(EgoBaseline, OneBudgetBoundsNestedRepairsAndExpiredSearch) {
+  PlanningBudget budget(1.5, 3);
+  EXPECT_TRUE(budget.tryRepair(PlanningBudget::Repair::Search));
+  EXPECT_TRUE(budget.tryRepair(PlanningBudget::Repair::Reinitialize));
+  EXPECT_TRUE(budget.tryRepair(PlanningBudget::Repair::BackendRestart));
+  EXPECT_FALSE(budget.tryRepair(PlanningBudget::Repair::TargetShortening));
+  EXPECT_EQ(budget.used(), 3u);
+  auto node = makeNode();
+  auto map = std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map, {}, 10.0, Eigen::Vector3d(-2, 0, 1));
+  GridMapTestAccess::markObserved(*map);
+  AStar search; search.initGridMap(map, Eigen::Vector3i(100,100,100));
+  search.setPlanningBudget(std::make_shared<PlanningBudget>(0.0));
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-2,0,1), Eigen::Vector3d(2,0,1)));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::TIME_BUDGET);
+  EXPECT_EQ(search.lastResult().expanded, 0u);
+}
+
+TEST(EgoBaseline, UnknownGuessCanSearchObservedBypassUsingActualEndpoints) {
+  auto node = makeNode(); auto map = std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map, {}, 10.0, Eigen::Vector3d(-2,0,1));
+  GridMapTestAccess::markObserved(*map);
+  // Unknown across the straight guess, including its final control polygon;
+  // true target remains observed and a route exists to either side.
+  for (double x=-0.8; x<2.5; x+=0.1)
+    for (double y=-0.2; y<0.2; y+=0.1)
+      GridMapTestAccess::clearObserved(*map, Eigen::Vector3d(x,y,1));
+  GridMotionContext motion; motion.quality=1; motion.stamp_s=10; motion.error_proxy_m=.05;
+  ego_planner::BsplineOptimizer optimizer; optimizer.setParam(node); optimizer.setEnvironment(map);
+  optimizer.a_star_ = std::make_shared<AStar>(); optimizer.a_star_->initGridMap(map, Eigen::Vector3i(100,100,100));
+  optimizer.setPlanningQuery([&](const Eigen::Vector3d& p) {
+    return map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion);
+  });
+  auto budget=std::make_shared<PlanningBudget>(); optimizer.setPlanningBudget(budget);
+  const Eigen::Vector3d start(-2,0,1), target(2,0.6,1);
+  optimizer.setPlanningEndpoints(start,target);
+  Eigen::MatrixXd points(3,12);
+  for (int i=0;i<12;++i) points.col(i)=Eigen::Vector3d(-2+4.0*i/11,0,1);
+  optimizer.initControlPoints(points,true);
+  ASSERT_FALSE(optimizer.initializationFailed());
+  ASSERT_TRUE(optimizer.needsGuideReinitialization());
+  const auto& guide=optimizer.recoveryGuide(); ASSERT_GE(guide.size(),2u);
+  EXPECT_LT((guide.front()-start).norm(),1e-9); EXPECT_LT((guide.back()-target).norm(),1e-9);
+  for (const auto& p:guide) EXPECT_TRUE(map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion).executable());
+  EXPECT_EQ(budget->used(),1u);
+  EXPECT_TRUE(budget->tryRepair(PlanningBudget::Repair::Reinitialize));
+  optimizer.initializeFromGuide(points);
+  EXPECT_FALSE(optimizer.needsGuideReinitialization());
 }

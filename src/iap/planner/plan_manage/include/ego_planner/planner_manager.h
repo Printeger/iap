@@ -113,6 +113,7 @@ namespace ego_planner
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
+    PlanningBudget::Ptr planningBudget() const { return planning_budget_; }
     bool beginPlanningView();
     void endPlanningView();
     std::optional<Eigen::Vector3d> planningReferencePosition() const {
@@ -183,6 +184,7 @@ namespace ego_planner
       mutable GridPlanningQueryStats advisory_stats;
     };
     std::optional<PlanningView> planning_view_;
+    PlanningBudget::Ptr planning_budget_;
     std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>
         latest_odom_provider_;
     void captureFailureMap(const std::string& kind, const Eigen::Vector3d& point,

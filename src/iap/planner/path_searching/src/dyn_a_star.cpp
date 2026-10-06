@@ -430,6 +430,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         Vector3d end_pt, const double max_duration_s,
                         std::optional<Vector3d> center_override)
 {
+    const auto steady_start = PlanningBudget::Clock::now();
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
     rejected_advisory_ = false;
@@ -452,6 +453,9 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     result_.pool_dimensions = POOL_SIZE_;
     result_.pool_center = center_;
 
+    if (budget_ && !budget_->tryRepair(PlanningBudget::Repair::Search)) {
+        finishFailure(Failure::TIME_BUDGET, time_1); return false;
+    }
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
     {
@@ -593,7 +597,8 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
         rclcpp::Time time_2 = rclcpp::Clock().now();
         const double limit = max_duration_s >= 0.0 ? max_duration_s :
             (planning_query_ ? 1.0 : 0.2);
-        if ((time_2 - time_1).seconds() > limit)
+        if (std::chrono::duration<double>(PlanningBudget::Clock::now() - steady_start).count() > limit ||
+            (budget_ && budget_->expired()))
         {
             finishFailure(Failure::TIME_BUDGET, time_1);
             return false;

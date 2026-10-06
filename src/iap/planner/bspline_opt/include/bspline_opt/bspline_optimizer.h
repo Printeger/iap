@@ -120,6 +120,19 @@ namespace ego_planner
     void setDroneId(const int drone_id);
 
     // optional inputs
+    void setPlanningBudget(PlanningBudget::Ptr budget) {
+      budget_ = std::move(budget);
+      a_star_->setPlanningBudget(budget_);
+    }
+    void setPlanningEndpoints(const Eigen::Vector3d& start, const Eigen::Vector3d& end) {
+      planning_endpoints_ = std::make_pair(start, end);
+    }
+    bool needsGuideReinitialization() const { return guide_reinitialization_; }
+    const vector<Eigen::Vector3d>& recoveryGuide() const { return guide_pts_; }
+    void initializeFromGuide(const Eigen::MatrixXd& points) {
+      cps_.resize(points.cols()); cps_.points = points; cps_.clearance = dist0_;
+      guide_reinitialization_ = false; setGuidePath(guide_pts_);
+    }
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
     void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
                           bool advisory_fallback = false) {
@@ -127,6 +140,9 @@ namespace ego_planner
       planning_advisory_fallback_ = advisory_fallback;
       initialization_failed_ = false;
       guide_tracking_ = false;
+      guide_reinitialization_ = false;
+      planning_endpoints_.reset();
+      guide_pts_.clear();
       if (a_star_) a_star_->setPlanningQuery(planning_query_, advisory_fallback);
     }
     void setSearchFailureObserver(std::function<void(
@@ -172,6 +188,9 @@ namespace ego_planner
       search_failure_observer_(result, context);
     }
     GridMap::Ptr grid_map_;
+    PlanningBudget::Ptr budget_;
+    std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> planning_endpoints_;
+    bool guide_reinitialization_ = false;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
     bool planning_advisory_fallback_ = false;
     bool initialization_failed_ = false;

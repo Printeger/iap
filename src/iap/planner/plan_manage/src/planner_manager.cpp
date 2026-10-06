@@ -642,6 +642,8 @@ namespace ego_planner
         start_cell.advisory.classification == GridAdvisoryClass::AVOID ||
         start_cell.advisory.classification == GridAdvisoryClass::PREDICTED_DEGRADED;
     bspline_optimizer_->setPlanningQuery(planning_query, start_in_advisory);
+    bspline_optimizer_->setPlanningBudget(planning_budget_);
+    bspline_optimizer_->setPlanningEndpoints(start_pt, local_target_pt);
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -666,6 +668,7 @@ namespace ego_planner
     bool flag_regenerate = false;
     do
     {
+      if (planning_budget_->expired()) return false;
       point_set.clear();
       start_end_derivatives.clear();
       flag_regenerate = false;
@@ -818,6 +821,26 @@ namespace ego_planner
     if (bspline_optimizer_->initializationFailed()) {
       ++continous_failures_count_;
       return false;
+    }
+    if (bspline_optimizer_->needsGuideReinitialization()) {
+      if (!planning_budget_->tryRepair(PlanningBudget::Repair::Reinitialize)) return false;
+      const auto& guide = bspline_optimizer_->recoveryGuide();
+      std::vector<double> arc(guide.size(), 0.0);
+      for (size_t i = 1; i < guide.size(); ++i)
+        arc[i] = arc[i-1] + (guide[i] - guide[i-1]).norm();
+      const size_t samples = std::max<size_t>(7, std::ceil(arc.back() / pp_.ctrl_pt_dist) + 1);
+      point_set.clear(); size_t segment = 1;
+      for (size_t i = 0; i < samples; ++i) {
+        if (planning_budget_->expired()) return false;
+        const double d = arc.back() * i / (samples - 1);
+        while (segment + 1 < arc.size() && arc[segment] < d) ++segment;
+        const double length = arc[segment] - arc[segment-1];
+        const double alpha = length > 1e-9 ? (d - arc[segment-1]) / length : 0.0;
+        point_set.push_back(guide[segment-1] * (1-alpha) + guide[segment] * alpha);
+      }
+      ts = std::max(ts, arc.back() / (pp_.max_vel_ * (samples - 1)));
+      UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+      bspline_optimizer_->initializeFromGuide(ctrl_pts);
     }
     // 计算时间差并更新时间
     auto now = node_->now();
@@ -991,7 +1014,7 @@ namespace ego_planner
     planning_timings_.final_checks_s += std::chrono::duration<double>(
         std::chrono::steady_clock::now() - check_started).count();
     const auto release_motion = currentMotionContext();
-    if (!release_check.executable() ||
+    if (planning_budget_->expired() || !release_check.executable() ||
         grid_map_->occupancyGeneration() !=
             release_check.evaluated_generation ||
         release_motion.quality !=

@@ -52,6 +52,7 @@ namespace ego_planner
 
   void BsplineOptimizer::setGuidePath(const vector<Eigen::Vector3d> &guide)
   {
+    guide_pts_ = guide;
     guide_tracking_ = false;
     ref_pts_.clear();
     if (guide.size() < 2 || cps_.size < 7) return;
@@ -590,27 +591,26 @@ namespace ego_planner
   std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
 
+    bool unknown_guess = false;
     if (planning_query_) {
       for (int i = 0; i < init_points.cols(); ++i) {
+        if (budget_ && budget_->expired()) { initialization_failed_ = true; return {}; }
         const auto cell = planning_query_(init_points.col(i));
-        if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-            cell.execution_reason == GridExecutionReason::OUT_OF_MAP ||
-            cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
-          RCLCPP_WARN(rclcpp::get_logger("initControlPoints"),
-              "Initial control point %d/%d rejected before A*: %s at (%.3f %.3f %.3f)",
-              i, static_cast<int>(init_points.cols()) - 1,
-              gridExecutionReasonName(cell.execution_reason),
-              init_points(0, i), init_points(1, i), init_points(2, i));
-          const auto failure = cell.execution_reason ==
-              GridExecutionReason::ENVIRONMENT_STALE
-              ? AStar::Failure::END_STALE : AStar::Failure::END_UNOBSERVED;
-          a_star_->recordPresearchFailure(failure, init_points.col(i),
-                                          init_points.col(init_points.cols() - 1));
+        unknown_guess |= cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+                         cell.execution_reason == GridExecutionReason::OUT_OF_MAP;
+        if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE ||
+            (cell.execution_reason != GridExecutionReason::OK &&
+             cell.execution_reason != GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
+             cell.execution_reason != GridExecutionReason::OUT_OF_MAP &&
+             cell.execution_reason != GridExecutionReason::PHYSICAL_OBSTACLE &&
+             cell.execution_reason != GridExecutionReason::INSUFFICIENT_CLEARANCE)) {
+          a_star_->recordPresearchFailure(
+              cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE
+                  ? AStar::Failure::END_STALE : AStar::Failure::CURRENT_MOTION,
+              init_points.col(i), init_points.col(init_points.cols() - 1));
           reportSearchFailure(a_star_->lastResult(), init_points, i,
-                              init_points.cols() - 1,
-                              "initial_control_points_unobserved");
-          initialization_failed_ = true;
-          return {};
+                              init_points.cols() - 1, "initial_control_points_input");
+          initialization_failed_ = true; return {};
         }
       }
     }
@@ -644,11 +644,13 @@ namespace ego_planner
     // 遍历所有点
     for (int i = order_; i <= i_end; ++i)
     {
+      if (budget_ && budget_->expired()) { initialization_failed_ = true; return {}; }
       // cout << " *" << i-1 << "*" ;
       //  相邻两个点之间进行线性插值并检测障碍物
       for (double a = 1.0; a > 0.0; a -= step_size)
       {
         // TODO:没搞懂这是干嘛的
+        if (budget_ && budget_->expired()) { initialization_failed_ = true; return {}; }
         occ = planningOccupied(a * init_points.col(i - 1) + (1 - a) * init_points.col(i));
         // cout << " " << occ;
         //  cout << setprecision(5);
@@ -720,9 +722,17 @@ namespace ego_planner
     const Eigen::Vector3d original_in(init_points.col(segment_ids.front().first));
     const Eigen::Vector3d original_out(init_points.col(segment_ids.back().second));
     AStar::Failure endpoint_failure;
-    const auto endpoints = chooseRepairEndpoints(init_points,
+    auto endpoints = chooseRepairEndpoints(init_points,
         segment_ids.front().first, segment_ids.back().second,
         endpoint_failure);
+    if (!endpoints && unknown_guess && planning_endpoints_) {
+      const auto& [start, target] = *planning_endpoints_;
+      if (planning_query_(start).executable() && planning_query_(target).executable()) {
+        RepairEndpoints whole;
+        whole.entry = start; whole.exit = target;
+        endpoints = whole; guide_reinitialization_ = true;
+      }
+    }
     if (planning_query_ && !endpoints) {
       a_star_->recordPresearchFailure(endpoint_failure, original_in, original_out);
       reportSearchFailure(a_star_->lastResult(), init_points,
@@ -733,10 +743,14 @@ namespace ego_planner
     }
     const Eigen::Vector3d in = endpoints ? endpoints->entry : original_in;
     const Eigen::Vector3d out = endpoints ? endpoints->exit : original_out;
-    const Eigen::Vector3d pool_center = (original_in + original_out) / 2.0;
+    const Eigen::Vector3d pool_center = guide_reinitialization_
+        ? (in + out) / 2.0 : (original_in + original_out) / 2.0;
     bool found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
     if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
         !planning_advisory_fallback_) {
+      if (budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) {
+        initialization_failed_ = true; return {};
+      }
       planning_advisory_fallback_ = true;
       a_star_->setPlanningQuery(planning_query_, true);
       found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
@@ -777,6 +791,7 @@ namespace ego_planner
     else for (int j = segment_ids.back().second + 1; j < init_points.cols(); ++j)
       full_guide.push_back(init_points.col(j));
     setGuidePath(full_guide);
+    if (guide_reinitialization_) return segment_ids;
     a_star_pathes.assign(segment_ids.size(), one_guide);
 
     /*** calculate bounds ***/
@@ -1034,6 +1049,7 @@ namespace ego_planner
     BsplineOptimizer *opt = reinterpret_cast<BsplineOptimizer *>(func_data);
     // cout << "k=" << k << endl;
     // cout << "opt->flag_continue_to_optimize_=" << opt->flag_continue_to_optimize_ << endl;
+    if (opt->budget_ && opt->budget_->expired()) return 1;
     return (opt->force_stop_type_ == STOP_FOR_ERROR || opt->force_stop_type_ == STOP_FOR_REBOUND);
   }
 
@@ -1589,6 +1605,9 @@ namespace ego_planner
       bool found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
       if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
           !planning_advisory_fallback_) {
+        if (budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) {
+          force_stop_type_ = STOP_FOR_ERROR; return false;
+        }
         planning_advisory_fallback_ = true;
         a_star_->setPlanningQuery(planning_query_, true);
         found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
@@ -1792,6 +1811,9 @@ namespace ego_planner
     constexpr int MAX_RESART_NUMS_SET = 3;
     do
     {
+      if (budget_ && (budget_->expired() || initialization_failed_)) return false;
+      if ((restart_nums || rebound_times) && budget_ &&
+          !budget_->tryRepair(PlanningBudget::Repair::BackendRestart)) return false;
       /* ---------- prepare ---------- */
       min_cost_ = std::numeric_limits<double>::max();
       min_ellip_dist_ = INIT_min_ellip_dist_;
@@ -1972,6 +1994,7 @@ namespace ego_planner
     memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
 
     double origin_lambda4 = lambda4_;
+    force_stop_type_ = DONT_STOP;
     bool flag_safe = true;
     int iter_count = 0;
     do
@@ -1982,7 +2005,7 @@ namespace ego_planner
       lbfgs_params.max_iterations = 200;
       lbfgs_params.g_epsilon = 0.001;
 
-      int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL, this, &lbfgs_params);
+      int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
       if (result == lbfgs::LBFGS_CONVERGENCE ||
           result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
           result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
@@ -1996,6 +2019,7 @@ namespace ego_planner
                                         "Solver error in refining!, return = %d, %s", result, lbfgs::lbfgs_strerror(result));
       }
 
+      if (budget_ && budget_->expired()) return false;
       // 使用优化后的控制点创建新的轨迹
       UniformBspline traj = UniformBspline(cps_.points, 3, bspline_interval_);
       double tm, tmp;

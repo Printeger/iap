@@ -1,3 +1,4 @@
+#include <plan_env/planning_budget.h>
 #ifndef _DYN_A_STAR_H_
 #define _DYN_A_STAR_H_
 
@@ -85,6 +86,7 @@ public:
 	};
 private:
 	GridMap::Ptr grid_map_;
+    PlanningBudget::Ptr budget_;
 	std::function<GridSearchCell(const Eigen::Vector3d&)> planning_query_;
 	bool advisory_fallback_ = false;
 	bool rejected_advisory_ = false;
@@ -199,6 +201,7 @@ public:
 	}
 	static const char* failureName(Failure failure);
 
+	void setPlanningBudget(PlanningBudget::Ptr budget) { budget_ = std::move(budget); }
 	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt,
 	                 Eigen::Vector3d end_pt, double max_duration_s = -1.0,
 	                 std::optional<Eigen::Vector3d> center_override = std::nullopt);

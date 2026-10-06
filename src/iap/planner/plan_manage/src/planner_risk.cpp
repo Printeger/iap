@@ -477,6 +477,7 @@ GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
 bool EGOPlannerManager::beginPlanningView() {
   const auto freeze_started = std::chrono::steady_clock::now();
   planning_view_.reset();
+  planning_budget_ = std::make_shared<PlanningBudget>();
   for (int attempt = 0; attempt < 2; ++attempt) {
     const double time_s = node_->now().seconds();
     const auto motion = currentMotionContext();

@@ -886,13 +886,14 @@ namespace ego_planner
     bool plan_and_refine_success = false;
     bool target_selected = false;
     std::optional<Eigen::Vector3d> attempted_target;
-    const auto planning_started = std::chrono::steady_clock::now();
+    const auto budget = planner_manager_->planningBudget();
     for (const double fraction : {1.0, 0.65, 0.35}) {
       const double distance = std::min(planning_horizen_ * fraction,
                                        search_pool_target_limit_m_);
       if (distance < min_distance ||
-          std::chrono::duration<double>(std::chrono::steady_clock::now() -
-              planning_started).count() > 1.5) break;
+          budget->expired()) break;
+      if (fraction != 1.0 &&
+          !budget->tryRepair(PlanningBudget::Repair::TargetShortening)) break;
       if (!getLocalTarget(distance)) continue;
       if (attempted_target &&
           (local_target_pt_ - *attempted_target).norm() <
@@ -1167,6 +1168,8 @@ namespace ego_planner
         wait_for_map_reason_ = GridExecutionReason::ENVIRONMENT_UNOBSERVED;
         return false;
       }
+      if (const auto budget = planner_manager_->planningBudget(); budget &&
+          !budget->tryRepair(PlanningBudget::Repair::TargetShortening)) return false;
       target_t = last_t;
       local_target_pt_ = reference.getPosition(target_t);
       local_target_vel_.setZero();
