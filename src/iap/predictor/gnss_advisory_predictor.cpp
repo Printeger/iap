@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -36,7 +37,7 @@ struct VisibleGeometrySet {
 VisibleGeometrySet visible_geometry(
     const GnssEpoch& epoch,
     const VisibilityResult& visibility,
-    const std::vector<bool>* satellite_mask = nullptr) {
+    const std::vector<bool>* satellite_mask = nullptr, double noise_scale = 1.0) {
   VisibleGeometrySet out;
   out.geom.reserve(static_cast<std::size_t>(visibility.n_vis));
   for (std::size_t i = 0; i < epoch.sats.size(); ++i) {
@@ -64,6 +65,7 @@ VisibleGeometrySet visible_geometry(
         (i < visibility.sigma_effs.size() && visibility.sigma_effs[i] > 0.0)
             ? visibility.sigma_effs[i]
             : epoch.sats[i].pr_sigma;
+    sat.pr_sigma *= noise_scale;
     sat.sat_id = epoch.sats[i].sat_id;
     out.geom.push_back(sat);
     out.used_sat_ids.push_back(sat.sat_id);
@@ -114,7 +116,7 @@ bool eliminate_clock_by_schur_complement(const Eigen::Matrix4d& lambda_gnss_4d,
   const double eps =
       std::isfinite(clock_epsilon) && clock_epsilon > 0.0 ? clock_epsilon
                                                           : 1.0e-6;
-  if (!std::isfinite(lambda_cc) || lambda_cc + eps <= 0.0) {
+  if (!std::isfinite(lambda_cc) || lambda_cc <= eps) {
     return false;
   }
 
@@ -123,7 +125,10 @@ bool eliminate_clock_by_schur_complement(const Eigen::Matrix4d& lambda_gnss_4d,
       lambda_gnss_4d.block<3, 1>(0, 3);
   const Eigen::Matrix<double, 1, 3> lambda_cp =
       lambda_gnss_4d.block<1, 3>(3, 0);
-  *lambda_position = lambda_pp - (lambda_pc * lambda_cp) / (lambda_cc + eps);
+  // epsilon is a clock solve-conditioning floor, not a pseudo clock prior.
+  // Adding it to the Schur denominator manufactures position information and
+  // breaks the measurement-noise inverse-square scaling contract.
+  *lambda_position = lambda_pp - (lambda_pc * lambda_cp) / lambda_cc;
   *lambda_position =
       0.5 * (*lambda_position + lambda_position->transpose());
   return lambda_position->allFinite();
@@ -192,10 +197,15 @@ GnssAdvisoryPredictor::GnssAdvisoryPredictor(
       visibility_predictor_(params.visibility_params),
       receiver_anchor_cache_(std::make_shared<ReceiverAnchorCache>()),
       visibility_evidence_cache_(
-          std::make_shared<VisibilityEvidenceCache>()) {}
+          std::make_shared<VisibilityEvidenceCache>()) {
+  if(!std::isfinite(params.measurement_noise_scale) || params.measurement_noise_scale<=0)
+    throw std::invalid_argument("GNSS measurement_noise_scale must be positive");
+}
 
 void GnssAdvisoryPredictor::set_params(
     const GnssAdvisoryPredictorParams& params) {
+  if(!std::isfinite(params.measurement_noise_scale) || params.measurement_noise_scale<=0)
+    throw std::invalid_argument("GNSS measurement_noise_scale must be positive");
   params_ = params;
   geometry_predictor_ = GnssGeometryPlPredictor(params_.geometry_params);
   visibility_predictor_ = VisibilityPredictor(params_.visibility_params);
@@ -330,7 +340,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
               LocalMapSupportAuthority::TRUSTED_LOCAL_MAP && base.valid
           ? LocalMapSupportStatus::MODEL_COMPLETE
           : visibility.support_status;
-  const auto visible_set = visible_geometry(epoch, visibility, satellite_mask);
+  const auto visible_set = visible_geometry(epoch, visibility, satellite_mask, params_.measurement_noise_scale);
   copy_geometry_set_diagnostics(visible_set, out);
   const auto& geom = visible_set.geom;
   if (out.n_used < params_.geometry_params.min_sats) {
@@ -417,7 +427,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
       retain_unknown_support,
       query_time_s, evaluation_time_s, unknown_as_open_bound);
   const auto visible_set = visible_geometry(
-      snapshot.gnss_epoch, visibility, satellite_mask);
+      snapshot.gnss_epoch, visibility, satellite_mask, params_.measurement_noise_scale);
   const auto& geom = visible_set.geom;
   if (static_cast<int>(geom.size()) < params_.geometry_params.min_sats) {
     auto out = fallback(visibility.n_unknown > 0

@@ -1071,6 +1071,19 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto numerical=input; numerical.params.fusion.max_regularization_fraction=.005;
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(numerical));
   EXPECT_DOUBLE_EQ(ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(numerical)).params.fusion.max_regularization_fraction,.005);
+  auto calibrated=input; calibrated.params.gnss.measurement_noise_scale=2.3;
+  calibrated.params.lidar.fim_params.fim_support_voxel_m=.4;
+  const auto roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(calibrated));
+  EXPECT_EQ(roundtrip.recording_codec_version,4u);
+  EXPECT_DOUBLE_EQ(roundtrip.params.gnss.measurement_noise_scale,2.3);
+  EXPECT_DOUBLE_EQ(roundtrip.params.lidar.fim_params.fim_support_voxel_m,.4);
+  EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(calibrated));
+  auto historical=input; historical.recording_codec_version=1;
+  historical=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(historical));
+  EXPECT_EQ(historical.recording_codec_version,1u);
+  std::string rejection;
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(historical,{},&rejection).predict);
+  EXPECT_EQ(rejection,"historical_codec_input");
   EXPECT_THROW(ego_planner::decodePredictionInput({1,2,3}),std::runtime_error);
   if (std::getenv("IAP_TEST_PREDICTION_BENCHMARK")) {
     using Clock=std::chrono::steady_clock;

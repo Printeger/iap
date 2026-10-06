@@ -99,6 +99,31 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertTrue(on["risk/use_posterior_prior"])
         self.assertNotIn("risk/use_posterior_prior", runtime.visualizer_parameters())
 
+    def test_explicit_calibration_is_hashed_and_cannot_change_planning_checks(self):
+        runtime=self._load_launch("_includes/full_stack_runtime.py")
+        import hashlib
+        scene=json.loads((REPO/"config/scenarios/catalog.json").read_text())["icra_dense_forest_four_fork_v2"]
+        base=runtime.planner_parameters(scene)
+        value={"parameters":{"risk/gnss_noise_scale":2.,"risk/lidar_noise_scale":3.,
+                             "risk/K_H_adv":4.,"risk/K_V_adv":4.},"identity":"LIVE_CALIBRATION_CANDIDATE","stage":"conversion","scene":"icra_dense_forest_four_fork_v2",
+               "calibration_evidence":[{"run_id":"unit-fixture"}],
+               "contract":{"map_seed":41021,"route_sha256":"route","coordinates_sha256":"frame",
+                           "degradation_schedule_sha256":"schedule"}}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"parameters.json"
+            value["sha256"]=hashlib.sha256(json.dumps(value,sort_keys=True,allow_nan=False).encode()).hexdigest()
+            path.write_text(json.dumps(value))
+            loaded=runtime.planner_parameters(scene,advisory_calibration=str(path))
+            for key,old in base.items(): self.assertEqual(loaded[key],old)
+            self.assertEqual(loaded["risk/gnss_noise_scale"],2.)
+            value["parameters"]["planning/body_radius_m"]=0.
+            unsigned={k:v for k,v in value.items() if k!="sha256"}
+            value["sha256"]=hashlib.sha256(json.dumps(unsigned,sort_keys=True,allow_nan=False).encode()).hexdigest()
+            path.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError,"only positive"): runtime.load_advisory_calibration(str(path))
+            value["sha256"]="altered";path.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError,"checksum"):runtime.load_advisory_calibration(str(path))
+
     def test_stage1_graph_materializes_same_registered_lattice_and_preserves_artifacts(self):
         runtime = self._load_launch("_includes/full_stack_runtime.py")
         runs = self._load_launch("_includes/run_directory.py")

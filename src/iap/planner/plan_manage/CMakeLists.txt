@@ -111,6 +111,8 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_validation.py
     --binary $<TARGET_FILE:advisory_validation>)
   set_tests_properties(test_advisory_validation PROPERTIES TIMEOUT 120)
+  add_test(NAME test_advisory_calibration COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_calibration.py)
   add_test(NAME test_advisory_prior_ab COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_prior_ab.py
     --binary $<TARGET_FILE:advisory_validation>)

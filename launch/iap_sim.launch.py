@@ -55,6 +55,16 @@ def _setup(context):
         output_dir, output_dir / "metadata" / "config" / "full_stack"
     )
 
+    calibration=context.launch_configurations.get("advisory_calibration", "")
+    if calibration:
+        from full_stack_runtime import load_advisory_calibration
+        load_advisory_calibration(calibration)
+        frozen=output_dir/"metadata/config/advisory_calibration.json"
+        frozen.write_bytes(Path(calibration).read_bytes())
+        load_advisory_calibration(str(frozen))
+        register_config_snapshot(output_dir,frozen)
+        calibration=str(frozen)
+
     manifest = {
         "schema_version": "iap_canonical_sim_v3",
         "scenario": scenario,
@@ -71,6 +81,7 @@ def _setup(context):
             *(["Independent GridMap PL visualizer"] if context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true" else []),
         ],
         "grid_map_visualizer_enabled": context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true",
+        "advisory_calibration": calibration,
         "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
@@ -107,6 +118,7 @@ def _setup(context):
             ),
             launch_arguments={
                 "scenario": scenario,
+                "advisory_calibration": calibration,
                 "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
@@ -132,6 +144,8 @@ def generate_launch_description():
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("start_grid_map_visualizer", default_value="true"),
+            DeclareLaunchArgument("advisory_calibration", default_value="",
+                                 description="Absolute frozen empirical Advisory JSON; empty preserves uncalibrated defaults"),
             DeclareLaunchArgument("advisory_posterior_prior", default_value="false",
                                  choices=["true", "false"],
                                  description="Include FGO posterior proxy in Advisory (legacy A/B only)"),

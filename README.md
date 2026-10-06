@@ -847,3 +847,28 @@ src/iap/
 `docs/icra27/`、`docs/dev_planner/`、`docs/dev_predictor/`、`docs/dev_ARAIM/` 和旧审计目录保留专题设计、测试报告及实验记录。记录中的阶段状态和历史命令应按对应版本解释；日常编译与启动以本 README 和当前 launch 契约为准。
 
 本仓库包含从 GLIM 及 EGO Planner 体系借鉴或迁移的实现，具体来源见源码注释。本仓库许可证见 [LICENSE](LICENSE)，子包及第三方代码另见其各自声明。
+
+### Advisory 分阶段验证与经验校准
+
+后验代理默认关闭。当前 Advisory 是基于观测条件的实验性路线风险指标；
+尚无真实误差 95% 经验覆盖证据或未来误差保证。共享准入、联合数值状态与
+采样密度机制检查见 [预测契约](docs/spec/advisory_prediction_contract.md)。
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 advisory_posterior_prior:=false
+# 仅复现旧后验代理：advisory_posterior_prior:=true
+# 已分配并共享 IAP_RUN_DIR 的离线工具：
+python3 src/iap/scripts/dev_predictor/advisory_calibration.py protocol --label staged
+python3 src/iap/scripts/dev_predictor/test_advisory_calibration.py
+```
+
+真实校准前需要生产物理检查通过的固定 waypoint／速度路线与 hash、静态坐标与
+外参时间证明、来源测量残差、九次校准及九次独立验证。三步工具分别为
+`noise --dataset <calibration manifest>`、`conversion --dataset <noise replay manifest>
+--parameters <noise.json>`、`validate --dataset <heldout manifest> --parameters <conversion.json>`。
+数据 manifest 的每个 trial 指向 `error_requests.csv` 及 hash，并指定 phase、condition、seed、run_id；
+noise 阶段另需 GNSS/LiDAR 测量 residual_m 与 nominal_sigma_m 字段。
+冻结 JSON 用 `advisory_calibration:=<绝对路径>` 显式启动，空值保留原默认。
+独立验证与完整任务对照均通过后才可推广默认；本轮受工作区规则阻止，未推广。

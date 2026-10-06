@@ -135,6 +135,15 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   // No temporal extrapolation in stage 1; horizon is always zero.
   predictor_params_.covariance_growth.sigma_grow_m_sqrt_s = 0.0;
   predictor_params_.lidar.enable_legacy_observability = false;
+  const auto positive_parameter=[&](const char* name,double base) {
+    const double value=node->declare_parameter(name,base,prior_descriptor);
+    if(!std::isfinite(value) || value<=0) throw std::invalid_argument(std::string(name)+" must be positive");
+    return value;
+  };
+  predictor_params_.gnss.measurement_noise_scale=positive_parameter("risk/gnss_noise_scale",1.);
+  predictor_params_.lidar.fim_params.fim_range_sigma_base *= positive_parameter("risk/lidar_noise_scale",1.);
+  predictor_params_.fusion.K_H_adv=positive_parameter("risk/K_H_adv",predictor_params_.fusion.K_H_adv);
+  predictor_params_.fusion.K_V_adv=positive_parameter("risk/K_V_adv",predictor_params_.fusion.K_V_adv);
   const auto qos = rclcpp::QoS(50);
   risk_odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>("odom_world", qos,
       [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {

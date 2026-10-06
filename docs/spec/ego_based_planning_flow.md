@@ -418,8 +418,8 @@ ctest --test-dir build/ego_planner -R '^test_ego_baseline$|^test_ego_pipeline$' 
 默认关闭 Advisory 后验代理，预测输入／来源信息／运动执行三种有效性分离。
 共享 `PredictorModule::admission` 负责来源准入，缺 GNSS 不再阻止合法 LiDAR。
 联合原始信息秩与正则化弱方向占比先于有效 PL 授予；占比上限 1%，
-官方数值退化值为空。来源独立秩亏可由联合观测补足。v3 codec 保存数值与支持分组参数及原始格式身份，
-v1/v2 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束。
+官方数值退化值为空。来源独立秩亏可由联合观测补足。v4 codec 保存数值与支持分组参数及原始格式身份，
+v1/v2/v3 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束。
 
 准入／数值、codec、生产包装器及批次回归已通过；重复与表面加密对照已完成，
 LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立法向。
@@ -431,3 +431,10 @@ LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立
 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，不推广未经独立实测的校准参数。
 契约见 [advisory_prediction_contract.md](../spec/advisory_prediction_contract.md)。
 本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/staged/report.md)。
+
+固定路线校准工具已实现：三条件 × 三次校准／三次独立验证、disjoint seed，
+测量残差噪声标定后必须重放，再冻结统一换算；水平／垂直同时满足的 95%
+经验覆盖按独立运行报告，无效请求留在分母，趋势按 5 s 轨迹块及 block bootstrap。
+冻结参数需显式加载，hash／原始格式身份进入 v4 codec、输入身份与缓存。
+这些是工具合同回归；本轮没有真实合法参考路线、ENU 旋转／外参时间证据、
+观测 seed 注入或退化时序实测。校准／独立验证保持 INCONCLUSIVE，默认参数不推广。

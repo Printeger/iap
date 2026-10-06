@@ -456,7 +456,7 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
-      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<3?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<4?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
       for (const bool enabled : {true, false}) {
         auto variant=in;
         ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
@@ -467,8 +467,8 @@ int main(int argc,char** argv) {
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
-      evaluate(in,label,in.recording_codec_version<3?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
-      evaluate(in,label+"_current",in.recording_codec_version<3?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
+      evaluate(in,label,in.recording_codec_version<4?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
+      evaluate(in,label+"_current",in.recording_codec_version<4?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
     }
     std::cout<<log.run_dir()<<'\n';
   } catch(const std::exception& e) {std::cerr<<"advisory_validation: "<<e.what()<<'\n';return 1;}

@@ -11,7 +11,7 @@ struct PredictionInput {
   iap::PredictorParams params;
   double reference_time_s = 0.0;
   double validity_s = .5;
-  uint32_t recording_codec_version = 3;
+  uint32_t recording_codec_version = 4;
 };
 // Shared input authority. This only controls the Advisory posterior proxy;
 // Current Monitor fields and GLIO/FGO state are never changed.

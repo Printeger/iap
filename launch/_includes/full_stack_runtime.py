@@ -23,7 +23,32 @@ from profile_runtime import materialize_profile
 from run_directory import register_config_snapshot
 
 
-def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_prior=False):
+def load_advisory_calibration(path):
+    """Explicit frozen empirical parameters only; defaults are never promoted here."""
+    if not path: return {}
+    import hashlib
+    import json
+    target=Path(path)
+    if not target.is_absolute(): raise ValueError("advisory calibration must use an absolute path")
+    value=json.loads(target.read_text())
+    unsigned={k:v for k,v in value.items() if k != "sha256"}
+    actual=hashlib.sha256(json.dumps(unsigned,sort_keys=True,allow_nan=False).encode()).hexdigest()
+    if actual != value.get("sha256"): raise ValueError("advisory calibration checksum mismatch")
+    required={"route_sha256","coordinates_sha256","degradation_schedule_sha256","map_seed"}
+    if (value.get("identity")!="LIVE_CALIBRATION_CANDIDATE" or value.get("stage") not in ("noise","conversion") or
+            value.get("scene")!="icra_dense_forest_four_fork_v2" or
+            not required.issubset(value.get("contract",{})) or value["contract"]["map_seed"]!=41021 or
+            not value.get("calibration_evidence")):
+        raise ValueError("frozen real calibration provenance required")
+    params=value["parameters"]
+    allowed={"risk/gnss_noise_scale","risk/lidar_noise_scale","risk/K_H_adv","risk/K_V_adv"}
+    import math
+    if set(params)!=allowed or any(not math.isfinite(v) or v<=0 for v in params.values()):
+        raise ValueError("only positive observation noise and common PL conversion parameters allowed")
+    return params
+
+
+def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_prior=False, advisory_calibration=""):
     size = [float(v) for v in scenario["map_size"]]
     goal = [float(v) for v in scenario["goal"]]
     velocity = float(scenario["max_velocity_mps"])
@@ -81,6 +106,7 @@ def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_p
     for i, axis in enumerate("xyz"):
         params[f"grid_map/map_size_{axis}"] = size[i]
         params[f"fsm/waypoint0_{axis}"] = goal[i]
+    params.update(load_advisory_calibration(advisory_calibration))
     return params
 
 
@@ -124,7 +150,8 @@ def _setup(context):
                        context.launch_configurations.get(
                            "capture_failure_map", "false").lower() == "true",
                        context.launch_configurations.get(
-                           "advisory_posterior_prior", "false").lower() == "true")],
+                           "advisory_posterior_prior", "false").lower() == "true",
+                       context.launch_configurations.get("advisory_calibration", ""))],
                    remappings=remaps)
     actions = [
         IncludeLaunchDescription(PythonLaunchDescriptionSource(

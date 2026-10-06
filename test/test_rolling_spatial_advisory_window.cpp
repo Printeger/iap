@@ -45,6 +45,9 @@ IntegritySnapshot makeGnssSnapshot(const std::uint64_t prior_generation,
   satellite.azimuth = 1.2;
   satellite.pr_sigma = 2.0;
   snapshot.gnss_epoch.sats.push_back(satellite);
+  snapshot.current.gnss_valid=true;
+  snapshot.current.gnss_epoch_stamp=snapshot.gnss_epoch.stamp;
+  snapshot.current.gnss_epoch_identity=gnss_epoch_identity(snapshot.gnss_epoch,snapshot.current.excluded_prns);
   return snapshot;
 }
 
@@ -114,8 +117,8 @@ PredictorBatchDiagnostics queryWindow(
         const Eigen::Vector3d position =
             Eigen::Vector3d(x + 0.5, y + 0.5, z + 0.5);
         std::vector<PredictorQueryInput> inputs;
-        inputs.emplace_back(position, snapshot, 100.0, 0.0, "map", 100.0);
-        inputs.emplace_back(position, snapshot, 101.0, 1.0, "map", 100.0);
+        inputs.emplace_back(position, snapshot, snapshot.stamp, 0.0, "map", snapshot.stamp);
+        inputs.emplace_back(position, snapshot, snapshot.stamp+1.0, 1.0, "map", snapshot.stamp);
         PredictorBatchDiagnostics local;
         const auto outputs = window->queryPositionHorizons(inputs, &local);
         EXPECT_EQ(outputs.size(), 2u);
@@ -785,6 +788,8 @@ TEST(RollingSpatialAdvisoryWindowTest,
   updated_snapshot.gnss_epoch.stamp = 102.0;
   updated_snapshot.gnss_epoch.sats.front().elevation = 0.9;
   updated_snapshot.gnss_epoch.sats.front().azimuth = 1.4;
+  updated_snapshot.current.gnss_epoch_stamp=updated_snapshot.gnss_epoch.stamp;
+  updated_snapshot.current.gnss_epoch_identity=gnss_epoch_identity(updated_snapshot.gnss_epoch,updated_snapshot.current.excluded_prns);
   auto updated_input = make_input(updated_snapshot, 14, 102.0);
   updated_input.provenance.current_stamp = 102.0;
   ASSERT_TRUE(window.beginRefresh(std::move(updated_input)));
@@ -797,8 +802,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
   ASSERT_EQ(query(&window, updated_snapshot, Eigen::Vector3d(1.5, 0.5, 0.5),
                   &entered_counts).size(),
             1u);
-  EXPECT_EQ(retained_counts.spatial_advisory_recompute_count, 0u);
-  EXPECT_EQ(retained_counts.spatial_advisory_reuse_count, 1u);
+  // Changed epoch requires its own certification, irrespective of diagnostic TTL.
+  EXPECT_EQ(retained_counts.spatial_advisory_recompute_count, 1u);
+  EXPECT_EQ(retained_counts.spatial_advisory_reuse_count, 0u);
   EXPECT_EQ(entered_counts.spatial_advisory_recompute_count, 1u);
   EXPECT_EQ(window.diagnostics().ttl_retained_position_count, 1u);
   EXPECT_EQ(window.diagnostics().exact_retained_position_count, 0u);
@@ -816,10 +822,10 @@ TEST(RollingSpatialAdvisoryWindowTest,
   ASSERT_EQ(query(&window, updated_snapshot, Eigen::Vector3d(1.5, 0.5, 0.5),
                   &current_counts).size(),
             1u);
-  EXPECT_EQ(expired_counts.spatial_advisory_recompute_count, 1u);
+  EXPECT_EQ(expired_counts.spatial_advisory_recompute_count, 0u);
   EXPECT_EQ(current_counts.spatial_advisory_reuse_count, 1u);
-  EXPECT_EQ(window.diagnostics().gnss_ttl_expired_position_count, 1u);
-  EXPECT_EQ(window.diagnostics().exact_retained_position_count, 1u);
+  EXPECT_EQ(window.diagnostics().gnss_ttl_expired_position_count, 0u);
+  EXPECT_EQ(window.diagnostics().exact_retained_position_count, 2u);
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
@@ -863,8 +869,8 @@ TEST(RollingSpatialAdvisoryWindowTest,
   incoming.stamp = 102.0;
   incoming.pose_stamp = 102.0;
   incoming.current.stamp = 102.0;
-  incoming.gnss_epoch.stamp = 102.0;
-  incoming.gnss_epoch.sats.front().elevation = 0.8;
+  // No new epoch is certified: the old source must expire even if refresh
+  // and pose times advance. Do not rewrite a cached source to a fresh stamp.
   auto input = make_input(incoming, 14, 102.0);
   ASSERT_TRUE(window.beginRefresh(std::move(input)));
   PredictorBatchDiagnostics diagnostics;
@@ -934,11 +940,13 @@ TEST(RollingSpatialAdvisoryWindowTest,
   updated_snapshot.current.stamp = 102.0;
   updated_snapshot.gnss_epoch.stamp = 102.0;
   updated_snapshot.gnss_epoch.sats.front().elevation = 0.9;
+  updated_snapshot.current.gnss_epoch_stamp=updated_snapshot.gnss_epoch.stamp;
+  updated_snapshot.current.gnss_epoch_identity=gnss_epoch_identity(updated_snapshot.gnss_epoch,updated_snapshot.current.excluded_prns);
   ASSERT_TRUE(window.beginRefresh(make_input(updated_snapshot, 14, 102.0)));
   PredictorBatchDiagnostics one_cell;
   ASSERT_EQ(query_grid(&window, updated_snapshot, 0, -1, &one_cell).size(),
             27u);
-  EXPECT_EQ(one_cell.spatial_advisory_recompute_count, 9u);
+  EXPECT_EQ(one_cell.spatial_advisory_recompute_count, 27u);
   EXPECT_EQ(window.diagnostics().ttl_retained_position_count, 18u);
   EXPECT_EQ(window.diagnostics().entered_position_count, 9u);
   window.commitRefresh();
@@ -947,10 +955,10 @@ TEST(RollingSpatialAdvisoryWindowTest,
   PredictorBatchDiagnostics mixed_age;
   const auto mixed_outputs =
       query_grid(&window, updated_snapshot, 1, 0, &mixed_age);
-  EXPECT_EQ(mixed_age.spatial_advisory_recompute_count, 21u);
-  EXPECT_EQ(window.diagnostics().gnss_ttl_expired_position_count, 6u);
-  EXPECT_EQ(window.diagnostics().exact_retained_position_count, 6u);
-  EXPECT_EQ(window.diagnostics().entered_position_count, 21u);
+  EXPECT_EQ(mixed_age.spatial_advisory_recompute_count, 15u);
+  EXPECT_EQ(window.diagnostics().gnss_ttl_expired_position_count, 0u);
+  EXPECT_EQ(window.diagnostics().exact_retained_position_count, 12u);
+  EXPECT_EQ(window.diagnostics().entered_position_count, 15u);
 
   RollingSpatialAdvisoryWindow fresh_window;
   ASSERT_TRUE(
@@ -1235,7 +1243,7 @@ TEST(RollingSpatialAdvisoryWindowTest,
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
-     GnssIdentityIgnoresSatelliteFieldsNotConsumedBySpatialScience) {
+     ChangedEpochProofCannotReuseSpatialScience) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   const auto snapshot = makeGnssSnapshot(1);
 
@@ -1267,7 +1275,7 @@ TEST(RollingSpatialAdvisoryWindowTest,
   ASSERT_TRUE(window.beginRefresh(make_gnss_input(changed)));
 
   const auto counts = queryWindow(&window, changed, 0, false);
-  EXPECT_EQ(counts.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(counts.spatial_advisory_recompute_count, 27u);
   EXPECT_EQ(window.diagnostics().retained_position_count, 27u);
   EXPECT_EQ(window.diagnostics().full_invalidation_count, 0u);
   EXPECT_EQ(window.diagnostics().invalidation_reason,
@@ -1314,6 +1322,15 @@ TEST(RollingSpatialAdvisoryWindowTest,
         input->module.set_params(params);
       },
       RollingSpatialInvalidationReason::PredictorParametersChanged);
+  for(int parameter=0;parameter<3;++parameter) {
+    expect_reason([parameter](RollingSpatialRefreshInput* input) {
+      auto params=input->module.params();
+      if(parameter==0) params.gnss.measurement_noise_scale=2;
+      if(parameter==1) params.fusion.max_regularization_fraction=.005;
+      if(parameter==2) params.lidar.fim_params.fim_support_voxel_m=.4;
+      input->module.set_params(params);
+    },RollingSpatialInvalidationReason::PredictorParametersChanged);
+  }
   expect_reason(
       [](RollingSpatialRefreshInput* input) {
         auto params = input->module.params();
@@ -1633,11 +1650,11 @@ TEST(RollingSpatialAdvisoryWindowTest,
       window.queryPositionHorizons(invalid_queries, &invalid_diagnostics);
   ASSERT_EQ(invalid_outputs.size(), 1u);
   EXPECT_FALSE(invalid_outputs.front().valid);
-  EXPECT_EQ(invalid_outputs.front().fallback_reason, "stale_integrity");
+  EXPECT_NE(invalid_outputs.front().fallback_reason, "stale_integrity");
   EXPECT_EQ(window.diagnostics().retained_position_count, 1u);
   EXPECT_EQ(invalid_diagnostics.spatial_advisory_recompute_count, 0u);
-  EXPECT_EQ(invalid_diagnostics.spatial_advisory_reuse_count, 0u);
-  EXPECT_EQ(invalid_diagnostics.fusion_advisory_invocations, 0u);
+  EXPECT_EQ(invalid_diagnostics.spatial_advisory_reuse_count, 1u);
+  EXPECT_EQ(invalid_diagnostics.fusion_advisory_invocations, 1u);
   window.commitRefresh();
 
   auto stale_current = snapshot;
@@ -1651,11 +1668,18 @@ TEST(RollingSpatialAdvisoryWindowTest,
       window.queryPositionHorizons(stale_queries, &stale_diagnostics);
   ASSERT_EQ(stale_outputs.size(), 1u);
   EXPECT_FALSE(stale_outputs.front().valid);
-  EXPECT_EQ(stale_outputs.front().fallback_reason, "stale_integrity");
+  EXPECT_NE(stale_outputs.front().fallback_reason, "stale_integrity");
   EXPECT_EQ(window.diagnostics().retained_position_count, 1u);
   EXPECT_EQ(stale_diagnostics.spatial_advisory_recompute_count, 0u);
   EXPECT_EQ(stale_diagnostics.spatial_advisory_reuse_count, 1u);
   EXPECT_EQ(stale_diagnostics.fusion_advisory_invocations, 1u);
+  auto stale_pose=snapshot; stale_pose.pose_stamp=99;
+  std::vector<PredictorQueryInput> rejected;
+  rejected.emplace_back(Eigen::Vector3d(.5,.5,.5),stale_pose,100.,0.,"map",100.);
+  const auto pose_outputs=window.queryPositionHorizons(rejected);
+  ASSERT_EQ(pose_outputs.size(),1u);
+  EXPECT_FALSE(pose_outputs[0].valid);
+  EXPECT_EQ(pose_outputs[0].fallback_reason,"stale_odom");
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,

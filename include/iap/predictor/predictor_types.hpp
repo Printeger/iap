@@ -80,6 +80,7 @@ inline std::uint64_t forwardRiskPointSatelliteSetsHash(
 }
 
 struct GnssAdvisoryPredictorParams {
+  double measurement_noise_scale = 1.0;
   GnssGeometryPlPredictorParams geometry_params;
   VisibilityPredictor::Params visibility_params;
   // Deprecated identity-only field. A received epoch proves signal use only

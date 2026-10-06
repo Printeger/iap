@@ -4330,3 +4330,20 @@ TEST(AdvisoryAdmission, DiscardedPriorDoesNotExpireFreshLidar) {
   iap::PredictorQueryInput q(Eigen::Vector3d::Zero(),s,100.);q.lidar_support_stamp_s=100.;
   EXPECT_GT(module.admission(q).valid_until_s,100.);EXPECT_TRUE(module.query(q).valid);
 }
+
+TEST(AdvisoryCalibration, GnssNoiseScaleChangesInformationWithoutAnchorInversion) {
+  auto params=make_params(); const auto snapshot=make_snapshot(true,false);
+  iap::GnssAdvisoryPredictor one(params.gnss);
+  params.gnss.measurement_noise_scale=2;
+  iap::GnssAdvisoryPredictor two(params.gnss);
+  for(auto* predictor:{&one,&two}) {
+    predictor->set_observation_predicate([](const Eigen::Vector3d&){return true;});
+    predictor->set_occupancy_query([](const Eigen::Vector3d&){return 0;},.2);
+  }
+  const auto a=one.query(Eigen::Vector3d::Zero(),snapshot);
+  const auto b=two.query(Eigen::Vector3d::Zero(),snapshot);
+  ASSERT_TRUE(a.fim_valid); ASSERT_TRUE(b.fim_valid);
+  EXPECT_TRUE((a.lambda_gnss/4).isApprox(b.lambda_gnss,1e-6));
+  params.gnss.measurement_noise_scale=0;
+  EXPECT_THROW(iap::GnssAdvisoryPredictor invalid(params.gnss),std::invalid_argument);
+}

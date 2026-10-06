@@ -81,6 +81,7 @@ bool exactLidarFim(const LidarObservabilityFim::Params& lhs,
          exactDouble(lhs.bias_h_m, rhs.bias_h_m) &&
          exactDouble(lhs.bias_v_m, rhs.bias_v_m) &&
          exactDouble(lhs.fim_radius_m, rhs.fim_radius_m) &&
+         exactDouble(lhs.fim_support_voxel_m,rhs.fim_support_voxel_m) &&
          lhs.fim_min_voxels == rhs.fim_min_voxels &&
          exactDouble(lhs.fim_range_sigma_base, rhs.fim_range_sigma_base) &&
          exactDouble(lhs.fim_condition_max, rhs.fim_condition_max) &&
@@ -88,7 +89,8 @@ bool exactLidarFim(const LidarObservabilityFim::Params& lhs,
 }
 
 bool exactParams(const PredictorParams& lhs, const PredictorParams& rhs) {
-  return exactGeometry(lhs.gnss.geometry_params, rhs.gnss.geometry_params) &&
+  return exactDouble(lhs.gnss.measurement_noise_scale,rhs.gnss.measurement_noise_scale) &&
+         exactGeometry(lhs.gnss.geometry_params, rhs.gnss.geometry_params) &&
          exactVisibility(lhs.gnss.visibility_params,
                          rhs.gnss.visibility_params) &&
          exactDouble(lhs.gnss.measured_epoch_support_radius_m,
@@ -104,6 +106,7 @@ bool exactParams(const PredictorParams& lhs, const PredictorParams& rhs) {
          lhs.lidar.enable_legacy_observability ==
              rhs.lidar.enable_legacy_observability &&
          exactDouble(lhs.fusion.fim_epsilon, rhs.fusion.fim_epsilon) &&
+         exactDouble(lhs.fusion.max_regularization_fraction,rhs.fusion.max_regularization_fraction) &&
          exactDouble(lhs.fusion.K_H_adv, rhs.fusion.K_H_adv) &&
          exactDouble(lhs.fusion.K_V_adv, rhs.fusion.K_V_adv) &&
          exactDouble(lhs.fusion.b_H_pred, rhs.fusion.b_H_pred) &&
@@ -854,8 +857,13 @@ bool RollingSpatialAdvisoryWindow::queryPositionHorizons(
     PredictorQueryInput evaluated_input = input;
     if (cached && predictorSpatialSourceUsage(
                       impl_->candidate->identity.params).gnss) {
-      evaluated_input.snapshot.gnss_epoch.stamp =
-          slot.provenance.gnss_epoch_stamp;
+      // Cached geometry never carries another epoch's FDE admission proof.
+      // Source identity takes priority over optional diagnostic TTL retention.
+      if(input.snapshot.current.gnss_epoch_identity != slot.source_snapshot.current.gnss_epoch_identity ||
+         gnss_epoch_identity(input.snapshot.gnss_epoch,input.snapshot.current.excluded_prns) !=
+         gnss_epoch_identity(slot.source_snapshot.gnss_epoch,slot.source_snapshot.current.excluded_prns))
+        cached=nullptr;
+      else evaluated_input.snapshot.gnss_epoch.stamp=slot.provenance.gnss_epoch_stamp;
     }
     PredictorModule::SpatialAdvisory evaluated;
     const std::size_t recomputes_before =
