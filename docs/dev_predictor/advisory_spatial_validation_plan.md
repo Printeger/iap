@@ -230,6 +230,26 @@ python3 src/iap/scripts/dev_predictor/advisory_validation.py fixture \
 
 本轮接续 HEAD `9b03f36`，没有回退版本。默认关闭 shared FGO posterior proxy，只读启动开关 `risk/use_posterior_prior` / 仿真 `advisory_posterior_prior`；ON 仅旧行为复现。OFF 冻结输入 has_lambda_base=false，当前监测、误差代理、运动质量保留。当前输出为“基于观测条件的融合 Advisory”，没有未来 GLIO 误差保证。开关及 A/B 合同见 [工具契约](../spec/advisory_validation_contract.md)，实际 launch 命令见 README。
 
-新 run 为 `log/20261006T141611Z_756`。同物理地图/源观测/时间/参数/候选的 S0–S5 双组工具已经实现；完整编码配对只移除先验标志/矩阵，来源诊断及正则化证据另存。关闭组不重新引入 S4 alpha 先验。CPU 弱墙恢复曲线出图仍被原物理检查拒绝，需分别记录规划覆盖和预测机制；缺 GNSS 的准入差异不在本轮放宽。正式提交绑定复跑与图文报告将在新 run 登记；旧报告及产物保持原身份。现场三份输入、固定合法路线、配对 seed 至少三次运行和实际误差校准仍待测，不将机制测试写成真实森林验收。
+新 run 为 `log/20261006T141611Z_756`。同物理地图/源观测/时间/参数/候选的 S0–S5 双组工具已经实现；完整编码配对只移除先验标志/矩阵，来源诊断及正则化证据另存。关闭组不重新引入 S4 alpha 先验。CPU 弱墙恢复曲线出图仍被原物理检查拒绝，需分别记录规划覆盖和预测机制；缺 GNSS 的准入差异不在本轮放宽。正式提交绑定复跑与图文报告已登记；旧报告及产物保持原身份。现场三份输入、固定合法路线、配对 seed 至少三次运行和实际误差校准仍待测，不将机制测试写成真实森林验收。
 
 回归已执行：6 项新 A/B 合同、9 项原冻结工具合同、33 项 EGO baseline、独立可视化/规划进程管线、35 项 canonical launch 合同及 PredictorModule CTest 通过；已安装 launch 的 --show-args 确认默认 false。产物契约检查通过。日志在本轮 runtime/ros。
+
+正式提交绑定实验代码 `f3de428b2e95e4744ca85cbef6273ce4b35d91e1` 已完成同输入复跑。新 [图文 report.md](../../log/20261006T141611Z_756/export/analysis/advisory_validation/committed_ab/report.md)、[summary.json](../../log/20261006T141611Z_756/export/analysis/advisory_validation/committed_ab/summary.json)、[数值/模型解释](../../log/20261006T141611Z_756/export/analysis/advisory_validation/committed_ab/findings.md)、[原始数值表](../../log/20261006T141611Z_756/export/analysis/advisory_validation/committed_ab/ab_values.csv)；完整输入分别在本 run 的 `export/advisory/validation/committed_ab_on/` 与 `committed_ab_off/`，没有真实森林输入。40 个对照变体、每组 139 请求，39 对完整编码 SHA256 相等，缺物理地图一对 N/A。OFF 所有 has_lambda_base=false、prior_used=0；两组各 120/139 官方有效，S0 各 100/100 有效，其余失败/诊断不丢弃。
+
+合成空间 HPL 跨度 ON 1.46556361e-5→OFF 0.142859503 m（9747.75 倍），VPL 跨度 1.02482704e-5→0.083014211 m（8100.31 倍）。双源噪声 1→100 时 OFF HPL 0.362424369→36.2218096 m，ON 0.0199696167→0.0199999970 m；OFF 弱法向 LiDAR-only HPL=9.59613 m，双源=8.19796 m，信息互补有机制证据。极端 ×1e6 时 GNSS 因 singular_geometry 退出，epsilon 占弱方向约 99.9810%，HPL 接近 4999.52450 m；GNSS anchor/raw/FIM 标量仍有尺度差异，未经实际误差校准。CPU 弱墙恢复出图被原物理闸门拒绝，是需要后续修复的覆盖风险，不通过调预算/先验隐藏。原值和矩阵已在 report 链接。
+
+三项真实结论分别为：输入可用性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；空间敏感性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；实际误差符合性 `INCONCLUSIVE_LIVE_NOT_RUN`。GPU READY（nvidia-smi=0、cuInit=0、device_count=1），提交后原有 RViz、两份文档和旧报告脚本修改仍保留，现场为 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，live_started=false。完整 [预检 JSON](../../log/20261006T141611Z_756/metadata/manifests/advisory_preflight.json)。真实 start/middle/stop、固定合法路线、配对 seed 至少三次重复、坐标/外参/时间现场核验仍未完成；误差 CSV 只有表头，不代表零误差。
+
+实际执行命令（已 source ROS 与 workspace，所有命令采用同一 `IAP_RUN_DIR=/home/dev/ws_iap/src/iap/log/20261006T141611Z_756`）：
+
+```bash
+ctest --test-dir build/ego_planner -R '^(test_advisory_prior_ab|test_advisory_validation|test_ego_baseline|test_ego_pipeline)$' --output-on-failure
+python3 src/iap/test/test_canonical_launch_contracts.py
+ctest --test-dir build/iap -R '^test_predictor_module$' --output-on-failure
+ros2 launch iap iap_sim.launch.py --show-args
+python3 src/iap/scripts/dev_predictor/advisory_validation.py preflight
+python3 src/iap/scripts/dev_predictor/compare_advisory_error.py
+python3 src/iap/scripts/dev_predictor/advisory_prior_ab_validation.py fixture --binary build/ego_planner/advisory_validation --label committed_ab
+```
+
+`--show-args` 只验证已安装入口参数，不启动现场。重跑须取消 IAP_RUN_DIR，让 resolver 新分配，不能在本正式 run 覆盖同名产物；完整构建/测试/实验命令与日志登记在本 run metadata/manifests。未执行的森林 record/launch 不列为已完成命令。
