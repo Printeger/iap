@@ -719,10 +719,13 @@ namespace ego_planner
     if ((exec_state_ != EXEC_TRAJ && exec_state_ != REPLAN_TRAJ) ||
         info.start_time_.seconds() < 1e-5)
       return;
-    const double now = node_->now().seconds();
-    const double elapsed = std::max(0.0, now - info.start_time_.seconds());
+    double now = node_->now().seconds();
+    double elapsed = std::max(0.0, now - info.start_time_.seconds());
     if (elapsed >= info.duration_) return;
     auto assessment = planner_manager_->assessRemainingTrajectory(now);
+    now=assessment.evaluation_time_s;
+    elapsed=std::max(0.0,now-info.start_time_.seconds());
+    applyLatestOdometry();
     // Compare the command curve and GLIO at the same measurement time.
     const double measured_elapsed = std::clamp(
         applied_odom_stamp_s_ - info.start_time_.seconds(), 0.0,

@@ -137,14 +137,18 @@ namespace ego_planner
     void setPlanningGoals(const std::vector<Eigen::Vector3d>& goals) { planning_goals_ = goals; }
     bool searchRecoveryGuide();
     void strengthenGuideTracking() { guide_weight_ *= 2.0; }
+    bool addCurveClearanceConstraints(const Eigen::MatrixXd& points, double interval,
+        const std::vector<std::pair<double,GridPlanningCell>>& violations);
     bool curveViolates(const Eigen::MatrixXd& points, double interval) const;
     bool needsGuideReinitialization() const { return guide_reinitialization_; }
     const vector<Eigen::Vector3d>& recoveryGuide() const { return guide_pts_; }
     void initializeFromGuide(const Eigen::MatrixXd& points);
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
     void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
-                          bool advisory_fallback = false) {
+                          bool advisory_fallback = false,
+                          std::function<GridPlanningCell(const Eigen::Vector3d&)> guide_query = {}) {
       planning_query_ = std::move(query);
+      guide_query_=guide_query ? std::move(guide_query) : planning_query_;
       planning_advisory_fallback_ = advisory_fallback;
       initialization_failed_ = false;
       guide_tracking_ = false;
@@ -153,7 +157,8 @@ namespace ego_planner
       planning_goals_.clear();
       guide_pts_.clear();
       guide_weight_ = 1.0;
-      if (a_star_) a_star_->setPlanningQuery(planning_query_, advisory_fallback);
+      curve_clearance_constraints_.clear();
+      if (a_star_) a_star_->setPlanningQuery(guide_query_, advisory_fallback);
     }
     void setSearchFailureObserver(std::function<void(
         const AStar::Result&, const SearchFailureContext&)> observer) {
@@ -201,9 +206,17 @@ namespace ego_planner
     PlanningBudget::Ptr budget_;
     std::vector<Eigen::Vector3d> planning_goals_;
     double guide_weight_ = 1.0;
+    struct CurveClearanceConstraint {
+      int first_control;
+      Eigen::Vector4d weights;
+      Eigen::Vector3d center, direction;
+      double clearance;
+    };
+    std::vector<CurveClearanceConstraint> curve_clearance_constraints_;
     std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> planning_endpoints_;
     bool guide_reinitialization_ = false;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
+    std::function<GridPlanningCell(const Eigen::Vector3d&)> guide_query_;
     bool planning_advisory_fallback_ = false;
     bool initialization_failed_ = false;
     bool guide_tracking_ = false;

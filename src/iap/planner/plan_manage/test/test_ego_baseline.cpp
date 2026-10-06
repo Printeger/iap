@@ -133,6 +133,12 @@ struct EGOPlannerManagerTestAccess {
   static void setExternalSupportAge(EGOPlannerManager& manager, double age) {
     manager.current_integrity_.current_external_support_age_s = age;
   }
+  static void setMotionStamp(EGOPlannerManager& manager, double stamp) {
+    manager.current_integrity_.stamp=stamp;
+  }
+  static void setMotionError(EGOPlannerManager& manager, double error) {
+    manager.current_integrity_.current_motion_error_proxy_m=error;
+  }
   static void setMotion(EGOPlannerManager& manager, double stamp,
                         uint8_t quality,
                         const Eigen::Vector3d& position = Eigen::Vector3d(-2, 0, 1)) {
@@ -158,7 +164,7 @@ struct EGOPlannerManagerTestAccess {
 };
 }
 namespace {
-rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false) {
+rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double smooth_weight = 1.0) {
   if (!rclcpp::ok()) rclcpp::init(0,nullptr);
   rclcpp::NodeOptions opts;
   opts.parameter_overrides({
@@ -172,7 +178,7 @@ rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false) {
     {"manager/max_vel",1.0}, {"manager/max_acc",2.0}, {"manager/max_jerk",4.0},
     {"manager/control_points_distance",0.4}, {"manager/planning_horizon",5.0},
     {"manager/drone_id",0}, {"manager/feasibility_tolerance",0.05},
-    {"optimization/lambda_smooth",1.0}, {"optimization/lambda_collision",0.5},
+    {"optimization/lambda_smooth",smooth_weight}, {"optimization/lambda_collision",0.5},
     {"optimization/lambda_feasibility",0.1}, {"optimization/lambda_fitness",1.0},
     {"optimization/dist0",0.5}, {"optimization/swarm_clearance",0.5},
     {"optimization/max_vel",1.0}, {"optimization/max_acc",2.0}
@@ -1129,6 +1135,95 @@ TEST(EgoBaseline, ActualPublicationAllowsRemoteUpdatesAndRejectsRelevantRevocati
     else { EXPECT_EQ(manager.local_data_.traj_id_,77); EXPECT_EQ(manager.local_data_.position_traj_.getControlPoint(),old); }
     manager.endPlanningView();
   }
+}
+
+TEST(EgoBaseline, RemainingCheckBindsTimeAfterConcurrentMapAndMotionUpdate) {
+  auto node=makeNode();
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},99.95,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,99.95,1,start);
+  Eigen::MatrixXd control(3,10);
+  for(int i=0;i<10;++i) control.col(i)=start+Eigen::Vector3d(.2*i,0,0);
+  manager.local_data_.position_traj_=ego_planner::UniformBspline(control,3,.4);
+  manager.local_data_.start_time_=rclcpp::Time(99000000000LL,RCL_ROS_TIME);
+  // Exactly the callback pattern in the saved run: the caller records time,
+  // then a newer observed map and motion report arrive before corridor capture.
+  ego_planner::EGOPlannerManagerTestAccess::interceptOdom(manager,[&] {
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100100000000LL),RCL_RET_OK);
+    GridMapTestAccess::input(*manager.grid_map_,{},100.05,start);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.05,1,start);
+  });
+  const auto checked=manager.assessRemainingTrajectory(100.0);
+  EXPECT_TRUE(checked.executable()) << gridExecutionReasonName(checked.execution_reason);
+  EXPECT_DOUBLE_EQ(checked.evaluation_time_s,100.1);
+  EXPECT_NEAR(checked.checked_from_time_s,1.1,1e-9);
+  EXPECT_DOUBLE_EQ(checked.evaluated_motion.stamp_s,100.05);
+  // A genuinely future map must still fail; never clamp a negative age to zero.
+  GridMapTestAccess::input(*manager.grid_map_,{},100.2,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::ENVIRONMENT_STALE);
+  GridMapTestAccess::input(*manager.grid_map_,{},100.05,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,99.5,1,start);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_UNAVAILABLE);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.05,1,start);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionStamp(manager,99.5);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_STALE);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionStamp(manager,100.2);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_STALE);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionStamp(manager,100.05);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionError(manager,NAN);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_UNAVAILABLE);
+  const auto& curve=manager.local_data_.position_traj_;
+  EXPECT_EQ(manager.assessTrajectory(curve,0,100.1,true,1.1).execution_reason,
+            GridExecutionReason::CURRENT_MOTION_UNAVAILABLE);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionError(manager,.05);
+  GridMapTestAccess::input(*manager.grid_map_,{},99.3,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::ENVIRONMENT_STALE);
+  // A ROS time jump still revokes the whole check.
+  GridMapTestAccess::input(*manager.grid_map_,{},99.95,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  EXPECT_EQ(manager.assessRemainingTrajectory(100.1).execution_reason,
+            GridExecutionReason::ENVIRONMENT_STALE);
+}
+
+TEST(EgoBaseline, GuideCurveCorrectionClearsActualObstacleWithOriginalMargin) {
+  // Strong smoothing still cuts inside a guide with fitting reserve. This
+  // exercises actual-sample correction instead of only initial route padding.
+  auto node=makeNode(false,10.); ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  const double now=node->now().seconds();
+  // Synthetic fully observed sphere around one raw voxel. A* can skirt its
+  // boundary, but the actual smooth spline must retain the original clearance.
+  GridMapTestAccess::input(*manager.grid_map_,{Eigen::Vector3d(0,0,1)},now,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,start);
+  ASSERT_TRUE(manager.beginPlanningView());
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+  EXPECT_GT(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager).expanded,0u);
+  EXPECT_GT(manager.planningBudget()->count(PlanningBudget::Repair::CurveCorrection),0u);
+  EXPECT_LE(manager.planningBudget()->used(),3u);
+  const auto assessment=manager.assessTrajectory(manager.local_data_.position_traj_,0,node->now().seconds());
+  EXPECT_TRUE(assessment.executable()) << gridExecutionReasonName(assessment.execution_reason);
+  EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(start,1e-8));
+  EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(manager.local_data_.duration_).isApprox(goal,1e-8));
+  manager.endPlanningView();
 }
 
 TEST(EgoBaseline, ReadOnlyExportPreservesOneBasedObservationProvenanceAndExpiry) {

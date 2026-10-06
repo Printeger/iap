@@ -88,6 +88,8 @@ namespace ego_planner
       Eigen::Vector3d first_execution_position = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());
       GridPlanningCell first_execution_cell;
+      // Frozen candidate violations, with exact raw geometry for correction.
+      std::vector<std::pair<double,GridPlanningCell>> curve_clearance_violations;
       // Independent of the first physical/motion rejection on the curve.
       double first_unobserved_time_s = std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d first_unobserved_position = Eigen::Vector3d::Constant(
@@ -119,7 +121,8 @@ namespace ego_planner
                                           double to_time_s =
                                               std::numeric_limits<double>::infinity(),
                                           const GridPlanningContext* physical_context = nullptr,
-                                          bool check_connection = true);
+                                          bool check_connection = true,
+                                          const GridMotionContext* bound_motion = nullptr);
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
@@ -148,7 +151,8 @@ namespace ego_planner
       latest_odom_provider_ = std::move(provider);
     }
     GridPlanningRisk queryPlanningViewAdvisory(const Eigen::Vector3d& position) const;
-    GridPlanningCell queryPlanningViewCell(const Eigen::Vector3d& position) const;
+    GridPlanningCell queryPlanningViewCell(const Eigen::Vector3d& position,
+                                         double clearance_reserve_m = 0.0) const;
     std::optional<uint64_t> planningEvidenceFingerprint(
         const Eigen::Vector3d& start, const Eigen::Vector3d& target) const;
     void capturePlanningStall(const Eigen::Vector3d& start,
@@ -214,6 +218,14 @@ namespace ego_planner
     int connection_predecessor_ = -1;
     int next_trajectory_id_ = 0;
     PlanFailure last_plan_failure_ = PlanFailure::None;
+    struct ExecutionView {
+      double time_s;
+      GridMotionContext motion;
+      GridPlanningContext physical;
+    };
+    ExecutionView captureExecutionView(
+        const std::vector<Eigen::Vector3d>& positions, double earliest_time_s,
+        bool allow_bridged, PlanningBudget::Ptr budget = {});
     TrajectoryAssessment last_candidate_assessment_;
     std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>
         latest_odom_provider_;

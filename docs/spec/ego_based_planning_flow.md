@@ -7,7 +7,19 @@
 阶段 1 已恢复 EGO 主线、同一个 GridMap 的空间 PL 缓存与真实 PredictorModule 接入；阶段 1a 已实测 GLIO 驱动的仿真和同图显示。本次实施把当前融合运动质量、物理环境与 advisory 预测分开查询，在原 EGO 触发点做完整性避让，并在写入 `local_data` 前检查实际曲线。以下「当前阶段」描述代码；新行为尚无四分叉现场验收记录，不能把旧运行结果当作本次功能的成功证据。原版流程图保持固定基线。
 从本轮起，`iap_sim.launch.py` 默认且统一使用 `icra_dense_forest_four_fork_v2` 做完整仿真和可视化回归；单元测试可以保留小型定向 fixture，历史 `fused_nominal` 运行记录保持原场景身份，不迁写为四分叉结论。
 
-## 执行反馈接线与完整扫描传输（当前修正）
+## 运行时检查时序与实际曲线修正（当前修正）
+
+本轮基线 `2d63cb8`，诊断依据 `20261006T110434Z_515`。保存的 remaining_stop 地图时间比检查参考时间新 0.100629 s；候选实际曲线距原始障碍中心 0.550945 m，原要求为 0.551355 m，欠缺 0.000411 m。原始快照保持不变。CSV 中 130 轮、114 次 repair_denied、0 次截止时间过期，advisory avoid / 回退均为零；本轮不把这些失败归因于 PL 或此前已修复的反馈/beam 接线。
+
+运行时执行段和待生效段先组成同一走廊，`captureExecutionView()` 捕获物理 epoch 后读取当前运动上下文和 ROS 时间。两段检查共用这份 epoch、运动质量和时刻，并按该时刻重新计算剩余曲线起点及 FSM lead。运动误差扩大净空半径时最多重捕获一次；无效当前运动证据保留具体 CURRENT_MOTION 原因，不写成地图过期。普通地图更新不改变已捕获结论，真正的超龄、未来地图/运动时间、ROS 时钟倒退仍拒绝。发布走廊及独立最新曲线检查复用同一捕获入口；规划事件冻结也在物理捕获后绑定运动质量与参考时间。最终地图锁内提交检查继续保留。
+
+同一 GridMap 的 guide 查询额外保留半个分辨率的拟合余量，按到真实起点/合法目标集合的距离在 0.5 m 范围内收回，精确起终状态仍按原阈值连接。正常搜索和 advisory 高代价回退共用该 guide 查询，原无违反初值仍走快路径。实际曲线检查收集所有物理/净空违反采样点的精确原始障碍几何；`addCurveClearanceConstraints()` 以这些点建立球外支撑平面，三次样条权重把梯度分配给对应四个控制点，二次罚项避免微小越线的梯度趋近零。每次实际曲线修正单独计 CurveCorrection 动作，累积几何约束；时间调整后仍恢复起终 p/v/a、复查动力学和完整曲线。拟合余量不降低最终授权阈值，候选失败不覆盖执行轨迹。
+
+未知环境及 advisory 的原查询语义保持；没有可用原始障碍几何或固定边界不可修正时拒绝候选，不凭平面约束授权。共享预算仍为 1.5 s / 三次动作，单次 A* 至多 1 s。CSV 追加 `curve_correction_repairs` 与 `guide_fitting_reserve_m`，日志记录违反点数量和实际余量；渐变搜索半径可能降低现有单半径净空缓存的命中率，现场耗时仍待测量。
+
+定向回归先复现负年龄 ENVIRONMENT_STALE 和单障碍 guide 成功后修复耗尽（`regression_red.log`）；修正后前者绑定捕获后的时刻及剩余起点，并覆盖真正过期、未来时间、时钟倒退、无效运动误差的分类。曲线 fixture 明确为合成、完全已观测；guide 余量足以解决默认平滑情况，更强平滑用例仍触发 15 个实际采样点的约束修正，在原三次动作内通过完整曲线检查（`final_regression.log`）。证据目录为 `log/20261006T111341Z_228/runtime/`：六包 Release 构建 `final_build.log` 及最新 planner 增量 `verified_build.log` 通过；IAP 29 项、GridMap 4 项、A* 1 项和 EGO 5 项行为 CTest（含 30 个 EGO 基线用例、进程管线、接续反馈及失败工具）全部通过，分别记录在 `iap_tests.log`、`gridmap_tests.log`、`astar_tests.log`、`ego_tests.log`。四分叉新现场运行仍为 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，保留用户 RViz 修改；验收契约 Draft，不报告正式 PASS 或任务到达。
+
+## 执行反馈接线与完整扫描传输（已实现）
 
 基线 `9cccb56` 的现场记录 `20261006T103803Z_118` 暴露完整 launch 的反馈漏接：traj_server 发布 `/drone_0_planning/pos_cmd`，planner 的 `/position_cmd` 未重映射。服务端已切换、规划器未确认，同步窗口结束后进入已有检查制动。现在 canonical `_includes/full_stack_runtime.py` 对 planner 与服务端使用同一位置命令话题；生效时刻、0.1 s 确认检查和制动机制不变。
 
@@ -177,7 +189,7 @@ flowchart TD
     Init --> Scan{完整实际初始曲线含尾部}
     Scan -->|无违反| Opt[EGO 快路径]
     Scan -->|有违反| Search[同一个 A*：真实起点到终点集合，完整边和连接段]
-    Search -->|成功| Guide[单条 guide：重采样、rebound、参考跟踪]
+    Search -->|成功| Guide[单条 guide 与拟合余量：重采样、rebound、参考跟踪]
     Search -->|穷尽且存在 advisory 拒绝| Soft[预算内一次高代价回退]
     Soft -->|成功| Guide
     Search -->|超时或条件失效| Keep
@@ -185,7 +197,7 @@ flowchart TD
     Guide --> Opt
     Opt --> Retime[时间调整恢复边界导数，再查动力学]
     Retime --> Check{完整实际曲线与终端状态}
-    Check -->|预算内可修正| Correct[加强同一 guide/rebound 约束]
+    Check -->|预算内可修正| Correct[实际违反采样点的几何避让约束]
     Correct --> Opt
     Check -->|目标失败| Short
     Check -->|拒绝| Keep
@@ -195,7 +207,7 @@ flowchart TD
     Publish --> Server[traj_server：切换前持续旧命令，指定时刻切换]
     Server --> Feedback[canonical pos_cmd：两端同话题 remap]
     Feedback --> Confirm[position_cmd ID 确认规划端切换]
-    Confirm --> Monitor[两段轨迹、新证据与当前质量监督]
+    Confirm --> Monitor[捕获走廊后绑定时间与当前质量，两段统一监督]
     Monitor --> Round
     Monitor -->|执行条件失效| Keep
     Inputs -.只读导出.-> Viz[独立可视化进程]
@@ -213,7 +225,8 @@ flowchart TD
 | `enforceBoundaryStates` / `assessTrajectory` | 三次均匀样条硬绑定两端 p/v/a；时间调整后恢复边界并复查动力学、完整实际曲线及终端制动空间；控制多边形不代替曲线检查。预算耗尽独立记录。 |
 | `commitFrozenCorridor` / `publicationStillTimely` | 原地图锁内比较相关 raw/inflate/observed、时效和运动条件，GLIO 按测量时刻对齐，曲线按未来接续时刻对齐；序列化后再次检查发布时间余量，失败不覆盖执行轨迹。 |
 | `Bspline.start_mode` / `observeExecutingTrajectory` | canonical 位置命令发布/订阅均为 `/drone_0_planning/pos_cmd`；IMMEDIATE=0；AT_TIME=1，默认提前 1.6 s，迟到拒绝；执行与待生效各一条，位置命令 ID 确认切换，立即恢复取消队列。 |
-| `assessRemainingTrajectory` / `checkCollisionCallback` | 监督旧段至切换及新段，合并 pending 的物理与 advisory 发现；待生效存在不能视为恢复成功，物理授权撤销进入检查恢复；advisory 缺失降级、有效警告请求重新规划。失败/未知尾段取证继续使用原有运行目录接口。 |
+| `captureExecutionView` / `assessRemainingTrajectory` / `checkCollisionCallback` | 捕获后绑定时间和当前运动质量，两段共享物理 epoch；按该时刻重算剩余起点及 lead，真正 stale/future/时间倒退仍拒绝。监督旧段至切换及新段，合并 pending 的物理与 advisory 发现；待生效存在不能视为恢复成功，物理授权撤销进入检查恢复；advisory 缺失降级、有效警告请求重新规划。失败/未知尾段取证继续使用原有运行目录接口。 |
+| `guide_query_` / `addCurveClearanceConstraints` | 同图 guide 保留半分辨率余量并在精确起终附近收回；实际曲线违反点驱动球外支撑平面，通过三次样条权重约束四个控制点。CurveCorrection 每次计一动作，最终净空/动力学/边界检查保留原阈值。 |
 
 `captureFailureSnapshot(include_observation_evidence)` 在同一个 occupancy 锁内拷贝完整物理/观测层、当前 registered frame 和 current/active 的 hit/free 贡献；仅显式取证时保留每体素最近一次 observed→unknown 的 producer（当前帧替换、活动 delta、活动 recovery）。`RegisteredLidarWindow::unthinnedObservationMask` 重用原遍历，只在诊断中关闭端点去重，锁释放后执行，结果只写文件。`analyze_curve_observation.py` 先按实际 B-spline 和保存的采样区间重放首个未知点，检查地图/当前帧年龄，再对照原始帧、实际 mask 与未去重诊断 mask；缺失证据或不一致不能给出空间可执行授权。保存后的 assessment 持有同代快照，后续 live 地图更新不把失败曲线拼到另一代地图；无法取得同代证据时记录采集失败。
 

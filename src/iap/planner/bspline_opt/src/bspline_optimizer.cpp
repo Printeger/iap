@@ -79,7 +79,7 @@ namespace ego_planner
     if(!found && result.exhausted && result.rejected_advisory && !planning_advisory_fallback_) {
       if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) return false;
       planning_advisory_fallback_=true;
-      a_star_->setPlanningQuery(planning_query_,true);
+      a_star_->setPlanningQuery(guide_query_,true);
       found=a_star_->AstarSearchGoals(.1,start,planning_goals_,-1,center);
       RCLCPP_WARN(rclcpp::get_logger("one_guide"),
           "Search exhausted with advisory rejections; high-cost retry %s",
@@ -124,6 +124,33 @@ namespace ego_planner
         cps_.base_point[i].push_back(nearest-direction*cps_.clearance);
       }
     }
+  }
+
+  bool BsplineOptimizer::addCurveClearanceConstraints(const Eigen::MatrixXd& points,
+      double interval, const std::vector<std::pair<double,GridPlanningCell>>& violations) {
+    if(points.cols()<7 || !(interval>0)) return false;
+    UniformBspline curve(points,3,interval);
+    const size_t previous=curve_clearance_constraints_.size();
+    for(const auto& [time,cell]:violations) {
+      if(budget_ && budget_->expired()) return false;
+      if(!cell.nearest_raw_center.allFinite() || !std::isfinite(cell.required_clearance_m)) continue;
+      const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
+      const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));
+      const double u=parameter-first;
+      const Eigen::Vector4d weights(std::pow(1-u,3)/6.,
+          (3*u*u*u-6*u*u+4)/6.,(-3*u*u*u+3*u*u+3*u+1)/6.,u*u*u/6.);
+      double movable=0;
+      for(int j=0;j<4;++j) if(first+j>=order_ && first+j<points.cols()-order_) movable+=weights[j];
+      if(movable<1e-8) continue; // fixed endpoint derivatives cannot be repaired here
+      Eigen::Vector3d direction=curve.evaluateDeBoorT(time)-cell.nearest_raw_center;
+      if(direction.norm()<1e-8) continue;
+      direction.normalize();
+      // A supporting plane outside the raw-center sphere. The extra half voxel
+      // is fitting reserve, not a change to the final execution threshold.
+      curve_clearance_constraints_.push_back({first,weights,cell.nearest_raw_center,
+          direction,cell.required_clearance_m+.5*grid_map_->getResolution()});
+    }
+    return curve_clearance_constraints_.size()>previous;
   }
 
   void BsplineOptimizer::setGuidePath(const vector<Eigen::Vector3d> &guide)
@@ -849,7 +876,7 @@ namespace ego_planner
         initialization_failed_ = true; return {};
       }
       planning_advisory_fallback_ = true;
-      a_star_->setPlanningQuery(planning_query_, true);
+      a_star_->setPlanningQuery(guide_query_, true);
       found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
       static rclcpp::Clock fallback_clock(RCL_SYSTEM_TIME);
       RCLCPP_WARN_THROTTLE(rclcpp::get_logger("initControlPoints"),
@@ -1278,6 +1305,18 @@ namespace ego_planner
     }
 
     /*** calculate distance cost and gradient ***/
+    // Constrain the actual spline sample, not its control polygon. Quadratic
+    // penalties retain a useful gradient for sub-millimetre violations.
+    const double weight=100.*std::max(1.,lambda1_/std::max(1e-6,lambda2_));
+    for(const auto& constraint:curve_clearance_constraints_) {
+      Eigen::Vector3d position=Eigen::Vector3d::Zero();
+      for(int j=0;j<4;++j) position+=constraint.weights[j]*q.col(constraint.first_control+j);
+      const double deficit=constraint.clearance-(position-constraint.center).dot(constraint.direction);
+      if(deficit<=0) continue;
+      cost+=weight*deficit*deficit;
+      for(int j=0;j<4;++j) gradient.col(constraint.first_control+j)-=
+          2*weight*deficit*constraint.weights[j]*constraint.direction;
+    }
     for (auto i = order_; i < end_idx; ++i)
     {
       for (size_t j = 0; j < cps_.direction[i].size(); ++j)
@@ -1710,7 +1749,7 @@ namespace ego_planner
           force_stop_type_ = STOP_FOR_ERROR; return false;
         }
         planning_advisory_fallback_ = true;
-        a_star_->setPlanningQuery(planning_query_, true);
+        a_star_->setPlanningQuery(guide_query_, true);
         found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
       }
       if (!found) {

@@ -8,7 +8,7 @@
 class PlanningBudget {
  public:
   enum class Repair { TargetShortening, Reinitialize, Search, AdvisoryFallback,
-                      BackendRestart, PublicationRecheck, Count };
+                      BackendRestart, PublicationRecheck, CurveCorrection, Count };
   using Clock = std::chrono::steady_clock;
   explicit PlanningBudget(double seconds = 1.5, unsigned repairs = 3)
       : deadline_(started_ + std::chrono::duration_cast<Clock::duration>(

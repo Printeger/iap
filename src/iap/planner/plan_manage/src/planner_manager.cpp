@@ -677,7 +677,15 @@ namespace ego_planner
       if(capture_failure_map_) captureFailureMap("endpoint",start_pt,target_pt,start_cell);
       return fail(PlanFailure::Connection);
     }
-    optimizer.setPlanningQuery(query,false);
+    const double fitting_reserve=.5*grid_map_->getResolution();
+    // Use the same epoch and physical query with additional fitting room.
+    // Taper to the exact boundary states; legal starts/goals stay connectable.
+    const auto guide_query=[this,start_pt,fitting_reserve](const Eigen::Vector3d& point) {
+      double endpoint_distance=(point-start_pt).norm();
+      for(const auto& target:planning_targets_) endpoint_distance=std::min(endpoint_distance,(point-target.position).norm());
+      return queryPlanningViewCell(point,fitting_reserve*std::clamp(endpoint_distance/.5,0.,1.));
+    };
+    optimizer.setPlanningQuery(query,false,guide_query);
     optimizer.setPlanningBudget(planning_budget_);
     optimizer.setPlanningEndpoints(start_pt,target_pt);
     std::vector<Eigen::Vector3d> goals;
@@ -786,9 +794,17 @@ namespace ego_planner
       if(optimizer.recoveryGuide().empty()) {
         if(!optimizer.searchRecoveryGuide() || !initialize_guide()) return fail(PlanFailure::Search);
       } else {
-        if(!planning_budget_->tryRepair(PlanningBudget::Repair::Reinitialize)) return fail(PlanFailure::Budget);
-        optimizer.strengthenGuideTracking();
-        optimizer.initializeFromGuide(control);
+        if(!planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) return fail(PlanFailure::Budget);
+        if(!assessment.curve_clearance_violations.empty()) {
+          if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations))
+            return fail(PlanFailure::Curve);
+          RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
+              assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
+          optimizer.setControlPoints(control);
+        } else {
+          optimizer.strengthenGuideTracking();
+          optimizer.initializeFromGuide(control);
+        }
       }
     }
     const bool advisory_downgraded=!std::isfinite(planning_view_->advisory_valid_until_s) ||
@@ -837,13 +853,20 @@ namespace ego_planner
             positions.push_back(selected.position+selected.velocity.normalized()*std::min(d,stopping));
           }
         }
-        const auto prepared=grid_map_->preparePlanningQuery(now,release.evaluated_motion);
-        release.physical_epoch=grid_map_->captureFrozenCorridor(positions,prepared.required_clearance_m,planning_budget_);
-        if(!release.physical_epoch) return fail(PlanFailure::Release);
-        const auto context=grid_map_->preparePlanningQuery(now,release.evaluated_motion,release.physical_epoch);
+        const auto view=captureExecutionView(positions,now,false,planning_budget_);
+        if(!view.physical.epoch) {
+          last_candidate_assessment_.execution_reason=view.physical.motion_reason!=GridExecutionReason::OK
+              ? view.physical.motion_reason : GridExecutionReason::ENVIRONMENT_STALE;
+          return fail(PlanFailure::Release);
+        }
+        release.physical_epoch=view.physical.epoch;
+        release.evaluation_time_s=view.time_s;
+        release.evaluated_motion=view.motion;
+        release.evaluated_motion_quality=view.motion.quality;
+        release.evaluated_motion_error_proxy_m=view.motion.error_proxy_m;
         for(const auto& point:positions) {
           if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-          const auto cell=grid_map_->queryPlanningCell(point,0,now,planning_risk_policy_,release.evaluated_motion,false,&context);
+          const auto cell=grid_map_->queryPlanningCell(point,0,view.time_s,planning_risk_policy_,view.motion,false,&view.physical);
           if(!cell.executable()) {
             last_candidate_assessment_.execution_reason=cell.execution_reason;
             last_candidate_assessment_.first_execution_position=point;
