@@ -58,3 +58,13 @@ The frozen interface does not export the estimator world-to-ENU rotation. The
 canonical static planner translation alone cannot prove that rotation is identity.
 Real frame proof and independent noise/error calibration remain required; this
 is a known evidence gap, not a reason to force legacy source PL to agree.
+
+## 实际曲线物理范围
+
+恢复 guide 不授予执行权限。初始化曲线先取得实际清障约束；rebound 与 refine
+共享曲线样本清障平面及冻结地图边界成本，按 cubic 坐标极值施加边界方向梯度。
+固定起终 P/V/A 与原独立实际曲线／最新走廊发布闸门保留。优化失败时只在
+原共享预算内使用现有有序前方目标与单条 guide，不增加候选竞赛。
+重新拟合后旧控制点索引约束失效并重新建立。软成本不能证明边界合法；
+独立检查同时核对实际 piecewise cubic 极值（含重定时 knots），拒绝采样间越界。
+CPU 时钟冻结回归验证模型与发布接口，不能代替在线输入新鲜度和真实执行验收。

@@ -135,6 +135,10 @@ namespace ego_planner
       planning_goals_ = {end};
     }
     void setPlanningGoals(const std::vector<Eigen::Vector3d>& goals) { planning_goals_ = goals; }
+    // Frozen physical volume; actual cubic extrema are constrained in both solvers.
+    void setCurvePhysicalBounds(const Eigen::Vector3d& lower, const Eigen::Vector3d& upper) {
+      curve_bounds_ = std::make_pair(lower, upper);
+    }
     bool searchRecoveryGuide();
     void strengthenGuideTracking() { guide_weight_ *= 2.0; }
     bool addCurveClearanceConstraints(const Eigen::MatrixXd& points, double interval,
@@ -158,6 +162,7 @@ namespace ego_planner
       guide_pts_.clear();
       guide_weight_ = 1.0;
       curve_clearance_constraints_.clear();
+      curve_bounds_.reset();
       if (a_star_) a_star_->setPlanningQuery(guide_query_, advisory_fallback);
     }
     void setSearchFailureObserver(std::function<void(
@@ -213,6 +218,7 @@ namespace ego_planner
       double clearance;
     };
     std::vector<CurveClearanceConstraint> curve_clearance_constraints_;
+    std::optional<std::pair<Eigen::Vector3d,Eigen::Vector3d>> curve_bounds_;
     std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> planning_endpoints_;
     bool guide_reinitialization_ = false;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
@@ -291,6 +297,7 @@ namespace ego_planner
     void calcDistanceCostRebound(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient, int iter_num, double smoothness_cost);
     void calcMovingObjCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcSwarmCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
+    void calcCurvePhysicalCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     bool check_collision_and_rebound(void);
 

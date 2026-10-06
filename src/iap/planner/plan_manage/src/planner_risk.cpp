@@ -447,13 +447,18 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   if (end < assessment.checked_from_time_s) return assessment;
   const size_t intervals = static_cast<size_t>(std::ceil(
       (end - assessment.checked_from_time_s) / step));
+  std::vector<double> check_times=curve.coordinateExtremaTimes(assessment.checked_from_time_s,end);
+  for(size_t sample=0;sample<=intervals;++sample)
+    check_times.push_back(std::min(end,assessment.checked_from_time_s+sample*step));
+  std::sort(check_times.begin(),check_times.end());
+  check_times.erase(std::unique(check_times.begin(),check_times.end()),check_times.end());
   GridPlanningContext corridor_context;
   if (!physical_context) {
     std::vector<Eigen::Vector3d> positions; positions.reserve(intervals+1);
     const auto budget=planning_view_ && from_time_s<=0.0 ? planning_budget_ : PlanningBudget::Ptr{};
-    for (size_t sample=0;sample<=intervals;++sample) {
+    for (double t:check_times) {
       if (budget && budget->expired()) { assessment.budget_exhausted=true; return assessment; }
-      positions.push_back(curve.evaluateDeBoorT(std::min(end,assessment.checked_from_time_s+sample*step)));
+      positions.push_back(curve.evaluateDeBoorT(t));
     }
     const auto view=captureExecutionView(positions,now_s,allow_bridged,budget);
     now_s=view.time_s;
@@ -477,6 +482,19 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   assessment.physical_epoch = physical_context->epoch;
   generation = physical_context->generation;
   assessment.evaluated_generation = generation;
+  // The ordinary physical schedule and its diagnostics remain unchanged.
+  // Additionally, reject out-of-volume coordinate extrema between samples.
+  for(double t:curve.coordinateExtremaTimes(assessment.checked_from_time_s,end)) {
+    if(planning_view_ && planning_budget_ && planning_budget_->expired()) {
+      assessment.budget_exhausted=true; return assessment;
+    }
+    const auto p=curve.evaluateDeBoorT(t);
+    const auto cell=grid_map_->queryPlanningCell(p,0,now_s,planning_risk_policy_,motion,false,physical_context);
+    if(cell.execution_reason==GridExecutionReason::OUT_OF_MAP && assessment.executable()) {
+      assessment.execution_reason=cell.execution_reason; assessment.first_execution_time_s=t;
+      assessment.first_execution_position=p; assessment.first_execution_cell=cell;
+    }
+  }
   // Always visit the actual interval endpoint, including a tail shorter
   // than half a sampling step. Store effective curve time, never an overshoot.
   for (size_t sample = 0; sample <= intervals; ++sample) {
@@ -507,7 +525,8 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       assessment.first_unobserved_position = p;
       assessment.first_unobserved_cell = cell;
     }
-    if (!cell.executable() && assessment.executable()) {
+    if (!cell.executable() && (assessment.executable() ||
+        (assessment.execution_reason==GridExecutionReason::OUT_OF_MAP && t<assessment.first_execution_time_s))) {
       assessment.execution_reason = cell.execution_reason;
       assessment.first_execution_time_s = t;
       assessment.first_execution_position = p;

@@ -97,6 +97,8 @@ namespace ego_planner
   }
 
   void BsplineOptimizer::initializeFromGuide(const Eigen::MatrixXd& points) {
+    // Constraint indices refer to a specific parameterization, never another target fit.
+    curve_clearance_constraints_.clear();
     cps_.resize(points.cols()); cps_.points=points; cps_.clearance=dist0_;
     if(planning_query_ && planning_endpoints_) {
       const auto start=planning_query_(planning_endpoints_->first);
@@ -1305,18 +1307,7 @@ namespace ego_planner
     }
 
     /*** calculate distance cost and gradient ***/
-    // Constrain the actual spline sample, not its control polygon. Quadratic
-    // penalties retain a useful gradient for sub-millimetre violations.
-    const double weight=100.*std::max(1.,lambda1_/std::max(1e-6,lambda2_));
-    for(const auto& constraint:curve_clearance_constraints_) {
-      Eigen::Vector3d position=Eigen::Vector3d::Zero();
-      for(int j=0;j<4;++j) position+=constraint.weights[j]*q.col(constraint.first_control+j);
-      const double deficit=constraint.clearance-(position-constraint.center).dot(constraint.direction);
-      if(deficit<=0) continue;
-      cost+=weight*deficit*deficit;
-      for(int j=0;j<4;++j) gradient.col(constraint.first_control+j)-=
-          2*weight*deficit*constraint.weights[j]*constraint.direction;
-    }
+    calcCurvePhysicalCost(q,cost,gradient);
     for (auto i = order_; i < end_idx; ++i)
     {
       for (size_t j = 0; j < cps_.direction[i].size(); ++j)
@@ -1338,6 +1329,58 @@ namespace ego_planner
         {
           cost += a * dist_err * dist_err + b * dist_err + c;
           gradient.col(i) += -(2.0 * a * dist_err + b) * dist_grad;
+        }
+      }
+    }
+  }
+
+  void BsplineOptimizer::calcCurvePhysicalCost(const Eigen::MatrixXd& q,
+      double& cost, Eigen::MatrixXd& gradient) {
+    // Constrain the actual spline sample, not its control polygon. Quadratic
+    // penalties retain a useful gradient for sub-millimetre violations.
+    const double weight=100.*std::max(1.,lambda1_/std::max(1e-6,lambda2_));
+    for(const auto& constraint:curve_clearance_constraints_) {
+      Eigen::Vector3d position=Eigen::Vector3d::Zero();
+      for(int j=0;j<4;++j) position+=constraint.weights[j]*q.col(constraint.first_control+j);
+      const double deficit=constraint.clearance-(position-constraint.center).dot(constraint.direction);
+      if(deficit<=0) continue;
+      cost+=weight*deficit*deficit;
+      for(int j=0;j<4;++j) gradient.col(constraint.first_control+j)-=
+          2*weight*deficit*constraint.weights[j]*constraint.direction;
+    }
+    if(!curve_bounds_) return;
+    for(int first=0;first+3<q.cols();++first) {
+      if(budget_ && budget_->expired()) return;
+      for(int axis=0;axis<3;++axis) {
+        const double p0=q(axis,first),p1=q(axis,first+1),p2=q(axis,first+2),p3=q(axis,first+3);
+        const double a=(-p0+3*p1-3*p2+p3)/6.,b=(p0-2*p1+p2)/2.,c=(p2-p0)/2.;
+        std::vector<double> extrema{0.,1.};
+        if(std::abs(a)<1e-14) {
+          if(std::abs(b)>1e-14) extrema.push_back(-c/(2*b));
+        } else {
+          const double discriminant=4*b*b-12*a*c;
+          if(discriminant>=0) {
+            extrema.push_back((-2*b+std::sqrt(discriminant))/(6*a));
+            extrema.push_back((-2*b-std::sqrt(discriminant))/(6*a));
+          }
+        }
+        for(double u:extrema) {
+          if(u<0 || u>1) continue;
+          const Eigen::Vector4d w(std::pow(1-u,3)/6.,(3*u*u*u-6*u*u+4)/6.,
+              (-3*u*u*u+3*u*u+3*u+1)/6.,u*u*u/6.);
+          double value=0;
+          for(int j=0;j<4;++j) {
+            value+=w[j]*q(axis,first+j);
+          }
+          // Fitting reserve tapers to fixed legal endpoint P/V/A. It does not
+          // change physical clearance or clip the submitted trajectory.
+          const double reserve=.5*grid_map_->getResolution()*
+              std::min({1.,double(first),double(q.cols()-4-first)});
+          const double lower=curve_bounds_->first[axis]+reserve;
+          const double upper=curve_bounds_->second[axis]-reserve;
+          const double delta=value<lower ? value-lower : value>upper ? value-upper : 0.;
+          cost+=weight*delta*delta;
+          for(int j=0;j<4;++j) gradient(axis,first+j)+=2*weight*delta*w[j];
         }
       }
     }
@@ -2243,11 +2286,15 @@ namespace ego_planner
     calcFitnessCost(cps_.points, f_fitness, g_fitness);
     calcFeasibilityCost(cps_.points, f_feasibility, g_feasibility);
 
+    double f_physical=0;
+    Eigen::MatrixXd g_physical=Eigen::MatrixXd::Zero(3,cps_.points.cols());
+    calcCurvePhysicalCost(cps_.points,f_physical,g_physical);
+
     /* ---------- convert to solver format...---------- */
-    f_combine = lambda1_ * f_smoothness + lambda4_ * f_fitness + lambda3_ * f_feasibility;
+    f_combine = lambda1_ * f_smoothness + lambda4_ * f_fitness + lambda3_ * f_feasibility + lambda2_ * f_physical;
     // printf("origin %f %f %f %f\n", f_smoothness, f_fitness, f_feasibility, f_combine);
 
-    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * g_fitness + lambda3_ * g_feasibility;
+    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * g_fitness + lambda3_ * g_feasibility + lambda2_ * g_physical;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
 

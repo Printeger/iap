@@ -123,6 +123,31 @@ namespace ego_planner
     return derivative;
   }
 
+  std::vector<double> UniformBspline::coordinateExtremaTimes(double from,double to) {
+    std::vector<double> times;
+    if(p_!=3) throw std::invalid_argument("physical extrema require cubic spline");
+    auto velocity=getDerivative();
+    for(int span=p_;span<m_-p_;++span) {
+      const double left=u_[span]-u_[p_],right=u_[span+1]-u_[p_],width=right-left;
+      if(width<=0 || right<from || left>to) continue;
+      times.push_back(std::clamp(left,from,to)); times.push_back(std::clamp(right,from,to));
+      const auto v0=velocity.evaluateDeBoorT(left).eval();
+      const auto vm=velocity.evaluateDeBoorT((left+right)/2).eval();
+      const auto v1=velocity.evaluateDeBoorT(right).eval();
+      for(int axis=0;axis<control_points_.rows();++axis) {
+        const double a=2*(v1[axis]+v0[axis]-2*vm[axis]),b=v1[axis]-v0[axis]-a,c=v0[axis];
+        const auto append=[&](double u) { const double t=left+width*u;
+          if(u>0 && u<1 && t>=from && t<=to) times.push_back(t); };
+        if(std::abs(a)<1e-13) { if(std::abs(b)>1e-13) append(-c/b); }
+        else { const double d=b*b-4*a*c; if(d>=0) {
+          append((-b+std::sqrt(d))/(2*a)); append((-b-std::sqrt(d))/(2*a));
+        }}
+      }
+    }
+    std::sort(times.begin(),times.end());
+    times.erase(std::unique(times.begin(),times.end()),times.end()); return times;
+  }
+
   double UniformBspline::getInterval() { return interval_; }
 
   void UniformBspline::setPhysicalLimits(const double &vel, const double &acc, const double &tolerance)

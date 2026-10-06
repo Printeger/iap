@@ -424,8 +424,10 @@ v1/v2 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束�
 准入／数值、codec、生产包装器及批次回归已通过；重复与表面加密对照已完成，
 LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立法向。
 来源 raw／anchored／information PL 明确分列。地图 ENU 与估计器旋转的实测
-同帧证据仍缺失，不宣称绝对尺度已统一或已校准。实际曲线修复、固定路线
-校准与任务对照继续实施。真实森林现场仍待测：
+同帧证据仍缺失，不宣称绝对尺度已统一或已校准。实际曲线约束已贯通初始化、rebound、refine 与重定时检查；
+冻结 CPU 弱墙 OFF 回归生成合法曲线、通过发布闸门并验证一次接续的固定 P/V/A 与执行 ID 消费。
+独立检查增加 cubic 轴向极值硬边界核对，采样间越界不能靠软惩罚获得授权；
+真正不可解的拒绝检查保留。实时 ROS 发布／接续及固定路线校准与任务对照仍待测。真实森林现场仍待测：
 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，不推广未经独立实测的校准参数。
 契约见 [advisory_prediction_contract.md](../spec/advisory_prediction_contract.md)。
 本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/staged/report.md)。

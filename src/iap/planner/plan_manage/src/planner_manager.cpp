@@ -686,10 +686,18 @@ namespace ego_planner
       return queryPlanningViewCell(point,fitting_reserve*std::clamp(endpoint_distance/.5,0.,1.));
     };
     optimizer.setPlanningQuery(query,false,guide_query);
+    const auto& epoch=*planning_view_->physical;
+    Eigen::Vector3d upper=epoch.lattice_origin+epoch.extent_m;
+    if(epoch.virtual_ceiling_height_m>0) upper.z()=std::min(upper.z(),epoch.virtual_ceiling_height_m);
+    optimizer.setCurvePhysicalBounds(epoch.lattice_origin+Eigen::Vector3d::Constant(1e-4),
+        upper-Eigen::Vector3d::Constant(1e-4));
     optimizer.setPlanningBudget(planning_budget_);
     optimizer.setPlanningEndpoints(start_pt,target_pt);
     std::vector<Eigen::Vector3d> goals;
-    for(const auto& target:planning_targets_) goals.push_back(target.position);
+    std::vector<size_t> target_indices;
+    for(size_t i=0;i<planning_targets_.size();++i) {
+      goals.push_back(planning_targets_[i].position); target_indices.push_back(i);
+    }
     optimizer.setPlanningGoals(goals);
     LocalTarget selected{target_pt,target_vel,Eigen::Vector3d::Zero(),0};
     std::vector<Eigen::Vector3d> derivatives{start_vel,selected.velocity,start_acc,selected.acceleration};
@@ -735,7 +743,7 @@ namespace ego_planner
       const auto& guide=optimizer.recoveryGuide();
       if(guide.size()<2) return false;
       const auto index=optimizer.a_star_->lastResult().selected_goal;
-      if(index<planning_targets_.size()) selected=planning_targets_[index];
+      if(index<target_indices.size()) selected=planning_targets_[target_indices[index]];
       derivatives={start_vel,selected.velocity,start_acc,selected.acceleration};
       std::vector<double> arc(guide.size(),0);
       for(size_t i=1;i<guide.size();++i) arc[i]=arc[i-1]+(guide[i]-guide[i-1]).norm();
@@ -754,12 +762,33 @@ namespace ego_planner
       bind_boundaries(); optimizer.initializeFromGuide(control); return true;
     };
     if(optimizer.needsGuideReinitialization() && !initialize_guide()) return fail(PlanFailure::Search);
+    const auto shorten_target=[&]() {
+      if(target_indices.size()<2 || !planning_budget_->tryRepair(PlanningBudget::Repair::TargetShortening)) return false;
+      const auto failed=std::find_if(target_indices.begin(),target_indices.end(),[&](size_t i) {
+        return planning_targets_[i].position.isApprox(selected.position,1e-8);
+      });
+      if(failed==target_indices.end()) return false;
+      target_indices.erase(failed); goals.clear();
+      for(size_t i:target_indices) goals.push_back(planning_targets_[i].position);
+      optimizer.setPlanningGoals(goals);
+      // Existing ordered forward targets, one guide at a time, shared budget.
+      return optimizer.searchRecoveryGuide() && initialize_guide();
+    };
     TrajectoryAssessment assessment;
     UniformBspline curve;
     for(;;) {
       if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+      // Fit/retime can leave a legal guide. Constrain the actual initial curve
+      // before either solver; the independent final/release checks still own authorization.
+      const auto initial=assessTrajectory(UniformBspline(control,3,interval),0,planning_view_->time_s,
+          false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
+      if(initial.budget_exhausted) return fail(PlanFailure::Budget);
+      optimizer.addCurveClearanceConstraints(control,interval,initial.curve_clearance_violations);
       const auto backend_start=PlanningBudget::Clock::now();
-      if(!optimizer.BsplineOptimizeTrajRebound(control,interval)) return fail(PlanFailure::Curve);
+      if(!optimizer.BsplineOptimizeTrajRebound(control,interval)) {
+        if(shorten_target()) continue;
+        return fail(PlanFailure::Curve);
+      }
       planning_timings_.backend_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-backend_start).count();
       bind_boundaries();
       bool feasible=false;
@@ -787,7 +816,8 @@ namespace ego_planner
       if(assessment.executable() && !advisory_violation) break;
       if(!assessment.executable() && assessment.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
           assessment.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
-          assessment.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED) return fail(PlanFailure::Curve);
+          assessment.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
+          assessment.execution_reason!=GridExecutionReason::OUT_OF_MAP) return fail(PlanFailure::Curve);
       if(capture_failure_map_ && assessment.first_execution_position.allFinite())
         captureFailureMap("candidate",assessment.first_execution_position,selected.position,
             assessment.first_execution_cell,nullptr,nullptr,&curve,&assessment);
@@ -796,8 +826,10 @@ namespace ego_planner
       } else {
         if(!planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) return fail(PlanFailure::Budget);
         if(!assessment.curve_clearance_violations.empty()) {
-          if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations))
+          if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations)) {
+            if(shorten_target()) continue;
             return fail(PlanFailure::Curve);
+          }
           RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
               assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
           optimizer.setControlPoints(control);

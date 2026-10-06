@@ -1387,8 +1387,13 @@ TEST(EgoBaseline, AdvisoryPriorToggleSharesExportAndPreservesMotionAuthority) {
   }
 }
 
-TEST(EgoBaseline, ObservationOnlyWeakWallCannotBypassPhysicalCurveCheck) {
-  auto node=makeNode(true); ego_planner::EGOPlannerManager manager;
+TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
+  auto node=makeNode(true);
+  // Deterministic frozen-input CPU regression. Steady-clock search/repair
+  // budgets remain active; online sensor freshness needs separate live testing.
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  ego_planner::EGOPlannerManager manager;
   manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
   manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
   const Eigen::Vector3d start(-2,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
@@ -1403,11 +1408,31 @@ TEST(EgoBaseline, ObservationOnlyWeakWallCannotBypassPhysicalCurveCheck) {
   ASSERT_TRUE(manager.grid_map_->queryPlanningCell(start,0,now,GridPlanningRiskPolicy{},motion).executable());
   const auto id=manager.local_data_.traj_id_;
   ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
-  // This single weak wall drives the unchanged Advisory recovery outside the
-  // map. The production final check must reject, rather than publish it.
-  EXPECT_FALSE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+  ASSERT_TRUE(manager.beginPlanningView());
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+  ASSERT_GT(manager.local_data_.traj_id_,id);
+  ASSERT_TRUE(manager.publicationStillTimely());
+  const auto predecessor=manager.local_data_;
+  manager.observeExecutingTrajectory(predecessor.traj_id_);
+  manager.endPlanningView();
+  const auto connection=node->now()+rclcpp::Duration::from_seconds(1.6);
+  const double t=connection.seconds()-predecessor.start_time_.seconds();
+  const auto position=manager.local_data_.position_traj_.evaluateDeBoorT(t);
+  const auto velocity=manager.local_data_.velocity_traj_.evaluateDeBoorT(t);
+  const auto acceleration=manager.local_data_.acceleration_traj_.evaluateDeBoorT(t);
+  ASSERT_TRUE(manager.beginPlanningView());
+  manager.setPlanningConnection(connection,predecessor.traj_id_);
+  ASSERT_TRUE(manager.reboundReplan(position,velocity,acceleration,goal,zero,false,false));
+  ASSERT_TRUE(manager.hasPendingTrajectory());
+  ASSERT_TRUE(manager.publicationStillTimely());
+  auto successor=manager.publicationTrajectory();
+  EXPECT_TRUE(successor.position_traj_.evaluateDeBoorT(0).isApprox(position,1e-8));
+  EXPECT_TRUE(successor.velocity_traj_.evaluateDeBoorT(0).isApprox(velocity,1e-8));
+  EXPECT_TRUE(successor.acceleration_traj_.evaluateDeBoorT(0).isApprox(acceleration,1e-8));
+  manager.observeExecutingTrajectory(successor.traj_id_);
+  EXPECT_EQ(manager.local_data_.traj_id_,successor.traj_id_);
   EXPECT_FALSE(manager.hasPendingTrajectory());
-  EXPECT_EQ(manager.local_data_.traj_id_,id);
+  manager.endPlanningView();
 }
 
 TEST(EgoBaseline, ConcurrentReadOnlyAndPlanningFreezeShareOneEpoch) {
@@ -1418,4 +1443,28 @@ TEST(EgoBaseline, ConcurrentReadOnlyAndPlanningFreezeShareOneEpoch) {
   for(int i=0;i<8;++i) futures.push_back(std::async(std::launch::async,[&](){ready.wait();return map->captureFrozenOccupancyEpoch();}));
   start.set_value(); const auto epoch=futures[0].get(); ASSERT_TRUE(epoch);
   for(size_t i=1;i<futures.size();++i) EXPECT_EQ(futures[i].get(),epoch);
+}
+
+TEST(EgoBaseline, ActualCubicExtremumOutsideMapIsRejectedBetweenSamples) {
+  auto node=makeNode(); ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const double now=node->now().seconds();
+  GridMapTestAccess::input(*manager.grid_map_,{},now,Eigen::Vector3d(5.99991,0,1));
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,Eigen::Vector3d(5.99991,0,1));
+  Eigen::MatrixXd q(3,4); const double d=5.99991,c=.0004,b=-.0004;
+  q.col(0)=Eigen::Vector3d(d-c+2*b/3,0,1);
+  q.col(1)=Eigen::Vector3d(d-b/3,0,1);
+  q.col(2)=Eigen::Vector3d(d+c+2*b/3,0,1);
+  q.col(3)=Eigen::Vector3d(d+2*c+11*b/3,0,1);
+  ego_planner::UniformBspline curve(q,3,.02);
+  EXPECT_LT(curve.evaluateDeBoorT(0).x(),6);
+  EXPECT_LT(curve.evaluateDeBoorT(.02).x(),6);
+  EXPECT_GT(curve.evaluateDeBoorT(.01).x(),6);
+  const auto check=manager.assessTrajectory(curve,0,now);
+  EXPECT_EQ(check.execution_reason,GridExecutionReason::OUT_OF_MAP);
+  EXPECT_NEAR(check.first_execution_time_s,.01,1e-8);
+  // Production retiming rebuilds a uniform spline and preserves the geometry.
+  curve=ego_planner::UniformBspline(q,3,.028);
+  EXPECT_EQ(manager.assessTrajectory(curve,0,now).execution_reason,GridExecutionReason::OUT_OF_MAP);
 }

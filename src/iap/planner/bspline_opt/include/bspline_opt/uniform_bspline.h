@@ -44,6 +44,9 @@ namespace ego_planner
     Eigen::VectorXd getKnot();
     Eigen::MatrixXd getControlPoint();
     double getInterval();
+    // All knots and coordinate extrema of the actual piecewise cubic, including
+    // nonuniform retimed knots. Used by independent physical authorization.
+    std::vector<double> coordinateExtremaTimes(double from, double to);
     bool getTimeSpan(double &um, double &um_p);
 
     // compute position / derivative
