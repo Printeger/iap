@@ -13,7 +13,12 @@ struct PredictionInput {
   double validity_s = .5;
 };
 GridRiskContext makeRiskPrediction(const PredictionInput& input,
-    std::shared_ptr<std::atomic<uint64_t>> calls = {});
+    std::shared_ptr<std::atomic<uint64_t>> calls = {},
+    std::string* rejection_reason = nullptr);
+// Same frozen map/support/primitive derivation as the production binding.
+// Direct queries are diagnostic; callers must retain the binding's rejection.
+iap::PredictorModule makeFrozenPredictor(const PredictionInput& input);
+GridRiskVoxel predictionRiskVoxel(const iap::PredictorQueryResult& result);
 std::vector<uint8_t> encodePredictionInput(const PredictionInput& input);
 PredictionInput decodePredictionInput(const std::vector<uint8_t>& payload);
 }

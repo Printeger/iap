@@ -1108,6 +1108,59 @@ TEST(EgoBaseline, DisplayInterpolationRejectsInteriorHolesAndNeverRenewsHistory)
   EXPECT_NEAR(ego_planner::visualizationBudget({.01},{.001}),.11,1e-12);
 }
 
+TEST(EgoBaseline, AdvisoryCodecRetainsEpochExclusionsParametersAndFrozenTime) {
+  auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
+  GridMapTestAccess::input(*map,{},10,Eigen::Vector3d(0,0,1));
+  GridMapTestAccess::markObserved(*map);
+  ego_planner::PredictionInput input; input.occupancy=map->captureFrozenOccupancyEpoch();
+  ASSERT_TRUE(input.occupancy);
+  input.reference_time_s=10.1;
+  auto& s=input.integrity;
+  s.valid=s.has_pose=s.current.valid=s.has_epoch=s.has_lambda_base=true;
+  s.stamp=10.1;s.pose_stamp=s.current.stamp=10.;s.gnss_epoch.stamp=9.8;
+  s.p_wb=Eigen::Vector3d(0,0,1); s.q_wb=Eigen::Quaterniond(Eigen::AngleAxisd(.3,Eigen::Vector3d::UnitZ()));
+  s.current.excluded_prns={301,302};s.current.excluded_trunk_ids={7,11};
+  s.gnss_epoch.source_identity=1234;s.prior_source_generation=55;
+  iap::SatObs sat;sat.sat_id=301;sat.constellation='G';sat.pr_sigma=2.3;
+  sat.sat_pos=Eigen::Vector3d(10,20,30);sat.excluded=true;sat.admission_hysteresis_pending=true;
+  s.gnss_epoch.sats.push_back(sat);s.gnss_epoch.iono_params={.1,.2,.3};
+  s.current.gnss_epoch_identity=iap::gnss_epoch_identity(s.gnss_epoch,s.current.excluded_prns);
+  s.lambda_base_pos << 100,2,3,2,200,4,3,4,300;
+  input.params.freshness.enabled=true;input.params.freshness.max_gnss_age_s=2;
+  input.params.gnss_epoch_policy=iap::PredictorGnssEpochPolicy::Optional;
+  input.params.fusion.conservative_max_with_gnss=true;input.params.fusion.K_H_adv=6;
+  input.params.lidar.fim_params.fim_range_sigma_base=.7;
+  auto restored=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(input));
+  EXPECT_DOUBLE_EQ(restored.reference_time_s,10.1);
+  EXPECT_EQ(restored.integrity.current.excluded_prns,s.current.excluded_prns);
+  EXPECT_EQ(restored.integrity.current.excluded_trunk_ids,s.current.excluded_trunk_ids);
+  EXPECT_EQ(restored.integrity.gnss_epoch.source_identity,1234u);
+  EXPECT_EQ(restored.integrity.gnss_epoch.iono_params,s.gnss_epoch.iono_params);
+  ASSERT_EQ(restored.integrity.gnss_epoch.sats.size(),1u);
+  EXPECT_TRUE(restored.integrity.gnss_epoch.sats[0].excluded);
+  EXPECT_TRUE(restored.integrity.gnss_epoch.sats[0].admission_hysteresis_pending);
+  EXPECT_TRUE(restored.integrity.gnss_epoch.sats[0].sat_pos.isApprox(sat.sat_pos,0));
+  EXPECT_TRUE(restored.integrity.lambda_base_pos.isApprox(s.lambda_base_pos,0));
+  EXPECT_TRUE(restored.integrity.q_wb.coeffs().isApprox(s.q_wb.coeffs(),0));
+  EXPECT_EQ(restored.integrity.prior_source_generation,55u);
+  EXPECT_EQ(restored.params.gnss_epoch_policy, input.params.gnss_epoch_policy);
+  EXPECT_DOUBLE_EQ(restored.params.fusion.K_H_adv,6);
+  EXPECT_TRUE(restored.params.fusion.conservative_max_with_gnss);
+  EXPECT_DOUBLE_EQ(restored.params.lidar.fim_params.fim_range_sigma_base,.7);
+  std::string reason;
+  auto missing=restored;missing.integrity.has_epoch=false;
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(missing,{},&reason).predict);
+  EXPECT_EQ(reason,"wrapper_missing_gnss_epoch");
+  auto stale=restored;stale.reference_time_s=1000;
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(stale,{},&reason).predict);
+  EXPECT_EQ(reason,"wrapper_stale_input");
+  EXPECT_DOUBLE_EQ(stale.integrity.gnss_epoch.stamp,9.8);
+  auto partial=std::make_shared<FrozenOccupancyEpoch>(*restored.occupancy);
+  auto cells=std::make_shared<FrozenOccupancyCells>(*partial->cells);cells->addresses={0};partial->cells=cells;
+  restored.occupancy=partial;
+  EXPECT_THROW(ego_planner::encodePredictionInput(restored),std::runtime_error);
+}
+
 TEST(EgoBaseline, ActualPublicationAllowsRemoteUpdatesAndRejectsRelevantRevocation) {
   for (int change=0;change<4;++change) {
     auto node=makeNode(); ego_planner::EGOPlannerManager manager;

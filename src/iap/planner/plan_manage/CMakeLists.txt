@@ -61,6 +61,10 @@ target_link_libraries(prediction_input iap::iap Boost::serialization ZLIB::ZLIB)
 add_executable(grid_map_visualizer src/grid_map_visualizer.cpp)
 ament_target_dependencies(grid_map_visualizer std_srvs plan_env rclcpp nav_msgs geometry_msgs sensor_msgs visualization_msgs iap cv_bridge pcl_conversions)
 target_link_libraries(grid_map_visualizer prediction_input iap::iap ${IAP_MSGS_TYPESUPPORT_CPP})
+add_executable(advisory_validation src/advisory_validation.cpp)
+ament_target_dependencies(advisory_validation plan_env rclcpp nav_msgs geometry_msgs
+  sensor_msgs visualization_msgs iap cv_bridge pcl_conversions)
+target_link_libraries(advisory_validation prediction_input iap::iap)
 
 add_executable(ego_planner_node
   src/ego_planner_node.cpp
@@ -103,6 +107,10 @@ ament_target_dependencies(traj_server
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   find_package(ZLIB REQUIRED)
+  add_test(NAME test_advisory_validation COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_validation.py
+    --binary $<TARGET_FILE:advisory_validation>)
+  set_tests_properties(test_advisory_validation PROPERTIES TIMEOUT 120)
   add_test(NAME test_ego_pipeline COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_pipeline.py
     --planner $<TARGET_FILE:ego_planner_node> --server $<TARGET_FILE:traj_server>
@@ -134,7 +142,7 @@ endif()
 
 # Install targets
 install(
-  TARGETS ego_planner_node grid_map_visualizer traj_server failure_map_replay
+  TARGETS ego_planner_node grid_map_visualizer traj_server failure_map_replay advisory_validation
   DESTINATION lib/${PROJECT_NAME}
 )
 

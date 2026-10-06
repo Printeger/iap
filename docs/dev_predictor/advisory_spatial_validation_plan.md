@@ -1,6 +1,6 @@
 # Advisory PL 空间退化验证：方案与预实验报告
 
-状态：**实验方案；空间扫描与误差校准尚未运行（NOT_RUN）**。日期：2026-10-06。
+状态：**工具与合成机制对照已实施；真实森林扫描和误差校准 INCONCLUSIVE，现场阻止**。日期：2026-10-06。
 
 当前实现依据：`d05d792fac3d831a2dd474bc7ca650500499fe32`。
 现有运行依据：`20261006T114500Z_605`，场景 `icra_dense_forest_four_fork_v2`。
@@ -164,10 +164,10 @@ IAP_RUN_DIR/
 | 验证项目 | 当前状态 |
 |---|---|
 | 现有日志核对与强先验解析示意 | 已完成，仅诊断/推导 |
-| 完整冻结预测输入录制与重放一致性 | 待实现、待测 |
+| 完整冻结预测输入录制与重放一致性 | 已实现；服务传输、codec、重复/batch/包装器对齐测试通过；真实录制待现场 |
 | 三份森林输入的空间扫描与退化对照 | 待测 |
 | 实际定位误差与 PL 校准 | 待测 |
-| CSV 到图文报告的完整自动流水线 | 待实现 |
+| CSV 到图文报告的完整自动流水线 | 已实现并运行合成 S0、S1–S5；真实误差图明确 NOT RUN |
 
 **先完成输入录制与 S0/S4；若输入不可用先修准入，若先验掩盖先核验先验语义与相关性；再做 S1/S2/S3 与真实误差对照。** 不先改 PL 阈值、色标、地图或增加多候选管理。
 
@@ -184,3 +184,19 @@ IAP_RUN_DIR/
 - [已有 Predictor 实验报告](predictor_test_report.md)：历史证据与实验方法，不替代当前版本验证。
 - [运行产物契约](../spec/run_artifact_contract.md)
 - [当前规划流程](../spec/ego_based_planning_flow.md)
+
+## 10. 本轮实施记录（2026-10-06）
+
+开始时 HEAD 为方案提交 `ec53b65a485617a58e2c69f2bc3678ea09ed7819`，未切换版本。该提交只改文档，因此方案对 `d05d792` 生产代码、融合公式、先验和显示下限的描述仍适用于开始时 HEAD。保留唯一既有的 `config/sim_ego/grid_map_stage1.rviz` 修改，未修改原版 EGO 仓库。
+
+已完成共享生产冻结准备入口、只读服务完整录制、原 codec 重放、逐点状态/原因、来源 PL、矩阵/eigen/weak direction、耗时、checksum/版本及图文报告。没有替换模型、放宽有效性或改在线准入；包装器只新增可选拒绝原因。工具语义见 [契约](../spec/advisory_validation_contract.md)。
+
+本轮 run：`log/20261006T123756Z_794`。提交前合成证据见 [候选报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/verified/report.md)，正式提交绑定复跑将在同 run 的 `committed/` 子目录登记。候选报告不能替代真实扫描；旧解析示意图仍保留原身份。
+
+合成六平面夹具采用完整 v1 payload 和真实 PredictorModule，S0 查询 100 个唯一中心，S1–S5/来源诊断共 135 个请求。双源 sigma 1→100 时，alpha=1 的 HPL 约 0.0199696→0.0200000 m，alpha=0 则 0.362424→36.22181 m；基线弱方向先验占比约 99.6965%。这是先验主导的机制证据，不能直接写成森林实测的空间 FAIL/PASS。
+
+缺 GNSS 的 S5 复现包装器未绑定、模块仍可使用有效 LiDAR；prior-only 且两源均不可用没有得到有效预测。FGO smoother 后验被缩成对角先验后又加入空间观测，未见交叉协方差或来源去重；实际因子重叠和数值偏差仍未量化。证据及建议见报告，不在本任务擅自修正生产模型。
+
+独立结论暂为：真实输入可用性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；真实空间敏感性 `INCONCLUSIVE_INPUT_UNAVAILABLE`；实际误差符合性 `INCONCLUSIVE_LIVE_NOT_RUN`。合成单调性和源准入回归已通过，并不把准入矛盾当成生产能力已修复。
+
+现场仍为 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`。提交后需记录干净工作树检查与 GPU 预检，再登记提交绑定的离线重跑；三份真实输入、合法固定路线、至少三次配对重复和 GLIO 误差校准保持待测。

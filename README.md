@@ -728,6 +728,25 @@ python3 src/iap/tools/ana_log.py \
 
 `--strict` 在存在 runtime error/critical 或应启用的当前产物缺失时返回非零；它是日志检查，不能替代完整运行或飞行验收。显式 `--out /absolute/path/to/report` 可导出到其他目录，外部导出会登记到 run manifest。所有参数见 `python3 src/iap/tools/ana_log.py --help`。
 
+### Advisory PL 冻结验证
+
+先构建 `ego_planner` 并 source ROS 与工作区 install。下面运行真实 PredictorModule 的**合成机制对照**，由 artifact resolver 自动分配一份 run；它不能替代森林实测：
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+unset IAP_RUN_DIR
+python3 src/iap/scripts/dev_predictor/advisory_validation.py fixture \
+  --binary build/ego_planner/advisory_validation --label committed
+```
+
+报告位于打印的 `export/analysis/advisory_validation/committed/report.md`，完整输入、CSV 和矩阵在同 run 的 `export/advisory/validation/committed/`。拒绝覆盖已有同名证据。
+
+真实录制必须采用 `iap_sim.launch.py` 分配的 `IAP_RUN_DIR`，通过只读 `grid_map/prediction_input` 保存 payload；`record --label start --count 1`、`replay --payload <完整 input.bin> --label start --binary <advisory_validation>` 是录制/重放入口，本轮现场仍待测。源码/提交、checksum 或几何身份不匹配会失败，旧时间不会改成当前时间。`preflight` 保存干净工作树和 CUDA 预检，拒绝现场的原因由其 JSON 记录；该命令本身不启动现场。
+
+语义、来源拆分、固定误差对齐及产物格式见 [工具契约](docs/spec/advisory_validation_contract.md)，本轮验证状态见 [实验方案与结果](docs/dev_predictor/advisory_spatial_validation_plan.md)。
+
 ## 9. 运行检查与常见问题
 
 ### 如何判断系统已运行正常？

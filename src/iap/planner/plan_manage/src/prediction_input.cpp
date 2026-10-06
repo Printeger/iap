@@ -1,7 +1,9 @@
 #include <ego_planner/prediction_input.h>
 namespace ego_planner {
 GridRiskContext makeRiskPrediction(const PredictionInput& input,
-    std::shared_ptr<std::atomic<uint64_t>> calls) {
+    std::shared_ptr<std::atomic<uint64_t>> calls, std::string* rejection_reason) {
+  if (rejection_reason) rejection_reason->clear();
+  const auto reject = [&](const char* reason) { if (rejection_reason) *rejection_reason=reason; };
   GridRiskContext context;
   const auto& snapshot=input.integrity;
   const double now=input.reference_time_s;
@@ -13,6 +15,7 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
   const auto occupancy = input.occupancy;
   if (!occupancy) {
     context.occupancy_generation = 0;
+    reject("missing_physical_epoch");
     return context;
   }
   context.occupancy_generation = occupancy->generation;
@@ -20,18 +23,40 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
       !std::isfinite(snapshot.pose_stamp) || !std::isfinite(snapshot.current.stamp) ||
       !std::isfinite(occupancy->cloud_stamp_s) || snapshot.pose_stamp > now ||
       snapshot.current.stamp > now || occupancy->cloud_stamp_s > now) {
+    reject(!snapshot.valid ? "invalid_snapshot" : !snapshot.has_pose ? "missing_pose" :
+        !snapshot.current.valid ? "invalid_current" :
+        (!std::isfinite(snapshot.pose_stamp) || !std::isfinite(snapshot.current.stamp) ||
+         !std::isfinite(occupancy->cloud_stamp_s)) ? "invalid_source_timestamp" : "future_source_timestamp");
     return context;
   }
   context.valid_until_s = std::min({now + risk_validity_s_,
       snapshot.pose_stamp + risk_validity_s_, snapshot.current.stamp + risk_validity_s_,
       occupancy->cloud_stamp_s + risk_validity_s_});
   if (predictor_params_.source_mode != iap::PredictorSourceMode::LidarOnly) {
-    if (!snapshot.has_epoch) context.valid_until_s = std::numeric_limits<double>::quiet_NaN();
+    if (!snapshot.has_epoch) {
+      context.valid_until_s = std::numeric_limits<double>::quiet_NaN();
+      reject("wrapper_missing_gnss_epoch");
+    }
     else context.valid_until_s = std::min(context.valid_until_s,
         snapshot.gnss_epoch.stamp + predictor_params_.freshness.max_gnss_age_s);
   }
-  if (!std::isfinite(context.valid_until_s) || now>context.valid_until_s) return context;
-  iap::PredictorModule predictor(predictor_params_);
+  if (!std::isfinite(context.valid_until_s) || now>context.valid_until_s) {
+    if (!rejection_reason || rejection_reason->empty()) reject("wrapper_stale_input");
+    return context;
+  }
+  auto predictor=makeFrozenPredictor(input);
+  context.predict = [predictor = std::move(predictor), snapshot, now,
+                     frame = context.frame_id, calls](const Eigen::Vector3d& center) {
+    if (calls) calls->fetch_add(1,std::memory_order_relaxed);
+    return predictionRiskVoxel(predictor.query(iap::PredictorQueryInput(center, snapshot, now, 0.0, frame, now)));
+  };
+  return context;
+}
+iap::PredictorModule makeFrozenPredictor(const PredictionInput& input) {
+  const auto occupancy=input.occupancy;
+  if (!occupancy) throw std::invalid_argument("missing_physical_epoch");
+  const double now=input.reference_time_s;
+  iap::PredictorModule predictor(input.params);
   predictor.set_occupancy_query([occupancy](const Eigen::Vector3d& p) {
     return GridMap::queryFrozenOccupancy(*occupancy,p).raw_occupied;
   }, occupancy->resolution_m);
@@ -57,11 +82,10 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
     predictor.set_lidar_map_points(occupancy->raw_occupied_voxel_centers);
     predictor.set_lidar_fim_primitives(iap::make_lidar_fim_primitives(*occupancy->raw_occupied_voxel_centers));
   }
-  context.predict = [predictor = std::move(predictor), snapshot, now,
-                     frame = context.frame_id, calls](const Eigen::Vector3d& center) {
+  return predictor;
+}
+GridRiskVoxel predictionRiskVoxel(const iap::PredictorQueryResult& result) {
     GridRiskVoxel voxel;
-    if (calls) calls->fetch_add(1,std::memory_order_relaxed);
-    const auto result = predictor.query(iap::PredictorQueryInput(center, snapshot, now, 0.0, frame, now));
     voxel.status = result.freshness_status == iap::PredictorFreshnessStatus::STALE
         ? GridRiskStatus::STALE : GridRiskStatus::INVALID;
     if (result.available && result.valid && result.fused.valid && !result.fallback) {
@@ -72,7 +96,5 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
       voxel.status = GridRiskStatus::PREDICTED_DEGRADED;
     }
     return voxel;
-  };
-  return context;
 }
 }

@@ -2,7 +2,7 @@
 
 ## 状态与依据
 
-Advisory 空间退化与实际误差的验证方法见 [验证方案与预实验报告](../dev_predictor/advisory_spatial_validation_plan.md)。当前只完成已有日志核对和强先验解析示意，完整预测输入录制、空间退化对照及实际误差校准均待测；该文档不改变当前规划流程或执行授权，也不声明风险地图已验证正确。
+Advisory 验证见 [方案与实施结果](../dev_predictor/advisory_spatial_validation_plan.md) 和 [冻结验证工具契约](advisory_validation_contract.md)。完整录制、原 codec/生产 PredictorModule 重放、来源拆分、S1–S5 合成机制对照与报告已实施；生产包装器增加拒绝原因并共享相同冻结准备/状态映射，来源准入、物理地图、执行授权和阈值不变。缺 GNSS 阻断有效 LiDAR 的准入差异及强先验主导已在合成输入复现；未擅自修正模型。真实 start/middle/stop 扫描和三次 GLIO 误差重复仍为 INCONCLUSIVE，现场受无关 RViz 修改阻止，不声明风险地图已验证正确。
 
 结构基线：`../ego-planner-swarm`，提交 `23a8d5a191711dd65633df689bd00f55d4dea8f9`。原版目录只读。
 设计依据：工作区 `docs/0928_review.md` 第 1862 行以后的最终收敛，以及本轮用户确认。
