@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/ego_replan_fsm.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <iap/util/run_log_manager.hpp>
 #include <filesystem>
@@ -55,6 +56,20 @@ struct GridMapTestAccess {
   }
 };
 namespace ego_planner {
+struct EGOReplanFSMTestAccess {
+  static void configure(EGOReplanFSM& fsm, EGOPlannerManager::Ptr manager,
+                        rclcpp::Node::SharedPtr node, const Eigen::Vector3d& position,
+                        const Eigen::Vector3d& goal) {
+    fsm.planner_manager_ = std::move(manager);
+    fsm.node_ = std::move(node);
+    fsm.planning_horizen_ = 3;
+    fsm.odom_pos_ = fsm.start_pt_ = position;
+    fsm.start_vel_ = Eigen::Vector3d(0.4, 0, 0);
+    fsm.end_pt_ = goal;
+  }
+  static bool select(EGOReplanFSM& fsm, double distance) { return fsm.getLocalTarget(distance); }
+  static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
+};
 struct EGOPlannerManagerTestAccess {
   static AStar::Result lastSearchResult(const EGOPlannerManager& manager) {
     return manager.bspline_optimizer_->a_star_->lastResult();
@@ -543,4 +558,87 @@ TEST(EgoBaseline, FrozenMotionCannotAuthorizePublicationAfterCurrentQualityRevoc
   EXPECT_EQ(manager.local_data_.traj_id_, 77);
   EXPECT_EQ(manager.local_data_.position_traj_.getControlPoint(), old_controls);
   manager.endPlanningView();
+}
+
+TEST(EgoBaseline, ForwardProjectionSkipsOldUnknownAndNeverRollsBack) {
+  auto node = makeNode();
+  auto owner = std::make_unique<ego_planner::EGOPlannerManager>();
+  auto* manager = owner.get();
+  auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager->initPlanModules(node, vis);
+  const Eigen::Vector3d position(0, 0, 1), goal(4, 0, 1), zero = Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_, {}, node->now().seconds(), position);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  for (double x = -2; x < -0.3; x += 0.05)
+    GridMapTestAccess::clearObserved(*manager->grid_map_, Eigen::Vector3d(x, 0, 1));
+  for (double x = 1.5; x < 5; x += 0.05)
+    GridMapTestAccess::clearObserved(*manager->grid_map_, Eigen::Vector3d(x, 0, 1));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager, node->now().seconds(), 1, position);
+  ASSERT_TRUE(manager->planGlobalTraj(Eigen::Vector3d(-2, 0, 1), zero, zero, goal, zero, zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, position, goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 3));
+  const auto target = ego_planner::EGOReplanFSMTestAccess::target(fsm);
+  EXPECT_GT(target.x(), 0.5);
+  EXPECT_LT(target.x(), 1.6);
+  const double progress = manager->global_data_.last_progress_time_;
+  EXPECT_GT(progress, 0);
+  EXPECT_LT((manager->global_data_.getPosition(progress) - position).norm(), 0.25);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 1));
+  EXPECT_GE(manager->global_data_.last_progress_time_, progress);
+  manager->endPlanningView();
+  for (double x = 0; x < 5; x += 0.05)
+    GridMapTestAccess::clearObserved(*manager->grid_map_, Eigen::Vector3d(x, 0, 1));
+  ASSERT_TRUE(manager->beginPlanningView());
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 2));
+  EXPECT_GE(manager->global_data_.last_progress_time_, progress);
+}
+
+TEST(EgoBaseline, UnknownOrObstacleInsideReferenceDoesNotForbidKnownEndpoint) {
+  auto node = makeNode();
+  auto owner = std::make_unique<ego_planner::EGOPlannerManager>();
+  auto* manager = owner.get();
+  auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager->initPlanModules(node, vis);
+  const Eigen::Vector3d position(-2, 0, 1), goal(2, 0, 1), zero = Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_, {Eigen::Vector3d(0, 0, 1)}, node->now().seconds(), position);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  GridMapTestAccess::clearObserved(*manager->grid_map_, Eigen::Vector3d(-1, 0, 1));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager, node->now().seconds(), 1, position);
+  ASSERT_TRUE(manager->planGlobalTraj(position, zero, zero, goal, zero, zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, position, goal);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 3));
+  EXPECT_GT(ego_planner::EGOReplanFSMTestAccess::target(fsm).x(), 0.8);
+}
+
+TEST(EgoBaseline, CurvedReferenceUsesForwardArcAndFirstSelfIntersection) {
+  auto node = makeNode();
+  auto owner = std::make_unique<ego_planner::EGOPlannerManager>();
+  auto* manager = owner.get();
+  auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager->initPlanModules(node, vis);
+  const Eigen::Vector3d position(0, 0, 1), zero = Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_, {}, node->now().seconds(), position);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager, node->now().seconds(), 1, position);
+  const std::vector<Eigen::Vector3d> loop = {Eigen::Vector3d(1, 0, 1),
+      Eigen::Vector3d(1, 1, 1), Eigen::Vector3d(0, 1, 1), Eigen::Vector3d(0, -0.4, 1)};
+  ASSERT_TRUE(manager->planGlobalTrajWaypoints(position, zero, zero, loop, zero, zero));
+  GridMapTestAccess::clearObserved(*manager->grid_map_, loop.back());
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, position, loop.back());
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 4));
+  EXPECT_LT((ego_planner::EGOReplanFSMTestAccess::target(fsm) - position).norm(), 0.44);
+  EXPECT_LT(manager->global_data_.last_progress_time_, 0.1);
+  manager->endPlanningView();
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ASSERT_TRUE(manager->planGlobalTrajWaypoints(position, zero, zero,
+      {Eigen::Vector3d(2, 0, 1), position, Eigen::Vector3d(0, 2, 1)}, zero, zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 1));
+  EXPECT_LT(manager->global_data_.last_progress_time_, 0.1);
 }

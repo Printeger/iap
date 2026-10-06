@@ -105,7 +105,7 @@ if(BUILD_TESTING)
   set_tests_properties(test_failure_map_tools PROPERTIES ENVIRONMENT
     "IAP_FAILURE_MAP_REPLAY_BIN=$<TARGET_FILE:failure_map_replay>")
   ament_add_gtest(test_ego_baseline test/test_ego_baseline.cpp
-    src/planner_manager.cpp src/planner_risk.cpp src/planner_risk_viz.cpp)
+    src/planner_manager.cpp src/planner_risk.cpp src/planner_risk_viz.cpp src/ego_replan_fsm.cpp)
   ament_target_dependencies(test_ego_baseline rclcpp nav_msgs geometry_msgs
     visualization_msgs quadrotor_msgs plan_env path_searching bspline_opt
     traj_utils cv_bridge pcl_conversions iap gnss_comm sensor_msgs)

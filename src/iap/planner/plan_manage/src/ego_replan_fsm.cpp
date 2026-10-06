@@ -209,7 +209,6 @@ namespace ego_planner
     {
       end_pt_ = next_wp;
       wait_for_map_reason_ = GridExecutionReason::OK;
-      require_observed_reference_prefix_ = false;
       search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
 
       constexpr double step_size_t = 0.1;
@@ -880,8 +879,6 @@ namespace ego_planner
       EGOPlannerManager* manager;
       ~EndView() { manager->endPlanningView(); }
     } end_view{planner_manager_.get()};
-    const double previous_progress =
-        planner_manager_->global_data_.last_progress_time_;
     const double min_distance = std::max(0.2,
         start_vel_.squaredNorm() /
             (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) +
@@ -896,7 +893,6 @@ namespace ego_planner
       if (distance < min_distance ||
           std::chrono::duration<double>(std::chrono::steady_clock::now() -
               planning_started).count() > 1.5) break;
-      planner_manager_->global_data_.last_progress_time_ = previous_progress;
       if (!getLocalTarget(distance)) continue;
       if (attempted_target &&
           (local_target_pt_ - *attempted_target).norm() <
@@ -914,8 +910,6 @@ namespace ego_planner
           failure == AStar::Failure::MAP_STALE ||
           failure == AStar::Failure::END_STALE) break;
     }
-    if (!plan_and_refine_success)
-      planner_manager_->global_data_.last_progress_time_ = previous_progress;
     if (!target_selected && !plan_and_refine_success) {
       last_failed_plan_time_s_ = now;
       wait_for_evidence();
@@ -945,13 +939,6 @@ namespace ego_planner
           search_failure == AStar::Failure::END_STALE) {
         wait_for_map_generation_ = planner_manager_->grid_map_->occupancyGeneration();
         wait_for_map_reason_ = GridExecutionReason::ENVIRONMENT_STALE;
-      }
-      if (search_failure == AStar::Failure::END_UNOBSERVED ||
-          search_failure == AStar::Failure::END_OUT_OF_MAP ||
-          search_failure == AStar::Failure::NO_PATH_WITH_UNOBSERVED) {
-        require_observed_reference_prefix_ = true;
-        observed_prefix_failure_generation_ =
-            planner_manager_->grid_map_->occupancyGeneration();
       }
       if (search_failure == AStar::Failure::END_OUT_OF_POOL ||
           search_failure == AStar::Failure::START_OUT_OF_POOL) {
@@ -1104,148 +1091,92 @@ namespace ego_planner
 
   bool EGOReplanFSM::getLocalTarget(const double target_distance_m)
   {
-    double t;
-    bool target_selected = false;
+    auto& reference = planner_manager_->global_data_;
+    const double resolution = planner_manager_->grid_map_->getResolution();
+    const double velocity = std::max(0.1, planner_manager_->pp_.max_vel_);
+    const double step = std::min(planning_horizen_ / (20.0 * velocity),
+                                 resolution * 0.5 / velocity);
+    const Eigen::Vector3d position = planner_manager_->planningReferencePosition()
+        .value_or(odom_pos_);
+    if (!position.allFinite() || !(step > 0)) return false;
 
-    const double previous_progress = planner_manager_->global_data_.last_progress_time_;
-    const double target_distance = std::min(
-        target_distance_m, search_pool_target_limit_m_);
-
-    double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;
-    double dist_min = 9999, dist_min_t = 0.0;
-    for (t = planner_manager_->global_data_.last_progress_time_; t < planner_manager_->global_data_.global_duration_; t += t_step)
-    {
-      Eigen::Vector3d pos_t = planner_manager_->global_data_.getPosition(t);
-      double dist = (pos_t - start_pt_).norm();
-
-      if (t < planner_manager_->global_data_.last_progress_time_ + 1e-5 && dist > target_distance)
-      {
-        // Important cornor case!
-        for (; t < planner_manager_->global_data_.global_duration_; t += t_step)
-        {
-          Eigen::Vector3d pos_t_temp = planner_manager_->global_data_.getPosition(t);
-          double dist_temp = (pos_t_temp - start_pt_).norm();
-          if (dist_temp < target_distance)
-          {
-            pos_t = pos_t_temp;
-            dist = (pos_t - start_pt_).norm();
-            cout << "Escape cornor case \"getLocalTarget\"" << endl;
-            break;
-          }
-        }
-      }
-
-      if (dist < dist_min)
-      {
-        dist_min = dist;
-        dist_min_t = t;
-      }
-
-      if (dist >= target_distance)
-      {
-        local_target_pt_ = pos_t;
-        planner_manager_->global_data_.last_progress_time_ = dist_min_t;
-        target_selected = true;
+    // Progress is a projection of the vehicle, never the selected target.
+    // Prefer the first near-minimum on a self-intersecting reference.
+    double minimum = std::numeric_limits<double>::infinity();
+    const double old_progress = reference.last_progress_time_;
+    for (double t = old_progress; t <= reference.global_duration_ + step; t += step)
+      minimum = std::min(minimum, (reference.getPosition(
+          std::min(t, reference.global_duration_)) - position).norm());
+    double projection = old_progress;
+    for (double t = old_progress; t <= reference.global_duration_ + step; t += step)
+      if ((reference.getPosition(std::min(t, reference.global_duration_)) -
+           position).norm() <= minimum + resolution * 0.5) {
+        projection = std::min(t, reference.global_duration_);
         break;
       }
-    }
-    if (!target_selected) // The loop may end exactly on global_duration_.
-    {
-      local_target_pt_ = end_pt_;
-      planner_manager_->global_data_.last_progress_time_ = planner_manager_->global_data_.global_duration_;
-    }
+    reference.last_progress_time_ = std::max(old_progress, projection);
+    projection = reference.last_progress_time_;
+    if (projection >= reference.global_duration_ - 1e-9) return false;
 
+    const double distance = std::min(target_distance_m, search_pool_target_limit_m_);
+    double target_t = reference.global_duration_;
+    for (double t = projection + step; t < reference.global_duration_; t += step)
+      if ((reference.getPosition(t) - start_pt_).norm() >= distance) {
+        target_t = t;
+        break;
+      }
+    local_target_pt_ = reference.getPosition(target_t);
     const auto nominal = planner_manager_->queryLocalTargetCell(
         local_target_pt_, node_->now().seconds());
     if (nominal.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
-      planner_manager_->global_data_.last_progress_time_ = previous_progress;
       wait_for_map_generation_ = nominal.occupancy_generation;
       wait_for_map_reason_ = nominal.execution_reason;
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-          "Local target deferred: environment stale generation=%lu cloud=%.3f",
-          static_cast<unsigned long>(wait_for_map_generation_),
-          nominal.cloud_stamp_s);
       return false;
     }
+    // A gap inside a guessed reference can have an observed side route.
+    // Only an unavailable endpoint requires shortening here; obstacles and
+    // advisory are left to the existing one-guide repair.
     if (nominal.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-        nominal.execution_reason == GridExecutionReason::OUT_OF_MAP ||
-        require_observed_reference_prefix_) {
-      // Advance only as far as the connected *observed* prefix of the global
-      // reference. Obstacles in that prefix remain for EGO/A* to route around.
-      const double stop_t = target_selected ? t :
-          planner_manager_->global_data_.global_duration_;
-      const double step_t = std::max(0.02,
-          planner_manager_->grid_map_->getResolution() /
-          std::max(0.1, planner_manager_->pp_.max_vel_));
-      double last_free_t = std::numeric_limits<double>::quiet_NaN();
-      bool encountered_unknown = false;
-      bool encountered_stale = false;
-      for (double probe_t = previous_progress;
-           probe_t <= stop_t + 1e-9; probe_t += step_t) {
-        const auto probe = planner_manager_->global_data_.getPosition(
-            std::min(probe_t, stop_t));
-        const auto cell = planner_manager_->queryLocalTargetCell(
-            probe, node_->now().seconds());
+        nominal.execution_reason == GridExecutionReason::OUT_OF_MAP) {
+      double arc = 0.0, available_arc = 0.0;
+      double last_t = std::numeric_limits<double>::quiet_NaN();
+      Eigen::Vector3d previous = reference.getPosition(projection);
+      for (double t = projection; t <= target_t + step; t += step) {
+        const double sample_t = std::min(t, target_t);
+        const auto probe = reference.getPosition(sample_t);
+        arc += (probe - previous).norm();
+        previous = probe;
+        const auto cell = planner_manager_->queryLocalTargetCell(probe, node_->now().seconds());
+        if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
+          wait_for_map_generation_ = cell.occupancy_generation;
+          wait_for_map_reason_ = cell.execution_reason;
+          return false;
+        }
         if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-            cell.execution_reason == GridExecutionReason::OUT_OF_MAP ||
-            cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
-          encountered_unknown = true;
-          encountered_stale = cell.execution_reason ==
-              GridExecutionReason::ENVIRONMENT_STALE;
-          break;
+            cell.execution_reason == GridExecutionReason::OUT_OF_MAP) break;
+        if (cell.executable() && sample_t > projection + 1e-9) {
+          last_t = sample_t;
+          available_arc = arc;
         }
-        if (cell.executable()) last_free_t = std::min(probe_t, stop_t);
+        if (sample_t == target_t) break;
       }
-      if (!encountered_unknown && nominal.executable()) {
-        if (require_observed_reference_prefix_ &&
-            nominal.occupancy_generation == observed_prefix_failure_generation_) {
-          planner_manager_->global_data_.last_progress_time_ = previous_progress;
-          wait_for_map_generation_ = nominal.occupancy_generation;
-          wait_for_map_reason_ = GridExecutionReason::ENVIRONMENT_UNOBSERVED;
-          RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-              "No observed local route beyond the current prefix; waiting for map generation after %lu",
-              static_cast<unsigned long>(wait_for_map_generation_));
-          return false;
-        }
-        require_observed_reference_prefix_ = false;
-      } else {
-        if (encountered_stale || !std::isfinite(last_free_t) ||
-            (planner_manager_->global_data_.getPosition(last_free_t) -
-             start_pt_).norm() < std::max(0.2,
-               start_vel_.squaredNorm() /
-                   (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) +
-               2.0 * planner_manager_->grid_map_->getResolution())) {
-          planner_manager_->global_data_.last_progress_time_ = previous_progress;
-          wait_for_map_generation_ = nominal.occupancy_generation;
-          wait_for_map_reason_ = encountered_stale
-              ? GridExecutionReason::ENVIRONMENT_STALE
-              : GridExecutionReason::ENVIRONMENT_UNOBSERVED;
-          RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-              "Local target deferred: %s generation=%lu",
-              encountered_stale ? "environment stale" :
-              "observed corridor shorter than stopping allowance",
-              static_cast<unsigned long>(wait_for_map_generation_));
-          return false;
-        }
-        local_target_pt_ = planner_manager_->global_data_.getPosition(last_free_t);
-        local_target_vel_.setZero();
-        planner_manager_->global_data_.last_progress_time_ = previous_progress;
-        RCLCPP_INFO(node_->get_logger(),
-            "Local target shortened to observed prefix (%.2f %.2f %.2f)",
-            local_target_pt_.x(), local_target_pt_.y(), local_target_pt_.z());
-        return true;
+      const double allowance = std::max(0.2, start_vel_.squaredNorm() /
+          (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) + 2.0 * resolution);
+      if (!std::isfinite(last_t) || available_arc < allowance) {
+        wait_for_map_generation_ = nominal.occupancy_generation;
+        wait_for_map_reason_ = GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+        return false;
       }
+      target_t = last_t;
+      local_target_pt_ = reference.getPosition(target_t);
+      local_target_vel_.setZero();
+      return true;
     }
-
-    if ((end_pt_ - local_target_pt_).norm() < (planner_manager_->pp_.max_vel_ * planner_manager_->pp_.max_vel_) / (2 * planner_manager_->pp_.max_acc_))
-    {
-      local_target_vel_ = Eigen::Vector3d::Zero();
-    }
-    else
-    {
-      local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
-    }
-    return true;
+    local_target_vel_ = (end_pt_ - local_target_pt_).norm() <
+        planner_manager_->pp_.max_vel_ * planner_manager_->pp_.max_vel_ /
+        (2.0 * planner_manager_->pp_.max_acc_)
+        ? Eigen::Vector3d::Zero().eval() : reference.getVelocity(target_t);
+    return target_t > projection + 1e-9;
   }
 
 } // namespace ego_planner

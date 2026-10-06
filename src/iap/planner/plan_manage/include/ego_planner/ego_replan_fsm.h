@@ -34,6 +34,7 @@ namespace ego_planner
 
   class EGOReplanFSM
   {
+    friend struct EGOReplanFSMTestAccess;
 
   private:
     /* ---------- flag ---------- */
@@ -72,8 +73,6 @@ namespace ego_planner
     double last_failed_plan_time_s_ = -std::numeric_limits<double>::infinity();
     uint64_t wait_for_map_generation_ = 0;
     GridExecutionReason wait_for_map_reason_ = GridExecutionReason::OK;
-    bool require_observed_reference_prefix_ = false;
-    uint64_t observed_prefix_failure_generation_ = 0;
     double search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
     bool waiting_for_spatial_evidence_ = false;
     uint64_t waiting_evidence_generation_ = 0;

@@ -491,6 +491,12 @@ bool EGOPlannerManager::beginPlanningView() {
     view.generation = snapshot->generation;
     view.time_s = time_s;
     view.motion = motion;
+    const auto odom = latest_odom_provider_ ? latest_odom_provider_() : risk_odom_;
+    if (odom && odom->header.frame_id == grid_map_->getFrameId()) {
+      const auto& p = odom->pose.pose.position;
+      Eigen::Vector3d position(p.x, p.y, p.z);
+      if (position.allFinite()) view.reference_position = position;
+    }
     view.physical_context = view.physical->preparePlanningQuery(time_s, motion);
     // The bound PL context has to refer to this same occupancy generation.
     view.risk_version = snapshot->risk_context_matches_map ? risk_version : 0;

@@ -115,6 +115,9 @@ namespace ego_planner
                                           double now_s) const;
     bool beginPlanningView();
     void endPlanningView();
+    std::optional<Eigen::Vector3d> planningReferencePosition() const {
+      return planning_view_ ? planning_view_->reference_position : std::nullopt;
+    }
     void setLatestOdometryProvider(std::function<
         nav_msgs::msg::Odometry::ConstSharedPtr()> provider) {
       latest_odom_provider_ = std::move(provider);
@@ -175,6 +178,7 @@ namespace ego_planner
       uint64_t generation = 0;
       double time_s = 0.0;
       GridMotionContext motion;
+      std::optional<Eigen::Vector3d> reference_position;
       GridPlanningContext physical_context;
       mutable GridPlanningQueryStats advisory_stats;
     };
