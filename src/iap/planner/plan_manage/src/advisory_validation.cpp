@@ -117,6 +117,7 @@ std::string coordinateReason(const Input& in) {
 void describe(const Input& in,const std::filesystem::path& path) {
   std::ofstream o(path); const auto& s=in.integrity;
   o << "{\"schema\":\"iap_advisory_frozen_metadata_v1\",\"reference_time_s\":"; number(o,in.reference_time_s);
+  o << ",\"recording_codec_version\":"<<in.recording_codec_version;
   o << ",\"pose_stamp\":"; number(o,s.pose_stamp);
   o << ",\"current_stamp\":"; number(o,s.current.stamp);
   o << ",\"snapshot_stamp\":"; number(o,s.stamp);
@@ -189,7 +190,7 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
   std::string timing_label=campaign_namespace+label;
   std::replace(timing_label.begin(),timing_label.end(),'/','_');
   std::ofstream timing(log.profiling_path("advisory_validation_"+timing_label+".csv"));
-  csv<<"id,identity,label,x,y,z,ix,iy,iz,generation,reference_time_s,cloud_stamp_s,pose_stamp_s,current_stamp_s,gnss_stamp_s,observed,raw_occupied,inflated_occupied,status,reason,wrapper_bound,wrapper_called,module_called,valid,gnss_used,lidar_used,prior_used,gnss_valid,lidar_valid,gnss_reason,lidar_reason,gnss_hpl,gnss_vpl,gnss_raw_hpl,gnss_raw_vpl,lidar_hpl,lidar_vpl,prior_hpl,prior_vpl,pre_hpl,pre_vpl,fused_hpl,fused_vpl,floor_h,floor_v,module_valid,module_hpl,module_vpl,repeat_equal,batch_equal,wrapper_equal,query_s,codec_equal,wrapper_original_hpl,wrapper_original_vpl\n";
+  csv<<"id,identity,label,x,y,z,ix,iy,iz,generation,reference_time_s,cloud_stamp_s,pose_stamp_s,current_stamp_s,gnss_stamp_s,observed,raw_occupied,inflated_occupied,status,reason,wrapper_bound,wrapper_called,module_called,valid,gnss_used,lidar_used,prior_used,gnss_valid,lidar_valid,gnss_reason,lidar_reason,gnss_hpl,gnss_vpl,gnss_raw_hpl,gnss_raw_vpl,lidar_hpl,lidar_vpl,prior_hpl,prior_vpl,pre_hpl,pre_vpl,fused_hpl,fused_vpl,floor_h,floor_v,module_valid,module_hpl,module_vpl,repeat_equal,batch_equal,wrapper_equal,query_s,codec_equal,wrapper_original_hpl,wrapper_original_vpl,gnss_anchored_hpl,gnss_anchored_vpl,gnss_information_hpl,gnss_information_vpl\n";
   timing<<"label,codec_s,preparation_s,query_total_s,total_s,requested,wrapper_calls,module_calls\n";
   auto total=Clock::now(), started=total;
   auto calls=std::make_shared<std::atomic<uint64_t>>(0); std::string binding_reason;
@@ -281,7 +282,8 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     const double elapsed=seconds(started);query_total+=elapsed;
     csv<<',';if(called) csv<<repeat_equal;csv<<',';if(called) csv<<batch_equal;csv<<',';
     if(!weak_normals && context.predict && physical_ok) csv<<wrapper_equal;
-    csv<<','<<elapsed<<','<<codec_equal<<',';csvNumber(csv,wrapped.hpl);csv<<',';csvNumber(csv,wrapped.vpl);csv<<'\n';
+    csv<<','<<elapsed<<','<<codec_equal<<',';csvNumber(csv,wrapped.hpl);csv<<',';csvNumber(csv,wrapped.vpl);
+    for(double value:{result.gnss.valid?result.gnss.hpl:NAN,result.gnss.valid?result.gnss.vpl:NAN,f.gnss_information_hpl,f.gnss_information_vpl}) {csv<<',';csvNumber(csv,value);}csv<<'\n';
     matrices<<"{\"id\":"<<id<<",\"label\":"<<std::quoted(label)<<",\"identity\":"<<std::quoted(identity)<<",\"module_valid\":"<<(result.valid?"true":"false");
     matrix(matrices,"prior",f.lambda_prior,called);matrix(matrices,"gnss",f.lambda_gnss,called);
     matrix(matrices,"lidar",f.lambda_lidar,called);matrix(matrices,"fused_information",f.lambda_pred,called);
@@ -302,7 +304,8 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     matrices<<",\"epsilon_applied\":"<<(f.epsilon_applied?"true":"false")
       <<",\"degeneracy_regularized\":"<<(f.degeneracy_regularized?"true":"false")
       <<",\"gnss_regularized\":"<<(result.gnss.fim_regularized?"true":"false")
-      <<",\"lidar_regularized\":"<<(result.lidar.fim_regularized?"true":"false");
+      <<",\"lidar_regularized\":"<<(result.lidar.fim_regularized?"true":"false")
+      <<",\"lidar_support_groups\":"<<result.lidar.n_support_groups;
     matrices<<"}\n";
   }
   timing<<label<<','<<std::setprecision(17)<<codec_s<<','<<preparation<<','<<query_total<<','<<seconds(total)+codec_s<<','<<points.size()<<','<<calls->load()<<','<<direct_calls<<'\n';
@@ -327,6 +330,10 @@ void campaign(const Input& original,const std::string& identity,double budget,gl
       }
       evaluate(in,group+"_"+std::to_string(level),diagnostic_identity,false,budget,log);
     }
+  if(pair_phase) for(int level=0;level<3;++level) {
+    auto epsilon=original;epsilon.params.fusion.fim_epsilon*=level==0?.1:level==1?1.:10.;
+    evaluate(epsilon,"epsilon_"+std::to_string(level),diagnostic_identity,false,budget,log);
+  }
   // Paired prior-free dual-source degradation for the signal-retention ratio.
   for(int level=0;level<3;++level) {
     auto in=original;in.integrity.has_lambda_base=false;in.integrity.lambda_base_pos.setZero();
@@ -393,6 +400,39 @@ void campaign(const Input& original,const std::string& identity,double budget,gl
     evaluate(invalid,"S5_nonfinite_observations",diagnostic_identity,false,budget,log);
   }
 }
+void samplingDiagnostics(const std::string& label,glim::RunLogManager& log) {
+  const auto dir=log.export_path("advisory/validation/"+label);
+  if(std::filesystem::exists(dir)) throw std::runtime_error("diagnostic evidence exists");
+  std::filesystem::create_directories(dir);
+  std::ofstream csv(dir/"sampling.csv"), raw(dir/"primitives.csv");
+  csv<<"identity,case,count,valid,hpl,vpl,lambda_min,lambda_max,query_s,xx,xy,xz,yx,yy,yz,zx,zy,zz\n";
+  raw<<"case,id,x,y,z,nx,ny,nz,weight,confidence\n";
+  const auto run=[&](const std::string& name,const std::vector<iap::LidarFimPrimitive>& points) {
+    iap::LidarAdvisoryPredictor predictor;predictor.set_lidar_fim_primitives(
+        std::make_shared<const std::vector<iap::LidarFimPrimitive>>(points));
+    auto snapshot=fixture().integrity;ego_planner::setAdvisoryPosteriorPrior(snapshot,false);
+    const auto begin=Clock::now();const auto lidar=predictor.query(Point::Zero(),snapshot);
+    const auto fused=iap::FusionAdvisoryPredictor().query(snapshot,iap::GnssAdvisoryResult{},lidar);
+    csv<<"SYNTHETIC_MECHANISM,"<<name<<','<<points.size()<<','<<fused.valid<<',';
+    for(double value:{fused.hpl,fused.vpl,fused.lambda_pred_min_eig,fused.lambda_pred_max_eig,seconds(begin)}) {csvNumber(csv,value);csv<<',';}
+    for(int r=0;r<3;++r) for(int c=0;c<3;++c) {csvNumber(csv,fused.lambda_lidar(r,c));if(r<2||c<2) csv<<',';}csv<<'\n';
+    for(size_t i=0;i<points.size();++i) {const auto& p=points[i];raw<<name<<','<<i<<','<<p.center_w.x()<<','<<p.center_w.y()<<','<<p.center_w.z()<<','<<p.normal_w.x()<<','<<p.normal_w.y()<<','<<p.normal_w.z()<<','<<p.weight<<','<<p.normal_confidence<<'\n';}
+  };
+  std::vector<iap::LidarFimPrimitive> base;
+  for(int axis=0;axis<3;++axis) for(int u=-8;u<=8;++u) for(int v=-8;v<=8;++v) {
+    iap::LidarFimPrimitive p;p.center_w[axis]=2.;p.center_w[(axis+1)%3]=u*.25;p.center_w[(axis+2)%3]=v*.25;
+    p.normal_w=Point::Unit(axis);base.push_back(p);
+  }
+  for(int copies:{1,2,4}) {auto points=base;for(int i=1;i<copies;++i) points.insert(points.end(),base.begin(),base.end());run("duplicates_"+std::to_string(copies),points);}
+  for(int density:{2,4,8}) {
+    std::vector<iap::LidarFimPrimitive> points;
+    for(int axis=0;axis<3;++axis) for(int u=-2*density;u<2*density;++u) for(int v=-2*density;v<2*density;++v) {
+      iap::LidarFimPrimitive p;p.center_w[axis]=2.;p.center_w[(axis+1)%3]=double(u)/density;p.center_w[(axis+2)%3]=double(v)/density;
+      p.normal_w=Point::Unit(axis);points.push_back(p);
+    }
+    run("density_"+std::to_string(density),points);
+  }
+}
 } // namespace
 
 int main(int argc,char** argv) {
@@ -403,6 +443,7 @@ int main(int argc,char** argv) {
     if(label.empty() || label.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos)
       throw std::invalid_argument("unsafe label");
     auto& log=glim::RunLogManager::initialize("advisory_validation");
+    if(mode=="diagnostics") {samplingDiagnostics(label,log);return 0;}
     Input in; double budget=120.;
     if(mode=="fixture" || mode=="fixture_ab") in=fixture();
     else if((mode=="replay" || mode=="replay_ab") && argc>=4) {
@@ -415,7 +456,7 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
-      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":"REAL_REPLAY";
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<3?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
       for (const bool enabled : {true, false}) {
         auto variant=in;
         ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
@@ -426,8 +467,8 @@ int main(int argc,char** argv) {
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
-      evaluate(in,label,"REAL_REPLAY",true,budget,log);
-      evaluate(in,label+"_current","REAL_REPLAY",false,budget,log);
+      evaluate(in,label,in.recording_codec_version<3?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
+      evaluate(in,label+"_current",in.recording_codec_version<3?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
     }
     std::cout<<log.run_dir()<<'\n';
   } catch(const std::exception& e) {std::cerr<<"advisory_validation: "<<e.what()<<'\n';return 1;}

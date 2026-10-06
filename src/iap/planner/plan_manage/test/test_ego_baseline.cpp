@@ -222,7 +222,11 @@ TEST(EgoBaseline, RealPredictorUsesSameMapAndRejectsStaleInputs) {
   EXPECT_EQ(map->queryRisk(Eigen::Vector3d(0,0,1),version,10.6).status,GridRiskStatus::STALE);
   snapshot.current.stamp=9;
   const auto stale=manager.bindRiskPrediction(snapshot,10);
-  EXPECT_EQ(map->queryRisk(Eigen::Vector3d(0,0,1),stale,10).status,GridRiskStatus::STALE);
+  // A discarded stale posterior/monitor cannot expire fresh LiDAR diagnostics.
+  EXPECT_EQ(map->queryRisk(Eigen::Vector3d(0,0,1),stale,10).status,GridRiskStatus::VALID);
+  snapshot.pose_stamp=9;
+  const auto stale_pose=manager.bindRiskPrediction(snapshot,10);
+  EXPECT_NE(map->queryRisk(Eigen::Vector3d(0,0,1),stale_pose,10).status,GridRiskStatus::VALID);
 }
 TEST(EgoBaseline, PhysicalPlanningProducesFiniteCurveAndObstacleDetour) {
   // Preserve the original physical-planning fixture's legacy input assumption.

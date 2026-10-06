@@ -134,14 +134,14 @@ def report(run, label):
         for i, mode in enumerate(("on", "off")):
             rows = tables[mode]["S0"]
             for j, source in enumerate(("gnss", "lidar", "prior", "fused")):
-                ax=axes[i,j]; field=source+"_"+metric
+                ax=axes[i,j]; field=("gnss_information" if source=="gnss" else source)+"_"+metric
                 valid = [r for r in rows if r[field]]; missing = [r for r in rows if not r[field]]
                 if valid:
                     scatter=ax.scatter([float(r["x"]) for r in valid],[float(r["y"]) for r in valid],
                                        c=[float(r[field]) for r in valid],norm=Normalize(lo,hi),cmap="turbo",s=28)
                     fig.colorbar(scatter,ax=ax,extend="both",label="m")
                 if missing: ax.scatter([float(r["x"]) for r in missing],[float(r["y"]) for r in missing],marker="x",color="purple",label="missing")
-                ax.set_title(mode+" "+source+" "+metric.upper()); ax.set_aspect("equal")
+                ax.set_title(mode+" "+("GNSS information" if source=="gnss" else source)+" "+metric.upper()); ax.set_aspect("equal")
         save(fig, "spatial_ab_"+metric+".png", "Same 100 voxel centers; fixed production color limits; missing = purple x")
     fig, axes=plt.subplots(1,2,figsize=(11,4))
     for metric,ax in zip(("hpl","vpl"),axes):

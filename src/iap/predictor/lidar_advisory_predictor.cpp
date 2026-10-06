@@ -77,6 +77,7 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
   out.lambda_lidar = fim.lambda;
   out.n_primitives = fim.n_primitives;
   out.n_valid_normals = fim.n_valid_normals;
+  out.n_support_groups = fim.n_support_groups;
   out.condition = fim.condition;
   copy_fim_diagnostics(fim, out);
   if (fim.valid) {

@@ -3,6 +3,7 @@
 #include <Eigen/Eigenvalues>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -513,6 +514,14 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   const double inv_sigma2 = 1.0 / (sigma * sigma);
   int nearby = 0;
   int valid_normals = 0;
+  // One correlated surface family per existing PCA-sized spatial support.
+  // Preserve the averaged normal outer product (including weaker directions),
+  // rather than accumulating repeated samples as independent evidence.
+  using SupportKey=std::array<int64_t,4>;
+  struct Support { Eigen::Matrix3d information=Eigen::Matrix3d::Zero(); size_t count=0; };
+  std::map<SupportKey,Support> supports;
+  if (!std::isfinite(params.fim_support_voxel_m) || params.fim_support_voxel_m<=0)
+    return fallback("invalid_lidar_support_scale");
   const auto accumulate = [&](const LidarFimPrimitive& primitive) {
     if (!primitive.center_w.allFinite() || !primitive.normal_w.allFinite()) {
       return;
@@ -541,9 +550,12 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
       return;
     }
     const double pi_range = std::exp(-dist2 / std::max(2.0 * radius2, 1.0e-9));
-    out.lambda +=
-        weight_scale * pi_range * confidence * primitive_weight * inv_sigma2 *
-        (n * n.transpose());
+    const Eigen::Array3d cell=(primitive.center_w.array()/params.fim_support_voxel_m+1e-9).floor();
+    if ((cell.abs()>double(std::numeric_limits<int64_t>::max()/2)).any()) return;
+    Eigen::Index family; n.cwiseAbs().maxCoeff(&family);
+    auto& support=supports[{int64_t(cell.x()),int64_t(cell.y()),int64_t(cell.z()),int64_t(family)}];
+    support.information += weight_scale*pi_range*confidence*primitive_weight*inv_sigma2*(n*n.transpose());
+    ++support.count;
     ++valid_normals;
   };
 
@@ -559,9 +571,11 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     }
   }
 
+  for (const auto& [key,support]:supports) out.lambda += support.information/double(support.count);
+  out.n_support_groups=static_cast<int>(supports.size());
   out.n_primitives = nearby;
   out.n_valid_normals = valid_normals;
-  if (valid_normals < min_voxels) {
+  if (out.n_support_groups < min_voxels) {
     return fallback(valid_normals == 0 ? "missing_lidar_normals"
                                        : "too_few_lidar_normals");
   }

@@ -278,6 +278,7 @@ struct LidarAdvisoryResult {
   double condition = 1.0e6;
   int n_primitives = 0;
   int n_valid_normals = 0;
+  int n_support_groups = 0;
   double bias_h = 0.0;
   double bias_v = 0.0;
 
@@ -367,6 +368,7 @@ struct PredictorQueryInput {
   // Current Monitor validity. NaN means no timed support supplied by this API.
   double lidar_support_stamp_s = std::numeric_limits<double>::quiet_NaN();
   double lidar_support_max_age_s = 0.5;
+  double gnss_map_support_stamp_s = std::numeric_limits<double>::quiet_NaN();
   Eigen::Vector3d query_position_map;
   IntegritySnapshot snapshot;
   double query_time_s;

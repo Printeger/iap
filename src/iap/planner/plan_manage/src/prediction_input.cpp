@@ -28,6 +28,7 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
     return context;
   }
   context.occupancy_generation = occupancy->generation;
+  if(input.recording_codec_version < 3) {reject("historical_codec_input");return context;}
   // Source admission belongs to PredictorModule. An unavailable source must
   // not expire the other source or prevent its actual prediction call.
   context.valid_until_s = now + risk_validity_s_;
@@ -47,6 +48,8 @@ iap::PredictorQueryInput frozenPredictionQuery(const PredictionInput& input, con
   query.lidar_support_max_age_s=input.validity_s;
   // A non-finite physical support time explicitly rejects that source.
   if (!std::isfinite(query.lidar_support_stamp_s)) query.lidar_support_stamp_s=-INFINITY;
+  if(!input.occupancy->local_evidence_snapshot)
+    query.gnss_map_support_stamp_s=query.lidar_support_stamp_s;
   return query;
 }
 iap::PredictorModule makeFrozenPredictor(const PredictionInput& input) {
@@ -57,7 +60,7 @@ iap::PredictorModule makeFrozenPredictor(const PredictionInput& input) {
   predictor.set_occupancy_query([occupancy](const Eigen::Vector3d& p) {
     return GridMap::queryFrozenOccupancy(*occupancy,p).raw_occupied;
   }, occupancy->resolution_m);
-  predictor.set_support_query([occupancy, now](const Eigen::Vector3d& p, double, double) {
+  predictor.set_support_query([occupancy, now, input_validity_s=input.validity_s](const Eigen::Vector3d& p, double, double) {
     iap::LocalMapSupportQuery support;
     support.status = iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
     if (occupancy->local_evidence_snapshot) {
@@ -70,7 +73,9 @@ iap::PredictorModule makeFrozenPredictor(const PredictionInput& input) {
         support.status = iap::LocalMapSupportStatus::EXPIRED;
     } else {
       const auto voxel = GridMap::queryFrozenOccupancy(*occupancy,p);
-      if (voxel.available && voxel.observed)
+      if (!std::isfinite(occupancy->cloud_stamp_s) || occupancy->cloud_stamp_s>now ||
+          now-occupancy->cloud_stamp_s>input_validity_s) support.status=iap::LocalMapSupportStatus::EXPIRED;
+      else if (voxel.available && voxel.observed)
         support.status = iap::LocalMapSupportStatus::MODEL_COMPLETE;
     }
     return support;

@@ -11,14 +11,13 @@
 #include <vector>
 
 #include <iap/predictor/lidar_observability_fim.hpp>
+#include <iap/util/run_log_manager.hpp>
 
 namespace {
 
 std::filesystem::path predictor_artifact_dir() {
-  std::filesystem::path path(IAP_SOURCE_ROOT);
-  path /= "docs/dev_predictor/predictor_isolated_test_coverage_artifacts";
-  std::filesystem::create_directories(path);
-  return path;
+  auto path=glim::RunLogManager::initialize("advisory_lidar_regression").export_path("advisory/validation/lidar_regression");
+  std::filesystem::create_directories(path);return path;
 }
 
 std::string csv_escape(const std::string& value) {
@@ -680,4 +679,42 @@ TEST(LidarObservabilityFimTest, PrimitiveGenerationParameterCurvesExport) {
       << csv_escape(normal_diagnostics.fallback_reason) << '\n';
 
   EXPECT_EQ(normal_primitives->size(), normal_points.size());
+}
+
+TEST(LidarSampling, DuplicatesDoNotInventIndependentInformation) {
+  auto base=axis_primitives({Eigen::Vector3d::UnitX(),Eigen::Vector3d::UnitY(),Eigen::Vector3d::UnitZ()},16);
+  iap::LidarObservabilityFim estimator;
+  const auto reference=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),&base,make_current());
+  ASSERT_TRUE(reference.valid);
+  for(int copies:{2,4}) {
+    auto repeated=base;for(int i=1;i<copies;++i) repeated.insert(repeated.end(),base.begin(),base.end());
+    auto result=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),&repeated,make_current());
+    ASSERT_TRUE(result.valid); EXPECT_TRUE(result.lambda.isApprox(reference.lambda,1e-12));
+    EXPECT_EQ(result.n_support_groups,reference.n_support_groups);
+    auto ptr=std::make_shared<const std::vector<iap::LidarFimPrimitive>>(repeated);
+    auto index=iap::LidarFimPrimitiveIndex::build(ptr,1.);
+    EXPECT_TRUE(estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),index.get(),make_current()).lambda.isApprox(reference.lambda,1e-12));
+  }
+}
+TEST(LidarSampling, IndependentNormalDirectionsSurviveSupportGrouping) {
+  auto partial=axis_primitives({Eigen::Vector3d::UnitX()},16);
+  auto full=axis_primitives({Eigen::Vector3d::UnitX(),Eigen::Vector3d::UnitY(),Eigen::Vector3d::UnitZ()},16);
+  iap::LidarObservabilityFim estimator;
+  const auto a=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),&partial,make_current());
+  const auto b=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),&full,make_current());
+  ASSERT_TRUE(a.valid);ASSERT_TRUE(b.valid);EXPECT_LE(a.min_eig,1e-12);EXPECT_GT(b.min_eig,1.);
+  EXPECT_NEAR(a.lambda(0,0),b.lambda(0,0),1e-12);
+}
+TEST(LidarSampling, SameSurfaceDensityDoesNotChangePLByFivePercent) {
+  iap::LidarObservabilityFim estimator;double reference=0;
+  for(int density:{2,4,8}) {
+    std::vector<iap::LidarFimPrimitive> points;
+    for(int axis=0;axis<3;++axis) for(int u=-2*density;u<2*density;++u) for(int v=-2*density;v<2*density;++v) {
+      iap::LidarFimPrimitive p;p.center_w[axis]=2.;p.center_w[(axis+1)%3]=double(u)/density;p.center_w[(axis+2)%3]=double(v)/density;
+      p.normal_w=Eigen::Vector3d::Unit(axis);points.push_back(p);
+    }
+    auto result=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),&points,make_current());
+    ASSERT_TRUE(result.valid);const double pl=5./std::sqrt(result.min_eig+1e-6);
+    if(reference==0) reference=pl;EXPECT_LT(std::abs(pl/reference-1.),.05);
+  }
 }

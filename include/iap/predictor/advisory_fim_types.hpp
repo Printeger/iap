@@ -56,6 +56,7 @@ struct GnssAdvisoryFimResult : FimDiagnostic {
 };
 
 struct LidarAdvisoryFimResult : FimDiagnostic {
+  int n_support_groups = 0;
   int n_primitives = 0;
   int n_valid_normals = 0;
 };

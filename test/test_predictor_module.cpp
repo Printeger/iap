@@ -4011,7 +4011,7 @@ TEST(PredictorModuleTest,
   EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
 }
 
-TEST(PredictorModuleTest, FreshnessGuardRejectsRequiredStaleGnssEpoch) {
+TEST(PredictorModuleTest, FusionRequiredPolicyStillExcludesOnlyStaleGnss) {
   auto params = make_params();
   params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Required;
   params.freshness.enabled = true;
@@ -4031,12 +4031,12 @@ TEST(PredictorModuleTest, FreshnessGuardRejectsRequiredStaleGnssEpoch) {
                                  "map");
   const auto result = module.query(input);
 
-  EXPECT_FALSE(result.valid);
-  EXPECT_FALSE(result.available);
-  EXPECT_TRUE(result.fallback);
-  EXPECT_EQ(result.fallback_reason, "stale_gnss_epoch");
-  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
-  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_VALID));
+  EXPECT_TRUE(result.valid);
+  EXPECT_TRUE(result.available);
+  EXPECT_FALSE(result.fallback);
+  EXPECT_EQ(result.gnss.fallback_reason, "stale_gnss_epoch");
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_VALID));
 }
 
 TEST(PredictorModuleTest, FreshnessGuardRejectsStaleSnapshot) {
@@ -4143,6 +4143,7 @@ TEST(PredictorModuleTest, UnsupportedFrameFallsBackBeforePrediction) {
 TEST(PredictorModuleTest,
      PositiveHorizonEarlyValidationFailuresNeverReportGrowthApplied) {
   auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::GnssOnly;
   params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Required;
   params.freshness.enabled = true;
   params.freshness.max_odom_age_s = 0.5;
@@ -4306,4 +4307,26 @@ TEST(AdvisoryAdmission, MotionUnavailableDoesNotAuthorizeExecutionOrBlockSources
   q.lidar_support_stamp_s=99.;EXPECT_FALSE(module.query(q).valid);
   q.snapshot.has_epoch=true;EXPECT_TRUE(module.query(q).valid);EXPECT_FALSE(module.query(q).fused.lidar_used);
   q.snapshot.current.gnss_epoch_identity++;EXPECT_FALSE(module.query(q).valid);
+}
+
+TEST(AdvisoryAdmission, CacheCannotOverrideEpochRejectionOrSourceTime) {
+  auto params=make_params();params.freshness.enabled=true;
+  iap::PredictorModule module(params);module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto s=make_snapshot(true,false);
+  ASSERT_GT(s.current.gnss_epoch_identity,uint64_t(1)<<53);
+  iap::PredictorQueryInput first(Eigen::Vector3d::Zero(),s,100.);
+  auto second=first;second.snapshot.current.gnss_epoch_identity++;
+  auto third=first;third.lidar_support_stamp_s=99.;
+  auto result=module.queryBatch({first,second,third});
+  ASSERT_EQ(result.size(),3u);EXPECT_TRUE(result[0].fused.gnss_used);
+  EXPECT_FALSE(result[1].fused.gnss_used);EXPECT_TRUE(result[1].fused.lidar_used);
+  EXPECT_FALSE(result[2].fused.lidar_used);EXPECT_TRUE(result[2].fused.gnss_used);
+  for(size_t i=0;i<result.size();++i) expect_scientific_result_eq(result[i],module.query(std::vector<iap::PredictorQueryInput>{first,second,third}[i]));
+}
+TEST(AdvisoryAdmission, DiscardedPriorDoesNotExpireFreshLidar) {
+  auto params=make_params();params.freshness.enabled=true;
+  iap::PredictorModule module(params);module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto s=make_snapshot(false,true);s.current.stamp=99.;
+  iap::PredictorQueryInput q(Eigen::Vector3d::Zero(),s,100.);q.lidar_support_stamp_s=100.;
+  EXPECT_GT(module.admission(q).valid_until_s,100.);EXPECT_TRUE(module.query(q).valid);
 }

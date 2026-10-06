@@ -418,11 +418,14 @@ ctest --test-dir build/ego_planner -R '^test_ego_baseline$|^test_ego_pipeline$' 
 默认关闭 Advisory 后验代理，预测输入／来源信息／运动执行三种有效性分离。
 共享 `PredictorModule::admission` 负责来源准入，缺 GNSS 不再阻止合法 LiDAR。
 联合原始信息秩与正则化弱方向占比先于有效 PL 授予；占比上限 1%，
-官方数值退化值为空。来源独立秩亏可由联合观测补足。v2 codec 保存新参数，
-v1 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束。
+官方数值退化值为空。来源独立秩亏可由联合观测补足。v3 codec 保存数值与支持分组参数及原始格式身份，
+v1/v2 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束。
 
-准入／数值、codec、生产包装器及批次回归已通过；来源密度核验、实际曲线
-修复、固定路线校准与任务对照继续实施。真实森林现场仍待测：
+准入／数值、codec、生产包装器及批次回归已通过；重复与表面加密对照已完成，
+LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立法向。
+来源 raw／anchored／information PL 明确分列。地图 ENU 与估计器旋转的实测
+同帧证据仍缺失，不宣称绝对尺度已统一或已校准。实际曲线修复、固定路线
+校准与任务对照继续实施。真实森林现场仍待测：
 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，不推广未经独立实测的校准参数。
 契约见 [advisory_prediction_contract.md](../spec/advisory_prediction_contract.md)。
 本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/staged/report.md)。

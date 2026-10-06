@@ -79,6 +79,8 @@ class PredictorModule {
     double gnss_evaluation_time_s =
         std::numeric_limits<double>::quiet_NaN();
     bool evaluated = false;
+    bool gnss_admitted = false;
+    bool lidar_admitted = false;
   };
 
   PredictorParams params_;

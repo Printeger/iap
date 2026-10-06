@@ -53,8 +53,9 @@ class AdvisoryPriorABTest(unittest.TestCase):
             self.assertEqual(row["fused_hpl"],"");self.assertTrue(row["reason"])
         for source in ("pose","snapshot"):
             self.assertEqual(t["S5_stale_"+source][0]["status"],"STALE")
-        for source in ("current","cloud","gnss"):
+        for source in ("current","gnss"):
             self.assertEqual(t["S5_stale_"+source][0]["valid"],"1")
+        self.assertEqual(t["S5_stale_cloud"][0]["valid"],"0")
         for table in t.values():
             for row in table:
                 self.assertEqual(row["prior_used"],"0")

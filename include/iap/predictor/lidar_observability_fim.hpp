@@ -140,6 +140,8 @@ class LidarObservabilityFim {
     double fim_range_sigma_base = 0.5;
     double fim_condition_max = 1.0e6;
     double fim_weight_scale = 1.0;
+    // Same default support scale as PCA generation; independent of GridMap.
+    double fim_support_voxel_m = 0.5;
   };
 
   LidarObservabilityFim();
