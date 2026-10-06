@@ -141,6 +141,9 @@ namespace ego_planner
     }
     bool searchRecoveryGuide();
     void strengthenGuideTracking() { guide_weight_ *= 2.0; }
+    // Constrain violating actual samples toward the one existing legal guide.
+    // This is a route preference; final physical/motion checks remain independent.
+    bool addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval);
     bool addCurveClearanceConstraints(const Eigen::MatrixXd& points, double interval,
         const std::vector<std::pair<double,GridPlanningCell>>& violations);
     bool curveViolates(const Eigen::MatrixXd& points, double interval) const;

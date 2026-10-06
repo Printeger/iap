@@ -26,6 +26,7 @@ if str(_INCLUDES) not in sys.path:
 from run_directory import (  # noqa: E402
     finalize_run_from_shutdown,
     register_config_snapshot,
+    register_validation_trial,
     resolve_run_directory,
     write_subordinate_manifest,
 )
@@ -65,6 +66,26 @@ def _setup(context):
         register_config_snapshot(output_dir,frozen)
         calibration=str(frozen)
 
+    trial_path=context.launch_configurations.get("advisory_trial", "")
+    if trial_path:
+        from full_stack_runtime import load_advisory_trial, planner_parameters
+        trial=load_advisory_trial(trial_path,catalog[scenario])
+        if scenario!="icra_dense_forest_four_fork_v2": raise ValueError("validation trial requires canonical forest")
+        for key in ("coordinates","physical_route_evidence"):
+            frozen=output_dir/"metadata/config"/(key+".json")
+            frozen.write_bytes(Path(trial[key]).read_bytes());register_config_snapshot(output_dir,frozen)
+            trial[key]=str(frozen)
+        frozen=output_dir/"metadata/config/advisory_trial.json"
+        frozen.write_text(json.dumps(trial,sort_keys=True,allow_nan=False,indent=2));register_config_snapshot(output_dir,frozen)
+        trial_path=str(frozen)
+        params=planner_parameters(catalog[scenario],False,
+            context.launch_configurations.get("advisory_posterior_prior","false")=="true",calibration,
+            context.launch_configurations.get("advisory_guidance","true")=="true",trial_path)
+        import hashlib
+        trial["parameter_sha256"]=json.loads(Path(calibration).read_text())["sha256"] if calibration else hashlib.sha256(
+            json.dumps(params,sort_keys=True,allow_nan=False).encode()).hexdigest()
+        register_validation_trial(output_dir,trial)
+
     manifest = {
         "schema_version": "iap_canonical_sim_v3",
         "scenario": scenario,
@@ -82,6 +103,8 @@ def _setup(context):
         ],
         "grid_map_visualizer_enabled": context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true",
         "advisory_calibration": calibration,
+        "advisory_trial": trial_path,
+        "advisory_guidance_enabled": context.launch_configurations.get("advisory_guidance", "true").lower()=="true",
         "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
@@ -119,6 +142,8 @@ def _setup(context):
             launch_arguments={
                 "scenario": scenario,
                 "advisory_calibration": calibration,
+                "advisory_trial": trial_path,
+                "advisory_guidance": context.launch_configurations.get("advisory_guidance", "true"),
                 "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
@@ -144,8 +169,12 @@ def generate_launch_description():
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("start_grid_map_visualizer", default_value="true"),
+            DeclareLaunchArgument("advisory_guidance", default_value="true",choices=["true","false"],
+                                 description="Planning preference only; prediction/recording/display stay active"),
             DeclareLaunchArgument("advisory_calibration", default_value="",
                                  description="Absolute frozen empirical Advisory JSON; empty preserves uncalibrated defaults"),
+            DeclareLaunchArgument("advisory_trial",default_value="",
+                                 description="Absolute fixed-route/seed/observation trial JSON with real physical/frame proof"),
             DeclareLaunchArgument("advisory_posterior_prior", default_value="false",
                                  choices=["true", "false"],
                                  description="Include FGO posterior proxy in Advisory (legacy A/B only)"),

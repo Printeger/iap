@@ -130,6 +130,8 @@ namespace ego_planner
     bool beginPlanningView(double budget_seconds = 1.5);
     bool hasPlanningView() const { return planning_view_.has_value(); }
     void setPlanningConnection(rclcpp::Time start_time, int predecessor_id);
+    bool advisoryGuidanceEnabled() const { return advisory_guidance_enabled_; }
+    GridPlanningCell queryGuidanceCell(const Eigen::Vector3d& position,double clearance_reserve_m=0) const;
     bool hasPendingTrajectory() const { return pending_trajectory_.has_value(); }
     const LocalTrajData& publicationTrajectory() const {
       return pending_trajectory_ ? *pending_trajectory_ : local_data_;
@@ -176,6 +178,7 @@ namespace ego_planner
     SwarmTrajData swarm_trajs_buf_;
 
   private:
+    GridPlanningRisk guidancePreference(GridPlanningRisk advisory) const;
     // Input callbacks and planning run on the original serial executor.
     void initRiskInputs(const rclcpp::Node::SharedPtr& node);
     uint64_t beginRiskQuery();
@@ -184,6 +187,7 @@ namespace ego_planner
     iap::PredictorParams predictor_params_;
     double risk_validity_s_ = 0.5;
     bool advisory_posterior_prior_enabled_ = false;
+    bool advisory_guidance_enabled_ = true;
     GridPlanningRiskPolicy planning_risk_policy_;
     double motion_body_radius_m_ = 0.35;
     double motion_tracking_reserve_m_ = 0.10;

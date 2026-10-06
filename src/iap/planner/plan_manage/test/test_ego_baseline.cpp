@@ -104,8 +104,21 @@ struct EGOPlannerManagerTestAccess {
   static iap::IntegritySnapshot snapshot(const EGOPlannerManager& manager, double now) {
     return manager.capturePredictionSnapshot(now);
   }
+  static void injectAdvisory(EGOPlannerManager& manager) {
+    manager.planning_view_->advisory_query=[](const Eigen::Vector3d& p) {
+      GridPlanningRisk r; r.query_status=GridRiskStatus::VALID;
+      r.hpl=std::abs(p.x())<.35 && std::abs(p.y())<.6 ? 2. : .1;
+      r.vpl=.1; r.classification=r.hpl>1 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+      r.cost_multiplier=r.hpl>1 ? 3. : 1.; return r;
+    };
+  }
   static AStar::Result lastSearchResult(const EGOPlannerManager& manager) {
     return manager.bspline_optimizer_->a_star_->lastResult();
+  }
+  static bool searchGuidance(EGOPlannerManager& manager,const Eigen::Vector3d& start,const Eigen::Vector3d& goal) {
+    auto& search=*manager.bspline_optimizer_->a_star_;
+    search.setPlanningQuery([&manager](const Eigen::Vector3d& p){return manager.queryGuidanceCell(p);},false);
+    return search.AstarSearch(.1,start,goal,-1,(start+goal)/2.);
   }
   static double lastSearchSeconds(const EGOPlannerManager& manager) {
     return manager.bspline_optimizer_->a_star_->lastResult().duration_s;
@@ -168,11 +181,12 @@ struct EGOPlannerManagerTestAccess {
 }
 namespace {
 rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double smooth_weight = 1.0,
-                               bool posterior_prior = false) {
+                               bool posterior_prior = false, bool advisory_guidance = true) {
   if (!rclcpp::ok()) rclcpp::init(0,nullptr);
   rclcpp::NodeOptions opts;
   opts.parameter_overrides({
     {"planning/search_performance_diagnostics", performance_diagnostics},
+    {"planning/advisory_guidance_enabled",advisory_guidance},
     {"grid_map/resolution",0.2}, {"grid_map/map_size_x",12.0},
     {"grid_map/map_size_y",12.0}, {"grid_map/map_size_z",5.0},
     {"grid_map/local_update_range_x",10.0}, {"grid_map/local_update_range_y",10.0},
@@ -1480,4 +1494,53 @@ TEST(EgoBaseline, ActualCubicExtremumOutsideMapIsRejectedBetweenSamples) {
   // Production retiming rebuilds a uniform spline and preserves the geometry.
   curve=ego_planner::UniformBspline(q,3,.028);
   EXPECT_EQ(manager.assessTrajectory(curve,0,now).execution_reason,GridExecutionReason::OUT_OF_MAP);
+}
+
+TEST(EgoBaseline, GuidanceSwitchRetainsPredictionAndPhysicalAuthorization) {
+  // The full suite's earlier capture fixture owns a cleaned temporary run.
+  // Export only in the dedicated invocation, which adopts the caller's run.
+  std::ofstream csv;
+  if(!glim::RunLogManager::get_if_initialized()) {
+    auto& log=glim::RunLogManager::initialize("advisory_guidance_regression");
+    csv.open(log.export_path("advisory/validation/guidance_regression.csv"));
+    csv<<"identity,guidance,raw_hpl,raw_class,curve_detour_m,trajectory_id,advisory_calls\n";
+  }
+  for(bool enabled:{false,true}) {
+    auto node=makeNode(true,1.,false,enabled); ego_planner::EGOPlannerManager manager;
+    manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+    manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
+    const auto zero=Eigen::Vector3d::Zero().eval();const Eigen::Vector3d start(-2,0,1),goal(2,0,1);
+    const double now=node->now().seconds();
+    GridMapTestAccess::input(*manager.grid_map_,{},now,start);GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,start);
+    ASSERT_TRUE(manager.beginPlanningView());
+    ego_planner::EGOPlannerManagerTestAccess::injectAdvisory(manager);
+    const auto raw=manager.queryPlanningViewCell(Eigen::Vector3d(0,0,1));
+    const auto preference=manager.queryGuidanceCell(Eigen::Vector3d(0,0,1));
+    EXPECT_EQ(raw.advisory.classification,GridAdvisoryClass::AVOID);
+    EXPECT_DOUBLE_EQ(raw.advisory.hpl,2.);
+    EXPECT_EQ(preference.advisory.query_status,raw.advisory.query_status);
+    EXPECT_EQ(preference.execution_reason,raw.execution_reason);
+    EXPECT_EQ(preference.advisory.classification,enabled?GridAdvisoryClass::AVOID:GridAdvisoryClass::UNKNOWN);
+    ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::searchGuidance(manager,start,goal));
+    const auto search=ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager);
+    EXPECT_GT(search.advisory_refresh_calls,0u);
+    if(!enabled) EXPECT_EQ(search.rejected_advisory,0u);
+    else EXPECT_GT(search.rejected_advisory,0u);
+    ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+    ASSERT_TRUE(manager.publicationStillTimely());
+    double detour=0;
+    auto curve=manager.publicationTrajectory().position_traj_;
+    for(double t=0;t<curve.getTimeSum();t+=.01) detour=std::max(detour,std::abs(curve.evaluateDeBoorT(t).y()));
+    EXPECT_GT(manager.local_data_.traj_id_,0);
+    if(enabled) EXPECT_GT(detour,.6); else EXPECT_LT(detour,1e-5);
+    const auto assessment=manager.assessTrajectory(curve,1,now,false,0,
+        std::numeric_limits<double>::infinity(),nullptr,false);
+    EXPECT_TRUE(assessment.executable());
+    const auto calls=ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager).advisory_query_calls;
+    if(csv.is_open()) csv<<"SYNTHETIC_MECHANISM,"<<enabled<<','<<raw.advisory.hpl<<','<<int(raw.advisory.classification)<<','
+       <<detour<<','<<manager.local_data_.traj_id_<<','<<calls<<'\n';
+    EXPECT_FALSE(node->set_parameter(rclcpp::Parameter("planning/advisory_guidance_enabled",!enabled)).successful);
+    manager.endPlanningView();
+  }
 }

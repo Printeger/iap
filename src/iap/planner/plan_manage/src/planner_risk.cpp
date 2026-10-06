@@ -84,6 +84,9 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
   prior_descriptor.description = "Advisory FGO posterior proxy; restart to change; false uses observation information only";
   advisory_posterior_prior_enabled_ = node->declare_parameter(
       "risk/use_posterior_prior", false, prior_descriptor);
+  auto guidance_descriptor=prior_descriptor;
+  guidance_descriptor.description="Advisory planning preference only; prediction/display and execution checks stay active; restart to change";
+  advisory_guidance_enabled_=node->declare_parameter("planning/advisory_guidance_enabled",true,guidance_descriptor);
   planning_risk_policy_.hpl_budget_m = node->declare_parameter("planning/advisory_hpl_budget_m", 0.55);
   planning_risk_policy_.vpl_budget_m = node->declare_parameter("planning/advisory_vpl_budget_m", 0.60);
   planning_risk_policy_.reserve_h_m = node->declare_parameter("planning/advisory_hpl_reserve_m", 0.10);
@@ -680,6 +683,23 @@ GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
       search_performance_diagnostics_);
   if (cell.executable()) cell.advisory = queryPlanningViewAdvisory(position);
   return cell;
+}
+
+GridPlanningCell EGOPlannerManager::queryGuidanceCell(const Eigen::Vector3d& position,
+    double clearance_reserve_m) const {
+  auto cell=queryPlanningViewCell(position,clearance_reserve_m);
+  cell.advisory=guidancePreference(cell.advisory);
+  return cell;
+}
+
+GridPlanningRisk EGOPlannerManager::guidancePreference(GridPlanningRisk advisory) const {
+  if(!advisory_guidance_enabled_) {
+    // Neutral planning preference only. Raw status/PL, exported Predictor input
+    // and independent assessment continue to describe the actual prediction.
+    advisory.classification=GridAdvisoryClass::UNKNOWN;
+    advisory.cost_multiplier=1.;
+  }
+  return advisory;
 }
 
 GridPlanningRisk EGOPlannerManager::queryPlanningViewAdvisory(

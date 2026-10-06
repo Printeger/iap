@@ -546,7 +546,7 @@ namespace ego_planner
     bspline_optimizer_->a_star_->setPerformanceDiagnostics(search_performance_diagnostics_);
     bspline_optimizer_->a_star_->setAdvisoryQuery(
         [this](const Eigen::Vector3d& position) {
-          return queryPlanningViewAdvisory(position);
+          return guidancePreference(queryPlanningViewAdvisory(position));
         }, [this]() {
           return planning_view_ ? planning_view_->advisory_stats : GridPlanningQueryStats{};
         });
@@ -665,7 +665,7 @@ namespace ego_planner
     optimizer.a_star_->clearLastResult();
     optimizer.a_star_->setSearchMap(grid_map_);
     optimizer.a_star_->setFrozenEpoch(planning_view_->physical);
-    const auto query=[this](const Eigen::Vector3d& point) { return queryPlanningViewCell(point); };
+    const auto query=[this](const Eigen::Vector3d& point) { return queryGuidanceCell(point); };
     const auto start_cell=query(start_pt);
     if(!start_cell.executable()) {
       optimizer.a_star_->recordPresearchFailure(
@@ -683,7 +683,7 @@ namespace ego_planner
     const auto guide_query=[this,start_pt,fitting_reserve](const Eigen::Vector3d& point) {
       double endpoint_distance=(point-start_pt).norm();
       for(const auto& target:planning_targets_) endpoint_distance=std::min(endpoint_distance,(point-target.position).norm());
-      return queryPlanningViewCell(point,fitting_reserve*std::clamp(endpoint_distance/.5,0.,1.));
+      return queryGuidanceCell(point,fitting_reserve*std::clamp(endpoint_distance/.5,0.,1.));
     };
     optimizer.setPlanningQuery(query,false,guide_query);
     const auto& epoch=*planning_view_->physical;
@@ -812,7 +812,7 @@ namespace ego_planner
       // Terminal speed is rechecked after optimization against the same input.
       if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6)
         return fail(PlanFailure::Target);
-      const bool advisory_violation=assessment.advisory_avoid_samples && !optimizer.advisoryFallbackUsed();
+      const bool advisory_violation=advisory_guidance_enabled_ && assessment.advisory_avoid_samples && !optimizer.advisoryFallbackUsed();
       if(assessment.executable() && !advisory_violation) break;
       if(!assessment.executable() && assessment.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
           assessment.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
@@ -832,6 +832,8 @@ namespace ego_planner
           }
           RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
               assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
+          optimizer.setControlPoints(control);
+        } else if(advisory_violation && optimizer.addCurveGuideConstraints(control,interval)) {
           optimizer.setControlPoints(control);
         } else {
           optimizer.strengthenGuideTracking();

@@ -1,5 +1,6 @@
 """Executable same-observation and OFF-prior regression contracts."""
 import argparse
+import csv
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import advisory_prior_ab_validation as ab
+import advisory_staged_report as staged
 
 parser=argparse.ArgumentParser()
 parser.add_argument("--binary",required=True)
@@ -106,10 +108,56 @@ class AdvisoryPriorABTest(unittest.TestCase):
         for target in re.findall(r"\]\(([^)]+)\)",report):
             self.assertTrue((output/target).resolve().is_file(),target)
         self.assertTrue((output/"actual_error_vs_pl.png").is_file())
+        stages=staged.report(self.run_dir,"ab","staged_test")
+        text=(stages/"report.md").read_text()
+        self.assertIn("INCONCLUSIVE_MISSING_REGRESSION",text)
+        self.assertIn("INCONCLUSIVE_LIVE_NOT_RUN",text)
+        for target in re.findall(r"\]\(([^)]+)\)",text):
+            self.assertTrue((stages/target).resolve().is_file(),target)
+        with self.assertRaises(FileExistsError): staged.report(self.run_dir,"ab","staged_test")
+        poisoned={mode:{case:[dict(row) for row in table] for case,table in cases.items()} for mode,cases in self.tables.items()}
+        poisoned["on"]["epsilon_0"][0]["fused_hpl"]="nan"
+        self.assertEqual(staged.numerical_quality(poisoned)["on"]["status"],"FAIL")
+        # Same HEAD is insufficient if source hashes disagree with the tested tree.
+        log=ab.common.artifact(self.run_dir,"runtime/ros/mock_check.log");log.write_text("fixture test only\n")
+        sources=staged.regression_sources()
+        binaries={}
+        for name in ("ego_planner_node","test_ego_baseline"):
+            compiled=(Path(args.binary).resolve().parent/name)
+            bound=ab.common.binary_identity(compiled)
+            binaries[str(compiled)]=bound["sha256"];binaries.update(bound["libraries_sha256"])
+        check_manifest=ab.common.artifact(self.run_dir,"metadata/manifests/advisory_stage_checks.json")
+        evidence={"revision":ab.common.source_identity()["revision"],"checks":[{"name":"planning_contracts","exit_code":0,
+             "log":str(log.relative_to(self.run_dir)),"sha256":ab.common.sha(log),"source_sha256":sources,
+             "binary_sha256":binaries,"command":"fixture"}]}
+        ab.common.json_write(check_manifest,evidence)
+        bound=staged.report(self.run_dir,"ab","source_bound")
+        self.assertEqual(json.loads((bound/"summary.json").read_text())["statuses"]["curve_publication_continuation"],"PASS_CPU_FROZEN_CLOCK_REGRESSION")
+        sources["src/iap/planner/plan_manage/src/planner_manager.cpp"]="0"*64
+        check_manifest.write_text(json.dumps(evidence))
+        mismatch=staged.report(self.run_dir,"ab","source_mismatch")
+        status=json.loads((mismatch/"summary.json").read_text())["statuses"]["curve_publication_continuation"]
+        self.assertEqual(status,"INCONCLUSIVE_MISSING_REGRESSION")
         with self.assertRaises(FileExistsError):ab.report(self.run_dir,"ab")
         # Altering an actual source/candidate is rejected, never accepted as an A/B.
         payload=self.root/"ab_off/S0/input.bin";payload.write_bytes(payload.read_bytes()+b"tamper")
         with self.assertRaisesRegex(ValueError,"codec differs"):ab.analyze(self.run_dir,"ab")
+
+    def test_sampling_report_rejects_invalid_vpl_and_information(self):
+        root=self.run_dir/"export/advisory/validation"
+        names=["duplicates_"+str(i) for i in (1,2,4)]+["density_"+str(i) for i in (2,4,8)]
+        values=[dict(identity="SYNTHETIC_MECHANISM",case=n,valid="1",hpl=1.,vpl=1.,
+                     xx=1.,xy=0.,xz=0.,yx=0.,yy=1.,yz=0.,zx=0.,zy=0.,zz=1.) for n in names]
+        def save():
+            for label in ("density_before_no_prior","density_final"):
+                directory=root/label;directory.mkdir(exist_ok=True)
+                with (directory/"sampling.csv").open("w") as stream:
+                    writer=csv.DictWriter(stream,fieldnames=values[0]);writer.writeheader();writer.writerows(values)
+                (directory/"primitives.csv").write_text("synthetic unit support\n")
+        save();self.assertEqual(staged.sampling(self.run_dir)[0]["status"],"PASS")
+        values[0]["valid"]="0";save();self.assertTrue(staged.sampling(self.run_dir)[0]["status"].startswith("FAIL"))
+        values[0]["valid"]="1";values[-1]["vpl"]=2.;save();self.assertEqual(staged.sampling(self.run_dir)[0]["status"],"FAIL")
+        values[-1]["vpl"]=1.;values[1]["xx"]=2.;save();self.assertEqual(staged.sampling(self.run_dir)[0]["status"],"FAIL")
 
 
 if __name__=="__main__":unittest.main(argv=[__file__,*extra])

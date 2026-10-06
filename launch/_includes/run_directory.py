@@ -452,3 +452,15 @@ def register_config_snapshot(run_dir: Path, path: Path) -> None:
         references.append(relative)
         references.sort()
         _atomic_write_json(manifest_path, manifest)
+
+
+def register_validation_trial(run_dir: Path, trial: dict) -> None:
+    """Record the owner's frozen experiment identity in the primary manifest."""
+    manifest_path = run_dir / "metadata" / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("entrypoint") != "iap_sim" or manifest.get("lifecycle") != "active":
+        raise RuntimeError("validation trial requires an active canonical owner")
+    if "validation_trial" in manifest:
+        raise RuntimeError("validation trial identity is already frozen")
+    manifest["validation_trial"] = trial
+    _atomic_write_json(manifest_path, manifest)

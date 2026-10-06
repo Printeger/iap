@@ -21,7 +21,7 @@ def data(phase):
     seeds=cal.CAL_SEEDS if phase=="calibration" else cal.VALIDATION_SEEDS
     return {"identity": "LIVE_MEASUREMENT", "route_sha256": "route", "coordinates_sha256": "frame",
             "degradation_schedule_sha256": "schedule", "map_seed": 41021, "posterior_prior": False,
-            "guidance": False, "frame_verified": True,
+            "guidance": False, "frame_verified": True, "source_revisions":["unit-fixture"],
             "trials": [{"phase": phase, "condition": c, "seed": s, "run_id": c+str(s), "rows": table()}
                        for c in cal.CONDITIONS for s in seeds]}
 
@@ -42,20 +42,22 @@ class CalibrationContract(unittest.TestCase):
 
     def test_conversion_requires_noise_replay_and_heldout_validation(self):
         d=data("calibration")
-        noise=cal.frozen({"parameters":cal.fit_noise(d), "contract":cal.contract(d), "stage":"noise"})
+        noise=cal.frozen({"parameters":cal.fit_noise(d), "source_revisions":d["source_revisions"],"contract":cal.contract(d), "stage":"noise"})
         d["parameter_sha256"]=noise["sha256"]
         frozen=cal.frozen(cal.fit_conversion(d,noise)); v=data("validation")
         result=cal.evaluate(v,frozen)
         self.assertEqual(result["coverage_status"],"PASS")
         self.assertEqual(result["independent_runs"],9)
         self.assertFalse(result["future_error_guarantee"])
+        changed=copy.deepcopy(v);changed["source_revisions"]=["other-model"]
+        with self.assertRaisesRegex(ValueError,"model revision"):cal.evaluate(changed,frozen)
         v["trials"][0]["run_id"]=frozen["calibration_runs"][0]
         with self.assertRaisesRegex(ValueError,"held-out run reused"):cal.evaluate(v,frozen)
         d["parameter_sha256"]="another"
         with self.assertRaisesRegex(ValueError,"noise-scaled replay"):cal.fit_conversion(d,noise)
 
     def test_invalid_zero_and_missing_remain_coverage_denominator(self):
-        d=data("calibration"); noise=cal.frozen({"parameters":cal.fit_noise(d),"contract":cal.contract(d)})
+        d=data("calibration"); noise=cal.frozen({"parameters":cal.fit_noise(d),"source_revisions":d["source_revisions"],"contract":cal.contract(d)})
         d["parameter_sha256"]=noise["sha256"]; f=cal.frozen(cal.fit_conversion(d,noise))
         v=data("validation")
         for row in v["trials"][0]["rows"][:4]: row["hpl"]="0"
@@ -67,7 +69,7 @@ class CalibrationContract(unittest.TestCase):
 
     def test_low_variation_is_inconclusive(self):
         v=data("validation"); d=data("calibration")
-        noise=cal.frozen({"parameters":cal.fit_noise(d),"contract":cal.contract(d)})
+        noise=cal.frozen({"parameters":cal.fit_noise(d),"source_revisions":d["source_revisions"],"contract":cal.contract(d)})
         d["parameter_sha256"]=noise["sha256"]; f=cal.frozen(cal.fit_conversion(d,noise))
         for t in v["trials"]:
             for r in t["rows"]: r.update(hpl="1",vpl="1",error_h=".5",error_v=".5")

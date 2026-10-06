@@ -27,7 +27,11 @@ def protocol():
             "map_seed": 41021, "posterior_prior": False, "calibration_guidance": False,
             "joint_coverage_target": .95, "reference_route": None,
             "route_status": "PENDING_PHYSICAL_CHECK", "coordinates_status": "PENDING_VERIFICATION",
-            "degradation_schedule": None, "observation_seed_injection_status": "PENDING_LIVE_INTEGRATION",
+            "degradation_schedule": {"policy":"constant_for_entire_trial", "conditions":{
+                                     "normal":{"gnss_pseudorange_sigma_m":1.,"lidar_max_range_m":10.},
+                                     "gnss_degraded":{"gnss_pseudorange_sigma_m":5.,"lidar_max_range_m":10.},
+                                     "lidar_degraded":{"gnss_pseudorange_sigma_m":1.,"lidar_max_range_m":3.}}},
+            "observation_seed_injection_status": "IMPLEMENTED_CANONICAL_LAUNCH_PENDING_LIVE",
             "calibration": [{"condition": c, "seed": s} for c in CONDITIONS for s in CAL_SEEDS],
             "validation": [{"condition": c, "seed": s} for c in CONDITIONS for s in VALIDATION_SEEDS],
             "mission": [{"condition": "paired", "seed": s, "guidance": g}
@@ -153,6 +157,8 @@ def contract(data):
 def fit_conversion(data, noise):
     if data["parameter_sha256"] != noise["sha256"] or contract(data) != noise["contract"]:
         raise ValueError("noise-scaled replay and unchanged fixed contract required")
+    if not data.get("source_revisions") or data["source_revisions"]!=noise.get("source_revisions"):
+        raise ValueError("noise replay model revision differs from calibration")
     ratios = []
     for trial in data["trials"]:
         good, reasons = usable(trial["rows"])
@@ -180,6 +186,8 @@ def evaluate(data, frozen):
     unsigned = {k: v for k, v in frozen.items() if k != "sha256"}
     if digest(unsigned) != expected: raise ValueError("frozen parameters altered")
     if contract(data) != frozen["contract"]: raise ValueError("validation route/frame/schedule changed")
+    if not data.get("source_revisions") or data["source_revisions"]!=frozen.get("source_revisions"):
+        raise ValueError("held-out model revision differs from calibration")
     results = []
     for trial in data["trials"]:
         if trial["run_id"] in frozen["calibration_runs"]: raise ValueError("held-out run reused")

@@ -21,6 +21,7 @@ from launch_ros.actions import Node
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_runtime import materialize_profile
 from run_directory import register_config_snapshot
+from advisory_coordinates import checked_coordinates
 
 
 def load_advisory_calibration(path):
@@ -48,7 +49,53 @@ def load_advisory_calibration(path):
     return params
 
 
-def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_prior=False, advisory_calibration=""):
+def advisory_observation_schedule():
+    return {"policy":"constant_for_entire_trial","conditions":{
+        "normal":{"gnss_pseudorange_sigma_m":1.,"lidar_max_range_m":10.},
+        "gnss_degraded":{"gnss_pseudorange_sigma_m":5.,"lidar_max_range_m":10.},
+        "lidar_degraded":{"gnss_pseudorange_sigma_m":1.,"lidar_max_range_m":3.}}}
+
+
+def load_advisory_trial(path, scenario):
+    """Optional fixed-route experiment inputs; never bypass live curve checks."""
+    if not path: return {}
+    import hashlib
+    import math
+    target=Path(path)
+    if not target.is_absolute(): raise ValueError("validation trial must use an absolute path")
+    trial=json.loads(target.read_text())
+    if (trial.get("schema")!="iap_advisory_validation_trial_v1" or
+            trial.get("scene")!="icra_dense_forest_four_fork_v2" or trial.get("map_seed")!=41021 or
+            trial.get("condition") not in ("normal","gnss_degraded","lidar_degraded") or
+            trial.get("phase") not in ("calibration","validation","mission")):
+        raise ValueError("canonical predeclared trial required")
+    seeds=(1101,1102,1103) if trial["phase"]=="calibration" else (2101,2102,2103)
+    if trial.get("seed") not in seeds: raise ValueError("trial seed outside predeclared split")
+    route=trial["reference_route"]
+    digest=lambda x:hashlib.sha256(json.dumps(x,sort_keys=True,allow_nan=False).encode()).hexdigest()
+    if digest(route)!=trial.get("route_sha256"): raise ValueError("reference route checksum mismatch")
+    points=route.get("waypoints",[])
+    if (not 1<=len(points)<=50 or any(len(p)!=3 or any(not math.isfinite(float(x)) for x in p) for p in points) or
+            route.get("speed_mps")!=scenario["max_velocity_mps"]):
+        raise ValueError("fixed finite waypoint route at canonical speed required")
+    for key in ("coordinates","physical_route_evidence"):
+        resource=Path(trial[key])
+        if not resource.is_absolute() or hashlib.sha256(resource.read_bytes()).hexdigest()!=trial[key+"_sha256"]:
+            raise ValueError(key+" checksum mismatch")
+    coordinates=json.loads(Path(trial["coordinates"]).read_text())
+    checked_coordinates(coordinates)
+    proof=json.loads(Path(trial["physical_route_evidence"]).read_text())
+    if (proof.get("identity")!="REAL_REPLAY" or proof.get("physical_valid") is not True or
+            proof.get("route_sha256")!=trial["route_sha256"] or not proof.get("prediction_input_identity")):
+        raise ValueError("physical route proof from real frozen map required")
+    schedule=advisory_observation_schedule()
+    if trial.get("degradation_schedule")!=schedule or digest(schedule)!=trial.get("degradation_schedule_sha256"):
+        raise ValueError("predeclared constant observation schedule required")
+    trial["frame_verified"]=True
+    return trial
+
+
+def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_prior=False, advisory_calibration="", advisory_guidance=True, advisory_trial=""):
     size = [float(v) for v in scenario["map_size"]]
     goal = [float(v) for v in scenario["goal"]]
     velocity = float(scenario["max_velocity_mps"])
@@ -99,6 +146,7 @@ def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_p
         "planning/environment_max_age_s": 0.5,
         "planning/tracking_error_limit_m": 0.30,
         "planning/capture_failure_map": capture_failure_map,
+        "planning/advisory_guidance_enabled": advisory_guidance,
         "risk/gnss_max_age_s": 2.0,
         "risk/use_posterior_prior": advisory_posterior_prior,
         "risk/source": {"lidar_only": "lidar", "gnss_only": "gnss"}.get(profile, "fusion"),
@@ -107,6 +155,14 @@ def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_p
         params[f"grid_map/map_size_{axis}"] = size[i]
         params[f"fsm/waypoint0_{axis}"] = goal[i]
     params.update(load_advisory_calibration(advisory_calibration))
+    trial=load_advisory_trial(advisory_trial,scenario)
+    if trial:
+        if advisory_posterior_prior or (trial["phase"]!="mission" and advisory_guidance):
+            raise ValueError("trial requires posterior OFF and calibration guidance OFF")
+        params["fsm/flight_type"]=2
+        params["fsm/waypoint_num"]=len(trial["reference_route"]["waypoints"])
+        for i,point in enumerate(trial["reference_route"]["waypoints"]):
+            for j,axis in enumerate("xyz"): params[f"fsm/waypoint{i}_{axis}"]=float(point[j])
     return params
 
 
@@ -151,12 +207,15 @@ def _setup(context):
                            "capture_failure_map", "false").lower() == "true",
                        context.launch_configurations.get(
                            "advisory_posterior_prior", "false").lower() == "true",
-                       context.launch_configurations.get("advisory_calibration", ""))],
+                       context.launch_configurations.get("advisory_calibration", ""),
+                       context.launch_configurations.get("advisory_guidance", "true").lower()=="true",
+                       context.launch_configurations.get("advisory_trial", ""))],
                    remappings=remaps)
     actions = [
         IncludeLaunchDescription(PythonLaunchDescriptionSource(
             str(share / "launch/_includes/simulation_environment.launch.py")),
-            launch_arguments={"scenario": name, "output_dir": str(run)}.items()),
+            launch_arguments={"scenario": name, "output_dir": str(run),
+                              "advisory_trial":context.launch_configurations.get("advisory_trial", "")}.items()),
         Node(package="iap", executable="iap_rosnode", name="glio_integrity", output="screen",
              parameters=[{"config_path": runtime, "imu_topic": "/sim/drone_0/imu_iap",
                           "points_topic": "/sim/drone_0/lidar_body"}]),

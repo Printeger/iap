@@ -872,3 +872,21 @@ python3 src/iap/scripts/dev_predictor/test_advisory_calibration.py
 noise 阶段另需 GNSS/LiDAR 测量 residual_m 与 nominal_sigma_m 字段。
 冻结 JSON 用 `advisory_calibration:=<绝对路径>` 显式启动，空值保留原默认。
 独立验证与完整任务对照均通过后才可推广默认；本轮受工作区规则阻止，未推广。
+
+规划引导对照使用下列入口；关闭引导仍计算、录制和显示 Advisory：
+
+```bash
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 advisory_posterior_prior:=false advisory_guidance:=false
+# 开启组：advisory_guidance:=true（默认）
+```
+
+正式固定路线试验增加 `advisory_trial:=<绝对 trial.json>`，并在校准/独立验证时
+保持 `advisory_guidance:=false`。trial schema、预声明 seed、路线／坐标证据及
+恒定单源退化参数见 [预测契约](docs/spec/advisory_prediction_contract.md)。
+观测 seed 注入已有 launch 合同回归；实际路线和坐标证明未取得，现场仍待测。
+运行必须先提交任务代码、检查干净工作树并通过 GPU 预检，不能用该参数绕过规则。
+
+录制请求清单包含服务拒绝和未重放的请求；误差对照不会删去这些请求。
+分阶段报告由 `advisory_staged_report.py --campaign <A/B label> --label <new report label>`
+生成，保存原始链接、矩阵、来源审计、数值与采样检查，以及绑定源码/二进制的
+测试证据。受阻项目明确为 INCONCLUSIVE，不自动推广默认校准参数。

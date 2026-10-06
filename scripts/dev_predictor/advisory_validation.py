@@ -175,9 +175,10 @@ def record(run, args):
     requests = artifact(run, "export/advisory/validation/recordings/" + args.label + "_requests.csv")
     odometry = artifact(run, "export/advisory/validation/recordings/" + args.label + "_odometry.csv")
     start = time.monotonic()
+    request_ids=[]
     try:
         with requests.open("x") as req, odometry.open("x") as odom:
-            w = csv.writer(req); w.writerow(["request", "available", "reason", "elapsed_s", "payload"])
+            w = csv.writer(req); w.writerow(["request", "request_id", "run_id", "available", "reason", "elapsed_s", "payload"])
             ow = csv.writer(odom); ow.writerow(["source", "stamp", "frame", "body", "x", "y", "z", "qx", "qy", "qz", "qw"])
             def on_odom(msg, source):
                 p, q = msg.pose.pose.position, msg.pose.pose.orientation
@@ -187,6 +188,8 @@ def record(run, args):
             subscriptions = [node.create_subscription(Odometry, topic, lambda msg, s=source: on_odom(msg, s), 100)
                              for source, topic in (("glio", args.glio_topic), ("truth", args.truth_topic))]
             for i in range(args.count):
+                request_id=f"{run.name}:{args.label}:{i}"
+                request_ids.append(request_id)
                 stamp = time.monotonic()
                 payload_path = ""
                 if not client.wait_for_service(timeout_sec=args.timeout):
@@ -200,17 +203,21 @@ def record(run, args):
                     if available:
                         path = save_record(run, f"{args.label}_{i:04}", response.payload, identity,
                                            {"frame_id": response.frame_id, "geometry_id": response.geometry_id,
-                                            "generation": response.generation, "service": args.service})
+                                            "generation": response.generation, "service": args.service,
+                                            "request_id":request_id})
                         payload_path = str(path.relative_to(run))
-                w.writerow([i, available, reason, time.monotonic() - stamp, payload_path]); req.flush()
+                w.writerow([i, request_id, run.name, available, reason, time.monotonic() - stamp, payload_path]); req.flush()
                 end = time.monotonic() + args.interval
                 while time.monotonic() < end:
                     rclpy.spin_once(node, timeout_sec=min(.1, end - time.monotonic()))
             del subscriptions
     finally:
         node.destroy_node(); rclpy.shutdown()
+        request_manifest=artifact(run,"export/advisory/validation/recordings/"+args.label+"_requests_manifest.json")
+        json_write(request_manifest,{"identity":"LIVE_MEASUREMENT","run_id":run.name,"request_ids":request_ids,
+                   "requests_csv":str(requests.relative_to(run)),"requests_csv_sha256":sha(requests)})
         manifest(run, "advisory_record_" + args.label, {**identity, "duration_s": time.monotonic()-start,
-                 "artifacts": [str(requests.relative_to(run)), str(odometry.relative_to(run))]})
+                 "artifacts_sha256":{str(p.relative_to(run)):sha(p) for p in (requests,odometry,request_manifest)}})
 
 
 def rows(path):

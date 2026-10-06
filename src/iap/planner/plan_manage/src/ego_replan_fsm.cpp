@@ -797,7 +797,7 @@ namespace ego_planner
     }
     // Advisory warnings request an early revision. Missing or brief stale PL
     // does not enter the emergency path.
-    if (assessment.advisory_avoid_samples != 0 &&
+    if (planner_manager_->advisoryGuidanceEnabled() && assessment.advisory_avoid_samples != 0 &&
         now - last_advisory_replan_time_s_ > 1.0) {
       last_advisory_replan_time_s_ = now;
       RCLCPP_INFO(node_->get_logger(),

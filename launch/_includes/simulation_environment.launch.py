@@ -211,6 +211,14 @@ def _setup(context):
         valid = ", ".join(sorted(catalog))
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario_name}'; valid: {valid}")
     scenario = catalog[scenario_name]
+    trial_path=context.launch_configurations.get("advisory_trial", "")
+    from full_stack_runtime import load_advisory_trial
+    trial=load_advisory_trial(trial_path,scenario)
+    observation=trial["degradation_schedule"]["conditions"][trial["condition"]] if trial else {}
+    lidar_range=observation.get("lidar_max_range_m",10.)
+    gnss_params=_gnss_parameters(iap_share,str(scenario["gnss_profile"]))
+    if trial:
+        gnss_params.update(random_seed=trial["seed"],pseudorange_noise_std_m=observation["gnss_pseudorange_sigma_m"])
     initial = [float(value) for value in scenario["initial"]]
     output_dir = Path(LaunchConfiguration("output_dir").perform(context)).expanduser()
     if not output_dir.is_absolute():
@@ -224,6 +232,8 @@ def _setup(context):
                 "schema_version": "iap_simulation_scenario_v1",
                 "scenario": scenario_name,
                 "contract": scenario,
+                "validation_trial": trial,
+                "observation_parameters": {"gnss":gnss_params,"lidar_max_range_m":lidar_range},
             },
             indent=2,
             sort_keys=True,
@@ -274,7 +284,7 @@ def _setup(context):
                 {"lidar.vertical_min_deg": -7.0},
                 {"lidar.vertical_max_deg": 52.0},
                 {"lidar.min_range_m": 0.1},
-                {"lidar.max_range_m": 10.0},
+                {"lidar.max_range_m": lidar_range},
                 {"lidar.world_voxel_resolution_m": 0.1},
                 {"sensing_rate": 10.0},
                 {"estimation_rate": 15.0},
@@ -370,7 +380,7 @@ def _setup(context):
                 executable="gnss_sim_node",
                 name="iap_sim_gnss",
                 output="screen",
-                parameters=[_gnss_parameters(iap_share, str(scenario["gnss_profile"]))],
+                parameters=[gnss_params],
             )
         )
     return actions

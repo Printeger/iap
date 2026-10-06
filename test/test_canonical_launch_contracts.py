@@ -124,6 +124,72 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             value["sha256"]="altered";path.write_text(json.dumps(value))
             with self.assertRaisesRegex(ValueError,"checksum"):runtime.load_advisory_calibration(str(path))
 
+    def test_guidance_switch_changes_only_planning_preference(self):
+        runtime=self._load_launch("_includes/full_stack_runtime.py")
+        scene=json.loads((REPO/"config/scenarios/catalog.json").read_text())["icra_dense_forest_four_fork_v2"]
+        on=runtime.planner_parameters(scene);off=runtime.planner_parameters(scene,advisory_guidance=False)
+        self.assertEqual([k for k in on if on[k]!=off[k]],["planning/advisory_guidance_enabled"])
+        self.assertTrue(on["planning/advisory_guidance_enabled"])
+        self.assertFalse(off["risk/use_posterior_prior"])
+
+    def test_fixed_trial_injects_waypoints_observation_seed_and_preserves_map(self):
+        import hashlib
+        runtime=self._load_launch("_includes/full_stack_runtime.py")
+        environment=self._load_launch("_includes/simulation_environment.launch.py")
+        canonical=self._load_launch("iap_sim.launch.py")
+        scene=json.loads((REPO/"config/scenarios/catalog.json").read_text())["icra_dense_forest_four_fork_v2"]
+        digest=lambda value:hashlib.sha256(json.dumps(value,sort_keys=True,allow_nan=False).encode()).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            # Contract fixture only; this never starts processes or supplies live evidence.
+            route={"waypoints":[[-17.,0.,1.5],[-16.,1.,1.5]],"speed_mps":scene["max_velocity_mps"]}
+            frame=root/"coordinates.json";frame.write_text(json.dumps({"verified":True,"provenance":"unit fixture","alignment_policy":"known_fixed_transform",
+                "prediction_frame":"map","prediction_body":"body","truth_frame":"world","truth_body":"body",
+                "T_truth_map":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
+                "T_truthbody_predictionbody":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
+                "world_to_enu_verified":True,"body_extrinsics_verified":True,"time_verified":True,
+                "time_contract":{"clock":"ros_system_time","reference":"saved_pose_stamp",
+                                 "max_truth_bracket_dt_s":.05,"max_reference_pose_dt_s":.05}}))
+            proof=root/"route_proof.json";proof.write_text(json.dumps({"identity":"REAL_REPLAY","physical_valid":True,"route_sha256":digest(route),"prediction_input_identity":"unit fixture"}))
+            schedule=runtime.advisory_observation_schedule()
+            trial={"schema":"iap_advisory_validation_trial_v1","scene":"icra_dense_forest_four_fork_v2",
+                   "map_seed":41021,"phase":"calibration","condition":"gnss_degraded","seed":1101,
+                   "reference_route":route,"route_sha256":digest(route),"coordinates":str(frame),
+                   "coordinates_sha256":hashlib.sha256(frame.read_bytes()).hexdigest(),"physical_route_evidence":str(proof),
+                   "physical_route_evidence_sha256":hashlib.sha256(proof.read_bytes()).hexdigest(),
+                   "degradation_schedule":schedule,"degradation_schedule_sha256":digest(schedule)}
+            path=root/"trial.json";path.write_text(json.dumps(trial))
+            base=runtime.planner_parameters(scene,advisory_guidance=False)
+            params=runtime.planner_parameters(scene,advisory_guidance=False,advisory_trial=str(path))
+            self.assertEqual(params["fsm/waypoint_num"],2)
+            self.assertEqual(params["fsm/waypoint1_y"],1.)
+            for key,value in base.items():
+                if not key.startswith("fsm/waypoint"):self.assertEqual(params[key],value,key)
+            with self.assertRaisesRegex(ValueError,"calibration guidance OFF"):
+                runtime.planner_parameters(scene,advisory_trial=str(path))
+            context=LaunchContext();context.launch_configurations.update(scenario="icra_dense_forest_four_fork_v2",
+                output_dir=str(root/"environment"),advisory_trial=str(path))
+            nodes=[];original=environment.Node
+            def capture(**kwargs):nodes.append(kwargs);return original(**kwargs)
+            with mock.patch.object(environment,"get_package_share_directory",return_value=str(REPO)),mock.patch.object(environment,"Node",side_effect=capture):
+                environment._setup(context)
+            gnss=next(n for n in nodes if n.get("executable")=="gnss_sim_node")["parameters"][0]
+            self.assertEqual(gnss["random_seed"],1101);self.assertEqual(gnss["pseudorange_noise_std_m"],5.)
+            self.assertEqual(environment._map_parameters(scene["map_profile"],scene["initial"],scene["goal"])["random_seed"],41021)
+            with mock.patch.dict(os.environ,{"IAP_RUN_ROOT":str(root/"runs")}),mock.patch.object(canonical,"get_package_share_directory",return_value=str(REPO)):
+                context.launch_configurations.update(advisory_guidance="false",start_rviz="false",start_grid_map_visualizer="false",run_duration_s="0",planner_start_delay_s="0")
+                actions=canonical._setup(context)
+            run=next((root/"runs").glob("20*"))
+            primary=json.loads((run/"metadata/run_manifest.json").read_text())
+            self.assertEqual(primary["validation_trial"]["seed"],1101)
+            self.assertIn("metadata/config/advisory_trial.json",primary["config_snapshots"])
+            self.assertTrue((run/"metadata/config/coordinates.json").exists())
+            coordinates=json.loads(frame.read_text());coordinates.pop("T_truth_map");frame.write_text(json.dumps(coordinates))
+            trial["coordinates_sha256"]=hashlib.sha256(frame.read_bytes()).hexdigest();path.write_text(json.dumps(trial))
+            with self.assertRaisesRegex(ValueError,"fixed transform missing"):runtime.load_advisory_trial(str(path),scene)
+            trial["seed"]=2101;path.write_text(json.dumps(trial))
+            with self.assertRaisesRegex(ValueError,"predeclared split"):runtime.load_advisory_trial(str(path),scene)
+
     def test_stage1_graph_materializes_same_registered_lattice_and_preserves_artifacts(self):
         runtime = self._load_launch("_includes/full_stack_runtime.py")
         runs = self._load_launch("_includes/run_directory.py")

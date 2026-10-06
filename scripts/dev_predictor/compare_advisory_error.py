@@ -13,16 +13,7 @@ from pathlib import Path
 import numpy as np
 from advisory_validation import (adopt_run_directory, artifact, json_write,
                                  manifest, numeric, rows, sha)
-
-
-def rigid(value):
-    t = np.asarray(value, dtype=float)
-    if (t.shape != (4, 4) or not np.isfinite(t).all() or
-            not np.allclose(t[3], [0, 0, 0, 1], atol=1e-12, rtol=0) or
-            not np.allclose(t[:3, :3].T @ t[:3, :3], np.eye(3), atol=1e-9, rtol=0) or
-            abs(np.linalg.det(t[:3, :3]) - 1) > 1e-9):
-        raise ValueError("fixed transform must be rigid SE(3)")
-    return t
+from advisory_coordinates import rigid, checked_coordinates
 
 
 def quaternion(row):
@@ -84,30 +75,63 @@ def errors(position, truth_position, truth_rotation, contract):
 
 def compare(run, contract_path=None):
     contract = json.loads(contract_path.read_text()) if contract_path else None
+    coordinate_error="coordinate_contract_missing" if contract is None else ""
     if contract:
-        if contract.get("alignment_policy") not in ("known_fixed_transform", "single_initial_sim_se3"):
-            raise ValueError("a known fixed or single initial transform is required; fitting is forbidden")
-        if not contract.get("provenance"):
-            raise ValueError("coordinate/extrinsic provenance required")
-        if contract["alignment_policy"] == "single_initial_sim_se3" and "initial_alignment_stamp_s" not in contract:
-            raise ValueError("initial simulation alignment identity required")
-        for k in ("T_truth_map", "T_truthbody_predictionbody"):
-            rigid(contract[k])
+        try: checked_coordinates(contract)
+        except ValueError as error: coordinate_error="coordinate_contract_invalid:"+str(error)
     odom = [r for p in sorted((run / "export/advisory/validation/recordings").glob("*_odometry.csv")) for r in rows(p)]
     truth = [r for r in odom if r["source"] == "truth"]
+    recorded=[]
+    for source in sorted((run/"export/advisory/validation/recordings").glob("*_requests_manifest.json")):
+        recording=json.loads(source.read_text())
+        if recording.get("run_id")!=run.name or recording.get("identity")!="LIVE_MEASUREMENT":
+            raise ValueError("authoritative request identity mismatch")
+        ids=recording["request_ids"]
+        if len(ids)!=len(set(ids)): raise ValueError("duplicate authoritative request")
+        table=(run/recording["requests_csv"]).resolve();table.relative_to(run.resolve())
+        problem=""
+        if not table.is_file(): problem="requests_csv_missing"
+        elif sha(table)!=recording["requests_csv_sha256"]: problem="requests_csv_checksum_mismatch"
+        values=rows(table) if not problem else []
+        lookup={r.get("request_id"):r for r in values}
+        if not problem and (len(values)!=len(lookup) or set(lookup)!=set(ids)):
+            problem="requests_csv_identity_mismatch"
+        for request_id in ids:
+            request=dict(lookup[request_id]) if not problem else {"request_id":request_id,"payload":"","reason":problem}
+            payload=(run/request["payload"]).resolve() if request.get("payload") else None
+            if payload:
+                payload.relative_to(run.resolve())
+                if not payload.is_file(): request.update(payload="",reason="recorded_payload_missing")
+            recorded.append(request)
+    by_hash={}
+    for request in recorded:
+        if request.get("payload"):
+            by_hash.setdefault(sha(run/request["payload"]),[]).append(request)
+    seen=set()
+    unmatched_replays=[]
     result = []
     for p in sorted((run / "export/advisory/validation").rglob("*_current/points.csv")):
         meta = json.loads(p.with_name("input.json").read_text())
         for row in rows(p):
             if row["identity"] != "REAL_REPLAY":
                 continue
-            item = {"run_id": run.name, "identity": "LIVE_MEASUREMENT", "input": str(p.relative_to(run)),
+            matches=by_hash.get(sha(p.with_name("input.bin")),[])
+            label=p.parent.name.removesuffix("_current")
+            named=[r for r in matches if Path(r["payload"]).parent.name==label]
+            if named: matches=named
+            request=matches[0] if len(matches)==1 else None
+            request_id=request.get("request_id","") if request else ""
+            if not request_id or request_id in seen:
+                unmatched_replays.append({"input":str(p.relative_to(run)),"reason":"recorded_request_identity_unmatched_or_duplicate"})
+                continue
+            seen.add(request_id)
+            item = {"run_id": run.name, "request_id":request_id, "identity": "LIVE_MEASUREMENT", "input": str(p.relative_to(run)),
                     "reference_time_s": row["reference_time_s"], "pose_stamp_s": row["pose_stamp_s"],
                     "reference_pose_delta_s": numeric(row, "reference_time_s") - numeric(row, "pose_stamp_s"),
                     "valid": False, "reason": "", "error_h": "", "error_v": "", "hpl": row["fused_hpl"], "vpl": row["fused_vpl"]}
             try:
                 if row["valid"] != "1": raise ValueError("prediction_unavailable:" + row["reason"])
-                if contract is None: raise ValueError("coordinate_contract_missing")
+                if coordinate_error: raise ValueError(coordinate_error)
                 if abs(item["reference_pose_delta_s"]) > .05: raise ValueError("reference_pose_not_same_time")
                 if meta["frame_id"] != contract["prediction_frame"]: raise ValueError("prediction_frame_mismatch")
                 glio = [r for r in odom if r["source"] == "glio" and
@@ -126,12 +150,23 @@ def compare(run, contract_path=None):
             except ValueError as e:
                 item["reason"] = str(e)
             result.append(item)
+    # The authoritative recording list determines the denominator, including
+    # requests for which no prediction call/input/replay ever existed.
+    for request in recorded:
+        request_id=request.get("request_id","")
+        if request_id in seen: continue
+        result.append({"run_id":run.name,"request_id":request_id,"identity":"LIVE_MEASUREMENT",
+                       "input":request.get("payload",""),"reference_time_s":"","pose_stamp_s":"",
+                       "reference_pose_delta_s":"","valid":False,
+                       "reason":request.get("reason") or "prediction_not_replayed",
+                       "error_h":"","error_v":"","hpl":"","vpl":""})
     path = artifact(run, "export/advisory/validation/error_requests.csv")
-    fields = ["run_id", "identity", "input", "reference_time_s", "pose_stamp_s", "reference_pose_delta_s", "valid", "reason", "error_h", "error_v", "hpl", "vpl"]
+    fields = ["run_id", "request_id", "identity", "input", "reference_time_s", "pose_stamp_s", "reference_pose_delta_s", "valid", "reason", "error_h", "error_v", "hpl", "vpl"]
     with path.open("x") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields); writer.writeheader(); writer.writerows(result)
     good = [r for r in result if r["valid"]]
     summary = {"identity": "LIVE_MEASUREMENT", "requested": len(result), "valid": len(good),
+               "unmatched_replays":unmatched_replays,
                "independent_runs": len({r["run_id"] for r in good}),
                "status": "INCONCLUSIVE_LIVE_NOT_RUN" if not result else "INCONCLUSIVE_TOO_FEW_RUNS",
                "exceed_h": sum(r["error_h"] > float(r["hpl"]) for r in good),

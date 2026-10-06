@@ -155,6 +155,51 @@ namespace ego_planner
     return curve_clearance_constraints_.size()>previous;
   }
 
+  bool BsplineOptimizer::addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval) {
+    if(!planning_query_ || planning_advisory_fallback_ || guide_pts_.size()<2 || points.cols()<7 || !(interval>0)) return false;
+    UniformBspline curve(points,3,interval);
+    const size_t previous=curve_clearance_constraints_.size();
+    const double reserve=.5*grid_map_->getResolution();
+    for(double time=0;time<=curve.getTimeSum();time+=.02) {
+      if(budget_ && budget_->expired()) return false;
+      const Eigen::Vector3d position=curve.evaluateDeBoorT(time);
+      const auto cell=planning_query_(position);
+      if(cell.advisory.classification!=GridAdvisoryClass::AVOID &&
+          cell.advisory.classification!=GridAdvisoryClass::PREDICTED_DEGRADED) continue;
+      Eigen::Vector3d nearest=position; double best=std::numeric_limits<double>::infinity();
+      for(size_t j=1;j<guide_pts_.size();++j) {
+        const Eigen::Vector3d segment=guide_pts_[j]-guide_pts_[j-1];
+        const double fraction=segment.squaredNorm()>1e-12 ? std::clamp(
+            (position-guide_pts_[j-1]).dot(segment)/segment.squaredNorm(),0.,1.) : 0.;
+        const Eigen::Vector3d candidate=guide_pts_[j-1]+fraction*segment;
+        const auto support=guide_query_(candidate);
+        if(!support.executable() || support.advisory.classification==GridAdvisoryClass::AVOID ||
+            support.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED) continue;
+        const double distance=(candidate-position).squaredNorm();
+        if(distance<best) {best=distance;nearest=candidate;}
+      }
+      if(!std::isfinite(best) || best<1e-12) continue;
+      Eigen::Vector3d direction=(nearest-position).normalized();
+      const auto farther=guide_query_(nearest+reserve*direction);
+      const bool room=farther.executable() && farther.advisory.classification!=GridAdvisoryClass::AVOID &&
+          farther.advisory.classification!=GridAdvisoryClass::PREDICTED_DEGRADED;
+      const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
+      const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));
+      const double u=parameter-first;
+      const Eigen::Vector4d weights(std::pow(1-u,3)/6.,(3*u*u*u-6*u*u+4)/6.,
+          (-3*u*u*u+3*u*u+3*u+1)/6.,u*u*u/6.);
+      double movable=0;
+      for(int j=0;j<4;++j) if(first+j>=order_ && first+j<points.cols()-order_) movable+=weights[j];
+      if(movable<1e-8) continue;
+      // Reuse the actual-sample plane objective and its existing weight. Unlike
+      // a control-polygon anchor this corrects the precise point that cut the
+      // route. No PL threshold, GridMap risk cost or execution rule changes.
+      curve_clearance_constraints_.push_back({first,weights,position,direction,
+          std::sqrt(best)+(room?reserve:0.)});
+    }
+    return curve_clearance_constraints_.size()>previous;
+  }
+
   void BsplineOptimizer::setGuidePath(const vector<Eigen::Vector3d> &guide)
   {
     guide_pts_ = guide;
@@ -168,7 +213,11 @@ namespace ego_planner
     ref_pts_.reserve(cps_.size);
     size_t segment = 1;
     for (int i = 0; i < cps_.size; ++i) {
-      const double distance = arc.back() * i / (cps_.size - 1);
+      // calcFitnessCost compares an actual cubic knot position at t=i*dt
+      // with ref_pts_[i]. The spline has N-3 spans, not N-1 control-point
+      // intervals. Using the latter pulls the curve backward along the guide
+      // and can cut an otherwise legal advisory detour during smoothing.
+      const double distance = arc.back() * std::min(i, cps_.size - 3) / (cps_.size - 3);
       while (segment + 1 < arc.size() && arc[segment] < distance) ++segment;
       const double length = arc[segment] - arc[segment - 1];
       const double alpha = length > 1e-8 ?

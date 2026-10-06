@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import advisory_validation as validation
-from compare_advisory_error import errors, interpolate_truth, rigid
+from compare_advisory_error import compare, errors, interpolate_truth, rigid
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("--binary", required=True)
@@ -166,6 +166,29 @@ class AdvisoryValidationTest(unittest.TestCase):
             self.assertEqual(table[0]["available"], "False")
             self.assertEqual(table[0]["reason"], "physical epoch unavailable")
             self.assertEqual((self.run_dir / table[1]["payload"]).read_bytes(), payload)
+            recording=json.loads((self.run_dir/"export/advisory/validation/recordings/service_test_requests_manifest.json").read_text())
+            self.assertEqual(recording["request_ids"],[r["request_id"] for r in table])
+            compared=compare(self.run_dir)
+            self.assertEqual(compared["requested"],2)
+            failures=validation.rows(self.run_dir/"export/advisory/validation/error_requests.csv")
+            self.assertEqual({r["request_id"] for r in failures},set(recording["request_ids"]))
+            self.assertEqual(failures[0]["reason"],"physical epoch unavailable")
+            self.assertEqual(failures[1]["reason"],"prediction_not_replayed")
+            # Removal or loss never lowers the authoritative denominator.
+            output=self.run_dir/"export/advisory/validation/error_requests.csv"
+            summary=self.run_dir/"export/analysis/advisory_validation/error_summary.json"
+            payload_path=self.run_dir/table[1]["payload"]
+            evidence=self.run_dir/"metadata/manifests/advisory_errors.json"
+            payload_path.unlink();output.unlink();summary.unlink();evidence.unlink()
+            missing=compare(self.run_dir)
+            self.assertEqual(missing["requested"],2)
+            self.assertEqual(validation.rows(output)[1]["reason"],"recorded_payload_missing")
+            recording_csv=self.run_dir/recording["requests_csv"]
+            text=recording_csv.read_text().splitlines();recording_csv.write_text("\n".join(text[:-1])+"\n")
+            output.unlink();summary.unlink();evidence.unlink()
+            removed=compare(self.run_dir)
+            self.assertEqual(removed["requested"],2)
+            self.assertEqual({r["reason"] for r in validation.rows(output)},{"requests_csv_checksum_mismatch"})
         finally:
             primary.write_text(saved)
             executor.shutdown(timeout_sec=3);thread.join(timeout=3)

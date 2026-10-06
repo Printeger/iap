@@ -96,3 +96,42 @@ GNSS 时钟 Schur 消元使用原始 `lambda_cc`；`fim_clock_epsilon` 只判定
 校准数据绑定 clean canonical run manifest、实际 trial seed/phase/hash 与完整
 录制请求清单；重复文件／内容、删失请求、混用版本均拒绝。冻结参数保留校准
 来源清单；生产加载不能仅凭自报四个数字获得有效 provenance。
+
+## 规划引导对照与完整请求
+
+`planning/advisory_guidance_enabled` 默认为 true，canonical launch 参数为
+`advisory_guidance`。false 只中和规划查询复制值的分类与代价，新查询和 A*
+缓存刷新使用同一转换。原始 PL、状态、录制、显示和独立曲线评估继续计算；
+仅 Advisory 不触发急停，运动授权没有改变。
+
+实际三次样条有 N-3 个跨度，guide fitness 的参考点按此映射，避免优化时
+向 guide 后方拉回。若实际样本切入有效退化带，在原有修复次数与平面目标
+权重内约束该样本返回现有合法 guide，rebound/refine 复用同一实际样本目标。
+失败仍明确拒绝；不裁剪最终曲线，不修改地图 PL 代价或最终执行门槛。
+
+可选 `advisory_trial` 为绝对 JSON，schema 为 `iap_advisory_validation_trial_v1`：
+scene、map_seed、phase、condition、seed、reference_route（waypoints 和固定
+canonical speed_mps）、route_sha256、coordinates 及 sha256、
+physical_route_evidence 及 sha256、degradation_schedule 及 sha256。
+路线证据须是 REAL_REPLAY、physical_valid=true、同 route hash 和完整输入 identity；
+坐标证据须 known_fixed_transform、verified=true 及 provenance。证据人工声明
+不代替独立坐标审计或每条实际曲线检查。校准／验证关闭引导，所有 trial 关闭后验。
+
+预声明整次恒定退化为 normal：GNSS sigma=1 m/LiDAR range=10 m；
+gnss_degraded：5 m/10 m；lidar_degraded：1 m/3 m。只改变传感器观测条件，
+map seed=41021、GridMap 分辨率、运动能力和检查不变；GNSS 噪声 random_seed
+采用分离的 calibration/validation seed 集。LiDAR 渲染器为确定性首回波，无新增 RNG。
+真实有效性、路线覆盖及噪声残差支持仍需现场证明，不能因启动配置存在而授予 PASS。
+
+录制 CSV 保存 request_id，清单记录所有已尝试请求及 CSV hash，sidecar 绑定
+输入与 request_id。误差对照以清单为分母，拒绝丢失输入／未重放与重复请求混入
+正常 PL。报告要求适用源码与实际二进制的完整 hash、执行命令、日志 hash 和退出
+状态匹配，不能凭同 HEAD 或自报有限数值授予 CPU PASS。
+
+坐标验证由共享 `advisory_coordinates.checked_coordinates` 负责：两个有限合法
+SE(3)、prediction/truth frame 与 body、world→ENU／外参／时间核验声明及 provenance，
+并固定 ROS system clock、saved pose stamp、truth 两侧 50 ms 与参考位姿 50 ms 契约。
+不完整 JSON 不会获得 frame_verified。heldout 与噪声重放模型版本必须与冻结校准
+source_revisions 一致；代码变化后不能继续把旧尺度视为该模型的独立验证。
+请求清单为权威分母；CSV 校验失败、缺行、payload 丢失均保留对应失败 ID。
+不能匹配或重复的重放记录单列诊断，不伪造新的独立请求。
