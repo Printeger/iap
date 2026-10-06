@@ -1463,6 +1463,14 @@ GridMap::OccupancyCommitNotification GridMap::applyRegisteredLidarUpdate(
       maximum = maximum.cwiseMax(change.index);
     }
     const int address = toAddress(change.index);
+    if (failure_evidence_capture_) {
+      if (change.state == RegisteredVoxelState::UNKNOWN &&
+          md_.observed_buffer_[address] != 0)
+        observation_loss_producer_[address] =
+            static_cast<uint8_t>(update.operation);
+      else if (change.state != RegisteredVoxelState::UNKNOWN)
+        observation_loss_producer_[address] = 0;
+    }
     md_.occupancy_buffer_raw_cloud_[address] =
         change.state == RegisteredVoxelState::OCCUPIED ? 1 : 0;
     md_.observed_buffer_[address] =
@@ -2294,6 +2302,15 @@ void GridMap::setCurrentVehicleClearanceRadius(const double radius_m)
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   current_vehicle_clearance_radius_m_ =
       std::isfinite(radius_m) && radius_m >= 0.0 ? radius_m : 0.0;
+}
+
+void GridMap::setFailureEvidenceCapture(const bool enabled)
+{
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  failure_evidence_capture_ = enabled;
+  observation_loss_producer_.clear();
+  if (enabled)
+    observation_loss_producer_.resize(md_.observed_buffer_.size(), 0);
 }
 
 void GridMap::publishMap()

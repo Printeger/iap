@@ -9,6 +9,7 @@ import unittest
 import numpy as np
 
 from analyze_failure_map import inspect
+from analyze_curve_observation import inspect as inspect_curve
 
 
 class FailureMapToolsTest(unittest.TestCase):
@@ -131,6 +132,55 @@ class FailureMapToolsTest(unittest.TestCase):
         self.write()
         with self.assertRaisesRegex(ValueError, "v2 failure snapshot"):
             inspect(self.directory, 10)
+
+    def test_old_curve_snapshot_cannot_explain_missing_ray_provenance(self):
+        self.write()
+        self.assertEqual(inspect_curve(self.directory)["classification"],
+                         "INCONCLUSIVE_MISSING_CURVE_AND_FRAME")
+
+    def test_curve_observation_distinguishes_ray_dedup_and_window_removal(self):
+        self.meta.update(
+            schema_version="iap_gridmap_failure_v3", kind="curve_unobserved",
+            first_unobserved_position_m=[0.05, 0.05, 0.25],
+            first_unobserved_voxel_index=[10, 10, 2], first_unobserved_time_s=0.0,
+            curve_checked_from_time_s=0.0, curve_checked_to_time_s=0.1,
+            curve_sample_step_s=0.02,
+            actual_curve={"degree": 3, "interval_s": 0.1,
+                          "control_points_m": [[0.05, 0.05, 0.25]] * 4,
+                          "knots_s": [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4]},
+            observation_evidence_available=True,
+            observation_sources_file="observation_sources.bin",
+            current_frame={"frame_id": 9, "stamp_s": 10.0,
+                           "beam_evidence_complete": True,
+                           "hits_file": "current_frame_hits.csv",
+                           "beams_file": "current_frame_beams.csv"})
+        self.flags[10, 10, 2] = 0
+        self.write()
+        (self.directory / "current_frame_hits.csv").write_text("lidar_x,lidar_y,lidar_z\n")
+        (self.directory / "current_frame_beams.csv").write_text("outcome,range_m\n")
+        for flag, expected in (
+                (0, "CURRENT_RAY_COVERAGE_GAP"),
+                (128, "ENDPOINT_DEDUPLICATION_GAP"),
+                (16, "OBSERVATION_REMOVED_CURRENT_REPLACE"),
+                (32, "OBSERVATION_REMOVED_ACTIVE_DELTA"),
+                (48, "OBSERVATION_REMOVED_ACTIVE_REPLACE"),
+                (2, "OBSERVATION_MASK_INCONSISTENT")):
+            sources = np.zeros_like(self.flags)
+            sources[10, 10, 2] = flag
+            sources.tofile(self.directory / "observation_sources.bin")
+            report = inspect_curve(self.directory)
+            self.assertEqual(report["classification"], expected)
+            self.assertTrue(report["curve_replay_matches"])
+            json.dumps(report)
+        self.meta["curve_evaluation_time_s"] = 10.8
+        self.write()
+        self.assertEqual(inspect_curve(self.directory)["classification"],
+                         "INCONCLUSIVE_STALE_OBSERVATION_EVIDENCE")
+        self.meta["curve_evaluation_time_s"] = 10.1
+        self.meta["first_unobserved_voxel_index"] = [11, 10, 2]
+        self.write()
+        with self.assertRaisesRegex(ValueError, "disagree"):
+            inspect_curve(self.directory)
 
 
 if __name__ == "__main__":

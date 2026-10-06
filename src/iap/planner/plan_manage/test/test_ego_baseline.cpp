@@ -7,8 +7,31 @@
 #include <unistd.h>
 #include <zlib.h>
 #include <sstream>
+#include <rcl/time.h>
 
 struct GridMapTestAccess {
+  static void attachRegisteredSource(GridMap& map) {
+    RegisteredLidarWindow::Geometry geometry;
+    geometry.origin = map.mp_.map_origin_;
+    geometry.dimensions = map.mp_.map_voxel_num_;
+    geometry.resolution_m = map.mp_.resolution_;
+    geometry.frame_contract_id = "capture-fixture";
+    map.registered_lidar_window_ = std::make_unique<RegisteredLidarWindow>(geometry);
+    RegisteredLidarFrameData frame;
+    frame.frame_id = 1;
+    frame.stamp_s = frame.scan_end_stamp_s = 10.0;
+    frame.sensor_receipt_steady_ns = 1;
+    frame.T_map_lidar.translation() = Eigen::Vector3d(0, 0, 1);
+    frame.frame_contract_id = geometry.frame_contract_id;
+    frame.hits_lidar.emplace_back(0, 0, 0);
+    ASSERT_TRUE(map.registered_lidar_window_->applyCurrentFrame(frame).accepted);
+    map.setFailureEvidenceCapture(true);
+  }
+  static void clearObserved(GridMap& map, const Eigen::Vector3d& point) {
+    Eigen::Vector3i index;
+    map.posToIndex(point, index);
+    map.md_.observed_buffer_[map.toAddress(index)] = 0;
+  }
   static void markObserved(GridMap& map) {
     std::fill(map.md_.observed_buffer_.begin(),
               map.md_.observed_buffer_.end(), 1);
@@ -43,16 +66,19 @@ struct EGOPlannerManagerTestAccess {
   static void capture(EGOPlannerManager& manager, const std::string& kind,
                       const GridPlanningCell& cell,
                       const AStar::Result* result = nullptr,
-                      const BsplineOptimizer::SearchFailureContext* context = nullptr) {
+                      const BsplineOptimizer::SearchFailureContext* context = nullptr,
+                      const UniformBspline* curve = nullptr,
+                      const EGOPlannerManager::TrajectoryAssessment* assessment = nullptr) {
     manager.captureFailureMap(kind, Eigen::Vector3d(0, 0, 1),
                               Eigen::Vector3d(-1, 0, 1), cell,
-                              result, context);
+                              result, context, curve, assessment);
   }
   static void setExternalSupportAge(EGOPlannerManager& manager, double age) {
     manager.current_integrity_.current_external_support_age_s = age;
   }
   static void setMotion(EGOPlannerManager& manager, double stamp,
-                        uint8_t quality) {
+                        uint8_t quality,
+                        const Eigen::Vector3d& position = Eigen::Vector3d(-2, 0, 1)) {
     manager.current_integrity_.stamp = stamp;
     manager.current_integrity_.current_motion_quality = quality;
     manager.current_integrity_.current_motion_error_proxy_m = 0.05;
@@ -66,8 +92,9 @@ struct EGOPlannerManagerTestAccess {
     odom->header.stamp = rclcpp::Time(static_cast<int64_t>(stamp * 1e9));
     odom->header.frame_id = "map";
     odom->pose.pose.orientation.w = 1.0;
-    odom->pose.pose.position.x = -2.0;
-    odom->pose.pose.position.z = 1.0;
+    odom->pose.pose.position.x = position.x();
+    odom->pose.pose.position.y = position.y();
+    odom->pose.pose.position.z = position.z();
     manager.risk_odom_ = odom;
     manager.risk_frame_valid_ = true;
   }
@@ -331,6 +358,11 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   ASSERT_EQ(setenv("IAP_RUN_DIR", run.c_str(), 1), 0);
   glim::RunLogManager::initialize("failure_capture_test");
   auto node = makeNode();
+  // Match the saved frame, motion report and planner clock. Real wall time
+  // would reject every free sample as CURRENT_MOTION_UNAVAILABLE first.
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()), RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),
+                                     10100000000LL), RCL_RET_OK);
   ego_planner::EGOPlannerManager manager;
   auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
   manager.initPlanModules(node, vis);
@@ -357,8 +389,11 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   for (const auto& item : std::vector<std::pair<std::string, AStar::Failure>>{
            {"endpoint", AStar::Failure::END_BLOCKED},
            {"exhausted", AStar::Failure::NO_PATH},
-           {"timeout", AStar::Failure::TIME_BUDGET}}) {
+           {"timeout", AStar::Failure::TIME_BUDGET},
+           {"map_changed", AStar::Failure::TIME_BUDGET}}) {
     result.failure = item.second;
+    result.map_changed = item.first == "map_changed";
+    result.live_generation_at_finish = result.occupancy_generation + result.map_changed;
     ego_planner::EGOPlannerManagerTestAccess::capture(
         manager, item.first, cell, &result, &context);
     const auto leaf = root / item.first;
@@ -398,8 +433,58 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
     EXPECT_TRUE(std::filesystem::exists(run / "metadata/manifests" /
         (std::string("planner_failure_map_") + kind + ".json")));
   }
-  ego_planner::EGOPlannerManagerTestAccess::capture(manager, "candidate", cell);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  GridMapTestAccess::attachRegisteredSource(*manager.grid_map_);
+  GridMapTestAccess::clearObserved(*manager.grid_map_, Eigen::Vector3d(0.81, 0, 1));
+  GridMapTestAccess::clearObserved(*manager.grid_map_, Eigen::Vector3d(1.41, 0, 1));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(
+      manager, 10.0, 1, Eigen::Vector3d(0, 0, 1));
+  Eigen::MatrixXd controls(3, 10);
+  for (int i = 0; i < 10; ++i) controls.col(i) = Eigen::Vector3d(-0.2 + i * 0.2 + 1e-9, 0, 1);
+  ego_planner::UniformBspline curve(controls, 3, 0.249);
+  const auto assessment = manager.assessTrajectory(curve, 0, 10.1);
+  EXPECT_EQ(assessment.execution_reason, GridExecutionReason::PHYSICAL_OBSTACLE);
+  ASSERT_TRUE(std::isfinite(assessment.first_unobserved_time_s));
+  EXPECT_GT(assessment.first_unobserved_time_s, assessment.first_execution_time_s);
+  EXPECT_EQ(assessment.first_unobserved_cell.execution_reason,
+            GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  ASSERT_NE(assessment.failure_snapshot, nullptr);
+  const auto& index = assessment.first_unobserved_cell.voxel_index;
+  const size_t address = (index.x() * assessment.failure_snapshot->dimensions.y() +
+      index.y()) * assessment.failure_snapshot->dimensions.z() + index.z();
+  EXPECT_EQ(assessment.failure_snapshot->cell_flags[address], 0u);
+  // The only unknown point in this short checked tail is its endpoint. The
+  // old <= end + step/2 loop omitted it when the tail was 3 ms long.
+  const auto tail = manager.assessTrajectory(curve, 0, 10.1, false,
+      curve.getTimeSum() - 0.003, curve.getTimeSum());
+  EXPECT_EQ(tail.execution_reason, GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_DOUBLE_EQ(tail.first_unobserved_time_s, curve.getTimeSum());
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager, 10.0, 1);
+  const auto tracking = manager.assessTrajectory(curve, 0, 10.1);
+  EXPECT_EQ(tracking.execution_reason, GridExecutionReason::TRACKING_ERROR);
+  EXPECT_DOUBLE_EQ(tracking.first_unobserved_time_s, assessment.first_unobserved_time_s);
+  // A sensor callback may commit a newer frame before the writer runs. The
+  // actual-curve evidence must still use the assessment's immutable epoch.
+  GridMapTestAccess::input(*manager.grid_map_, {Eigen::Vector3d(2, 2, 1)},
+                           10.2, Eigen::Vector3d(0, 0, 1));
+  EXPECT_NE(manager.grid_map_->occupancyGeneration(), assessment.evaluated_generation);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager, "candidate",
+      assessment.first_execution_cell, nullptr, nullptr, &curve, &assessment);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager, "curve_unobserved",
+      assessment.first_unobserved_cell, nullptr, nullptr, &curve, &assessment);
   ASSERT_TRUE(std::filesystem::exists(root / "candidate/snapshot.json"));
+  std::ifstream curve_metadata(root / "curve_unobserved/snapshot.json");
+  std::string curve_text((std::istreambuf_iterator<char>(curve_metadata)), {});
+  EXPECT_NE(curve_text.find("\"first_unobserved_voxel_index\": ["), std::string::npos);
+  EXPECT_NE(curve_text.find("\"actual_curve\": {"), std::string::npos);
+  EXPECT_EQ(curve_text.find("\"first_unobserved_time_s\": null"), std::string::npos);
+  EXPECT_TRUE(std::filesystem::exists(root / "curve_unobserved/observation_sources.bin"));
+  EXPECT_TRUE(std::filesystem::exists(root / "curve_unobserved/current_frame_hits.csv"));
+  EXPECT_TRUE(std::filesystem::exists(root / "curve_unobserved/current_frame_beams.csv"));
+  const auto validate_curve = std::string("python3 ") +
+      IAP_CURVE_OBSERVATION_ANALYZER + " " + (root / "curve_unobserved").string() +
+      " >/dev/null";
+  EXPECT_EQ(std::system(validate_curve.c_str()), 0);
   const auto before = std::filesystem::last_write_time(root / "endpoint/snapshot.json");
   ego_planner::EGOPlannerManagerTestAccess::capture(
       manager, "endpoint", cell, &result, &context);
@@ -408,5 +493,5 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   size_t count = 0;
   for (const auto& leaf : std::filesystem::directory_iterator(root))
     if (leaf.is_directory()) ++count;
-  EXPECT_EQ(count, 8u);
+  EXPECT_EQ(count, 10u);
 }

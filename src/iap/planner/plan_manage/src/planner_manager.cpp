@@ -25,7 +25,9 @@ namespace ego_planner
       const std::string& kind, const Eigen::Vector3d& point,
       const Eigen::Vector3d& other, const GridPlanningCell& cell,
       const AStar::Result* search,
-      const BsplineOptimizer::SearchFailureContext* context)
+      const BsplineOptimizer::SearchFailureContext* context,
+      const UniformBspline* trajectory,
+      const TrajectoryAssessment* assessment)
   {
     if (!capture_failure_map_) return;
     if (captured_failure_kinds_.count(kind)) return;
@@ -35,19 +37,35 @@ namespace ego_planner
                    "planner failure map capture requires IAP run artifacts");
       return;
     }
-    const auto snapshot = grid_map_->captureFailureSnapshot();
+    auto snapshot = assessment ? assessment->failure_snapshot :
+        std::shared_ptr<const GridMapFailureSnapshot>{};
+    if (!snapshot && search && planning_view_ &&
+        planning_view_->generation == search->occupancy_generation)
+      snapshot = planning_view_->snapshot;
+    if (!snapshot) {
+      const auto live = grid_map_->captureFailureSnapshot(true);
+      if (live) snapshot = std::make_shared<const GridMapFailureSnapshot>(*live);
+    }
     const uint64_t expected = search ? search->occupancy_generation :
         cell.occupancy_generation;
     if (!snapshot || snapshot->generation != expected ||
+        (assessment && (assessment->map_changed ||
+         snapshot->generation != assessment->evaluated_generation)) ||
         (cell.occupancy_generation != 0 &&
          snapshot->generation != cell.occupancy_generation)) {
       RCLCPP_ERROR(node_->get_logger(),
-          "planner failure map %s capture failed: occupancy generation mismatch expected=%lu cell=%lu actual=%lu",
+          "planner failure map %s capture failed: occupancy evidence mismatch expected=%lu cell=%lu actual=%lu assessment=%lu assessment_map_changed=%d",
           kind.c_str(), static_cast<unsigned long>(expected),
           static_cast<unsigned long>(cell.occupancy_generation),
-          static_cast<unsigned long>(snapshot ? snapshot->generation : 0));
+          static_cast<unsigned long>(snapshot ? snapshot->generation : 0),
+          static_cast<unsigned long>(assessment ? assessment->evaluated_generation : 0),
+          assessment && assessment->map_changed);
       return;
     }
+    const auto& capture_motion = assessment ? assessment->evaluated_motion :
+        (search && planning_view_ ? planning_view_->motion : planning_motion_);
+    const double capture_time = assessment ? assessment->evaluation_time_s :
+        (search && planning_view_ ? planning_view_->time_s : planning_time_s_);
     const std::string relative = "planner/failure_map/" + kind;
     const auto directory = artifacts->export_path(relative);
     const auto manifest_path = artifacts->metadata_path(
@@ -69,6 +87,13 @@ namespace ego_planner
             !std::filesystem::exists(directory / "cells.bin") ||
             std::filesystem::file_size(directory / "cells.bin") !=
                 snapshot->cell_flags.size() ||
+            (!snapshot->observation_sources.empty() &&
+             (!std::filesystem::exists(directory / "observation_sources.bin") ||
+              std::filesystem::file_size(directory / "observation_sources.bin") !=
+                  snapshot->cell_flags.size())) ||
+            (snapshot->current_frame &&
+             (!std::filesystem::exists(directory / "current_frame_hits.csv") ||
+              !std::filesystem::exists(directory / "current_frame_beams.csv"))) ||
             !std::filesystem::exists(manifest_path))
           throw std::runtime_error("existing failure map artifact is incomplete");
         captured_failure_kinds_.insert(kind);
@@ -92,17 +117,60 @@ namespace ego_planner
              << sample.value.version << '\n';
       risk.close();
       if (!risk) throw std::runtime_error("queried_risk.csv write failed");
+      if (!snapshot->observation_sources.empty()) {
+        auto sources = snapshot->observation_sources;
+        // Replay diagnostic rays after the occupancy lock was released. This
+        // preserves sensor callback progress and never expands the live mask.
+        if (snapshot->current_frame) {
+          RegisteredLidarWindow::Geometry geometry;
+          geometry.origin = snapshot->origin;
+          geometry.dimensions = snapshot->dimensions;
+          geometry.resolution_m = snapshot->resolution_m;
+          geometry.frame_contract_id = snapshot->current_frame->frame_contract_id;
+          RegisteredLidarWindow replay(geometry);
+          const auto raw = replay.unthinnedObservationMask(*snapshot->current_frame);
+          for (size_t i = 0; i < sources.size(); ++i)
+            if (raw[i]) sources[i] |= 128;
+        }
+        std::ofstream evidence(pending / "observation_sources.bin", std::ios::binary);
+        evidence.write(reinterpret_cast<const char*>(sources.data()), sources.size());
+        evidence.close();
+        if (!evidence) throw std::runtime_error("observation_sources.bin write failed");
+      }
+      if (snapshot->current_frame) {
+        const auto& frame = *snapshot->current_frame;
+        std::ofstream hits(pending / "current_frame_hits.csv");
+        hits << std::setprecision(17) << "lidar_x,lidar_y,lidar_z,map_x,map_y,map_z\n";
+        for (const auto& hit : frame.hits_lidar) {
+          const Eigen::Vector3d world = frame.T_map_lidar * hit;
+          hits << hit.x() << ',' << hit.y() << ',' << hit.z() << ','
+               << world.x() << ',' << world.y() << ',' << world.z() << '\n';
+        }
+        hits.close();
+        std::ofstream beams(pending / "current_frame_beams.csv");
+        beams << std::setprecision(17)
+              << "lidar_dx,lidar_dy,lidar_dz,outcome,range_m,map_dx,map_dy,map_dz\n";
+        for (const auto& beam : frame.beams) {
+          const Eigen::Vector3d world = frame.T_map_lidar.linear() * beam.direction_lidar;
+          beams << beam.direction_lidar.x() << ',' << beam.direction_lidar.y() << ','
+                << beam.direction_lidar.z() << ',' << static_cast<unsigned>(beam.outcome)
+                << ',' << beam.range_m << ',' << world.x() << ',' << world.y() << ','
+                << world.z() << '\n';
+        }
+        beams.close();
+        if (!hits || !beams) throw std::runtime_error("current frame evidence write failed");
+      }
       std::ofstream metadata(pending / "snapshot.json");
-      metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v2\",\n"
+      metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v3\",\n"
           << "  \"kind\": " << std::quoted(kind) << ",\n"
           << "  \"frame_id\": " << std::quoted(snapshot->frame_id) << ",\n"
           << "  \"generation\": " << snapshot->generation << ",\n"
           << "  \"cloud_stamp_s\": " << number(snapshot->cloud_stamp_s) << ",\n"
-          << "  \"planning_time_s\": " << number(planning_time_s_) << ",\n"
+          << "  \"planning_time_s\": " << number(capture_time) << ",\n"
           << "  \"environment_max_age_s\": "
-          << number(planning_motion_.max_environment_age_s) << ",\n"
+          << number(capture_motion.max_environment_age_s) << ",\n"
           << "  \"motion_quality\": "
-          << static_cast<unsigned>(planning_motion_.quality) << ",\n"
+          << static_cast<unsigned>(capture_motion.quality) << ",\n"
           << "  \"origin_m\": " << vector(snapshot->origin) << ",\n"
           << "  \"max_boundary_m\": " << vector(snapshot->max_boundary) << ",\n"
           << "  \"dimensions\": [" << snapshot->dimensions.x() << ','
@@ -119,19 +187,21 @@ namespace ego_planner
           << number(snapshot->risk_valid_until_s) << ",\n"
           << "  \"risk_samples_file\": \"queried_risk.csv\",\n"
           << "  \"motion_allow_bridged\": "
-          << (planning_motion_.allow_bridged ? "true" : "false") << ",\n"
-          << "  \"motion_stamp_s\": " << number(planning_motion_.stamp_s) << ",\n"
+          << (capture_motion.allow_bridged ? "true" : "false") << ",\n"
+          << "  \"motion_stamp_s\": " << number(capture_motion.stamp_s) << ",\n"
           << "  \"motion_error_proxy_m\": "
-          << number(planning_motion_.error_proxy_m) << ",\n"
+          << number(capture_motion.error_proxy_m) << ",\n"
           << "  \"motion_body_radius_m\": "
-          << number(planning_motion_.body_radius_m) << ",\n"
+          << number(capture_motion.body_radius_m) << ",\n"
           << "  \"motion_tracking_reserve_m\": "
-          << number(planning_motion_.tracking_reserve_m) << ",\n"
+          << number(capture_motion.tracking_reserve_m) << ",\n"
           << "  \"motion_budget_m\": "
-          << number(planning_motion_.motion_budget_m) << ",\n"
+          << number(capture_motion.motion_budget_m) << ",\n"
           << "  \"motion_max_age_s\": "
-          << number(planning_motion_.max_motion_age_s) << ",\n"
+          << number(capture_motion.max_motion_age_s) << ",\n"
           << "  \"failure_position_m\": " << vector(point) << ",\n"
+          << "  \"failure_voxel_index\": [" << cell.voxel_index.x() << ','
+          << cell.voxel_index.y() << ',' << cell.voxel_index.z() << "],\n"
           << "  \"other_endpoint_m\": " << vector(other) << ",\n"
           << "  \"execution_reason\": "
           << std::quoted(gridExecutionReasonName(cell.execution_reason)) << ",\n"
@@ -144,6 +214,9 @@ namespace ego_planner
           << "  \"search_failure\": "
           << (search ? std::string("\"") + AStar::failureName(search->failure) + "\""
                      : "null") << ",\n"
+          << "  \"search_map_changed\": " << (search && search->map_changed ? "true" : "false") << ",\n"
+          << "  \"search_generation\": " << (search ? search->occupancy_generation : 0) << ",\n"
+          << "  \"search_live_generation_at_finish\": " << (search ? search->live_generation_at_finish : 0) << ",\n"
           << "  \"search_stage\": "
           << (context ? std::string("\"") + context->stage + "\"" : "null")
           << ",\n  \"search_step_size_m\": "
@@ -184,19 +257,88 @@ namespace ego_planner
                << "  \"search_advisory_query_s\": "
                << number(search ? search->advisory_query_s : 0.0) << ",\n"
                << "  \"search_duration_s\": "
-               << number(search ? search->duration_s : 0.0) << "\n}\n";
+               << number(search ? search->duration_s : 0.0) << ",\n";
+      metadata << "  \"first_unobserved_time_s\": "
+          << number(assessment ? assessment->first_unobserved_time_s : NAN) << ",\n"
+          << "  \"first_unobserved_position_m\": "
+          << (assessment && std::isfinite(assessment->first_unobserved_time_s)
+              ? vector(assessment->first_unobserved_position) : "null") << ",\n"
+          << "  \"first_unobserved_voxel_index\": ";
+      if (assessment && std::isfinite(assessment->first_unobserved_time_s)) {
+        const auto& index = assessment->first_unobserved_cell.voxel_index;
+        metadata << '[' << index.x() << ',' << index.y() << ',' << index.z() << ']';
+      } else metadata << "null";
+      metadata << ",\n  \"curve_evaluation_time_s\": "
+          << number(assessment ? assessment->evaluation_time_s : NAN)
+          << ",\n  \"curve_execution_reason\": "
+          << (assessment ? std::string("\"") +
+              gridExecutionReasonName(assessment->execution_reason) + "\"" : "null")
+          << ",\n  \"curve_checked_from_time_s\": "
+          << number(assessment ? assessment->checked_from_time_s : NAN)
+          << ",\n  \"curve_checked_to_time_s\": "
+          << number(assessment ? assessment->checked_to_time_s : NAN)
+          << ",\n  \"curve_sample_step_s\": "
+          << number(assessment ? assessment->sample_step_s : NAN)
+          << ",\n  \"actual_curve\": ";
+      if (trajectory && assessment) {
+        auto curve = *trajectory;
+        const auto points = curve.getControlPoint();
+        const auto knots = curve.getKnot();
+        metadata << "{\"degree\":" << knots.size() - points.cols() - 1
+                 << ",\"interval_s\":" << number(curve.getInterval())
+                 << ",\"control_points_m\":[";
+        for (int i = 0; i < points.cols(); ++i)
+          metadata << (i ? "," : "") << vector(points.col(i));
+        metadata << "],\"knots_s\":[";
+        for (int i = 0; i < knots.size(); ++i)
+          metadata << (i ? "," : "") << number(knots[i]);
+        metadata << "]}";
+      } else metadata << "null";
+      metadata << ",\n  \"observation_evidence_available\": "
+          << (snapshot->observation_evidence_available && snapshot->current_frame ? "true" : "false")
+          << ",\n  \"observation_sources_file\": "
+          << (snapshot->observation_sources.empty() ? "null" : "\"observation_sources.bin\"")
+          << ",\n  \"observation_source_bits\": {\"current_hit\":1,\"current_free\":2,\"active_hit\":4,\"active_free\":8,\"unthinned_current_observed\":128},\n"
+          << "  \"observation_loss_producer_mask\": 48,\n"
+          << "  \"observation_loss_producers\": {\"1\":\"current_replace\",\"2\":\"active_delta\",\"3\":\"active_replace\"},\n"
+          << "  \"active_window_generation\": " << snapshot->active_window_generation << ",\n"
+          << "  \"sensor_position_m\": " << vector(snapshot->sensor_position) << ",\n"
+          << "  \"vehicle_observed_radius_m\": " << number(snapshot->vehicle_observed_radius_m) << ",\n"
+          << "  \"current_frame\": ";
+      if (snapshot->current_frame) {
+        const auto& frame = *snapshot->current_frame;
+        metadata << "{\"frame_id\":" << frame.frame_id
+                 << ",\"stamp_s\":" << number(frame.stamp_s)
+                 << ",\"scan_end_stamp_s\":" << number(frame.scan_end_stamp_s)
+                 << ",\"sensor_position_m\":" << vector(frame.T_map_lidar.translation())
+                 << ",\"sensor_model_id\":" << std::quoted(frame.sensor_model_id)
+                 << ",\"beam_content_hash\":" << std::quoted(frame.beam_content_hash)
+                 << ",\"min_range_m\":" << number(frame.min_range_m)
+                 << ",\"beam_evidence_complete\":" << (frame.beam_evidence_complete ? "true" : "false")
+                 << ",\"max_range_m\":" << number(frame.max_range_m)
+                 << ",\"hits_file\":\"current_frame_hits.csv\",\"beams_file\":\"current_frame_beams.csv\"}";
+      } else metadata << "null";
+      metadata << "\n}\n";
       metadata.close();
       if (!metadata) throw std::runtime_error("snapshot.json write failed");
       std::filesystem::rename(pending, directory);
       std::filesystem::create_directories(manifest_path.parent_path());
       const auto manifest_pending = manifest_path.string() + ".pending";
       std::ofstream manifest(manifest_pending);
-      manifest << "{\"schema_version\":\"iap_planner_failure_artifact_v2\","
+      manifest << "{\"schema_version\":\"iap_planner_failure_artifact_v3\","
           << "\"kind\":" << std::quoted(kind) << ","
           << "\"snapshot\":" << std::quoted(relative + "/snapshot.json")
           << ",\"cells\":" << std::quoted(relative + "/cells.bin")
           << ",\"risk_samples\":"
           << std::quoted(relative + "/queried_risk.csv");
+      if (!snapshot->observation_sources.empty())
+        manifest << ",\"observation_sources\":"
+                 << std::quoted(relative + "/observation_sources.bin");
+      if (snapshot->current_frame)
+        manifest << ",\"current_frame_hits\":"
+                 << std::quoted(relative + "/current_frame_hits.csv")
+                 << ",\"current_frame_beams\":"
+                 << std::quoted(relative + "/current_frame_beams.csv");
       if (kind == "stall" || kind == "tracking_error" ||
           kind == "remaining_failure" || kind == "remaining_stop")
         manifest << ",\"state\":" << std::quoted(relative + "/state.json");
@@ -250,14 +392,27 @@ namespace ego_planner
       const Eigen::Vector3d& actual, const double error_m,
       const int trajectory_id, const double command_time_s,
       const double odom_age_s, const double map_age_s,
-      const GridExecutionReason reason) {
-    if (!capture_failure_map_ || captured_failure_kinds_.count(kind)) return;
+      const GridExecutionReason reason, const TrajectoryAssessment* assessment) {
+    if (!capture_failure_map_) return;
+    // A previously captured physical failure must not conceal a later hole
+    // on the executing curve.
+    if (assessment && std::isfinite(assessment->first_unobserved_time_s))
+      captureFailureMap("curve_unobserved", assessment->first_unobserved_position,
+          expected, assessment->first_unobserved_cell, nullptr, nullptr,
+          &local_data_.position_traj_, assessment);
+    if (captured_failure_kinds_.count(kind)) return;
     planning_time_s_ = node_->now().seconds();
     planning_motion_ = currentMotionContext();
     planning_risk_version_ = 0;
-    const auto cell = grid_map_->queryPlanningCell(actual, 0,
+    auto cell = grid_map_->queryPlanningCell(actual, 0,
         planning_time_s_, planning_risk_policy_, planning_motion_, true);
-    captureFailureMap(kind, actual, expected, cell);
+    Eigen::Vector3d point = actual;
+    if (assessment && assessment->first_execution_position.allFinite()) {
+      point = assessment->first_execution_position;
+      cell = assessment->first_execution_cell;
+    }
+    captureFailureMap(kind, point, expected, cell, nullptr, nullptr,
+        assessment ? &local_data_.position_traj_ : nullptr, assessment);
     if (!captured_failure_kinds_.count(kind)) return;
     auto* artifacts = glim::RunLogManager::get_if_initialized();
     if (!artifacts) return;
@@ -323,6 +478,7 @@ namespace ego_planner
     initRiskVisualization(node);
     capture_failure_map_ = node->declare_parameter(
         "planning/capture_failure_map", false);
+    grid_map_->setFailureEvidenceCapture(capture_failure_map_);
 
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);
@@ -335,12 +491,15 @@ namespace ego_planner
     bspline_optimizer_->setSearchFailureObserver(
         [this](const AStar::Result& result,
                const BsplineOptimizer::SearchFailureContext& context) {
-          const auto end = grid_map_->queryPlanningCell(
-              result.requested_end, planning_risk_version_, planning_time_s_,
-              planning_risk_policy_, planning_motion_, true);
-          const auto start = grid_map_->queryPlanningCell(
-              result.requested_start, planning_risk_version_, planning_time_s_,
-              planning_risk_policy_, planning_motion_, true);
+          const auto diagnostic_map = planning_view_ ? planning_view_->physical : grid_map_;
+          const double diagnostic_time = planning_view_ ? planning_view_->time_s : planning_time_s_;
+          const auto& diagnostic_motion = planning_view_ ? planning_view_->motion : planning_motion_;
+          const auto end = diagnostic_map->queryPlanningCell(
+              result.requested_end, planning_risk_version_, diagnostic_time,
+              planning_risk_policy_, diagnostic_motion, true);
+          const auto start = diagnostic_map->queryPlanningCell(
+              result.requested_start, planning_risk_version_, diagnostic_time,
+              planning_risk_policy_, diagnostic_motion, true);
           RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
               "A* endpoints failure=%s start_reason=%s start_required=%s start_nearest=%s start_nearest_xyz=(%.3f %.3f %.3f) start_observed=%d end_reason=%s end_required=%s end_nearest=%s end_nearest_xyz=(%.3f %.3f %.3f) end_observed=%d end_advisory=%u generation=%lu cloud=%.3f",
               AStar::failureName(result.failure),
@@ -361,6 +520,8 @@ namespace ego_planner
           std::string kind = "endpoint";
           if (result.failure == AStar::Failure::TIME_BUDGET)
             kind = "timeout";
+          else if (result.failure == AStar::Failure::MAP_STALE)
+            kind = "map_changed";
           else if (result.failure == AStar::Failure::NO_PATH ||
                    result.failure == AStar::Failure::NO_PATH_WITH_UNOBSERVED ||
                    result.failure == AStar::Failure::ADVISORY_NO_PATH)
@@ -368,6 +529,9 @@ namespace ego_planner
           if (capture_failure_map_ && !captured_failure_kinds_.count(kind))
             captureFailureMap(kind, result.requested_end,
                               result.requested_start, end, &result, &context);
+          if (result.map_changed && kind != "map_changed")
+            captureFailureMap("map_changed", result.requested_end,
+                result.requested_start, end, &result, &context);
         });
 
     visualization_ = vis;
@@ -693,12 +857,14 @@ namespace ego_planner
                   detail.cloud_stamp_s,
                   static_cast<unsigned>(detail.advisory.classification));
       if (capture_failure_map_ && !captured_failure_kinds_.count("candidate") &&
-          assessment.first_execution_position.allFinite() &&
-          (assessment.first_execution_cell.occupancy_generation == 0 ||
-           assessment.first_execution_cell.occupancy_generation ==
-               detail.occupancy_generation))
+          assessment.first_execution_position.allFinite())
         captureFailureMap("candidate", assessment.first_execution_position,
-                          local_target_pt, detail);
+                          local_target_pt, assessment.first_execution_cell,
+                          nullptr, nullptr, &pos, &assessment);
+      if (std::isfinite(assessment.first_unobserved_time_s))
+        captureFailureMap("curve_unobserved", assessment.first_unobserved_position,
+            local_target_pt, assessment.first_unobserved_cell,
+            nullptr, nullptr, &pos, &assessment);
       ++continous_failures_count_;
       return false;
     }
@@ -756,7 +922,11 @@ namespace ego_planner
           !captured_failure_kinds_.count("candidate"))
         captureFailureMap("candidate",
             release_check.first_execution_position, local_target_pt,
-            release_check.first_execution_cell);
+            release_check.first_execution_cell, nullptr, nullptr, &pos, &release_check);
+      if (std::isfinite(release_check.first_unobserved_time_s))
+        captureFailureMap("curve_unobserved", release_check.first_unobserved_position,
+            local_target_pt, release_check.first_unobserved_cell,
+            nullptr, nullptr, &pos, &release_check);
       ++continous_failures_count_;
       return false;
     }

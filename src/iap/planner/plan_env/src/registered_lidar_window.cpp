@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace {
@@ -151,7 +152,7 @@ Eigen::Vector3i RegisteredLidarWindow::indexFromAddress(
 
 RegisteredLidarWindow::FrameContribution
 RegisteredLidarWindow::buildContribution(
-    const RegisteredLidarFrameData& frame) const {
+    const RegisteredLidarFrameData& frame, const bool deduplicate) const {
   FrameContribution contribution;
   contribution.source = frame;
   const std::size_t word_count =
@@ -227,7 +228,8 @@ RegisteredLidarWindow::buildContribution(
             : clip_to_map(endpoint);
         if (clipped) {
           const Eigen::Vector3i finish = indexOf(*clipped);
-          if (inBounds(finish) && mark(&ray_end_bits, address(finish))) {
+          if (inBounds(finish) &&
+              (mark(&ray_end_bits, address(finish)) || !deduplicate)) {
             representative_rays.push_back({*clipped, false});
           }
         }
@@ -251,7 +253,7 @@ RegisteredLidarWindow::buildContribution(
       // evidence, one actual successful return per endpoint voxel is a
       // conservative 0.1 m voxel downsample: it never invents a no-return ray
       // and avoids retracing thousands of equivalent beams.
-      if (mark(&hit_bits, hit_address)) {
+      if (mark(&hit_bits, hit_address) || !deduplicate) {
         representative_rays.push_back({hit, true});
       }
       continue;
@@ -263,7 +265,7 @@ RegisteredLidarWindow::buildContribution(
     if (clipped) {
       const Eigen::Vector3i clipped_finish = indexOf(*clipped);
       if (inBounds(clipped_finish) &&
-          mark(&ray_end_bits, address(clipped_finish))) {
+          (mark(&ray_end_bits, address(clipped_finish)) || !deduplicate)) {
         representative_rays.push_back({*clipped, false});
       }
     }
@@ -355,6 +357,31 @@ RegisteredLidarWindow::buildContribution(
                   contribution.environment_hit_keys.end()),
       contribution.environment_hit_keys.end());
   return contribution;
+}
+
+std::optional<RegisteredLidarFrameData>
+RegisteredLidarWindow::currentFrameSource() const {
+  if (!has_current_frame_) return std::nullopt;
+  return current_frame_.source;
+}
+
+std::vector<uint8_t> RegisteredLidarWindow::observationSourceFlags() const {
+  std::vector<uint8_t> flags(active_hit_count_.size());
+  for (size_t i = 0; i < flags.size(); ++i)
+    flags[i] = (current_hit_[i] ? 1 : 0) | (current_free_[i] ? 2 : 0) |
+        (active_hit_count_[i] ? 4 : 0) | (active_free_count_[i] ? 8 : 0);
+  return flags;
+}
+
+std::vector<uint8_t> RegisteredLidarWindow::unthinnedObservationMask(
+    const RegisteredLidarFrameData& frame) const {
+  if (!validGeometry() || frame.frame_contract_id != geometry_.frame_contract_id)
+    throw std::invalid_argument("unthinned diagnostic requires matching registered geometry");
+  const auto contribution = buildContribution(frame, false);
+  std::vector<uint8_t> mask(active_hit_count_.size(), 0);
+  for (int address : contribution.hits) mask[address] = 1;
+  for (int address : contribution.observed_free) mask[address] = 1;
+  return mask;
 }
 
 std::optional<RegisteredLidarFrameMetadata>
@@ -711,7 +738,8 @@ void RegisteredLidarWindow::collectChanges(
 
 RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
     const RegisteredLidarFrameData& frame) {
-  RegisteredLidarWindowUpdate update;
+  RegisteredLidarWindowUpdate update{};
+  update.operation = RegisteredLidarWindowUpdate::Operation::CURRENT_REPLACE;
   update.active_generation = active_generation_;
   update.current_frame_id = current_frame_id_;
   if (!validGeometry() ||
@@ -811,7 +839,8 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
 
 RegisteredLidarWindowUpdate RegisteredLidarWindow::applyActiveDelta(
     const ActiveLidarWindowDeltaData& delta) {
-  RegisteredLidarWindowUpdate update;
+  RegisteredLidarWindowUpdate update{};
+  update.operation = RegisteredLidarWindowUpdate::Operation::ACTIVE_DELTA;
   update.active_generation = active_generation_;
   update.current_frame_id = current_frame_id_;
   if (delta.frame_contract_id != geometry_.frame_contract_id) {
@@ -915,7 +944,8 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::replaceActiveWindow(
     const std::uint64_t generation,
     const std::string& frame_contract_id,
     const std::vector<RegisteredLidarFrameData>& frames) {
-  RegisteredLidarWindowUpdate update;
+  RegisteredLidarWindowUpdate update{};
+  update.operation = RegisteredLidarWindowUpdate::Operation::ACTIVE_REPLACE;
   update.active_generation = active_generation_;
   update.current_frame_id = current_frame_id_;
   if (frame_contract_id != geometry_.frame_contract_id) {

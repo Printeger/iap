@@ -69,6 +69,8 @@ public:
 		Eigen::Vector3i pool_dimensions = Eigen::Vector3i::Zero();
 		Eigen::Vector3d pool_center = Eigen::Vector3d::Zero();
 		uint64_t occupancy_generation = 0;
+		uint64_t live_generation_at_finish = 0;
+		bool map_changed = false;
 	};
 private:
 	GridMap::Ptr grid_map_;
@@ -87,6 +89,7 @@ private:
 	GridPlanningCell queryLatticePoint(const Eigen::Vector3i& index);
 	GridPlanningCell timedPlanningQuery(const Eigen::Vector3d& position);
 	void finishFailure(Failure failure, const rclcpp::Time& started);
+	void recordMapAtFinish();
 	std::optional<double> edgeMultiplier(const Eigen::Vector3d& from,
 	                                     const Eigen::Vector3d& to,
 	                                     const Eigen::Vector3i& from_index,
@@ -160,6 +163,7 @@ public:
 		result_.pool_dimensions = POOL_SIZE_;
 		result_.pool_center = (start + end) / 2.0;
 		result_.occupancy_generation = grid_map_->occupancyGeneration();
+		recordMapAtFinish();
 	}
 	void setFailureObserver(std::function<void(const Result&)> observer) {
 		failure_observer_ = std::move(observer);

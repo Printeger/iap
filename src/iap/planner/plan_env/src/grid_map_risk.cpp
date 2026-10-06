@@ -286,7 +286,8 @@ GridPlanningCell GridMap::queryPlanningCell(
   return cell;
 }
 
-std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot() const
+std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot(
+    const bool include_observation_evidence) const
 {
   GridMapFailureSnapshot snapshot;
   std::lock_guard<std::mutex> map_lock(occupancy_epoch_mutex_);
@@ -300,6 +301,18 @@ std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshot() const
       std::memory_order_acquire);
   snapshot.generation = sequence / 2u;
   snapshot.frame_id = mp_.frame_id_;
+  if (include_observation_evidence && registered_lidar_window_) {
+    snapshot.observation_evidence_available = failure_evidence_capture_;
+    snapshot.current_frame = registered_lidar_window_->currentFrameSource();
+    snapshot.active_window_generation = registered_lidar_window_->activeGeneration();
+    snapshot.sensor_position = md_.camera_pos_;
+    snapshot.vehicle_observed_radius_m = current_vehicle_clearance_radius_m_;
+    snapshot.observation_sources = registered_lidar_window_->observationSourceFlags();
+    if (failure_evidence_capture_)
+      for (size_t i = 0; i < snapshot.observation_sources.size(); ++i)
+        if (md_.observed_buffer_[i] == 0)
+          snapshot.observation_sources[i] |= observation_loss_producer_[i] << 4;
+  }
   const auto count = static_cast<size_t>(snapshot.dimensions.x()) *
       snapshot.dimensions.y() * snapshot.dimensions.z();
   if (count == 0 || count > md_.occupancy_buffer_.size() ||

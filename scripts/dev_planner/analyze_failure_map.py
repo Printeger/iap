@@ -46,7 +46,7 @@ def _inconclusive(directory, reason):
 
 def inspect(directory, budget_s=120.0, backend=None):
     directory, meta, _ = load_snapshot(directory)
-    if meta.get("schema_version") != "iap_gridmap_failure_v2":
+    if meta.get("schema_version") not in ("iap_gridmap_failure_v2", "iap_gridmap_failure_v3"):
         raise ValueError("same-rule replay requires a v2 failure snapshot")
     if meta.get("kind") == "candidate":
         return _inconclusive(directory, "INCONCLUSIVE_CANDIDATE_ONLY")

@@ -222,6 +222,15 @@ struct GridMapFailureSnapshot {
     GridRiskVoxel value;
   };
   std::vector<RiskSample> queried_risk;
+  bool observation_evidence_available = false;
+  uint64_t active_window_generation = 0;
+  Eigen::Vector3d sensor_position = Eigen::Vector3d::Zero();
+  double vehicle_observed_radius_m = 0.0;
+  std::optional<RegisteredLidarFrameData> current_frame;
+  // Low bits: registered current hit/free and active hit/free. High nibble:
+  // last observed->unknown producer (1=current replacement, 2=active delta,
+  // 3=active recovery). Reset on reobservation; no age inference is made.
+  std::vector<uint8_t> observation_sources;
 };
 
 // intermediate mapping data for fusion
@@ -425,7 +434,9 @@ public:
                                     const GridPlanningRiskPolicy& risk_policy,
                                     const GridMotionContext& motion,
                                     bool include_rejected_clearance = false);
-  std::optional<GridMapFailureSnapshot> captureFailureSnapshot() const;
+  std::optional<GridMapFailureSnapshot> captureFailureSnapshot(
+      bool include_observation_evidence = false) const;
+  void setFailureEvidenceCapture(bool enabled);
   static Ptr fromFailureSnapshot(const GridMapFailureSnapshot& snapshot);
   std::string getFrameId() const { return mp_.frame_id_; }
 
@@ -643,6 +654,8 @@ private:
   std::string registered_delta_topic_;
   std::string registered_recovery_service_;
   std::unique_ptr<RegisteredLidarWindow> registered_lidar_window_;
+  bool failure_evidence_capture_ = false;
+  std::vector<uint8_t> observation_loss_producer_;
   std::atomic<bool> registered_recovery_in_flight_{false};
   std::atomic<bool> registered_recovery_pending_{false};
   std::atomic<uint64_t> registered_recovery_serial_{0};

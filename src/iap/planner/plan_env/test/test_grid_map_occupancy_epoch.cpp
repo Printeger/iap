@@ -264,6 +264,39 @@ struct GridMapTestAccess {
     map->applyRegisteredLidarUpdate(update);
   }
 
+  static void applyObservationFrame(GridMap* map, int64_t id, bool hit,
+                                    int operation = 1) {
+    std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
+    RegisteredLidarFrameData frame;
+    frame.frame_id = id;
+    frame.stamp_s = 10.0 + id * 0.1;
+    frame.scan_end_stamp_s = frame.stamp_s;
+    frame.sensor_receipt_steady_ns = 1;
+    frame.T_map_lidar.translation() = map->md_.camera_pos_;
+    frame.frame_contract_id = map->registered_frame_contract_id_;
+    if (hit) frame.hits_lidar.push_back(Eigen::Vector3d(3, 0, 0));
+    RegisteredLidarWindowUpdate update;
+    if (operation == 1)
+      update = map->registered_lidar_window_->applyCurrentFrame(frame);
+    else if (operation == 2) {
+      ActiveLidarWindowDeltaData delta;
+      delta.frame_contract_id = frame.frame_contract_id;
+      delta.base_generation = map->registered_lidar_window_->activeGeneration();
+      delta.generation = delta.base_generation + 1;
+      delta.complete = true;
+      delta.removed_frame_ids.push_back(20);
+      update = map->registered_lidar_window_->applyActiveDelta(delta);
+    } else {
+      std::vector<RegisteredLidarFrameData> frames;
+      if (hit) frames.push_back(frame);
+      update = map->registered_lidar_window_->replaceActiveWindow(
+          map->registered_lidar_window_->activeGeneration() + 1,
+          frame.frame_contract_id, frames);
+    }
+    ASSERT_TRUE(update.accepted);
+    map->applyRegisteredLidarUpdate(update);
+  }
+
   static bool observedAt(GridMap* map, const Eigen::Vector3d& position) {
     std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
     Eigen::Vector3i index;
@@ -477,6 +510,36 @@ struct GridMapTestAccess {
     map->occupancy_update_sequence_.store(4, std::memory_order_release);
   }
 };
+
+TEST(GridMapOccupancyEpoch, FailureEvidenceSeparatesCurrentReplacementAndActiveRemoval) {
+  GridMap map;
+  GridMapTestAccess::applyRegisteredEmptyUpdateAt(
+      &map, Eigen::Vector3d(-1.5, -1.5, -1.5));
+  map.setFailureEvidenceCapture(true);
+  GridMapTestAccess::applyObservationFrame(&map, 2, true);
+  constexpr size_t address = (2 * 4 + 0) * 4 + 0;
+  auto snapshot = map.captureFailureSnapshot(true);
+  ASSERT_TRUE(snapshot);
+  EXPECT_TRUE(snapshot->observation_evidence_available);
+  EXPECT_EQ(snapshot->current_frame->frame_id, 2);
+  EXPECT_EQ(snapshot->observation_sources[address], 2);
+  EXPECT_EQ(snapshot->generation, map.occupancyGeneration());
+  GridMapTestAccess::applyObservationFrame(&map, 3, false);
+  snapshot = map.captureFailureSnapshot(true);
+  EXPECT_EQ(snapshot->cell_flags[address], 0);
+  EXPECT_EQ(snapshot->observation_sources[address], 1 << 4);
+  GridMapTestAccess::applyObservationFrame(&map, 20, true, 3);
+  snapshot = map.captureFailureSnapshot(true);
+  EXPECT_EQ(snapshot->observation_sources[address], 8);
+  GridMapTestAccess::applyObservationFrame(&map, 21, false, 2);
+  snapshot = map.captureFailureSnapshot(true);
+  EXPECT_EQ(snapshot->observation_sources[address], 2 << 4);
+  GridMapTestAccess::applyObservationFrame(&map, 22, true, 3);
+  GridMapTestAccess::applyObservationFrame(&map, 23, false, 3);
+  snapshot = map.captureFailureSnapshot(true);
+  EXPECT_EQ(snapshot->observation_sources[address], 3 << 4);
+  EXPECT_TRUE(map.captureFailureSnapshot()->observation_sources.empty());
+}
 
 TEST(GridMapOccupancyEpochTest,
      RegisteredWindowMustRecoverBeforePublishingFrozenEpoch) {

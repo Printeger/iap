@@ -112,6 +112,7 @@ if(BUILD_TESTING)
   target_link_libraries(test_ego_baseline iap::iap ${TRAJ_UTILS_LIB} ${IAP_MSGS_TYPESUPPORT_CPP})
   target_link_libraries(test_ego_baseline ZLIB::ZLIB)
   target_compile_definitions(test_ego_baseline PRIVATE
+    IAP_CURVE_OBSERVATION_ANALYZER="${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/analyze_curve_observation.py"
     IAP_FAILURE_REGRESSION_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/20261005T163036Z_646_endpoint")
 endif()
 

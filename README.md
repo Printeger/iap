@@ -292,7 +292,7 @@ ros2 launch iap iap_sim.launch.py \
 | `scenario` | `icra_dense_forest_four_fork_v2` | 统一的四分叉测试场景；仍可显式选择目录中的其他场景 |
 | `start_rviz` | `true` | 启动 RViz |
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
-| `capture_failure_map` | `false` | 四分叉故障诊断时按端点、穷尽、超时、曲线拒绝、持续无可执行局部目标、跟踪误差、剩余轨迹失败和最终停止各保存首份 GridMap 快照，最多八份 |
+| `capture_failure_map` | `false` | 四分叉故障诊断时按端点、穷尽、超时、曲线拒绝、持续无可执行局部目标、跟踪误差、剩余轨迹失败、最终停止、实际曲线首个未观测点和地图变化各保存首份 GridMap 快照，最多十份 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
 本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 已把有效 advisory 预警用于局部绕行偏好，真实执行仍以物理环境、当前融合运动质量与最终曲线检查为准。
@@ -315,7 +315,16 @@ python3 src/iap/scripts/dev_planner/replay_failure_map.py \
   "$run_dir/export/planner/failure_map/timeout"
 ```
 
-快照位于同一运行目录的 `export/planner/failure_map/{endpoint,exhausted,timeout,candidate,stall,tracking_error,remaining_failure,remaining_stop}`；只保存实际发生的失败种类。分析脚本可改用实际存在的 `endpoint` 或 `exhausted` 目录。`cells.bin` 是当时 GridMap 的原始占据、膨胀和已观测标志；`queried_risk.csv` 只包含当时真正查询过的 PL 格子。`stall/state.json` 保存目标执行原因和搜索池空间证据指纹；跟踪或剩余轨迹失败的 `state.json` 保存同一测量时间的期望位置、GLIO 位置、误差、轨迹 ID、末次位置命令时间与数据年龄。v2 搜索快照还保存运动净空参数、搜索池和修补段控制点，以及占据、净空、PL 查询耗时；离线工具使用同一 C++ 净空查询与 A* 搜索，默认最多运行 120 秒。离线报告写入 `export/analysis/`；预算耗尽、证据过期或缺少合法端点时输出无法判定。“无路”仅适用于所存地图的已观测搜索池，不代表真实世界或未观测区域无路。旧 v1 快照和没有快照的运行不能用同规则工具追认结论。
+快照位于同一运行目录的 `export/planner/failure_map/{endpoint,exhausted,timeout,map_changed,candidate,curve_unobserved,stall,tracking_error,remaining_failure,remaining_stop}`；只保存实际发生的失败种类。分析脚本可改用实际存在的 `endpoint` 或 `exhausted` 目录。`cells.bin` 是当时 GridMap 的原始占据、膨胀和已观测标志；`queried_risk.csv` 只包含当时真正查询过的 PL 格子。`stall/state.json` 保存目标执行原因和搜索池空间证据指纹；跟踪或剩余轨迹失败的 `state.json` 保存同一测量时间的期望位置、GLIO 位置、误差、轨迹 ID、末次位置命令时间与数据年龄。v2/v3 搜索快照还保存运动净空参数、搜索池和修补段控制点，以及占据、净空、PL 查询耗时；离线工具使用同一 C++ 净空查询与 A* 搜索，默认最多运行 120 秒。离线报告写入 `export/analysis/`；预算耗尽、证据过期或缺少合法端点时输出无法判定。“无路”仅适用于所存地图的已观测搜索池，不代表真实世界或未观测区域无路。旧 v1 快照和没有快照的运行不能用同规则工具追认结论。
+
+v3 曲线快照独立保存 `first_unobserved_time_s`、`first_unobserved_position_m`、`first_unobserved_voxel_index` 和实际 B-spline 的控制点/完整 knot 向量、检查区间与采样间隔；短尾段也检查实际终点。即使先遇到净空或起点跟踪失败，后面的未知点也有单独的 `curve_unobserved` 首份产物；剩余轨迹快照保存失败曲线位置，飞机实际位置仍在 `state.json`。注册 LiDAR 模式还保存同代当前帧的原始点云/完整 beam CSV、`observation_sources.bin` 的当前帧与活动窗口 hit/free 贡献和最近一次观测移除来源。使用同一 C++ 射线遍历关闭端点去重得到诊断 mask，在地图锁外计算；此 mask 不回写在线地图。
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_curve_observation.py \
+  "$run_dir/export/planner/failure_map/curve_unobserved"
+```
+
+报告写入 `export/analysis/curve_observation_curve_unobserved.json`，先核对实际曲线、点坐标、体素索引与真实观测 mask，再区分当前射线覆盖缺口、端点去重缺口、当前帧替换/活动窗口移除和 mask 不一致。观测移除来源没有时间戳，不能据此推断证据年龄；只有完整 beam 输入才能讨论无回波覆盖。地图或当前帧证据过期、非注册输入或旧快照缺少曲线/帧来源时明确无法判定，不能用稀疏障碍反推自由空间。A* 的 `search_failure=TIME_BUDGET` 不再被地图推进覆盖；`search_map_changed`、搜索代数和结束时在线代数独立保存。一次失败同时超时且地图变化时，`timeout` 与 `map_changed` 都可保留首份同轮冻结地图。
 
 运行时切换色彩依据：
 

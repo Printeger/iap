@@ -75,6 +75,17 @@ namespace ego_planner
       Eigen::Vector3d first_execution_position = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());
       GridPlanningCell first_execution_cell;
+      // Independent of the first physical/motion rejection on the curve.
+      double first_unobserved_time_s = std::numeric_limits<double>::quiet_NaN();
+      Eigen::Vector3d first_unobserved_position = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      GridPlanningCell first_unobserved_cell;
+      double checked_from_time_s = 0.0;
+      double checked_to_time_s = 0.0;
+      double sample_step_s = 0.0;
+      double evaluation_time_s = 0.0;
+      GridMotionContext evaluated_motion;
+      std::shared_ptr<const GridMapFailureSnapshot> failure_snapshot;
       double first_advisory_time_s = std::numeric_limits<double>::quiet_NaN();
       size_t advisory_avoid_samples = 0;
       size_t advisory_unknown_samples = 0;
@@ -111,7 +122,8 @@ namespace ego_planner
         const Eigen::Vector3d& expected, const Eigen::Vector3d& actual,
         double error_m, int trajectory_id, double command_time_s,
         double odom_age_s, double map_age_s,
-        GridExecutionReason reason);
+        GridExecutionReason reason,
+        const TrajectoryAssessment* assessment = nullptr);
     AStar::Failure lastSearchFailure() const {
       return bspline_optimizer_->a_star_->lastResult().failure;
     }
@@ -149,6 +161,7 @@ namespace ego_planner
     GridMotionContext planning_motion_;
     struct PlanningView {
       GridMap::Ptr physical;
+      std::shared_ptr<const GridMapFailureSnapshot> snapshot;
       uint64_t risk_version = 0;
       uint64_t generation = 0;
       double time_s = 0.0;
@@ -163,7 +176,9 @@ namespace ego_planner
                            const Eigen::Vector3d& other,
                            const GridPlanningCell& cell,
                            const AStar::Result* search = nullptr,
-                           const BsplineOptimizer::SearchFailureContext* context = nullptr);
+                           const BsplineOptimizer::SearchFailureContext* context = nullptr,
+                           const UniformBspline* trajectory = nullptr,
+                           const TrajectoryAssessment* assessment = nullptr);
     double last_runtime_advisory_query_s_ =
         -std::numeric_limits<double>::infinity();
     iap::CurrentIntegrityState current_integrity_;

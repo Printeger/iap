@@ -79,14 +79,22 @@ GridPlanningCell AStar::queryLatticePoint(const Vector3i& index) {
     return cell;
 }
 
+void AStar::recordMapAtFinish() {
+    result_.live_generation_at_finish = live_generation_provider_
+        ? live_generation_provider_() : grid_map_->occupancyGeneration();
+    result_.map_changed = result_.live_generation_at_finish !=
+        result_.occupancy_generation || map_changed_;
+}
+
 void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
-    result_.failure = live_generation_provider_ &&
-        live_generation_provider_() != search_generation_
-        ? Failure::MAP_STALE : failure;
+    // Termination and evidence freshness are independent. In particular an
+    // online update must not erase a frozen search's TIME_BUDGET result.
+    result_.failure = failure;
+    recordMapAtFinish();
     result_.duration_s = (rclcpp::Clock().now() - started).seconds();
     static rclcpp::Clock log_clock(RCL_SYSTEM_TIME);
     RCLCPP_WARN_THROTTLE(rclcpp::get_logger("AstarSearch"), log_clock, 1000,
-        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs",
+        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
         failureName(result_.failure), result_.requested_start.x(), result_.requested_start.y(),
         result_.requested_start.z(), result_.requested_end.x(),
         result_.requested_end.y(), result_.requested_end.z(),
@@ -103,7 +111,9 @@ void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
         result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_BUDGET)],
         result_.rejected_advisory, result_.duration_s,
         result_.occupancy_query_s, result_.clearance_query_s,
-        result_.advisory_query_s);
+        result_.advisory_query_s, result_.map_changed,
+        static_cast<unsigned long>(result_.occupancy_generation),
+        static_cast<unsigned long>(result_.live_generation_at_finish));
     if (failure_observer_) failure_observer_(result_);
 }
 
@@ -455,12 +465,16 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
             // if((time_2 - time_1).toSec() > 0.1)
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
+            recordMapAtFinish();
             result_.duration_s = (rclcpp::Clock().now() - time_1).seconds();
             RCLCPP_INFO(rclcpp::get_logger("AstarSearch"),
-                "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs",
+                "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
                 result_.expanded, result_.query_calls, result_.cache_hits,
                 result_.duration_s, result_.occupancy_query_s,
-                result_.clearance_query_s, result_.advisory_query_s);
+                result_.clearance_query_s, result_.advisory_query_s,
+                result_.map_changed,
+                static_cast<unsigned long>(result_.occupancy_generation),
+                static_cast<unsigned long>(result_.live_generation_at_finish));
             return true;
         }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.

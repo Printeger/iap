@@ -104,6 +104,24 @@ TEST(RegisteredLidarWindow, SuccessfulHitRayMarksFreeAndHitWins) {
             RegisteredVoxelState::OCCUPIED);
 }
 
+TEST(RegisteredLidarWindow, UnthinnedDiagnosticSeparatesRayGapFromEndpointDeduplication) {
+  auto window = makeWindow();
+  // Both returns land in voxel (3,2,0), but their rays differ in voxel (2,1,0).
+  auto source = frame(1, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(3.4, 1.6, 0), Eigen::Vector3d(2.6, 2.4, 0)});
+  ASSERT_TRUE(window.applyCurrentFrame(source).accepted);
+  const auto thinned = window.observationSourceFlags();
+  const auto raw = window.unthinnedObservationMask(source);
+  bool found_gap = false;
+  for (size_t i = 0; i < raw.size(); ++i)
+    found_gap |= raw[i] && !(thinned[i] & 3);
+  EXPECT_TRUE(found_gap);
+  // Replaying all rays cannot grant any additional online observation.
+  EXPECT_EQ(window.observationSourceFlags(), thinned);
+  EXPECT_FALSE(raw[(6 * 4 + 3) * 4]);
+  EXPECT_EQ(window.currentFrameSource()->hits_lidar.size(), 2u);
+}
+
 TEST(RegisteredLidarWindow,
      NearBoundaryDiagonalRayCompletesWithoutOvershootingItsEndpoint) {
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";

@@ -210,6 +210,7 @@ TEST(AdvisoryAStar, MapChangeEndsSearchBeforeUsingPreviousCachedCells) {
   EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
                                   Eigen::Vector3d(1, 0, 1)));
   EXPECT_EQ(search.lastResult().failure, AStar::Failure::MAP_STALE);
+  EXPECT_TRUE(search.lastResult().map_changed);
 }
 
 TEST(AdvisoryAStar, FrozenSearchCompletesWhileLiveMapAdvances) {
@@ -234,6 +235,8 @@ TEST(AdvisoryAStar, FrozenSearchCompletesWhileLiveMapAdvances) {
                                  Eigen::Vector3d(1, 0, 1)));
   EXPECT_GT(calls, 12);
   EXPECT_NE(live->occupancyGeneration(), frozen->occupancyGeneration());
+  EXPECT_TRUE(search.lastResult().map_changed);
+  EXPECT_EQ(search.lastResult().live_generation_at_finish, live->occupancyGeneration());
 }
 
 TEST(AdvisoryAStar, TimeoutIsNotReportedAsNoPath) {
@@ -250,4 +253,26 @@ TEST(AdvisoryAStar, TimeoutIsNotReportedAsNoPath) {
   EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-2, 0, 1),
                                   Eigen::Vector3d(2, 0, 1), 0.0));
   EXPECT_EQ(search.lastResult().failure, AStar::Failure::TIME_BUDGET);
+}
+
+TEST(AdvisoryAStar, LiveUpdateDoesNotOverwriteFrozenSearchTimeout) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(100, 100, 20));
+  search.setLiveGenerationProvider([map] {
+    return map->occupancyGeneration() + 1;
+  });
+  search.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell;
+    cell.execution_reason = GridExecutionReason::OK;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-2, 0, 1),
+                                  Eigen::Vector3d(2, 0, 1), 0.0));
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::TIME_BUDGET);
+  EXPECT_TRUE(search.lastResult().map_changed);
+  EXPECT_EQ(search.lastResult().live_generation_at_finish,
+            search.lastResult().occupancy_generation + 1);
 }

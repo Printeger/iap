@@ -385,20 +385,33 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
             motion_start_tolerance_m_) {
       assessment.execution_reason = GridExecutionReason::TRACKING_ERROR;
       assessment.first_execution_time_s = 0.0;
-      return assessment;
+      assessment.first_execution_position = curve.evaluateDeBoorT(0.0);
+      // Keep the rejection, but opt-in forensics still scans the actual curve
+      // so a continuity error cannot conceal its first unknown voxel.
+      if (!capture_failure_map_) return assessment;
     }
   }
   const double end = std::min(duration, to_time_s);
   const auto motion = currentMotionContext(allow_bridged);
   assessment.evaluated_motion_quality = motion.quality;
   assessment.evaluated_motion_error_proxy_m = motion.error_proxy_m;
+  assessment.evaluated_motion = motion;
+  assessment.evaluation_time_s = now_s;
   const auto generation = grid_map_->occupancyGeneration();
   assessment.evaluated_generation = generation;
   const double step = std::min(0.02, grid_map_->getResolution() /
                                       (2.0 * std::max(0.1, pp_.max_vel_)));
-  for (double t = std::clamp(from_time_s, 0.0, duration);
-       t <= end + step / 2.0; t += step) {
-    const auto p = curve.evaluateDeBoorT(std::min(t, end));
+  assessment.checked_from_time_s = std::clamp(from_time_s, 0.0, duration);
+  assessment.checked_to_time_s = end;
+  assessment.sample_step_s = step;
+  if (end < assessment.checked_from_time_s) return assessment;
+  const size_t intervals = static_cast<size_t>(std::ceil(
+      (end - assessment.checked_from_time_s) / step));
+  // Always visit the actual interval endpoint, including a tail shorter
+  // than half a sampling step. Store effective curve time, never an overshoot.
+  for (size_t sample = 0; sample <= intervals; ++sample) {
+    const double t = std::min(end, assessment.checked_from_time_s + sample * step);
+    const auto p = curve.evaluateDeBoorT(t);
     const auto cell = grid_map_->queryPlanningCell(
         p, risk_version, now_s, planning_risk_policy_, motion);
     if (cell.occupancy_generation != generation ||
@@ -411,6 +424,14 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       return assessment;
     }
     ++assessment.sampled_points;
+    if (sample == 0 && assessment.execution_reason == GridExecutionReason::TRACKING_ERROR)
+      assessment.first_execution_cell = cell;
+    if (!cell.observed && cell.execution_reason != GridExecutionReason::OUT_OF_MAP &&
+        !std::isfinite(assessment.first_unobserved_time_s)) {
+      assessment.first_unobserved_time_s = std::min(t, end);
+      assessment.first_unobserved_position = p;
+      assessment.first_unobserved_cell = cell;
+    }
     if (!cell.executable() && assessment.executable()) {
       assessment.execution_reason = cell.execution_reason;
       assessment.first_execution_time_s = t;
@@ -429,6 +450,19 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       ++assessment.advisory_unknown_samples;
     }
   }
+  const bool need_unknown = std::isfinite(assessment.first_unobserved_time_s) &&
+      !captured_failure_kinds_.count("curve_unobserved");
+  const bool need_failure = from_time_s <= 0.0
+      ? !captured_failure_kinds_.count("candidate")
+      : (!captured_failure_kinds_.count("remaining_failure") ||
+         !captured_failure_kinds_.count("remaining_stop"));
+  if (capture_failure_map_ && !assessment.executable() &&
+      (need_unknown || need_failure)) {
+    const auto snapshot = grid_map_->captureFailureSnapshot(true);
+    if (snapshot && snapshot->generation == generation)
+      assessment.failure_snapshot =
+          std::make_shared<const GridMapFailureSnapshot>(*snapshot);
+  }
   return assessment;
 }
 
@@ -446,11 +480,13 @@ bool EGOPlannerManager::beginPlanningView() {
     const double time_s = node_->now().seconds();
     const auto motion = currentMotionContext();
     const auto risk_version = beginRiskQuery();
-    const auto snapshot = grid_map_->captureFailureSnapshot();
+    const auto snapshot = grid_map_->captureFailureSnapshot(capture_failure_map_);
     if (!snapshot) continue;
     if (snapshot->generation != grid_map_->occupancyGeneration()) continue;
     PlanningView view;
     view.physical = GridMap::fromFailureSnapshot(*snapshot);
+    if (capture_failure_map_)
+      view.snapshot = std::make_shared<const GridMapFailureSnapshot>(*snapshot);
     view.generation = snapshot->generation;
     view.time_s = time_s;
     view.motion = motion;

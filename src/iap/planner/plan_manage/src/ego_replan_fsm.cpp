@@ -761,7 +761,7 @@ namespace ego_planner
       planner_manager_->captureRemainingFailure(kind, expected, odom_pos_,
           (expected - odom_pos_).norm(), info.traj_id_,
           last_command_time_s_.load(std::memory_order_relaxed),
-          odom_age, map_age, reason);
+          odom_age, map_age, reason, &assessment);
     };
 
     // Swarm separation retains its physical execution meaning.

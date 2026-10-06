@@ -117,7 +117,7 @@ def main():
             wire.scale.x = 0.035
             wire.color.r = wire.color.g = wire.color.b = 0.95
             wire.color.a = 0.7
-            if meta.get("schema_version") == "iap_gridmap_failure_v2":
+            if meta.get("schema_version") in ("iap_gridmap_failure_v2", "iap_gridmap_failure_v3"):
                 middle = np.asarray(meta["search_pool_center_m"], dtype=float)
                 dimensions = np.asarray(meta["search_pool_dimensions"], dtype=float)
                 step = float(meta["search_step_size_m"])

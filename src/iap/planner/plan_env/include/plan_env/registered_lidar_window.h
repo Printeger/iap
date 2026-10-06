@@ -105,6 +105,11 @@ struct RegisteredVoxelChange {
 };
 
 struct RegisteredLidarWindowUpdate {
+  // Which authoritative producer removed an observed contribution. Used
+  // only for opt-in failure forensics, never as execution evidence.
+  enum class Operation : uint8_t { NONE = 0, CURRENT_REPLACE = 1,
+                                  ACTIVE_DELTA = 2, ACTIVE_REPLACE = 3 };
+  Operation operation = Operation::NONE;
   bool accepted = false;
   bool recovery_required = false;
   std::string reason;
@@ -146,6 +151,13 @@ class RegisteredLidarWindow {
   std::uint64_t activeGeneration() const { return active_generation_; }
   std::int64_t currentFrameId() const { return current_frame_id_; }
   const Geometry& geometry() const { return geometry_; }
+  std::optional<RegisteredLidarFrameData> currentFrameSource() const;
+  // current hit=1/free=2, active hit=4/free=8; retains the actual masks.
+  std::vector<uint8_t> observationSourceFlags() const;
+  // Diagnostic replay of every provided ray using the same traversal, with
+  // endpoint deduplication disabled. Does not modify online evidence.
+  std::vector<uint8_t> unthinnedObservationMask(
+      const RegisteredLidarFrameData& frame) const;
   std::optional<RegisteredLidarFrameMetadata> currentFrameMetadata() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
   environmentOccupiedVoxelCenters() const;
@@ -182,7 +194,7 @@ class RegisteredLidarWindow {
   Eigen::Vector3i indexOf(const Eigen::Vector3d& point) const;
   Eigen::Vector3i indexFromAddress(int address) const;
   FrameContribution buildContribution(
-      const RegisteredLidarFrameData& frame) const;
+      const RegisteredLidarFrameData& frame, bool deduplicate = true) const;
   RegisteredVoxelState stateAtAddress(int address) const;
   void removeActiveContribution(const FrameContribution& contribution);
   void addActiveContribution(const FrameContribution& contribution);
