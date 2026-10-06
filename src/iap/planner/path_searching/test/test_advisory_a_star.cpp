@@ -60,6 +60,41 @@ TEST(AdvisoryAStar, StartInsideWarningUsesSameHighCostSearch) {
   EXPECT_FALSE(search.getPath().empty());
 }
 
+TEST(AdvisoryAStar, RejectedIncomingEdgeDoesNotDiscoverItsNeighbor) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(20, 20, 10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.advisory.cost_multiplier = 1.0;
+    cell.advisory.classification = GridAdvisoryClass::VALID;
+    const bool lattice = std::abs(p.z() * 10 - std::round(p.z() * 10)) < 1e-8 &&
+        std::abs(p.x() * 10 - std::round(p.x() * 10)) < 1e-8 &&
+        std::abs(p.y() * 10 - std::round(p.y() * 10)) < 1e-8;
+    const bool allowed_node =
+        p.isApprox(Eigen::Vector3d(0, 0, 1), 1e-8) ||
+        p.isApprox(Eigen::Vector3d(0.1, 0.1, 1), 1e-8) ||
+        p.isApprox(Eigen::Vector3d(0.1, 0, 1), 1e-8) ||
+        p.isApprox(Eigen::Vector3d(0.2, 0, 1), 1e-8);
+    const bool blocked_midpoint =
+        p.isApprox(Eigen::Vector3d(0.05, 0, 1), 1e-8) ||
+        p.isApprox(Eigen::Vector3d(0.15, 0.05, 1), 1e-8);
+    cell.execution_reason = (lattice && !allowed_node) || blocked_midpoint
+        ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    return cell;
+  });
+  // A->B is blocked at its midpoint. A->C->B->goal is executable. Neither B
+  // nor goal can inherit old scores/state when their first incoming edge fails.
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(0, 0, 1),
+        Eigen::Vector3d(0.2, 0, 1), 1.0, Eigen::Vector3d(0, 0, 1)));
+    const auto route = search.getPath();
+    EXPECT_GE(route.size(), 4u);
+    EXPECT_EQ(search.lastResult().failure, AStar::Failure::NONE);
+  }
+}
+
 TEST(AdvisoryAStar, UnobservedEndpointDoesNotWalkOutOfPool) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);

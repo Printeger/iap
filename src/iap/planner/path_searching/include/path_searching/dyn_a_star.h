@@ -10,8 +10,9 @@
 #include <optional>
 #include <unordered_map>
 #include <array>
+#include <limits>
 
-constexpr double inf = 1 >> 20;
+constexpr double inf = std::numeric_limits<double>::infinity();
 struct GridNode;
 typedef GridNode *GridNodePtr;
 

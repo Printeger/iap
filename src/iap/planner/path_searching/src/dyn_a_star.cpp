@@ -432,12 +432,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     startPtr->index = start_idx;
     startPtr->rounds = rounds_;
     startPtr->gScore = 0;
+    endPtr->index = end_idx;
     startPtr->fScore = getHeu(startPtr, endPtr);
     startPtr->state = GridNode::OPENSET; //put start node in open set
     startPtr->cameFrom = NULL;
     openSet_.push({startPtr, startPtr->fScore});
-
-    endPtr->index = end_idx;
 
     double tentative_gScore;
 
@@ -507,8 +506,6 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         continue; //in closed set.
                     }
 
-                    neighborPtr->rounds = rounds_;
-
                     const auto multiplier = edgeMultiplier(
                         Index2Coord(current->index), Index2Coord(neighborPtr->index),
                         current->index,
@@ -526,7 +523,10 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
 
                     if (!flag_explored)
                     {
-                        //discover a new node
+                        // A rejected incoming edge does not discover a node.
+                        // Otherwise a later legal edge can inherit scores or
+                        // CLOSED state from a previous search round.
+                        neighborPtr->rounds = rounds_;
                         neighborPtr->state = GridNode::OPENSET;
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
