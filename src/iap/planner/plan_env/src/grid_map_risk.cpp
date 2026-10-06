@@ -205,12 +205,35 @@ GridPlanningCell GridMap::queryPlanningCell(
     {
       std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
       const auto dims = mp_.map_voxel_num_;
+      const bool indexed = frozen_raw_index_generation_ == observed.generation &&
+          frozen_raw_index_generation_ == occupancyGeneration() &&
+          !frozen_raw_row_offsets_.empty();
+      const auto examine_raw = [&](const Eigen::Vector3i& index) {
+        Eigen::Vector3d center;
+        indexToPos(index, center);
+        const double distance = (position - center).norm();
+        if (distance < closest) {
+          closest = distance;
+          nearest = center;
+        }
+      };
+      const int first_z = std::max(0, observed.voxel_index.z() - radius_cells);
+      const int last_z = std::min(dims.z() - 1, observed.voxel_index.z() + radius_cells);
       for (int x = std::max(0, observed.voxel_index.x() - radius_cells);
            x <= std::min(dims.x() - 1, observed.voxel_index.x() + radius_cells); ++x)
         for (int y = std::max(0, observed.voxel_index.y() - radius_cells);
-             y <= std::min(dims.y() - 1, observed.voxel_index.y() + radius_cells); ++y)
-          for (int z = std::max(0, observed.voxel_index.z() - radius_cells);
-               z <= std::min(dims.z() - 1, observed.voxel_index.z() + radius_cells); ++z) {
+             y <= std::min(dims.y() - 1, observed.voxel_index.y() + radius_cells); ++y) {
+          if (indexed) {
+            const size_t row = static_cast<size_t>(x) * dims.y() + y;
+            const int base = static_cast<int>(row) * dims.z();
+            const auto begin = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row];
+            const auto end = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row + 1];
+            for (auto it = std::lower_bound(begin, end, base + first_z);
+                 it != end && *it <= base + last_z; ++it)
+              examine_raw(Eigen::Vector3i(x, y, *it - base));
+            continue;
+          }
+          for (int z = first_z; z <= last_z; ++z) {
             const Eigen::Vector3i index(x, y, z);
             const auto address = static_cast<size_t>(toAddress(index));
             const bool raw_cloud = address < md_.occupancy_buffer_raw_cloud_.size() &&
@@ -218,15 +241,10 @@ GridPlanningCell GridMap::queryPlanningCell(
             const bool raw_fused = address < md_.occupancy_buffer_.size() &&
                 md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
             if (raw_cloud || raw_fused) {
-              Eigen::Vector3d center;
-              indexToPos(index, center);
-              const double distance = (position - center).norm();
-              if (distance < closest) {
-                closest = distance;
-                nearest = center;
-              }
+              examine_raw(index);
             }
           }
+        }
     }
     if (occupancyGeneration() != observed.generation) return;
     cell.raw_center_clearance_m = closest;
@@ -369,6 +387,7 @@ GridMap::Ptr GridMap::fromFailureSnapshot(const GridMapFailureSnapshot& snapshot
   map->md_.occupancy_buffer_raw_cloud_.resize(count);
   map->md_.occupancy_buffer_inflate_.resize(count);
   map->md_.observed_buffer_.resize(count);
+  map->frozen_raw_row_offsets_.resize(static_cast<size_t>(dims.x()) * dims.y() + 1);
   for (size_t i = 0; i < count; ++i) {
     const auto flags = snapshot.cell_flags[i];
     if (flags & ~static_cast<uint8_t>(7))
@@ -376,7 +395,12 @@ GridMap::Ptr GridMap::fromFailureSnapshot(const GridMapFailureSnapshot& snapshot
     map->md_.occupancy_buffer_raw_cloud_[i] = flags & 1;
     map->md_.occupancy_buffer_inflate_[i] = flags & 2;
     map->md_.observed_buffer_[i] = flags & 4;
+    if (i % static_cast<size_t>(dims.z()) == 0)
+      map->frozen_raw_row_offsets_[i / dims.z()] = map->frozen_raw_addresses_.size();
+    if (flags & 1) map->frozen_raw_addresses_.push_back(static_cast<int>(i));
   }
+  map->frozen_raw_row_offsets_.back() = map->frozen_raw_addresses_.size();
+  map->frozen_raw_index_generation_ = snapshot.generation;
   map->occupancy_update_sequence_.store(snapshot.generation * 2u);
   map->occupancy_cloud_stamp_s_.store(snapshot.cloud_stamp_s);
   return map;

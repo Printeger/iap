@@ -509,6 +509,12 @@ private:
 
   MappingParameters mp_;
   MappingData md_;
+  // Only fromFailureSnapshot builds this index over the same raw occupancy.
+  // Live mutation revokes it by generation; observed/inflated layers remain
+  // authoritative full buffers. Entries preserve x/y/z scan and tie order.
+  uint64_t frozen_raw_index_generation_ = 0;
+  std::vector<int> frozen_raw_addresses_;
+  std::vector<size_t> frozen_raw_row_offsets_;
   mutable std::mutex risk_mutex_;
   GridRiskContext risk_context_;
   uint64_t risk_version_ = 0;

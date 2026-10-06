@@ -33,6 +33,9 @@ struct GridMapTestAccess {
     map.md_.occupancy_buffer_raw_cloud_.at(address) = 1;
     map.md_.occupancy_buffer_inflate_.at(address) = 1;
   }
+  static void disableFrozenIndex(GridMap& map) {
+    map.frozen_raw_index_generation_ = 0;
+  }
 };
 class GridRiskTest : public testing::Test {
  protected:
@@ -123,6 +126,66 @@ TEST_F(GridRiskTest, FrozenFailureMapUsesSamePlanningCellRule) {
     else
       EXPECT_EQ(frozen.raw_center_clearance_m, original.raw_center_clearance_m);
   }
+}
+
+TEST(GridClearanceIndex, SameExactCubeNearestPointAndRejectionsAsLiveBuffers) {
+  GridMapFailureSnapshot saved;
+  saved.dimensions = Eigen::Vector3i(32, 24, 16);
+  saved.origin = Eigen::Vector3d(-1.6, -1.2, 0);
+  saved.resolution_m = 0.1;
+  saved.max_boundary = saved.origin + saved.dimensions.cast<double>() * 0.1;
+  saved.frame_id = "map";
+  saved.generation = 3;
+  saved.cloud_stamp_s = 10;
+  saved.cell_flags.resize(32 * 24 * 16, 4);
+  for (size_t i = 0; i < saved.cell_flags.size(); ++i) {
+    if (i % 211 == 0) saved.cell_flags[i] = 5;
+    else if (i % 137 == 0) saved.cell_flags[i] = 6;
+    else if (i % 17 == 0) saved.cell_flags[i] = 0;
+  }
+  auto indexed = GridMap::fromFailureSnapshot(saved);
+  auto dense = GridMap::fromFailureSnapshot(saved);
+  GridMapTestAccess::disableFrozenIndex(*dense);
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 10;
+  motion.error_proxy_m = 0.02;
+  GridPlanningRiskPolicy policy;
+  const auto compare = [&](const Eigen::Vector3d& p, bool diagnostics) {
+    const auto a = indexed->queryPlanningCell(p, 0, 10, policy, motion, diagnostics);
+    const auto b = dense->queryPlanningCell(p, 0, 10, policy, motion, diagnostics);
+    EXPECT_EQ(a.execution_reason, b.execution_reason);
+    EXPECT_EQ(a.observed, b.observed);
+    EXPECT_EQ(a.occupancy_generation, b.occupancy_generation);
+    EXPECT_EQ(a.required_clearance_m, b.required_clearance_m);
+    if (std::isnan(b.raw_center_clearance_m)) {
+      EXPECT_TRUE(std::isnan(a.raw_center_clearance_m));
+    } else {
+      EXPECT_EQ(a.raw_center_clearance_m, b.raw_center_clearance_m);
+      if (b.nearest_raw_center.allFinite()) {
+        EXPECT_TRUE(a.nearest_raw_center == b.nearest_raw_center);
+      }
+    }
+  };
+  // Continuous offsets, exact voxel edges/centers, unknown, raw/inflated,
+  // map boundaries and different stencil radii exercise both real paths.
+  for (const double radius : {0.0, 0.35, 0.9}) {
+    motion.body_radius_m = radius;
+    for (int i = 0; i < 600; ++i) {
+      Eigen::Vector3d p = saved.origin + Eigen::Vector3d(
+          (i * 13 % 33) * 0.1, (i * 19 % 25) * 0.1,
+          (i * 7 % 17) * 0.1);
+      if (i % 3 == 0) p.array() += 0.05;
+      if (i % 3 == 1) p.array() += 0.00123;
+      compare(p, false);
+      compare(p, true);
+    }
+  }
+  // Generation change invalidates the index, including new fused obstacles.
+  const Eigen::Vector3d new_raw(0.15, 0.05, 0.75);
+  indexed->setOccupancy(new_raw, 1);
+  dense->setOccupancy(new_raw, 1);
+  compare(new_raw + Eigen::Vector3d(0.12, 0, 0), true);
 }
 TEST_F(GridRiskTest, AllCellsShareAddressAndBordersReject) {
   const auto version = map.bindRiskContext(context());
