@@ -271,7 +271,7 @@ LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立
 真正不可解的拒绝检查保留。实时 ROS 发布／接续及固定路线校准与任务对照仍待测。真实森林现场仍待测：
 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，不推广未经独立实测的校准参数。
 契约见 [advisory_prediction_contract.md](../spec/advisory_prediction_contract.md)。
-本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/staged/report.md)。
+本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/final/report.md)。
 
 固定路线校准工具已实现：三条件 × 三次校准／三次独立验证、disjoint seed，
 测量残差噪声标定后必须重放，再冻结统一换算；水平／垂直同时满足的 95%
@@ -293,3 +293,26 @@ guide 跟踪使用实际 N-3 样条跨度，并在原修复预算／权重内以
 复制到同一 run 后登记。录制请求有独立 ID 和完整清单；未录到输入或未重放
 也进入误差分母。本轮未取得这些真实前置证据，九次校准、九次独立验证和六次
 任务对照均未启动；95% 经验覆盖与森林任务结果保持 INCONCLUSIVE，默认不推广。
+
+
+正式实施代码依次提交：`fa0a780`（准入／数值）、`9d41d66`（采样／缓存）、
+`8763abb`（实际曲线）、`a61b16d`（校准合同／来源噪声）、`7da3cba`（引导／试验与报告）。
+最终相关回归 8 个规划目标、7 个预测／输入目标通过；38 项 canonical launch、
+9 项录制／重放、7 项 A/B／报告、6 项经验校准合同及 35 项 EGO baseline 均通过。
+CPU 单独合成开关对照 HPL 同为 2 m，曲线横向偏移 OFF=0、ON=0.819709 m，
+原发布闸门通过，不能替代真实 ROS／森林接续。
+
+提交绑定的合成同输入 S0–S5 复跑保留 ON/OFF 完整冻结输入；HPL 空间跨度
+ON=0.0000146556 m、OFF=0.1428595 m。双源共同退化传入最终结果；共同秩亏
+或正则化主导官方 PL 为空。epsilon ×0.1/1/10 的正常 OFF PL 最大相对变化
+约 2.60e-8（预定 ≤5%），未放宽标准。重复 ×2/4 的信息及 H/V 变化均为 0，
+同覆盖密度最大变化 0.0298937%（预定 ≤5%）。原始支持、矩阵、数值、图和
+命令见本节正式报告链接；真实误差请求 CSV 仅有表头，独立实测运行 0。
+
+独立验收：准入／数值 PASS_CPU_REGRESSION；采样稳定性 PASS_SYNTHETIC；
+来源同帧语义 FAIL_INCOMPLETE_FRAME_CONTRACT；真实空间敏感性与误差经验符合性
+INCONCLUSIVE；曲线发布／接续 PASS_CPU，森林任务 INCONCLUSIVE。GPU READY
+（nvidia-smi=0、cuInit=0、device_count=1），四处用户修改仍保持原样，现场状态
+LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE。未启动三份真实冻结扫描、18 次校准／
+独立验证或 6 次任务对照，默认校准参数未推广。下一步补 ENU／外参／时间证据
+和生产物理检查通过的固定参考路线后，实施独立实测；冻结 tau=0 不作未来误差保证。
