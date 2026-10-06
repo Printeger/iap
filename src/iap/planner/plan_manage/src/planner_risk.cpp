@@ -375,13 +375,13 @@ GridMotionContext EGOPlannerManager::currentMotionContext(
 EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     const UniformBspline& trajectory, const uint64_t risk_version,
     const double now_s, const bool allow_bridged, const double from_time_s,
-    const double to_time_s, const GridPlanningContext* physical_context) {
+    const double to_time_s, const GridPlanningContext* physical_context, bool check_connection) {
   TrajectoryAssessment assessment;
   auto curve = trajectory;
   const double duration = curve.getTimeSum();
   const auto latest_odom = latest_odom_provider_
       ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
-  if (from_time_s <= 0.0 && latest_odom) {
+  if (from_time_s <= 0.0 && latest_odom && !(planning_view_ && connection_time_) && check_connection) {
     const auto& p = latest_odom->pose.pose.position;
     const Eigen::Vector3d actual = physical_context && planning_view_ &&
         physical_context == &planning_view_->physical_context && planning_view_->reference_position
@@ -406,8 +406,10 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   assessment.evaluated_motion = motion;
   assessment.evaluation_time_s = now_s;
   uint64_t generation = 0;
-  const double step = std::min(0.02, grid_map_->getResolution() /
-                                      (2.0 * std::max(0.1, pp_.max_vel_)));
+  const auto derivative_points=curve.getDerivative().getControlPoint();
+  double speed_bound=0.1;
+  for(int i=0;i<derivative_points.cols();++i) speed_bound=std::max(speed_bound,derivative_points.col(i).norm());
+  const double step = std::min(0.02, grid_map_->getResolution() / (2.0 * speed_bound));
   assessment.checked_from_time_s = std::clamp(from_time_s, 0.0, duration);
   assessment.checked_to_time_s = end;
   assessment.sample_step_s = step;
@@ -419,12 +421,20 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     std::vector<Eigen::Vector3d> positions; positions.reserve(intervals+1);
     const auto budget=planning_view_ && from_time_s<=0.0 ? planning_budget_ : PlanningBudget::Ptr{};
     for (size_t sample=0;sample<=intervals;++sample) {
-      if (budget && budget->expired()) { assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment; }
+      if (budget && budget->expired()) { assessment.budget_exhausted=true; return assessment; }
       positions.push_back(curve.evaluateDeBoorT(std::min(end,assessment.checked_from_time_s+sample*step)));
     }
     const auto prepared = grid_map_->preparePlanningQuery(now_s,motion);
     const auto corridor = grid_map_->captureFrozenCorridor(positions,prepared.required_clearance_m,budget,capture_failure_map_);
-    if (!corridor) { assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment; }
+    if (!corridor) {
+      assessment.budget_exhausted=budget && budget->expired();
+      if(!assessment.budget_exhausted) {
+        assessment.execution_reason=prepared.motion_reason!=GridExecutionReason::OK
+            ? prepared.motion_reason : GridExecutionReason::ENVIRONMENT_STALE;
+        assessment.first_execution_time_s=assessment.checked_from_time_s;
+      }
+      return assessment;
+    }
     corridor_context = grid_map_->preparePlanningQuery(now_s,motion,corridor);
     physical_context = &corridor_context;
   }
@@ -437,7 +447,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     const double t = std::min(end, assessment.checked_from_time_s + sample * step);
     const auto p = curve.evaluateDeBoorT(t);
     if (planning_view_ && planning_budget_ && planning_budget_->expired() && from_time_s<=0.0) {
-      assessment.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return assessment;
+      assessment.budget_exhausted=true; return assessment;
     }
     auto cell = grid_map_->queryPlanningCell(
         p, 0, now_s, planning_risk_policy_, motion, false, physical_context);
@@ -494,6 +504,26 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   return assessment;
 }
 
+double EGOPlannerManager::terminalSpeedLimit(const Eigen::Vector3d& position,
+    const Eigen::Vector3d& reference_velocity) const {
+  const double desired=std::min(pp_.max_vel_,reference_velocity.norm());
+  if (!(desired>1e-9) || !reference_velocity.allFinite()) return 0;
+  const double acceleration=std::max(.1,pp_.max_acc_);
+  const double reserve=2*grid_map_->getResolution();
+  const double distance=desired*desired/(2*acceleration)+reserve;
+  const Eigen::Vector3d direction=reference_velocity.normalized();
+  const double spacing=grid_map_->getResolution()*.5;
+  double available=0;
+  for(double d=0; d<=distance+spacing; d+=spacing) {
+    if(planning_budget_ && planning_budget_->expired()) return 0;
+    const double effective=std::min(d,distance);
+    if(!queryLocalTargetCell(position+direction*effective,node_->now().seconds()).executable()) break;
+    available=effective;
+    if(effective==distance) break;
+  }
+  return std::min(desired,std::sqrt(2*acceleration*std::max(0.0,available-reserve)));
+}
+
 GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
     const Eigen::Vector3d& position, const double now_s) const {
   if (planning_view_) return queryPlanningViewCell(position);
@@ -502,9 +532,12 @@ GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
                                       currentMotionContext());
 }
 
-bool EGOPlannerManager::beginPlanningView() {
+bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
   planning_view_.reset();
-  planning_budget_ = std::make_shared<PlanningBudget>();
+  planning_targets_.clear();
+  connection_time_.reset(); connection_predecessor_=-1;
+  last_plan_failure_=PlanFailure::None; last_candidate_assessment_={};
+  planning_budget_ = std::make_shared<PlanningBudget>(std::min(1.5,std::max(0.0,budget_seconds)));
   planning_calls_at_start_=predictor_calls_->load();
   planning_timings_.freeze_s=planning_timings_.prediction_preparation_s=0;
   planning_timings_.backend_s=planning_timings_.final_checks_s=0;
@@ -535,6 +568,7 @@ bool EGOPlannerManager::beginPlanningView() {
     view.physical_context = grid_map_->preparePlanningQuery(time_s, motion, epoch);
     // The bound PL context has to refer to this same occupancy generation.
     view.risk_version = epoch->generation == grid_map_->occupancyGeneration() ? risk_version : 0;
+    view.advisory_query=grid_map_->capturePlanningRiskQuery(view.risk_version,time_s,planning_risk_policy_,&view.advisory_valid_until_s);
     planning_view_ = std::move(view);
     return true;
   }
@@ -552,7 +586,14 @@ void EGOPlannerManager::endPlanningView() {
       <<planning_timings_.final_checks_s<<','<<a.calls<<','<<a.expanded<<','<<a.pushes<<','<<a.pops<<','<<a.queries<<','
       <<predictor_calls_->load()-planning_calls_at_start_<<','<<b.used()<<','<<b.expired()<<','<<b.denied()<<','
       <<a.hits[0]+a.hits[1]+a.hits[2]<<','<<a.misses[0]+a.misses[1]+a.misses[2]<<','
-      <<a.peak_cache_bytes[0]+a.peak_cache_bytes[1]+a.peak_cache_bytes[2]<<'\n'; planning_metrics_.flush();
+      <<a.peak_cache_bytes[0]+a.peak_cache_bytes[1]+a.peak_cache_bytes[2]<<','
+      <<last_candidate_assessment_.sampled_points<<','<<last_candidate_assessment_.advisory_avoid_samples<<','
+      <<last_candidate_assessment_.advisory_unknown_samples<<','
+      <<(!std::isfinite(planning_view_->advisory_valid_until_s) || node_->now().seconds()>planning_view_->advisory_valid_until_s || grid_map_->occupancyGeneration()!=planning_view_->generation)<<','
+      <<b.count(PlanningBudget::Repair::AdvisoryFallback)<<','<<planning_targets_.size()<<','
+      <<bspline_optimizer_->a_star_->lastResult().selected_goal<<','<<connection_predecessor_<<','
+      <<(connection_time_ ? connection_time_->seconds() : 0)<<','<<publicationTrajectory().traj_id_<<','
+      <<static_cast<unsigned>(last_plan_failure_)<<'\n'; planning_metrics_.flush();
   }
   planning_view_.reset();
 }
@@ -574,13 +615,12 @@ GridPlanningRisk EGOPlannerManager::queryPlanningViewAdvisory(
   const auto started = search_performance_diagnostics_
       ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   GridPlanningRisk risk;
-  if (view.risk_version != 0 && grid_map_->occupancyGeneration() == view.generation) {
+  if (view.advisory_query) {
     ++view.advisory_stats.queries;
-    risk = grid_map_->queryPlanningRisk(position, view.risk_version,
-        std::max(view.time_s, node_->now().seconds()), planning_risk_policy_);
+    risk=view.advisory_query(position);
   } else {
-    risk.query_status = GridRiskStatus::VERSION_CHANGED;
-    risk.cost_multiplier = std::max(1.0, planning_risk_policy_.unknown_multiplier);
+    risk.query_status=GridRiskStatus::UNCOMPUTED;
+    risk.cost_multiplier=std::max(1.0,planning_risk_policy_.unknown_multiplier);
   }
   if (search_performance_diagnostics_)
     view.advisory_stats.advisory_s += std::chrono::duration<double>(
@@ -627,15 +667,52 @@ EGOPlannerManager::assessRemainingTrajectory(const double now_s) {
     last_runtime_advisory_query_s_ = now_s;
     version = beginRiskQuery();
   }
-  const double elapsed = now_s - local_data_.start_time_.seconds();
+  const double elapsed = std::max(0.0,now_s - local_data_.start_time_.seconds());
   // Continue to find physical obstacles over the entire remaining curve.
   // The bridge is a current authorization with a wall-clock expiry, checked
   // again on every supervision tick; it is not a spatial lookahead cutoff.
   auto assessment = assessTrajectory(local_data_.position_traj_, version,
-                                     now_s, true, elapsed);
+                                     now_s, true, elapsed, pending_trajectory_ ?
+                                         pending_trajectory_->start_time_.seconds()-local_data_.start_time_.seconds() :
+                                         std::numeric_limits<double>::infinity());
   if (assessment.map_changed)
     assessment = assessTrajectory(local_data_.position_traj_, 0,
-                                  node_->now().seconds(), true, elapsed);
+                                  node_->now().seconds(), true, elapsed, pending_trajectory_ ?
+                                      pending_trajectory_->start_time_.seconds()-local_data_.start_time_.seconds() :
+                                      std::numeric_limits<double>::infinity());
+  assessment.trajectory_id=local_data_.traj_id_;
+  if(pending_trajectory_) {
+    const auto& pending=*pending_trajectory_;
+    const double future_from=std::max(0.0,now_s-pending.start_time_.seconds());
+    // Pending start is in the future: it is checked as a curve, not compared
+    // with the vehicle's current measured position.
+    auto checked=assessTrajectory(pending.position_traj_,version,now_s,true,
+        future_from,std::numeric_limits<double>::infinity(),nullptr,false);
+    checked.trajectory_id=pending.traj_id_;
+    const double offset=pending.start_time_.seconds()-local_data_.start_time_.seconds();
+    const double active_warning=assessment.first_advisory_time_s;
+    const auto active_samples=assessment.sampled_points;
+    const auto active_avoid=assessment.advisory_avoid_samples;
+    const auto active_unknown=assessment.advisory_unknown_samples;
+    if(!checked.executable() && assessment.executable()) {
+      checked.first_execution_time_s+=offset;
+      if(std::isfinite(checked.first_unobserved_time_s)) checked.first_unobserved_time_s+=offset;
+      assessment=checked;
+      assessment.sampled_points+=active_samples;
+      assessment.advisory_avoid_samples+=active_avoid;
+      assessment.advisory_unknown_samples+=active_unknown;
+    } else {
+      assessment.sampled_points+=checked.sampled_points;
+      assessment.advisory_avoid_samples+=checked.advisory_avoid_samples;
+      assessment.advisory_unknown_samples+=checked.advisory_unknown_samples;
+    }
+    assessment.first_advisory_time_s=active_warning;
+    if(std::isfinite(checked.first_advisory_time_s)) {
+      const double warning=checked.first_advisory_time_s+offset;
+      if(!std::isfinite(assessment.first_advisory_time_s) || warning<assessment.first_advisory_time_s)
+        assessment.first_advisory_time_s=warning;
+    }
+  }
   return assessment;
 }
 
@@ -655,7 +732,7 @@ void EGOPlannerManager::initPredictionExport() {
   if (const auto log=glim::RunLogManager::get_if_initialized(); log && std::filesystem::exists(log->run_dir())) {
     const auto name="planner_flow_"+std::to_string(getpid());
     planning_metrics_.open(log->profiling_path(name+".csv"));
-    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes\n";
+    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure\n";
     export_metrics_.open(log->profiling_path(name+"_export.csv"));
     export_metrics_<<"reference_time,generation,total_s,payload_bytes,predictor_queries_before,predictor_queries_after\n";
     std::ofstream manifest(log->metadata_path("manifests/"+name+".json"));

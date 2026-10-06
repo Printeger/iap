@@ -59,6 +59,10 @@ namespace ego_planner
     static void parameterizeToBspline(const double &ts, const vector<Eigen::Vector3d> &point_set,
                                       const vector<Eigen::Vector3d> &start_end_derivative,
                                       Eigen::MatrixXd &ctrl_pts);
+    static void enforceBoundaryStates(Eigen::MatrixXd& points, double interval,
+        const Eigen::Vector3d& start, const Eigen::Vector3d& start_velocity,
+        const Eigen::Vector3d& start_acceleration, const Eigen::Vector3d& end,
+        const Eigen::Vector3d& end_velocity, const Eigen::Vector3d& end_acceleration);
 
     /* check feasibility, adjust time */
 

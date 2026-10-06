@@ -97,12 +97,14 @@ namespace ego_planner
         -std::numeric_limits<double>::infinity();
     std::atomic<double> last_command_time_s_{
         -std::numeric_limits<double>::infinity()};
+    std::atomic<int> executing_trajectory_id_{-1};
     rclcpp::CallbackGroup::SharedPtr odom_callback_group_;
     Eigen::Quaterniond odom_orient_;
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state
     Eigen::Vector3d end_pt_, end_vel_;                                       // goal state
     Eigen::Vector3d local_target_pt_, local_target_vel_;                     // local target state
+    std::vector<LocalTarget> local_targets_;
     std::vector<Eigen::Vector3d> wps_;
     int current_wp_;
 
@@ -130,8 +132,8 @@ namespace ego_planner
     /* helper functions */
     bool callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj); // front-end and back-end method
     bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
-    bool planFromGlobalTraj(const int trial_times = 1);
-    bool planFromCurrentTraj(const int trial_times = 1);
+    bool planFromGlobalTraj();
+    bool planFromCurrentTraj();
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);

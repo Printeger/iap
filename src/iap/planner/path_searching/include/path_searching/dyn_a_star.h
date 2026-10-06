@@ -65,6 +65,8 @@ public:
 		std::array<size_t, 10> rejected_execution{};
 		size_t rejected_advisory = 0;
 		size_t expanded = 0;
+		bool exhausted = false;
+		size_t selected_goal = std::numeric_limits<size_t>::max();
 		size_t query_calls = 0;
 		size_t cache_hits = 0;
 		size_t queue_pushes = 0, queue_pops = 0, advisory_refresh_calls = 0;
@@ -212,6 +214,10 @@ public:
 	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt,
 	                 Eigen::Vector3d end_pt, double max_duration_s = -1.0,
 	                 std::optional<Eigen::Vector3d> center_override = std::nullopt);
+	bool AstarSearchGoals(double step_size, const Eigen::Vector3d& start,
+	                     const std::vector<Eigen::Vector3d>& goals,
+	                     double max_duration_s = -1.0,
+	                     std::optional<Eigen::Vector3d> center_override = std::nullopt);
 
 	std::vector<Eigen::Vector3d> getPath();
 };

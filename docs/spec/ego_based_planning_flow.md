@@ -7,7 +7,29 @@
 阶段 1 已恢复 EGO 主线、同一个 GridMap 的空间 PL 缓存与真实 PredictorModule 接入；阶段 1a 已实测 GLIO 驱动的仿真和同图显示。本次实施把当前融合运动质量、物理环境与 advisory 预测分开查询，在原 EGO 触发点做完整性避让，并在写入 `local_data` 前检查实际曲线。以下「当前阶段」描述代码；新行为尚无四分叉现场验收记录，不能把旧运行结果当作本次功能的成功证据。原版流程图保持固定基线。
 从本轮起，`iap_sim.launch.py` 默认且统一使用 `icra_dense_forest_four_fork_v2` 做完整仿真和可视化回归；单元测试可以保留小型定向 fixture，历史 `fused_nominal` 运行记录保持原场景身份，不迁写为四分叉结论。
 
-## 前方目标、恢复、曲线闸门与独立显示
+## 合法前方目标集合、单条 guide 与未来接续（当前实现）
+
+本次变更基线为 `749e5be509ae6e35f7a8773547415108bcb2ee1f`。正常规划已取消原初值合法前缀/尾部作为恢复入口的要求：先检查完整实际初始曲线，无违反保留 EGO 快路径；有违反从真实接续状态向合法目标集合搜索一条 guide。以下历史阶段保留原实验身份，涉及旧修补入口或立即替换执行曲线的描述已由本节及当前流程图取代。
+
+局部参考投影只由 GLIO 更新实际进度，目标选择和失败不推进进度。每个距离档位 `1.0 / 0.65 / 0.35` 在期望位置 1 m 球内枚举同一 GridMap 的中心，检查地图/搜索范围、真实观测、物理净空和沿当前分支的制动前进量，按位置距离、前进量、体素索引排序，最多保留 16 个。终端速度沿参考，以参考速度、动力学上限及已观测减速空间共同限速；余量无法证明时为零。最终任务目标保持原坐标及零速度；不合法时记录具体执行原因，可继续中间局部目标，不据此宣称到达。
+
+一个 FSM 事件持有唯一 PlanningView 与 steady-clock 预算：总计最多 1.5 s、三次恢复动作，单次 A* 最多 1 s。搜索并沿 guide 初始化共同计一次；缩目标、曲线修正、advisory 回退、后端重启和发布重捕获另计。失败分类为 Budget、Target、Search、Curve、Release、Connection；预算耗尽不编码为环境过期。搜索、初始化、优化、尾部检查和提交均检查该截止时间。每个恢复动作改变目标、guide 约束或风险偏好，不再外层随机初值重试。
+
+本轮 raw/inflate/observed、运动质量、预测上下文、风险策略和评估时间冻结。冻结 advisory 使用 GridMap 的分类/代价规则，普通在线更新不会改变同轮结论；提交时间超过有效期或在线代数已变时明确标为历史偏好/不可用。正常搜索只有队列穷尽且记录 advisory 拒绝才允许一次高代价回退；超时、公共输入失效、起点不合法均不触发。成功后才报告放宽偏好找到物理合法通路。起点预警不再使整条路线自动进入高代价模式；若物理合法的起点连接仅被 advisory 拒绝，正常搜索没有可用起始边，独立记为偏好穷尽后才计费回退。
+
+首次规划绑定 GLIO 位置/速度，当前里程计没有加速度输入，初始化加速度为零。运动中绑定执行 ID、ROS 未来时刻及旧曲线在该时刻的 p/v/a；默认提前 1.6 s，其中最多 1.5 s 计算、0.1 s 发布余量。旧曲线剩余时间不足时同时缩短提前量和计算预算，不能保留发布余量则走已有检查制动恢复。时间倒退、迟到发布、测量过期或接续不一致撤销候选。时间调整重建均匀样条并恢复起终 p/v/a，随后重查动力学和整条实际曲线。
+
+`Bspline.start_mode` 为 `IMMEDIATE=0` 或 `AT_TIME=1`；消息定义变更要求相关 ROS 包统一重编译。规划器与 traj_server 各保存一条执行曲线和至多一条待生效曲线，指定时刻前继续旧命令，迟到/重复/边界不连续消息拒绝。立即恢复取消待生效曲线。规划器通过既有 `/position_cmd.trajectory_id` 确认切换；超时没有该 ID 时进入已有恢复。发布前在原地图锁内核对旧曲线到接续时刻、新曲线、终端制动空间、当前运动质量和 GLIO 测量时刻对齐；失败候选不覆盖旧轨迹。等待期间监督两段：最新物理授权失效进入立即检查恢复以取消服务端队列；仅 advisory 警告请求下一次重规划，绝不独立急停。
+
+阶段状态：上述源码与合成/进程回归已接入；四分叉真实持续前进、至少三次连续接续、原任务目标到达、有效 PL 覆盖和耗时仍待现场证据。版本化验收契约仍为 Draft。原失败快照内容未改动，其未观测修补起点不代表完整真实接续状态，不能要求该快照重放成功；目标在树内和无合法原尾部的回归明确采用合成合法起点。
+
+本次自动化证据目录为 `log/20261006T100143Z_557/runtime/`：六包 Release 构建通过（`build_evidence.log`）；IAP 全部 29 项 CTest（`iap_final_tests.log`）、GridMap 四项（`gridmap_final_tests.log`）、A* 一项/21 个用例（`astar_verified_tests.log`）、EGO 四项行为检查（`ego_evidence_tests.log`，基线含 28 个用例、进程管线、失败地图工具及真实服务端接续）通过。新接续 Python 的 flake8 通过（`scheduled_python_lint.log`）。bspline_opt 没有注册独立 CTest，边界导数、guide 优化、实际曲线拒绝由 EGO 用例覆盖；未宣称历史全包 linter 问题已经消除。
+
+合成 evidence 覆盖树内名义目标附近重选、集合内其他可达目标、未知原尾部旁路、未知不得穿越、原任务目标不替换、已观测制动余量限速、完整尾部检查、guide 绕行、时间调整后的 p/v/a、候选失败不覆盖旧轨迹、冻结 advisory 抵御普通更新、超时与穷尽分类以及起点预警的计费回退。真实 traj_server 测试覆盖旧命令持续、未来切换 p/v/a、迟到拒绝和立即指令取消 pending；FSM/manager 回归覆盖待生效段物理授权撤销，以及命令 ID 确认。两段失败取证携带曲线归属 ID；保存 pending 样条时恢复其局部采样时间，避免把旧时间原点配给新曲线。
+
+无物理障碍的合成 advisory 带通过 `AdvisoryOnlyViolationBuildsOneGuideAndBendsCurve` 和 `TakesLongerRouteAroundPredictedBand` 证明触发 guide 与绕行。它们不是森林真实 PL 覆盖证据；当前 CSV 已记录冻结样本/avoid/unknown、发布降级、回退数、目标集合、接续 ID/时刻、失败阶段和各阶段耗时，真实覆盖率、停顿和闭环表现仍待参考运行。保留的 `config/sim_ego/grid_map_stage1.rviz` 无关修改触发 `AGENTS.md` 的 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，未启动 180 s 森林参考运行或现场 risk 实验，不报告正式 PASS。
+
+## 历史：前方目标、恢复、曲线闸门与独立显示
 
 本轮以 `b3cd747` 为基线。局部目标从本轮 GLIO 参考投影之后选择，`last_progress_time_` 只表示实际投影，不表示目标时刻，不随缩目标或失败回退。终点未知时从当前投影扫描观测范围，并用参考累计前进距离判断原制动余量；中间障碍/未知不作为旁路不存在的证据。原强制旧参考前缀标志已删除。此阶段新增三个真实 FSM 入口测试，覆盖旧位置未知、失败不回退、参考内部障碍、弯曲参考弧长与自交处早分支。ego_planner 构建与三项相关 CTest 通过（`log/20261006T065847Z_524/runtime/step1_final_tests.log`）；初值入口不再整批拒绝未知控制点：公共输入失效仍等待，合法修补端点优先；未知猜测无合法端点时，以可执行的真实接续起点与目标搜索一条 guide，然后按弧长重采样、保留起终端导数并参数化给 EGO。`PlanningBudget` 从冻结入口开始，以 steady_clock 共用 1.5 s / 三次修复配额；A* 每次仍至多 1 s，缩目标、重初始化、搜索、advisory fallback 和后端重启共同扣费，优化取消回调检查同一 deadline。新增真实优化器未知旁路与嵌套预算测试；三项 EGO CTest 通过（`runtime/step2_tests.log`，同一运行目录）。正常规划现已复用 `FrozenOccupancyEpoch`，不再用失败快照创建 GridMap；原 raw 行索引、inflate 与完整 observed 以不可变数据共享，同代缓存冻结一次。失败取证只有显式开启时保留独立 opt-in 数据。`GridPlanningContext.epoch` 供目标、搜索、优化和整条实际曲线查询；A* 仅几何/坐标改变撤销，普通 live 代数变化记录统计、PL 按原软失效处理。最新曲线检查一次捕获全部检查位置及 raw 净空邻域，`commitFrozenCorridor()` 在原地图锁内比较 raw/inflate/observed 和时效后提交；远处更新通过，相关变化最多一次预算内重捕获，当前运动/接续状态在锁边界再核对，监督也复用一致走廊。新增 600 点精确差分与走廊撤销测试，EGO 3 项、A* 1 项、GridMap 4 项定向 CTest 通过（本轮 `step3_*tests*.log`）。复查同时补齐投影/端点/采样循环 deadline、A* 成功前超时检查及隐含重初始化配额；搜索或曲线拒绝不再自动缩目标。独立显示已迁到 `grid_map_visualizer`，当前接口与验证见下文；不据此宣称共享 CPU 开销或四分叉闭环已经验收。
 
@@ -127,59 +149,41 @@ flowchart TD
 
 ## 当前阶段流程图（随代码同步）
 
-本图描述本次代码中的一条规划主线；“已接入”表示实现状态，不代表四分叉现场验收通过。普通滚动触发和轨迹采样执行保留原 EGO FSM/`traj_server` 主线。
+本图描述当前源码；已接入不表示现场验收通过。原版基线流程图保持不变。
 
 ```mermaid
 flowchart TD
-    Sensors[仿真 LiDAR/IMU/GNSS] --> GLIO[GLIO 与 FGO 后验：已接入]
-    GLIO --> Current[当前运动质量：同帧协方差/求解/测量支持，实验性]
-    Sensors --> Beams[完整 beam：内容校验一次、精确扫描时间匹配]
-    GLIO --> Registered[注册帧与保留活动帧]
-    Beams --> Registered
-    Registered -->|晚到同扫描证据：补发当前帧或 remove+add 活动帧| Map[GridMap 物理占据/膨胀/真实观测：已实现]
-    GLIO --> Advisory[PredictorModule 冻结空间 PL：已接入]
-    Map --> Advisory
-    Advisory --> Risk[GridMap 同索引 HPL/VPL/状态：已实现]
-    Map --> Export[只读完整物理 epoch 与对齐预测输入导出]
-    GLIO --> Export
-    Export --> Viz[独立 grid_map_visualizer：有界预测与历史显示]
-    Goal[全局参考目标] --> FSM[EGO FSM：从实际参考投影选择前方几何目标]
-    Map --> Freeze[完整 raw/inflate/observed 冻结视图、代数与本轮公共条件]
-    Current --> Freeze
-    Risk --> Freeze
-    Freeze --> FSM
-    FSM --> Init[同轮初值：未知作为待修复猜测]
-    Init --> Scan[物理/净空/advisory 违反扫描]
-    Freeze --> Scan
-    Scan -->|无违反| Opt[rebound 主优化与时间调整]
-    Scan -->|有违反| Endpoints[半体素采样合法入口/出口及前后连接段]
-    Endpoints -->|未知且无合法修补端点| Whole[真实接续起点到前方目标的整段搜索]
-    Whole --> Search
-    Endpoints -->|合法| Search[同轮冻结 A*：整边体素与连接段、单份轻量采样缓存、保守净空界、按需精查]
-    Search -->|无路/超时/几何变化| Keep
-    Search -->|advisory 偏好穷尽| SearchFallback[一次高代价回退]
-    SearchFallback --> Opt
-    Search --> Opt
-    Opt --> FrozenCurve[同一完整物理 epoch 检查完整实际曲线与动力学]
-    FrozenCurve --> Final[一致最新走廊、时效、运动与 GLIO 接续闸门]
-    Map --> Final
-    Current --> Final
-    Final -->|通过| Commit[写 local_data 并发布 B-spline]
-    Final -->|拒绝| Keep[保留旧轨迹]
-    FSM -->|同一搜索池空间证据未变| Wait[等待相关观测或运动条件变化]
-    Wait --> Evidence[有界保存 stall 地图]
-    Keep --> Evidence[有界保存失败地图]
-    Search -->|失败| Evidence
-    Final -->|独立记录首个未观测样本| Hole[实际 B-spline、体素索引及同代当前帧/活动窗口贡献]
-    Monitor -->|独立记录首个未观测样本| Hole
-    Hole --> ObservationReplay[同遍历射线与真实 mask：确认 current replace，beam 未绑定原因待证据]
-    Search -->|退出原因与地图变化分别留存| Evidence
-    Evidence --> Replay[冻结地图上的同规则净空与 A* 离线重放：已实现]
-    Commit --> Server[traj_server 采样：EGO 基线]
-    Server --> Control[SO3/仿真，GLIO 反馈：已实测]
-    Control --> Sensors
-    Server --> Monitor[剩余曲线/跟踪/质量监督与停机取证]
-    Monitor --> FSM
+    Inputs[GLIO、物理观测、当前运动质量、预测输入] --> Round[FSM 事件：唯一冻结视图与预算]
+    Goal[原任务目标与全局几何参考] --> Target
+    Round --> Target[GLIO 当前分支投影：合法前方目标集合]
+    Target -->|没有合法候选| Short[预算内缩目标并降低终端速度]
+    Short --> Target
+    Short -->|条件不足| Keep[保留并监督旧轨迹：必要时检查制动]
+    Target --> Init[绑定真实接续 p/v/a 与 ROS 生效时刻]
+    Init --> Scan{完整实际初始曲线含尾部}
+    Scan -->|无违反| Opt[EGO 快路径]
+    Scan -->|有违反| Search[同一个 A*：真实起点到终点集合，完整边和连接段]
+    Search -->|成功| Guide[单条 guide：重采样、rebound、参考跟踪]
+    Search -->|穷尽且存在 advisory 拒绝| Soft[预算内一次高代价回退]
+    Soft -->|成功| Guide
+    Search -->|超时或条件失效| Keep
+    Soft -->|失败| Keep
+    Guide --> Opt
+    Opt --> Retime[时间调整恢复边界导数，再查动力学]
+    Retime --> Check{完整实际曲线与终端状态}
+    Check -->|预算内可修正| Correct[加强同一 guide/rebound 约束]
+    Correct --> Opt
+    Check -->|目标失败| Short
+    Check -->|拒绝| Keep
+    Check -->|通过| Release[最新旧段、新曲线、减速走廊及 GLIO 对齐：地图锁内提交]
+    Release -->|拒绝| Keep
+    Release -->|通过| Publish[立即发布或保存唯一待生效曲线]
+    Publish --> Server[traj_server：切换前持续旧命令，指定时刻切换]
+    Server --> Confirm[position_cmd ID 确认规划端切换]
+    Confirm --> Monitor[两段轨迹、新证据与当前质量监督]
+    Monitor --> Round
+    Monitor -->|执行条件失效| Keep
+    Inputs -.只读导出.-> Viz[独立可视化进程]
 ```
 
 ### 本次接口和执行边界
@@ -187,14 +191,18 @@ flowchart TD
 | 接口 | 当前行为 |
 |---|---|
 | registered beam 绑定 / active delta | 入站完整性、内容 hash 和 sensor frame 校验通过后进入原有 64 帧历史；匹配必须同时满足扫描起止时间，不能借邻帧。合法证据到达唤醒原序列化 worker：只补发仍为最新的当前扫描，保留活动帧按原 remove+add 事务更新；已提交来源的 beam/运动健康证据不因输入历史淘汰而丢失，incomplete 窗口不能被补证据操作提升为 complete。匹配已校验历史只比较时间，不重复计算 beam hash。未收到匹配证据时保持真实未知。 |
-| `beginPlanningView` / `queryPlanningViewCell` / `endPlanningView` | 一轮目标、初值和 A* 共用完整的 raw、膨胀及真实 observed 体素标志、云时间、运动质量与预测版本；入口通过 `preparePlanningQuery` 固定公共条件和净空半径，PL 绑定直接复用同一个物理 epoch；PlanningView 不再保存浮点坐标结果缓存。地图回调写 live GridMap，A* 读取同一个共享不可变物理 epoch。预测上下文与冻结代数不符时 PL 为未知；地图更新后旧 PL 不作为当前有效预测。 |
-| `getLocalTarget(distance)` / `callReboundReplan` | 捕获 GLIO 位置投影，复用单调实际 `last_progress_time_`，近距离自交选择较早前方分支；保留几何 horizon。仅终点未知/越界或前进余量不足时按 1、0.65、0.35 缩短目标，制动余量按参考弧长；搜索或候选失败不自动缩短/回退。缩短与重初始化等共同使用 1.5 s、三次修复预算；本轮无可执行轨迹则记录搜索池空间证据指纹，只有相关体素或运动条件改变才重试。物理障碍仍交给单条 guide 搜索。 |
-| `chooseRepairEndpoints` / `AstarSearch` | 修补入口和出口沿初值以最多半体素间距检查，要求未修补前后段、格点舍入连接和端点净空可执行；保持原搜索池与真实起点。A* 默认记录节点、队列、查询、缓存和首次拒绝统计；`planning/search_performance_diagnostics` 显式启用分项计时；退出原因保留 `TIME_BUDGET`，独立记录 `map_changed`、原搜索代数和结束时在线代数。在线地图推进不覆盖冻结搜索的退出原因；冻结几何/坐标改变才撤销；普通 live 代数变化不改变物理搜索结论。未知猜测缺合法端点时严格检查真实起终端，整段搜索后按 guide 弧长重采样并保持边界导数。 |
-| `assessTrajectory` / `captureRemainingFailure` | 先用本轮完整 epoch 检查实际 B-spline；发布前一次读取完整检查位置及净空 raw 邻域，再检查最新运动和 GLIO 接续。`commitFrozenCorridor` 在原地图锁内比较 raw/inflate/observed、时效及几何，远处代数推进允许提交；相关改变最多消耗一次修复配额重新捕获，再次改变或过期则拒绝。advisory 更新单独软降级，不等于物理拒绝。跟踪误差以 GLIO 测量时间对齐样条期望位置。执行监督的 TRACKING_ERROR、剩余轨迹失败和最终停止各留首份地图；`state.json` 同时记录期望/GLIO 位置、误差、轨迹 ID、末次位置命令时间及数据年龄。独立记录实际曲线的首个未观测样本时间、位置和 `GridPlanningCell::voxel_index`，不受前面物理/净空或起点跟踪失败遮蔽（跟踪拒绝仍保留）；候选和剩余曲线均另存一次 `curve_unobserved`。检查区间总是包含真实终点（含短于半个采样间隔的尾段），v3 保存实际控制点与完整 knot 向量，剩余轨迹失败点不再用飞机当前位置代替。快照仍归入 `IAP_RUN_DIR/export/planner/failure_map/`。 |
+| `beginPlanningView` / `queryPlanningViewCell` / `endPlanningView` | FSM 一事件一份 1.5 s / 三动作预算，预测分类与代价绑定冻结输入、策略和评估时间；普通地图更新不撤销本轮，发布时另核对最新走廊和预测有效性。 |
+| `getLocalTarget` / `setLocalTargets` / `terminalSpeedLimit` | 同一 GridMap 的 1 m 球内合法中心，确定性排序最多 16 个；原参考分支弧长前进量，已观测减速余量限速，实际进度不随目标移动；最终任务坐标不替换。 |
+| `AstarSearchGoals` / `AstarSearch` | 集合最小距离启发式，返回 selected_goal 和一条含真实起点/精确终点的 guide；单点接口转调同一实现。完整边物理未知禁止穿越；明确区分 exhausted 与 TIME_BUDGET。正常规划不依赖 chooseRepairEndpoints；它只保留在无绑定状态的历史离线优化器入口。 |
+| `curveViolates` / `searchRecoveryGuide` / `initializeFromGuide` | 完整初值含短尾段检查；从绑定起点搜索目标集合，沿 guide 初始化、建立 rebound 和跟踪；后端违反走同一恢复入口，不拼接坏初值尾部。 |
+| `enforceBoundaryStates` / `assessTrajectory` | 三次均匀样条硬绑定两端 p/v/a；时间调整后恢复边界并复查动力学、完整实际曲线及终端制动空间；控制多边形不代替曲线检查。预算耗尽独立记录。 |
+| `commitFrozenCorridor` / `publicationStillTimely` | 原地图锁内比较相关 raw/inflate/observed、时效和运动条件，GLIO 按测量时刻对齐，曲线按未来接续时刻对齐；序列化后再次检查发布时间余量，失败不覆盖执行轨迹。 |
+| `Bspline.start_mode` / `observeExecutingTrajectory` | IMMEDIATE=0；AT_TIME=1，默认提前 1.6 s，迟到拒绝；执行与待生效各一条，位置命令 ID 确认切换，立即恢复取消队列。 |
+| `assessRemainingTrajectory` / `checkCollisionCallback` | 监督旧段至切换及新段，合并 pending 的物理与 advisory 发现；待生效存在不能视为恢复成功，物理授权撤销进入检查恢复；advisory 缺失降级、有效警告请求重新规划。失败/未知尾段取证继续使用原有运行目录接口。 |
 
 `captureFailureSnapshot(include_observation_evidence)` 在同一个 occupancy 锁内拷贝完整物理/观测层、当前 registered frame 和 current/active 的 hit/free 贡献；仅显式取证时保留每体素最近一次 observed→unknown 的 producer（当前帧替换、活动 delta、活动 recovery）。`RegisteredLidarWindow::unthinnedObservationMask` 重用原遍历，只在诊断中关闭端点去重，锁释放后执行，结果只写文件。`analyze_curve_observation.py` 先按实际 B-spline 和保存的采样区间重放首个未知点，检查地图/当前帧年龄，再对照原始帧、实际 mask 与未去重诊断 mask；缺失证据或不一致不能给出空间可执行授权。保存后的 assessment 持有同代快照，后续 live 地图更新不把失败曲线拼到另一代地图；无法取得同代证据时记录采集失败。
 
-规划节点使用四线程 executor；地图回调原有独立 callback group，以及轻量里程计、完整性报告和命令时间锁存回调可在搜索时继续处理。风险绑定与 FSM 状态更新仍串行，避免把进行中的预测缓存写成另一张地图。旧轨迹只有候选通过发布闸门才会被替换。
+规划节点使用四线程 executor；地图回调原有独立 callback group，以及轻量里程计、完整性报告和命令时间锁存回调可在搜索时继续处理。风险绑定与 FSM 状态更新仍串行，避免把进行中的预测缓存写成另一张地图。立即轨迹通过发布闸门后生效；指定时刻轨迹通过发布闸门后进入 pending，命令 ID 确认实际切换后才替换规划端执行轨迹。
 
 正常规划通过 `captureFrozenOccupancyEpoch()` 同代共享完整物理标志及 raw 地址/行索引，不创建第二张 GridMap；`GridMap::fromFailureSnapshot` 仅用于离线取证重放。`queryPlanningCell` 仍检查同一个立方邻域，只跳过空体素；精确距离、最近点同距顺序、膨胀和真实 observed 判断不变。正常规划索引绑定不可变 epoch；live 原接口的离线索引在地图变更后才回到原完整 buffer 路径。当前仅 A* 拥有本次搜索的采样结果缓存，GridMap 另复用净空界；没有新增风险地图或延长在线超时。差分回归覆盖 3 种体积半径、600 个含边界/中心/连续偏移的位置及拒绝诊断开关，共 3,600 对查询，并验证新 fused 障碍使索引失效。
 
@@ -249,7 +257,7 @@ flowchart TD
     Monitor --> FSM
 ```
 
-一次触发只交付一条 guide，不建立多候选竞赛。初值没有违反时保留 EGO 快路径；此方法是 *integrity-triggered replanning*，不声称对所有可通行路线求全局最低风险。物理环境、当前融合运动质量与局部净空是执行条件；advisory 的 0.45/0.50 m 线仅是主动避让线。未知预测的初始路径代价倍数为 1.5；同一 A* 在正常避让无路时至多顺序回退一次，不能放松真实执行条件。起点在预警区直接用同一搜索器的高代价规则，不建独立脱离模式。失效预测与真实退化保持不同状态。搜索边、优化后与时间调整后的曲线使用同一冻结预测上下文；运行期监督读取新信息。实验版本不声明概率完整性保证。
+一次触发只交付一条 guide，不建立多候选竞赛。初值没有违反时保留 EGO 快路径；此方法是 *integrity-triggered replanning*，不声称对所有可通行路线求全局最低风险。物理环境、当前融合运动质量与局部净空是执行条件；advisory 的 0.45/0.50 m 线仅是主动避让线。未知预测的初始路径代价倍数为 1.5；同一 A* 在正常避让无路时至多顺序回退一次，不能放松真实执行条件。起点预警不授予整条路线自动回退；高代价规则只在正常搜索穷尽且存在 advisory 拒绝后使用。失效预测与真实退化保持不同状态。搜索边、优化后与时间调整后的曲线使用同一冻结预测上下文；运行期监督读取新信息。实验版本不声明概率完整性保证。
 
 ## 阶段 1 接口与验证
 
@@ -300,7 +308,7 @@ flowchart TD
 
 仿真保留注册点云输入所需的 SI 加速度系数 1.0、NAIVE 初始化、512×40 spherical_first_hit_v1 射线模型与 2 秒传感器启动延迟；地图和规划使用同一静态坐标平移，不动态对齐真值。
 
-原版为适配现有输入进行了必要调整：统一节点时钟、命令 frame、Jazzy 头文件/依赖导出；未来开始时间到来前不发送原版的零坐标命令。尚未实现 pending 轨迹接续。
+原版为适配现有输入进行了必要调整：统一节点时钟、命令 frame、Jazzy 头文件/依赖导出；未来开始时间到来前不发送原版的零坐标命令。本轮已实现 start_mode 和唯一 pending 接续，接口见当前实现节；真实森林接续仍待参考现场证据。
 
 ### 本轮仿真可视化接口
 

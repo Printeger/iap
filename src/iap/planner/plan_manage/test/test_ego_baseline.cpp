@@ -88,7 +88,16 @@ struct EGOReplanFSMTestAccess {
     fsm.start_vel_ = Eigen::Vector3d(0.4, 0, 0);
     fsm.end_pt_ = goal;
   }
+  static bool rejectsPendingReplan(EGOReplanFSM& fsm) { return !fsm.planFromCurrentTraj(); }
+  static bool supervise(EGOReplanFSM& fsm, double stamp) {
+    fsm.applied_odom_stamp_s_=stamp;
+    fsm.exec_state_=EGOReplanFSM::EXEC_TRAJ;
+    fsm.tracking_error_limit_m_=1.; fsm.emergency_time_=1.;
+    fsm.checkCollisionCallback();
+    return fsm.exec_state_==EGOReplanFSM::EMERGENCY_STOP && fsm.flag_escape_emergency_;
+  }
   static bool select(EGOReplanFSM& fsm, double distance) { return fsm.getLocalTarget(distance); }
+  static Eigen::Vector3d taskGoal(const EGOReplanFSM& fsm) { return fsm.end_pt_; }
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
@@ -318,10 +327,16 @@ TEST(EgoBaseline, AdvisoryOnlyViolationBuildsOneGuideAndBendsCurve) {
   Eigen::MatrixXd controls;
   ego_planner::UniformBspline::parameterizeToBspline(
       0.25, samples, derivatives, controls);
+  optimizer.setPlanningEndpoints(Eigen::Vector3d(-2,0,1),Eigen::Vector3d(2,0,1));
+  optimizer.setBsplineInterval(.25);
   const auto segments = optimizer.initControlPoints(controls, true);
   ASSERT_FALSE(optimizer.initializationFailed());
-  ASSERT_FALSE(segments.empty());
-  EXPECT_GT(optimizer.a_star_->getPath().size(), 2u);
+  ASSERT_TRUE(optimizer.needsGuideReinitialization());
+  const auto guide=optimizer.recoveryGuide();
+  EXPECT_GT(guide.size(),2u);
+  ego_planner::UniformBspline::parameterizeToBspline(.25,guide,derivatives,controls);
+  ego_planner::UniformBspline::enforceBoundaryStates(controls,.25,guide.front(),zero,zero,guide.back(),zero,zero);
+  optimizer.initializeFromGuide(controls);
   EXPECT_EQ(optimizer.ref_pts_.size(), static_cast<size_t>(controls.cols()));
   ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(controls, 0.25));
   ego_planner::UniformBspline curve(controls, 3, 0.25);
@@ -608,7 +623,8 @@ TEST(EgoBaseline, ForwardProjectionSkipsOldUnknownAndNeverRollsBack) {
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 3));
   const auto target = ego_planner::EGOReplanFSMTestAccess::target(fsm);
   EXPECT_GT(target.x(), 0.5);
-  EXPECT_LT(target.x(), 1.6);
+  EXPECT_TRUE(manager->queryLocalTargetCell(target,node->now().seconds()).executable());
+  EXPECT_GT(std::abs(target.y())+std::abs(target.z()-1),0.05);
   const double progress = manager->global_data_.last_progress_time_;
   EXPECT_GT(progress, 0);
   EXPECT_LT((manager->global_data_.getPosition(progress) - position).norm(), 0.25);
@@ -618,7 +634,8 @@ TEST(EgoBaseline, ForwardProjectionSkipsOldUnknownAndNeverRollsBack) {
   for (double x = 0; x < 5; x += 0.05)
     GridMapTestAccess::clearObserved(*manager->grid_map_, Eigen::Vector3d(x, 0, 1));
   ASSERT_TRUE(manager->beginPlanningView());
-  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 2));
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 2));
+  EXPECT_TRUE(manager->queryLocalTargetCell(ego_planner::EGOReplanFSMTestAccess::target(fsm),node->now().seconds()).executable());
   EXPECT_GE(manager->global_data_.last_progress_time_, progress);
 }
 
@@ -659,7 +676,8 @@ TEST(EgoBaseline, CurvedReferenceUsesForwardArcAndFirstSelfIntersection) {
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, position, loop.back());
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 4));
-  EXPECT_LT((ego_planner::EGOReplanFSMTestAccess::target(fsm) - position).norm(), 0.44);
+  EXPECT_LE((ego_planner::EGOReplanFSMTestAccess::target(fsm) - loop.back()).norm(),1.0);
+  EXPECT_TRUE(manager->queryLocalTargetCell(ego_planner::EGOReplanFSMTestAccess::target(fsm),node->now().seconds()).executable());
   EXPECT_LT(manager->global_data_.last_progress_time_, 0.1);
   manager->endPlanningView();
   GridMapTestAccess::markObserved(*manager->grid_map_);
@@ -668,6 +686,63 @@ TEST(EgoBaseline, CurvedReferenceUsesForwardArcAndFirstSelfIntersection) {
   ASSERT_TRUE(manager->beginPlanningView());
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 1));
   EXPECT_LT(manager->global_data_.last_progress_time_, 0.1);
+}
+
+TEST(EgoBaseline, TargetInTreeIsReplacedByObservedForwardVoxel) {
+  // Synthetic known start: the captured v2 repair start is unobserved and
+  // cannot stand in for a captured GLIO connection state.
+  auto node = makeNode();
+  auto owner = std::make_unique<ego_planner::EGOPlannerManager>();
+  auto* manager = owner.get();
+  auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager->initPlanModules(node, vis);
+  const Eigen::Vector3d start(-2, 0, 1), goal(2, 0, 1), zero = Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_, {Eigen::Vector3d(1, 0, 1)},
+                           node->now().seconds(), start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager, node->now().seconds(), 1, start);
+  ASSERT_TRUE(manager->planGlobalTraj(start, zero, zero, goal, zero, zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, start, goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 3));
+  const auto target = ego_planner::EGOReplanFSMTestAccess::target(fsm);
+  EXPECT_TRUE(manager->queryLocalTargetCell(target, node->now().seconds()).executable());
+  EXPECT_GT(target.x(), 0);
+  EXPECT_GT((target - Eigen::Vector3d(1, 0, 1)).norm(), 0.45);
+}
+
+TEST(EgoBaseline, IllegalFinalTaskGoalIsPreservedWhileSelectingIntermediateTarget) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>(); auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1), goal(0,0,1), zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{goal},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::taskGoal(fsm).isApprox(goal,1e-9));
+  const auto selected=ego_planner::EGOReplanFSMTestAccess::target(fsm);
+  EXPECT_GT((selected-goal).norm(),.45);
+  EXPECT_TRUE(manager->queryLocalTargetCell(selected,node->now().seconds()).executable());
+}
+
+TEST(EgoBaseline, TerminalSpeedIsLimitedByObservedBrakingSpace) {
+  auto node=makeNode(); ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d target(2,0,1), desired(1,0,0);
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),target);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,target);
+  EXPECT_NEAR(manager.terminalSpeedLimit(target,desired),1.,1e-9);
+  GridMapTestAccess::clearObserved(*manager.grid_map_,target+Eigen::Vector3d(.6,0,0));
+  EXPECT_LT(manager.terminalSpeedLimit(target,desired),1.);
+  GridMapTestAccess::clearObserved(*manager.grid_map_,target);
+  EXPECT_DOUBLE_EQ(manager.terminalSpeedLimit(target,desired),0.);
 }
 
 TEST(EgoBaseline, OneBudgetBoundsNestedRepairsAndExpiredSearch) {
@@ -714,10 +789,147 @@ TEST(EgoBaseline, UnknownGuessCanSearchObservedBypassUsingActualEndpoints) {
   const auto& guide=optimizer.recoveryGuide(); ASSERT_GE(guide.size(),2u);
   EXPECT_LT((guide.front()-start).norm(),1e-9); EXPECT_LT((guide.back()-target).norm(),1e-9);
   for (const auto& p:guide) EXPECT_TRUE(map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion).executable());
-  EXPECT_EQ(budget->used(),1u);
-  EXPECT_TRUE(budget->tryRepair(PlanningBudget::Repair::Reinitialize));
+  EXPECT_EQ(budget->used(),1u); // Search and guide initialization are one action.
   optimizer.initializeFromGuide(points);
   EXPECT_FALSE(optimizer.needsGuideReinitialization());
+}
+
+TEST(EgoBaseline, FrozenAdvisorySurvivesLiveUpdatesWithoutBecomingExecutionEvidence) {
+  auto node=makeNode();
+  ego_planner::EGOPlannerManager manager;
+  auto vis=std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager.initPlanModules(node,vis);
+  const Eigen::Vector3d start(-2,0,1), point(0,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  GridRiskContext context;
+  context.reference_time_s=node->now().seconds(); context.valid_until_s=context.reference_time_s+.1;
+  context.frame_id="map"; context.occupancy_generation=manager.grid_map_->occupancyGeneration();
+  context.predict=[](const auto&) { GridRiskVoxel cell; cell.status=GridRiskStatus::PREDICTED_DEGRADED; return cell; };
+  const auto version=manager.grid_map_->bindRiskContext(context);
+  auto frozen=manager.grid_map_->capturePlanningRiskQuery(version,context.reference_time_s,{});
+  EXPECT_EQ(frozen(point).classification,GridAdvisoryClass::PREDICTED_DEGRADED);
+  GridMapTestAccess::changeEvidence(*manager.grid_map_,Eigen::Vector3d(4,4,1),true,true,true);
+  manager.grid_map_->invalidateRiskContext();
+  EXPECT_EQ(frozen(point).classification,GridAdvisoryClass::PREDICTED_DEGRADED);
+  EXPECT_NE(manager.grid_map_->queryPlanningRisk(point,version,context.valid_until_s+1,{}).classification,
+            GridAdvisoryClass::PREDICTED_DEGRADED);
+}
+
+TEST(EgoBaseline, GuideRecoveryUsesActualStartEvenWhenInitialTailHasNoExit) {
+  auto node=makeNode();
+  auto map=std::make_shared<GridMap>(); map->initMap(node);
+  const Eigen::Vector3d start(-2,0,1), target(2,0,1);
+  GridMapTestAccess::input(*map,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*map);
+  ego_planner::BsplineOptimizer optimizer; optimizer.setParam(node); optimizer.setEnvironment(map);
+  optimizer.a_star_=std::make_shared<AStar>(); optimizer.a_star_->initGridMap(map,Eigen::Vector3i(100,100,100));
+  optimizer.setPlanningQuery([](const Eigen::Vector3d& point) {
+    GridPlanningCell cell; cell.advisory.classification=GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=1;
+    cell.execution_reason=point.y()>.4 ? GridExecutionReason::ENVIRONMENT_UNOBSERVED : GridExecutionReason::OK;
+    return cell;
+  });
+  auto budget=std::make_shared<PlanningBudget>(); optimizer.setPlanningBudget(budget);
+  optimizer.setPlanningEndpoints(start,target); optimizer.setBsplineInterval(.3);
+  Eigen::MatrixXd bad(3,10);
+  for(int i=0;i<10;++i) bad.col(i)=Eigen::Vector3d(-2+4.*i/9, i>=6 ? 1.:0.,1.);
+  optimizer.initControlPoints(bad,true);
+  ASSERT_FALSE(optimizer.initializationFailed());
+  ASSERT_TRUE(optimizer.needsGuideReinitialization());
+  EXPECT_TRUE(optimizer.recoveryGuide().front().isApprox(start,1e-9));
+  EXPECT_TRUE(optimizer.recoveryGuide().back().isApprox(target,1e-9));
+  for(const auto& point:optimizer.recoveryGuide()) EXPECT_LE(point.y(),.4);
+  EXPECT_EQ(budget->used(),1u);
+}
+
+TEST(EgoBaseline, WarnedPhysicalOriginUsesOneCountedFallbackAfterExhaustion) {
+  auto node=makeNode();
+  auto map=std::make_shared<GridMap>(); map->initMap(node);
+  const Eigen::Vector3d start(-2,0,1), target(2,0,1);
+  GridMapTestAccess::input(*map,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*map);
+  ego_planner::BsplineOptimizer optimizer; optimizer.setParam(node); optimizer.setEnvironment(map);
+  optimizer.a_star_=std::make_shared<AStar>(); optimizer.a_star_->initGridMap(map,Eigen::Vector3i(100,100,100));
+  optimizer.setPlanningQuery([](const Eigen::Vector3d& point) {
+    GridPlanningCell cell; cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=point.x()<-1.7 ? GridAdvisoryClass::PREDICTED_DEGRADED : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=1.; return cell;
+  });
+  auto budget=std::make_shared<PlanningBudget>(); optimizer.setPlanningBudget(budget);
+  optimizer.setPlanningEndpoints(start,target);
+  ASSERT_TRUE(optimizer.searchRecoveryGuide());
+  EXPECT_TRUE(optimizer.advisoryFallbackUsed());
+  EXPECT_EQ(budget->used(),2u);
+  EXPECT_EQ(budget->count(PlanningBudget::Repair::AdvisoryFallback),1u);
+  EXPECT_TRUE(optimizer.recoveryGuide().front().isApprox(start,1e-9));
+  EXPECT_TRUE(optimizer.recoveryGuide().back().isApprox(target,1e-9));
+}
+
+TEST(EgoBaseline, TimeAdjustmentPreservesPhysicalEndpointDerivatives) {
+  Eigen::MatrixXd points=Eigen::MatrixXd::Zero(3,9);
+  const Eigen::Vector3d start(0,0,1), end(3,1,1), velocity(.4,.1,0), acceleration(.2,0,0);
+  for(double interval:{.2,.7}) {
+    ego_planner::UniformBspline::enforceBoundaryStates(points,interval,start,velocity,acceleration,
+        end,Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero());
+    ego_planner::UniformBspline curve(points,3,interval);
+    auto speed=curve.getDerivative(); auto acc=speed.getDerivative();
+    EXPECT_TRUE(curve.evaluateDeBoorT(0).isApprox(start,1e-9));
+    EXPECT_TRUE(speed.evaluateDeBoorT(0).isApprox(velocity,1e-9));
+    EXPECT_TRUE(acc.evaluateDeBoorT(0).isApprox(acceleration,1e-9));
+    EXPECT_TRUE(curve.evaluateDeBoorT(curve.getTimeSum()).isApprox(end,1e-9));
+    EXPECT_LT(speed.evaluateDeBoorT(curve.getTimeSum()).norm(),1e-9);
+    EXPECT_LT(acc.evaluateDeBoorT(curve.getTimeSum()).norm(),1e-9);
+  }
+}
+
+TEST(EgoBaseline, ScheduledCandidateKeepsPredecessorUntilMatchingCommand) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();
+  auto& manager=*owner;
+  auto vis=std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager.initPlanModules(node,vis);
+  manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1), end(2,0,1), zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
+  const auto predecessor=manager.local_data_;
+  const double measured=node->now().seconds();
+  const auto measured_position=manager.local_data_.position_traj_.evaluateDeBoorT(measured-predecessor.start_time_.seconds());
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,measured,1,measured_position);
+  const auto connection=node->now()+rclcpp::Duration::from_seconds(1.6);
+  const double t=connection.seconds()-manager.local_data_.start_time_.seconds();
+  const auto position=manager.local_data_.position_traj_.evaluateDeBoorT(t);
+  const auto velocity=manager.local_data_.velocity_traj_.evaluateDeBoorT(t);
+  const auto acceleration=manager.local_data_.acceleration_traj_.evaluateDeBoorT(t);
+  ASSERT_TRUE(manager.beginPlanningView());
+  manager.setPlanningConnection(connection,predecessor.traj_id_);
+  ASSERT_TRUE(manager.reboundReplan(position,velocity,acceleration,end,zero,false,false))
+      << "failure=" << static_cast<int>(manager.lastPlanFailure());
+  ASSERT_TRUE(manager.hasPendingTrajectory());
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  auto pending=manager.publicationTrajectory();
+  EXPECT_DOUBLE_EQ(pending.start_time_.seconds(),connection.seconds());
+  EXPECT_TRUE(pending.position_traj_.evaluateDeBoorT(0).isApprox(position,1e-8));
+  EXPECT_TRUE(pending.velocity_traj_.evaluateDeBoorT(0).isApprox(velocity,1e-8));
+  EXPECT_TRUE(pending.acceleration_traj_.evaluateDeBoorT(0).isApprox(acceleration,1e-8));
+  manager.endPlanningView();
+  manager.observeExecutingTrajectory(predecessor.traj_id_);
+  EXPECT_TRUE(manager.hasPendingTrajectory());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,measured_position,end);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::rejectsPendingReplan(fsm));
+  GridMapTestAccess::changeEvidence(*manager.grid_map_,end,true,true,true);
+  const auto supervision=manager.assessRemainingTrajectory(node->now().seconds());
+  EXPECT_FALSE(supervision.executable());
+  EXPECT_EQ(supervision.trajectory_id,pending.traj_id_);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,measured));
+  manager.observeExecutingTrajectory(pending.traj_id_);
+  EXPECT_FALSE(manager.hasPendingTrajectory());
+  EXPECT_EQ(manager.local_data_.traj_id_,pending.traj_id_);
+  manager.endPlanningView();
 }
 
 TEST(EgoBaseline, FullEpochMatchesExactQueriesAndSurvivesRemoteGenerations) {

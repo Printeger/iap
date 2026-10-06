@@ -5,6 +5,31 @@
 #include <chrono>
 #include <stdexcept>
 
+namespace {
+GridPlanningRisk classifyCurrentRisk(const GridRiskVoxel& live, const GridPlanningRiskPolicy& policy) {
+  GridPlanningRisk planning;
+  planning.version=live.version; planning.query_status=live.status;
+  planning.cost_multiplier=std::max(1.0,policy.unknown_multiplier);
+  if (live.status == GridRiskStatus::VALID) {
+    planning.hpl = live.hpl;
+    planning.vpl = live.vpl;
+    planning.classification = live.hpl >= policy.hpl_budget_m ||
+        live.vpl >= policy.vpl_budget_m
+        ? GridAdvisoryClass::PREDICTED_DEGRADED
+        : (live.hpl >= policy.hpl_budget_m - policy.reserve_h_m ||
+           live.vpl >= policy.vpl_budget_m - policy.reserve_v_m
+            ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID);
+    planning.cost_multiplier = 1.0;
+    return planning;
+  }
+  if (live.status == GridRiskStatus::PREDICTED_DEGRADED) {
+    planning.classification = GridAdvisoryClass::PREDICTED_DEGRADED;
+    return planning;
+  }
+  return planning;
+}
+}
+
 uint64_t GridMap::bindRiskContext(GridRiskContext context)
 {
   // Geometry is fixed after initMap. Lock order is occupancy then risk.
@@ -120,57 +145,72 @@ GridPlanningRisk GridMap::queryPlanningRisk(const Eigen::Vector3d& position,
                                             const double now,
                                             const GridPlanningRiskPolicy& policy)
 {
-  GridPlanningRisk planning;
-  planning.version = version;
-  planning.cost_multiplier = std::max(1.0, policy.unknown_multiplier);
   const auto live = queryRisk(position, version, now);
-  planning.query_status = live.status;
-  if (live.status == GridRiskStatus::VALID) {
-    planning.hpl = live.hpl;
-    planning.vpl = live.vpl;
-    planning.classification = live.hpl >= policy.hpl_budget_m ||
-        live.vpl >= policy.vpl_budget_m
-        ? GridAdvisoryClass::PREDICTED_DEGRADED
-        : (live.hpl >= policy.hpl_budget_m - policy.reserve_h_m ||
-           live.vpl >= policy.vpl_budget_m - policy.reserve_v_m
-            ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID);
-    planning.cost_multiplier = 1.0;
-    return planning;
-  }
-  if (live.status == GridRiskStatus::PREDICTED_DEGRADED) {
-    planning.classification = GridAdvisoryClass::PREDICTED_DEGRADED;
-    return planning;
-  }
-  // Geometry and frame errors revoke all historical evidence immediately.
-  if (live.status == GridRiskStatus::OUT_OF_MAP ||
-      live.status == GridRiskStatus::FRAME_MISMATCH ||
-      live.status == GridRiskStatus::VERSION_CHANGED ||
-      live.status == GridRiskStatus::INVALID_QUERY || !isInMap(position) ||
-      policy.stale_soft_seconds <= 0.0)
-    return planning;
   Eigen::Vector3i index;
-  posToIndex(position, index);
+  if(position.allFinite() && isInMap(position)) posToIndex(position,index);
+  else return classifyCurrentRisk(live,policy);
   std::lock_guard<std::mutex> lock(risk_mutex_);
-  const auto it = risk_history_.find(static_cast<size_t>(toAddress(index)));
-  if (it == risk_history_.end() ||
-      it->second.frame_id != mp_.frame_id_ ||
-      !risk_context_.reference_position.allFinite() ||
-      (it->second.reference_position - risk_context_.reference_position).norm() >
-          policy.stale_max_motion_m)
-    return planning;
-  const double age_after_expiry = now - it->second.valid_until_s;
-  if (age_after_expiry < 0.0 ||
-      age_after_expiry > policy.stale_soft_seconds ||
-      !std::isfinite(age_after_expiry))
-    return planning;
-  planning.classification = GridAdvisoryClass::STALE_REFERENCE;
-  planning.hpl = it->second.hpl;
-  planning.vpl = it->second.vpl;
-  const double strength = 1.0 - age_after_expiry / policy.stale_soft_seconds;
-  if (planning.hpl >= policy.hpl_budget_m - policy.reserve_h_m ||
-      planning.vpl >= policy.vpl_budget_m - policy.reserve_v_m)
-    planning.cost_multiplier += std::max(0.0, strength);
+  const auto found=risk_history_.find(static_cast<size_t>(toAddress(index)));
+  return classifyPlanningRisk(live,policy,risk_context_,
+      found==risk_history_.end() ? nullptr : &found->second,now);
+}
+
+GridPlanningRisk GridMap::classifyPlanningRisk(const GridRiskVoxel& live,
+    const GridPlanningRiskPolicy& policy, const GridRiskContext& context,
+    const RiskHistorySample* history, double now) {
+  auto planning=classifyCurrentRisk(live,policy);
+  if(live.status==GridRiskStatus::VALID || live.status==GridRiskStatus::PREDICTED_DEGRADED ||
+      live.status==GridRiskStatus::OUT_OF_MAP || live.status==GridRiskStatus::FRAME_MISMATCH ||
+      live.status==GridRiskStatus::VERSION_CHANGED || live.status==GridRiskStatus::INVALID_QUERY ||
+      policy.stale_soft_seconds<=0 || !history || history->frame_id!=context.frame_id ||
+      !context.reference_position.allFinite() ||
+      (history->reference_position-context.reference_position).norm()>policy.stale_max_motion_m) return planning;
+  const double age=now-history->valid_until_s;
+  if(!std::isfinite(age) || age<0 || age>policy.stale_soft_seconds) return planning;
+  planning.classification=GridAdvisoryClass::STALE_REFERENCE;
+  planning.hpl=history->hpl; planning.vpl=history->vpl;
+  if(planning.hpl>=policy.hpl_budget_m-policy.reserve_h_m || planning.vpl>=policy.vpl_budget_m-policy.reserve_v_m)
+    planning.cost_multiplier+=1-age/policy.stale_soft_seconds;
   return planning;
+}
+
+std::function<GridPlanningRisk(const Eigen::Vector3d&)> GridMap::capturePlanningRiskQuery(
+    uint64_t version, double now, const GridPlanningRiskPolicy& policy, double* valid_until_s) {
+  std::lock_guard<std::mutex> map_lock(occupancy_epoch_mutex_);
+  std::lock_guard<std::mutex> risk_lock(risk_mutex_);
+  const auto context=risk_context_;
+  const auto history=risk_history_;
+  const auto origin=mp_.map_origin_, low=mp_.map_min_boundary_, high=mp_.map_max_boundary_;
+  const auto dimensions=mp_.map_voxel_num_;
+  const double resolution=mp_.resolution_, inverse=mp_.resolution_inv_;
+  const bool bound=version!=0 && version==risk_version_ && context.frame_id==mp_.frame_id_ &&
+      context.occupancy_generation==occupancy_update_sequence_.load()/2;
+  if(valid_until_s) *valid_until_s=bound ? context.valid_until_s : std::numeric_limits<double>::quiet_NaN();
+  return [context,history,origin,low,high,dimensions,resolution,inverse,bound,version,now,policy,
+          cache=std::unordered_map<size_t,GridPlanningRisk>{}](const Eigen::Vector3d& position) mutable {
+    GridRiskVoxel value; value.version=version;
+    if (!position.allFinite() || !(position.array()>low.array()+1e-4).all() ||
+        !(position.array()<high.array()-1e-4).all()) {
+      value.status=GridRiskStatus::OUT_OF_MAP; return classifyCurrentRisk(value,policy);
+    }
+    const Eigen::Vector3i index=((position-origin)*inverse).array().floor().cast<int>();
+    const size_t address=(static_cast<size_t>(index.x())*dimensions.y()+index.y())*dimensions.z()+index.z();
+    if (const auto found=cache.find(address); found!=cache.end()) return found->second;
+    value.status=!bound ? GridRiskStatus::VERSION_CHANGED :
+        (!std::isfinite(context.reference_time_s) || !std::isfinite(context.valid_until_s)) ? GridRiskStatus::INVALID :
+        now<context.reference_time_s || now>context.valid_until_s ? GridRiskStatus::STALE :
+        !context.predict ? GridRiskStatus::UNCOMPUTED : GridRiskStatus::VALID;
+    if(value.status==GridRiskStatus::VALID) {
+      try { value=context.predict(origin+(index.cast<double>()+Eigen::Vector3d::Constant(.5))*resolution); }
+      catch(const std::exception&) { value.status=GridRiskStatus::INVALID; }
+      value.version=version;
+      if(value.status==GridRiskStatus::VALID && (!std::isfinite(value.hpl) || !std::isfinite(value.vpl) || value.hpl<0 || value.vpl<0)) value.status=GridRiskStatus::INVALID;
+    }
+    const auto found=history.find(address);
+    auto risk=classifyPlanningRisk(value,policy,context,
+        found==history.end() ? nullptr : &found->second,now);
+    cache.emplace(address,risk); return risk;
+  };
 }
 
 GridPlanningContext GridMap::preparePlanningQuery(

@@ -2,6 +2,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "traj_utils/msg/bspline.hpp"
 #include "quadrotor_msgs/msg/position_command.hpp"
+#include <optional>
 #include "std_msgs/msg/empty.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include <rclcpp/rclcpp.hpp>
@@ -29,14 +30,49 @@ double traj_duration_;
 rclcpp::Time start_time_;
 int traj_id_;
 
+struct ScheduledTrajectory {
+  vector<UniformBspline> curves;
+  rclcpp::Time start;
+  double duration;
+  int id;
+};
+std::optional<ScheduledTrajectory> pending_traj;
+void activateTrajectory(const ScheduledTrajectory& candidate) {
+  traj_=candidate.curves; start_time_=candidate.start;
+  traj_duration_=candidate.duration; traj_id_=candidate.id; receive_traj_=true;
+}
+
 // yaw control
 double last_yaw_, last_yaw_dot_;
 double time_forward_;
 rclcpp::Node::SharedPtr server_node;
 std::string command_frame;
 
+void publishExecutedCurve();
+
 void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
 {
+  const auto now=server_node->now();
+  if(msg->start_mode!=traj_utils::msg::Bspline::IMMEDIATE && msg->start_mode!=traj_utils::msg::Bspline::AT_TIME) {
+    RCLCPP_WARN(server_node->get_logger(),"Trajectory rejected: invalid start mode"); return;
+  }
+  const rclcpp::Time requested(msg->start_time,now.get_clock_type());
+  if(msg->start_mode==traj_utils::msg::Bspline::AT_TIME &&
+      (!receive_traj_ || requested<=now || pending_traj || msg->traj_id<=traj_id_)) {
+    RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: late, duplicate, or missing predecessor"); return;
+  }
+  if(msg->order!=3 || msg->pos_pts.size()<4 || msg->knots.size()!=msg->pos_pts.size()+4) {
+    RCLCPP_WARN(server_node->get_logger(),"Trajectory rejected: malformed cubic spline"); return;
+  }
+  for(size_t i=0;i<msg->knots.size();++i)
+    if(!std::isfinite(msg->knots[i]) || (i && msg->knots[i]<=msg->knots[i-1])) {
+      RCLCPP_WARN_THROTTLE(server_node->get_logger(), *server_node->get_clock(), 1000,
+          "traj_server receive rejected: trajectory=%ld invalid knot index=%zu", msg->traj_id, i); return;
+    }
+  for(const auto& p:msg->pos_pts) if(!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
+    RCLCPP_WARN_THROTTLE(server_node->get_logger(), *server_node->get_clock(), 1000,
+        "traj_server receive rejected: trajectory=%ld nonfinite control point", msg->traj_id); return;
+  }
   // parse pos traj
 
   Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
@@ -66,16 +102,34 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
 
   // UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
 
-  start_time_ = msg->start_time;
-  traj_id_ = msg->traj_id;
+  ScheduledTrajectory candidate;
+  candidate.curves.push_back(pos_traj);
+  candidate.curves.push_back(candidate.curves[0].getDerivative());
+  candidate.curves.push_back(candidate.curves[1].getDerivative());
+  candidate.start=requested; candidate.id=msg->traj_id;
+  candidate.duration=pos_traj.getTimeSum();
+  if(!(candidate.duration>0)) return;
+  if(msg->start_mode==traj_utils::msg::Bspline::AT_TIME) {
+    const double t=(requested-start_time_).seconds();
+    if(t<0 || t>traj_duration_) {
+      RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: predecessor ends before connection"); return;
+    }
+    for(size_t derivative=0;derivative<3;++derivative) {
+      if((traj_[derivative].evaluateDeBoorT(t)-candidate.curves[derivative].evaluateDeBoorT(0)).norm()>1e-5) {
+        RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: boundary derivative %zu",derivative); return;
+      }
+    }
+    pending_traj=std::move(candidate);
+    RCLCPP_INFO(server_node->get_logger(),"Trajectory %d scheduled for %.6f",pending_traj->id,pending_traj->start.seconds());
+    return;
+  }
+  pending_traj.reset();
+  activateTrajectory(candidate);
 
-  traj_.clear();
-  traj_.push_back(pos_traj);
-  traj_.push_back(traj_[0].getDerivative());
-  traj_.push_back(traj_[1].getDerivative());
+  publishExecutedCurve();
+}
 
-  traj_duration_ = traj_[0].getTimeSum();
-
+void publishExecutedCurve() {
   // Display samples of the curve that traj_server actually executes.
   visualization_msgs::msg::Marker curve;
   curve.header.frame_id = command_frame;
@@ -101,7 +155,6 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
   curve.lifetime = rclcpp::Duration::from_seconds(traj_duration_ + 1.0);
   trajectory_curve_pub->publish(curve);
 
-  receive_traj_ = true;
 }
 
 std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclcpp::Time &time_now, rclcpp::Time &time_last)
@@ -198,6 +251,18 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
 
 void cmdCallback()
 {
+  const auto clock_now=server_node->now();
+  static std::optional<rclcpp::Time> last_clock;
+  if(last_clock && clock_now<*last_clock) {
+    pending_traj.reset(); receive_traj_=false;
+    RCLCPP_WARN(server_node->get_logger(),"Trajectory withdrawn after ROS time reversal");
+  }
+  last_clock=clock_now;
+  if(pending_traj && clock_now>=pending_traj->start) {
+    activateTrajectory(*pending_traj); pending_traj.reset();
+    publishExecutedCurve();
+    RCLCPP_INFO(server_node->get_logger(),"Trajectory %d activated",traj_id_);
+  }
   /* no publishing before receive traj_ */
   if (!receive_traj_)
     return;
@@ -238,7 +303,7 @@ void cmdCallback()
   }
   else
   {
-    return; // Future-start handling is developed in the later handoff stage.
+    return;
   }
   time_last = time_now;
 

@@ -479,6 +479,9 @@ public:
   GridPlanningRisk queryPlanningRisk(const Eigen::Vector3d& position,
                                      uint64_t version, double evaluation_time_s,
                                      const GridPlanningRiskPolicy& policy);
+  std::function<GridPlanningRisk(const Eigen::Vector3d&)> capturePlanningRiskQuery(
+      uint64_t version, double evaluation_time_s, const GridPlanningRiskPolicy& policy,
+      double* valid_until_s = nullptr);
   GridPlanningCell queryPlanningCell(const Eigen::Vector3d& position,
                                     uint64_t version, double evaluation_time_s,
                                     const GridPlanningRiskPolicy& risk_policy,
@@ -613,6 +616,9 @@ private:
         std::numeric_limits<double>::quiet_NaN());
     std::string frame_id;
   };
+  static GridPlanningRisk classifyPlanningRisk(const GridRiskVoxel& live,
+      const GridPlanningRiskPolicy& policy, const GridRiskContext& context,
+      const RiskHistorySample* history, double evaluation_time_s);
   std::unordered_map<size_t, RiskHistorySample> risk_history_;
 
   // get depth image and camera pose

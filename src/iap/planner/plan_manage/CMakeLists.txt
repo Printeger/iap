@@ -109,6 +109,10 @@ if(BUILD_TESTING)
     --visualizer $<TARGET_FILE:grid_map_visualizer>
     --baseline $<TARGET_FILE:test_ego_baseline>)
   set_tests_properties(test_ego_pipeline PROPERTIES TIMEOUT 40)
+  add_test(NAME test_ego_scheduled_execution COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_scheduled_execution.py
+    --server $<TARGET_FILE:traj_server>)
+  set_tests_properties(test_ego_scheduled_execution PROPERTIES TIMEOUT 30)
   add_test(NAME test_failure_map_tools COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/test_failure_map_tools.py)
   set_tests_properties(test_failure_map_tools PROPERTIES ENVIRONMENT

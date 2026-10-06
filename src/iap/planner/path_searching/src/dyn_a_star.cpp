@@ -455,6 +455,15 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         Vector3d end_pt, const double max_duration_s,
                         std::optional<Vector3d> center_override)
 {
+    return AstarSearchGoals(step_size, start_pt, {end_pt}, max_duration_s, center_override);
+}
+
+bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
+                            const std::vector<Vector3d>& goals, double max_duration_s,
+                            std::optional<Vector3d> center_override)
+{
+    if (goals.empty()) { recordPresearchFailure(Failure::END_BLOCKED, start_pt, start_pt); return false; }
+    const Vector3d end_pt = goals.front();
     const auto steady_start = PlanningBudget::Clock::now();
     search_started_=steady_start; active_search_=true;
     const double limit = max_duration_s >= 0.0 ? max_duration_s : (planning_query_ ? 1.0 : .2);
@@ -482,13 +491,61 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     result_.pool_dimensions = POOL_SIZE_;
     result_.pool_center = center_;
 
-    if (budget_ && !budget_->tryRepair(PlanningBudget::Repair::Search)) {
-        finishFailure(Failure::TIME_BUDGET, time_1); return false;
-    }
+    if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET, time_1); return false; }
     Vector3i start_idx, end_idx;
-    if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
-    {
-        finishFailure(result_.failure, time_1);
+    struct Goal { size_t original; Vector3i index; GridSearchCell cell; };
+    std::vector<Goal> valid_goals;
+    // Prepare physical connectors without making advisory an endpoint authority.
+    // Advisory on a connector is checked when the goal is actually reached.
+    const bool preference_fallback = advisory_fallback_;
+    advisory_fallback_ = true;
+    for (size_t i = 0; i < goals.size(); ++i) {
+        if (deadlineExpired()) { advisory_fallback_ = preference_fallback;
+            finishFailure(Failure::TIME_BUDGET, time_1); return false; }
+        if (ConvertToIndexAndAdjustStartEndPoints(start_pt, goals[i], start_idx, end_idx))
+            valid_goals.push_back({i, end_idx, result_.end_cell});
+        else if (result_.failure == Failure::START_BLOCKED || result_.failure == Failure::START_OUT_OF_POOL ||
+                 result_.failure == Failure::CURRENT_MOTION || result_.failure == Failure::END_STALE) break;
+    }
+    advisory_fallback_ = preference_fallback;
+    if (valid_goals.empty() || result_.failure == Failure::START_BLOCKED ||
+        result_.failure == Failure::START_OUT_OF_POOL || result_.failure == Failure::CURRENT_MOTION ||
+        result_.failure == Failure::END_STALE) {
+        finishFailure(result_.failure, time_1); return false;
+    }
+    result_.failure = Failure::NONE;
+    const auto heuristic = [&](GridNodePtr node) {
+        double best = inf;
+        for (const auto& goal : valid_goals) {
+            GridNode terminal; terminal.index = goal.index;
+            best = std::min(best, getHeu(node, &terminal));
+        }
+        return best;
+    };
+    const auto connector_allowed = [&](const Vector3d& a, const Vector3d& b) {
+        const int count = std::max(1, static_cast<int>(std::ceil((b-a).norm() /
+            ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * .5))));
+        for (int i=0; i<=count; ++i) {
+            if (deadlineExpired()) return false;
+            const auto point = a+(b-a)*(static_cast<double>(i)/count);
+            if (!planning_query_) { if (grid_map_->getInflateOccupancy(point)) return false; continue; }
+            const auto cell = timedPlanningQuery(point);
+            if (!cell.executable()) return false;
+            if (!advisory_fallback_ && (cell.advisory_class == GridAdvisoryClass::AVOID ||
+                cell.advisory_class == GridAdvisoryClass::PREDICTED_DEGRADED)) {
+                rejected_advisory_=true; ++result_.rejected_advisory; return false;
+            }
+        }
+        return true;
+    };
+    if (!connector_allowed(start_pt, Index2Coord(start_idx))) {
+        // Physical origin/connector legality was already proven above. If only
+        // the frozen preference rejects this required connector, the normal
+        // search has zero admissible starting edges. This is exhaustion, not
+        // an invalid physical start; the owner may count one high-cost retry.
+        result_.exhausted=!deadlineExpired() && rejected_advisory_;
+        finishFailure(deadlineExpired() ? Failure::TIME_BUDGET :
+            result_.exhausted ? Failure::ADVISORY_NO_PATH : Failure::START_BLOCKED, time_1);
         return false;
     }
 
@@ -496,7 +553,6 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     //     cout << "start_pt=" << start_pt.transpose() << " end_pt=" << end_pt.transpose() << endl;
 
     GridNodePtr startPtr = GridNodeMap_[start_idx(0)][start_idx(1)][start_idx(2)];
-    GridNodePtr endPtr = GridNodeMap_[end_idx(0)][end_idx(1)][end_idx(2)];
 
     std::priority_queue<AStarQueueEntry, std::vector<AStarQueueEntry>, NodeComparator> empty;
     openSet_.swap(empty);
@@ -507,8 +563,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     startPtr->index = start_idx;
     startPtr->rounds = rounds_;
     startPtr->gScore = 0;
-    endPtr->index = end_idx;
-    startPtr->fScore = getHeu(startPtr, endPtr);
+    startPtr->fScore = heuristic(startPtr);
     startPtr->state = GridNode::OPENSET; //put start node in open set
     startPtr->cameFrom = NULL;
     ++result_.queue_pushes;
@@ -535,8 +590,16 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
         // if ( num_iter < 10000 )
         //     cout << "current=" << current->index.transpose() << endl;
 
-        if (current->index(0) == endPtr->index(0) && current->index(1) == endPtr->index(1) && current->index(2) == endPtr->index(2))
+        auto reached = std::find_if(valid_goals.begin(), valid_goals.end(), [&](const Goal& goal) {
+            return current->index == goal.index &&
+                connector_allowed(Index2Coord(current->index), goals[goal.original]);
+        });
+        if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET, time_1); return false; }
+        if (reached != valid_goals.end())
         {
+            result_.selected_goal = reached->original;
+            result_.requested_end = goals[reached->original];
+            result_.end_cell = reached->cell;
             // ros::Time time_2 = ros::Time::now();
             // printf("\033[34mA star iter:%d, time:%.3f\033[0m\n",num_iter, (time_2 - time_1).toSec()*1000);
             // if((time_2 - time_1).toSec() > 0.1)
@@ -611,7 +674,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         neighborPtr->state = GridNode::OPENSET;
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
-                        neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
+                        neighborPtr->fScore = tentative_gScore + heuristic(neighborPtr);
                         ++result_.queue_pushes;
                         openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
@@ -619,7 +682,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                     { //in open set and need update
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
-                        neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
+                        neighborPtr->fScore = tentative_gScore + heuristic(neighborPtr);
                         ++result_.queue_pushes;
                         openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
@@ -637,6 +700,8 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
         RCLCPP_WARN(rclcpp::get_logger("AstarSearch"),
                     "Time consume in A star path finding is %.3fs, iter=%d", (time_2 - time_1).seconds(), num_iter);
 
+    if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET, time_1); return false; }
+    result_.exhausted = true;
     const bool unknown_rejected = result_.rejected_execution[
         static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)] != 0;
     finishFailure(unknown_rejected ? Failure::NO_PATH_WITH_UNOBSERVED :

@@ -50,6 +50,82 @@ namespace ego_planner
     cps_.points = points;
   }
 
+  bool BsplineOptimizer::curveViolates(const Eigen::MatrixXd& points, double interval) const {
+    if (!planning_query_) return false;
+    UniformBspline curve(points,3,interval);
+    const auto derivative=curve.getDerivative().getControlPoint();
+    double bound=0;
+    for(int i=0;i<derivative.cols();++i) bound=std::max(bound,derivative.col(i).norm());
+    const double spacing=std::min(.02,grid_map_->getResolution()/(2*std::max(.1,bound)));
+    const double duration=curve.getTimeSum();
+    const size_t count=static_cast<size_t>(std::ceil(duration/spacing));
+    for(size_t i=0;i<=count;++i) {
+      if (budget_ && budget_->expired()) return true;
+      const auto cell=planning_query_(curve.evaluateDeBoorT(std::min(duration,i*spacing)));
+      if(!cell.executable() || (!planning_advisory_fallback_ &&
+          (cell.advisory.classification==GridAdvisoryClass::AVOID ||
+           cell.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED))) return true;
+    }
+    return false;
+  }
+
+  bool BsplineOptimizer::searchRecoveryGuide() {
+    if (!planning_endpoints_ || planning_goals_.empty()) return false;
+    if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::Search)) return false;
+    const auto start=planning_endpoints_->first;
+    const Eigen::Vector3d center=(start+planning_goals_.front())/2;
+    bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,-1,center);
+    const auto result=a_star_->lastResult();
+    if(!found && result.exhausted && result.rejected_advisory && !planning_advisory_fallback_) {
+      if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) return false;
+      planning_advisory_fallback_=true;
+      a_star_->setPlanningQuery(planning_query_,true);
+      found=a_star_->AstarSearchGoals(.1,start,planning_goals_,-1,center);
+      RCLCPP_WARN(rclcpp::get_logger("one_guide"),
+          "Search exhausted with advisory rejections; high-cost retry %s",
+          found ? "found a physical route" : "failed without proving advisory causality");
+    }
+    if(!found) {
+      initialization_failed_=true;
+      reportSearchFailure(a_star_->lastResult(),cps_.points,0,cps_.size-1,"whole_curve_recovery");
+      return false;
+    }
+    guide_pts_=a_star_->getPath();
+    guide_reinitialization_=guide_pts_.size()>=2;
+    initialization_failed_=!guide_reinitialization_;
+    return guide_reinitialization_;
+  }
+
+  void BsplineOptimizer::initializeFromGuide(const Eigen::MatrixXd& points) {
+    cps_.resize(points.cols()); cps_.points=points; cps_.clearance=dist0_;
+    if(planning_query_ && planning_endpoints_) {
+      const auto start=planning_query_(planning_endpoints_->first);
+      if(std::isfinite(start.required_clearance_m)) cps_.clearance=std::max(dist0_,start.required_clearance_m);
+    }
+    guide_reinitialization_=false;
+    const auto guide=guide_pts_;
+    setGuidePath(guide);
+    // Rebound constraints point toward the closest position on this same guide.
+    // At that position the signed clearance is satisfied. Tracking retains the
+    // route when the smoothing objective would otherwise cut the corner.
+    for(int i=order_; i<cps_.size-order_ && guide.size()>=2; ++i) {
+      Eigen::Vector3d nearest=guide.front(); double best=inf;
+      for(size_t j=1;j<guide.size();++j) {
+        const Eigen::Vector3d segment=guide[j]-guide[j-1];
+        const double fraction=segment.squaredNorm()>1e-12 ? std::clamp(
+            (points.col(i)-guide[j-1]).dot(segment)/segment.squaredNorm(),0.0,1.0) : 0;
+        const Eigen::Vector3d candidate=guide[j-1]+fraction*segment;
+        const double distance=(candidate-points.col(i)).squaredNorm();
+        if(distance<best) { best=distance; nearest=candidate; }
+      }
+      Eigen::Vector3d direction=nearest-points.col(i);
+      if(direction.norm()>1e-6) {
+        direction.normalize(); cps_.direction[i].push_back(direction);
+        cps_.base_point[i].push_back(nearest-direction*cps_.clearance);
+      }
+    }
+  }
+
   void BsplineOptimizer::setGuidePath(const vector<Eigen::Vector3d> &guide)
   {
     guide_pts_ = guide;
@@ -601,6 +677,15 @@ namespace ego_planner
 
   std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
+
+    if(planning_query_ && planning_endpoints_) {
+      initializeFromGuide(init_points);
+      if(curveViolates(init_points,bspline_interval_) && guide_pts_.empty()) {
+        if(!searchRecoveryGuide()) initialization_failed_=true;
+        return {{0,static_cast<int>(init_points.cols())-1}};
+      }
+      return {};
+    }
 
     bool unknown_guess = false;
     if (planning_query_) {
@@ -1519,6 +1604,10 @@ namespace ego_planner
   bool BsplineOptimizer::check_collision_and_rebound(void)
   {
 
+    // Normal planning checks the actual curve at the manager boundary. Control
+    // polygon probes cannot authorize/reject recovery or replace a whole guide.
+    if (planning_query_ && planning_endpoints_) return false;
+
     int end_idx = cps_.size - order_;
 
     /*** Check and segment the initial trajectory according to obstacles ***/
@@ -1811,7 +1900,7 @@ namespace ego_planner
     iter_num_ = 0;
     int start_id = order_;
     // int end_id = this->cps_.size - order_; //Fixed end
-    int end_id = this->cps_.size; // Free end
+    int end_id = planning_endpoints_ ? this->cps_.size-order_ : this->cps_.size;
     // 变量个数
     variable_num_ = 3 * (end_id - start_id);
 
@@ -1879,31 +1968,17 @@ namespace ego_planner
         /*** collision check, phase 2 ***/
         // 创建均匀的B样条曲线
         UniformBspline traj = UniformBspline(cps_.points, 3, bspline_interval_);
-        // 开始时间，结束时间
-        double tm, tmp;
-        traj.getTimeSpan(tm, tmp);
-        // 计算时间步长
-        double t_step = (tmp - tm) / ((traj.evaluateDeBoorT(tmp) - traj.evaluateDeBoorT(tm)).norm() / grid_map_->getResolution());
-        // 遍历轨迹的前2/3部分进行障碍物检测
-        for (double t = tm; t < tmp * 2 / 3; t += t_step) // Only check the closest 2/3 partition of the whole trajectory.
-        {
-          flag_occ = planningOccupied(traj.evaluateDeBoorT(t));
-          if (flag_occ)
-          {
-            // cout << "hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
-
-            // 如果在前三个控制点范围内检测到了碰撞则视为不可行
-            if (t <= bspline_interval_) // First 3 control points in obstacles!
-            {
-              // cout << cps_.points.col(1).transpose() << "\n"
-              //      << cps_.points.col(2).transpose() << "\n"
-              //      << cps_.points.col(3).transpose() << "\n"
-              //      << cps_.points.col(4).transpose() << endl;
-              RCLCPP_WARN(rclcpp::get_logger("rebound_optimize"), "First 3 control points in obstacles! return false, t=%f", t);
-              return false;
-            }
-
-            break;
+        double tm,tmp; traj.getTimeSpan(tm,tmp);
+        if(planning_query_ && planning_endpoints_) {
+          // The manager classifies the complete post-optimization curve and
+          // performs a budgeted guide correction, including the final tail.
+          flag_occ=false;
+        } else {
+          const double step=std::min(.02,grid_map_->getResolution()/(2*std::max(.1,max_vel_)));
+          for(double t=0;t<=traj.getTimeSum()+step;t+=step) {
+            if(budget_ && budget_->expired()) return false;
+            flag_occ=planningOccupied(traj.evaluateDeBoorT(std::min(t,traj.getTimeSum())));
+            if(flag_occ) break;
           }
         }
 
@@ -2101,11 +2176,11 @@ namespace ego_planner
     if (guide_tracking_ && ref_pts_.size() >= static_cast<size_t>(cps_.size))
       calcFitnessCost(cps_.points, f_guide, g_guide);
 
-    f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_swarm + lambda2_ * f_terminal + lambda4_ * f_guide;
+    f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_swarm + lambda2_ * f_terminal + lambda4_ * guide_weight_ * f_guide;
     // f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_mov_objs;
     // printf("origin %f %f %f %f\n", f_smoothness, f_distance, f_feasibility, f_combine);
 
-    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal + lambda4_ * g_guide;
+    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal + lambda4_ * guide_weight_ * g_guide;
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }

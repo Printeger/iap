@@ -17,6 +17,12 @@
 // The format of points: N x 3 matrix, each row is a point
 namespace ego_planner
 {
+  struct LocalTarget {
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
+    double progress_m = 0.0;
+  };
 
   class ControlPoints
   {
@@ -126,13 +132,15 @@ namespace ego_planner
     }
     void setPlanningEndpoints(const Eigen::Vector3d& start, const Eigen::Vector3d& end) {
       planning_endpoints_ = std::make_pair(start, end);
+      planning_goals_ = {end};
     }
+    void setPlanningGoals(const std::vector<Eigen::Vector3d>& goals) { planning_goals_ = goals; }
+    bool searchRecoveryGuide();
+    void strengthenGuideTracking() { guide_weight_ *= 2.0; }
+    bool curveViolates(const Eigen::MatrixXd& points, double interval) const;
     bool needsGuideReinitialization() const { return guide_reinitialization_; }
     const vector<Eigen::Vector3d>& recoveryGuide() const { return guide_pts_; }
-    void initializeFromGuide(const Eigen::MatrixXd& points) {
-      cps_.resize(points.cols()); cps_.points = points; cps_.clearance = dist0_;
-      guide_reinitialization_ = false; setGuidePath(guide_pts_);
-    }
+    void initializeFromGuide(const Eigen::MatrixXd& points);
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
     void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
                           bool advisory_fallback = false) {
@@ -142,7 +150,9 @@ namespace ego_planner
       guide_tracking_ = false;
       guide_reinitialization_ = false;
       planning_endpoints_.reset();
+      planning_goals_.clear();
       guide_pts_.clear();
+      guide_weight_ = 1.0;
       if (a_star_) a_star_->setPlanningQuery(planning_query_, advisory_fallback);
     }
     void setSearchFailureObserver(std::function<void(
@@ -189,6 +199,8 @@ namespace ego_planner
     }
     GridMap::Ptr grid_map_;
     PlanningBudget::Ptr budget_;
+    std::vector<Eigen::Vector3d> planning_goals_;
+    double guide_weight_ = 1.0;
     std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> planning_endpoints_;
     bool guide_reinitialization_ = false;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
@@ -217,7 +229,7 @@ namespace ego_planner
 
     // main input
     // Eigen::MatrixXd control_points_;     // B-spline control points, N x dim
-    double bspline_interval_; // B-spline knot span
+    double bspline_interval_ = .1; // B-spline knot span
     Eigen::Vector3d end_pt_;  // end of the trajectory
     // int             dim_;                // dimension of the B-spline
     //

@@ -431,12 +431,25 @@ namespace ego_planner
       const double odom_age_s, const double map_age_s,
       const GridExecutionReason reason, const TrajectoryAssessment* assessment) {
     if (!capture_failure_map_) return;
+    auto* evidence_curve=&local_data_.position_traj_;
+    TrajectoryAssessment curve_assessment;
+    if(assessment && pending_trajectory_ && assessment->trajectory_id==pending_trajectory_->traj_id_) {
+      // Supervision uses the executing start as a shared lead-time origin;
+      // saved curve samples must use the owning pending curve's local time.
+      curve_assessment=*assessment;
+      const double offset=pending_trajectory_->start_time_.seconds()-local_data_.start_time_.seconds();
+      curve_assessment.first_execution_time_s-=offset;
+      curve_assessment.first_unobserved_time_s-=offset;
+      curve_assessment.first_advisory_time_s-=offset;
+      assessment=&curve_assessment;
+      evidence_curve=&pending_trajectory_->position_traj_;
+    }
     // A previously captured physical failure must not conceal a later hole
     // on the executing curve.
     if (assessment && std::isfinite(assessment->first_unobserved_time_s))
       captureFailureMap("curve_unobserved", assessment->first_unobserved_position,
           expected, assessment->first_unobserved_cell, nullptr, nullptr,
-          &local_data_.position_traj_, assessment);
+          evidence_curve, assessment);
     if (captured_failure_kinds_.count(kind)) return;
     planning_time_s_ = node_->now().seconds();
     planning_motion_ = currentMotionContext();
@@ -449,7 +462,7 @@ namespace ego_planner
       cell = assessment->first_execution_cell;
     }
     captureFailureMap(kind, point, expected, cell, nullptr, nullptr,
-        assessment ? &local_data_.position_traj_ : nullptr, assessment);
+        assessment ? evidence_curve : nullptr, assessment);
     if (!captured_failure_kinds_.count(kind)) return;
     auto* artifacts = glim::RunLogManager::get_if_initialized();
     if (!artifacts) return;
@@ -466,6 +479,7 @@ namespace ego_planner
           << actual.y() << ',' << actual.z() << ']'
           << ",\"error_m\":" << error_m
           << ",\"trajectory_id\":" << trajectory_id
+          << ",\"failed_curve_id\":" << (assessment ? assessment->trajectory_id : trajectory_id)
           << ",\"last_command_time_s\":"
           << (std::isfinite(command_time_s) ? command_time_s : -1.0)
           << ",\"command_age_s\":"
@@ -507,6 +521,7 @@ namespace ego_planner
     node->get_parameter("manager/drone_id", pp_.drone_id);
 
     local_data_.traj_id_ = 0;
+    local_data_.duration_ = 0;
     grid_map_.reset(new GridMap);
     // grid_map_->initMap(nh);
     grid_map_->initMap(node);
@@ -599,491 +614,288 @@ namespace ego_planner
     visualization_ = vis;
   }
 
+  void EGOPlannerManager::setPlanningConnection(rclcpp::Time start_time, int predecessor_id) {
+    connection_time_=start_time; connection_predecessor_=predecessor_id;
+  }
+
+  void EGOPlannerManager::observeExecutingTrajectory(int trajectory_id) {
+    if(pending_trajectory_ && pending_trajectory_->traj_id_==trajectory_id) {
+      local_data_=*pending_trajectory_; pending_trajectory_.reset();
+      RCLCPP_INFO(node_->get_logger(),"Trajectory %d executing at its scheduled connection",trajectory_id);
+    }
+  }
+
+  bool EGOPlannerManager::publicationStillTimely() const {
+    const double now=node_->now().seconds();
+    return planning_view_ && planning_budget_ && !planning_budget_->expired() &&
+        now>=planning_view_->time_s && (!connection_time_ || connection_time_->seconds()-now>=.1);
+  }
+
+  void EGOPlannerManager::discardUnpublishedTrajectory(const LocalTrajData& predecessor) {
+    if(pending_trajectory_) pending_trajectory_.reset();
+    else local_data_=predecessor;
+    last_plan_failure_=planning_budget_ && planning_budget_->expired() ? PlanFailure::Budget : PlanFailure::Connection;
+  }
+
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
-                                        Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
-                                        Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
-  {
-    planning_timings_.backend_s = 0;
-    planning_timings_.final_checks_s = 0;
-    bspline_optimizer_->a_star_->clearLastResult();
-    const bool own_view = !planning_view_;
-    if (own_view && !beginPlanningView()) return false;
-    struct ViewReset {
-      EGOPlannerManager* manager;
-      bool own;
-      ~ViewReset() { if (own) manager->endPlanningView(); }
-    } reset{this, own_view};
-    const auto risk_version = planning_view_->risk_version;
-    const double planning_time_s = planning_view_->time_s;
-    const auto motion = planning_view_->motion;
-    bspline_optimizer_->a_star_->setSearchMap(grid_map_);
-    bspline_optimizer_->a_star_->setFrozenEpoch(planning_view_->physical);
-    planning_risk_version_ = risk_version;
-    planning_time_s_ = planning_time_s;
-    planning_motion_ = motion;
-    const auto planning_query = [this](
-        const Eigen::Vector3d& position) {
-      return queryPlanningViewCell(position);
+      Eigen::Vector3d start_acc, Eigen::Vector3d target_pt, Eigen::Vector3d target_vel,
+      bool polynomial_init, bool /* random_polynomial */) {
+    const bool own_view=!planning_view_;
+    if(own_view && !beginPlanningView()) return false;
+    struct EndView { EGOPlannerManager* manager; bool own;
+      ~EndView() { if(own) manager->endPlanningView(); } } end_view{this,own_view};
+    last_plan_failure_=PlanFailure::None;
+    const auto fail=[&](PlanFailure reason) {
+      last_plan_failure_=planning_budget_->expired() || planning_budget_->denied() ? PlanFailure::Budget : reason;
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+          "Planner rebound rejected: phase=%s execution=%s budget_expired=%d repair_denied=%d",
+          last_plan_failure_==PlanFailure::Budget ? "budget" : last_plan_failure_==PlanFailure::Target ? "target" :
+          last_plan_failure_==PlanFailure::Search ? "search" : last_plan_failure_==PlanFailure::Curve ? "curve" :
+          last_plan_failure_==PlanFailure::Release ? "release" : "connection", gridExecutionReasonName(last_candidate_assessment_.execution_reason),
+          planning_budget_->expired(), planning_budget_->denied());
+      ++continous_failures_count_; return false;
     };
-    const auto start_cell = planning_query(start_pt);
-    if (!start_cell.executable()) {
-      const auto detail = grid_map_->queryPlanningCell(
-          start_pt, risk_version, planning_time_s, planning_risk_policy_,
-          motion, true, &planning_view_->physical_context);
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-          "Planning denied: start %s pos=(%.3f %.3f %.3f) required=%s nearest=%s generation=%lu cloud=%.3f",
-          gridExecutionReasonName(detail.execution_reason), start_pt.x(),
-          start_pt.y(), start_pt.z(),
-          clearanceText(detail.required_clearance_m).c_str(),
-          clearanceText(detail.raw_center_clearance_m).c_str(),
-          static_cast<unsigned long>(detail.occupancy_generation),
-          detail.cloud_stamp_s);
-      return false;
+    if(pending_trajectory_ || planning_budget_->expired()) return fail(PlanFailure::Connection);
+    if(!start_pt.allFinite() || !start_vel.allFinite() || !start_acc.allFinite() ||
+       !target_pt.allFinite() || !target_vel.allFinite()) return fail(PlanFailure::Target);
+    if(planning_targets_.empty()) planning_targets_.push_back({target_pt,target_vel,Eigen::Vector3d::Zero(),0});
+    planning_time_s_=planning_view_->time_s; planning_risk_version_=planning_view_->risk_version;
+    planning_motion_=planning_view_->motion;
+    auto& optimizer=*bspline_optimizer_;
+    optimizer.a_star_->clearLastResult();
+    optimizer.a_star_->setSearchMap(grid_map_);
+    optimizer.a_star_->setFrozenEpoch(planning_view_->physical);
+    const auto query=[this](const Eigen::Vector3d& point) { return queryPlanningViewCell(point); };
+    const auto start_cell=query(start_pt);
+    if(!start_cell.executable()) {
+      optimizer.a_star_->recordPresearchFailure(
+          start_cell.execution_reason==GridExecutionReason::ENVIRONMENT_STALE ? AStar::Failure::MAP_STALE :
+          start_cell.execution_reason==GridExecutionReason::CURRENT_MOTION_UNAVAILABLE ||
+          start_cell.execution_reason==GridExecutionReason::CURRENT_MOTION_STALE ||
+          start_cell.execution_reason==GridExecutionReason::CURRENT_MOTION_BUDGET ? AStar::Failure::CURRENT_MOTION :
+          AStar::Failure::START_BLOCKED,start_pt,target_pt);
+      if(capture_failure_map_) captureFailureMap("endpoint",start_pt,target_pt,start_cell);
+      return fail(PlanFailure::Connection);
     }
-    const bool start_in_advisory =
-        start_cell.advisory.classification == GridAdvisoryClass::AVOID ||
-        start_cell.advisory.classification == GridAdvisoryClass::PREDICTED_DEGRADED;
-    bspline_optimizer_->setPlanningQuery(planning_query, start_in_advisory);
-    bspline_optimizer_->setPlanningBudget(planning_budget_);
-    bspline_optimizer_->setPlanningEndpoints(start_pt, local_target_pt);
-    static int count = 0;
-    printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
-
-    if ((start_pt - local_target_pt).norm() < 0.2)
-    {
-      cout << "Close to goal" << endl;
-      continous_failures_count_++;
-      return false;
+    optimizer.setPlanningQuery(query,false);
+    optimizer.setPlanningBudget(planning_budget_);
+    optimizer.setPlanningEndpoints(start_pt,target_pt);
+    std::vector<Eigen::Vector3d> goals;
+    for(const auto& target:planning_targets_) goals.push_back(target.position);
+    optimizer.setPlanningGoals(goals);
+    LocalTarget selected{target_pt,target_vel,Eigen::Vector3d::Zero(),0};
+    std::vector<Eigen::Vector3d> derivatives{start_vel,selected.velocity,start_acc,selected.acceleration};
+    double interval=std::max(.05,pp_.ctrl_pt_dist/std::max(.1,pp_.max_vel_)*1.5);
+    std::vector<Eigen::Vector3d> points;
+    const double distance=(target_pt-start_pt).norm();
+    if(distance<.2) return fail(PlanFailure::Target);
+    // Reuse starts at the bound connection time, never at a fresh now().
+    if(!polynomial_init && local_data_.duration_>0 && connection_time_) {
+      auto curve=local_data_.position_traj_;
+      const double from=connection_time_->seconds()-local_data_.start_time_.seconds();
+      for(double t=from;t<local_data_.duration_;t+=interval) {
+        if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+        points.push_back(curve.evaluateDeBoorT(t));
+      }
     }
-
-    bspline_optimizer_->setLocalTargetPt(local_target_pt);
-
-    rclcpp::Time t_start = node_->now();
-    rclcpp::Duration t_init(0, 0), t_opt(0, 0), t_refine(0, 0);
-
-    /*** STEP 1: INIT
-    根据起始点和目标点的距离计算首个时间步长ts,向量的模大于0.1则用1.5倍否则用5倍
-    ***/
-    double ts = (start_pt - local_target_pt).norm() > 0.1 ? pp_.ctrl_pt_dist / pp_.max_vel_ * 1.5 : pp_.ctrl_pt_dist / pp_.max_vel_ * 5; // pp_.ctrl_pt_dist / pp_.max_vel_ is too tense, and will surely exceed the acc/vel limits
-    vector<Eigen::Vector3d> point_set, start_end_derivatives;
-    static bool flag_first_call = true, flag_force_polynomial = false;
-    bool flag_regenerate = false;
-    do
-    {
-      if (planning_budget_->expired()) return false;
-      point_set.clear();
-      start_end_derivatives.clear();
-      flag_regenerate = false;
-
-      // 这里如果正常进入if（通常为初次生成），则do部分只进行一次，即只清空一次点集；若进入else则有可能对异常情况重置flag_regenerate并再do一次
-      if (flag_first_call || flag_polyInit || flag_force_polynomial /*|| ( start_pt - local_target_pt ).norm() < 1.0*/) // Initial path generated from a min-snap traj by order.
+    if(points.size()<7) {
+      points.clear();
+      const double duration=std::max(1.0,2*distance/std::max(.1,pp_.max_vel_));
+      auto polynomial=PolynomialTraj::one_segment_traj_gen(start_pt,start_vel,start_acc,
+          selected.position,selected.velocity,selected.acceleration,duration);
+      const size_t count=std::max<size_t>(7,std::ceil(duration/interval)+1);
+      interval=duration/(count-1);
+      for(size_t i=0;i<count;++i) {
+        if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+        points.push_back(polynomial.evaluate(i*interval));
+      }
+    } else {
+      points.push_back(target_pt);
+    }
+    Eigen::MatrixXd control;
+    const auto bind_boundaries=[&]() {
+      UniformBspline::enforceBoundaryStates(control,interval,start_pt,start_vel,start_acc,
+          selected.position,selected.velocity,selected.acceleration);
+      optimizer.setLocalTargetPt(selected.position);
+      optimizer.setBsplineInterval(interval);
+    };
+    UniformBspline::parameterizeToBspline(interval,points,derivatives,control);
+    bind_boundaries();
+    optimizer.initControlPoints(control,true);
+    if(optimizer.initializationFailed()) return fail(PlanFailure::Search);
+    const auto initialize_guide=[&]() {
+      const auto& guide=optimizer.recoveryGuide();
+      if(guide.size()<2) return false;
+      const auto index=optimizer.a_star_->lastResult().selected_goal;
+      if(index<planning_targets_.size()) selected=planning_targets_[index];
+      derivatives={start_vel,selected.velocity,start_acc,selected.acceleration};
+      std::vector<double> arc(guide.size(),0);
+      for(size_t i=1;i<guide.size();++i) arc[i]=arc[i-1]+(guide[i]-guide[i-1]).norm();
+      const size_t count=std::max<size_t>(7,std::ceil(arc.back()/pp_.ctrl_pt_dist)+1);
+      points.clear(); size_t segment=1;
+      for(size_t i=0;i<count;++i) {
+        if(planning_budget_->expired()) return false;
+        const double d=arc.back()*i/(count-1);
+        while(segment+1<arc.size() && arc[segment]<d) ++segment;
+        const double length=arc[segment]-arc[segment-1];
+        const double alpha=length>1e-9 ? (d-arc[segment-1])/length : 0;
+        points.push_back(guide[segment-1]*(1-alpha)+guide[segment]*alpha);
+      }
+      interval=std::max(interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
+      UniformBspline::parameterizeToBspline(interval,points,derivatives,control);
+      bind_boundaries(); optimizer.initializeFromGuide(control); return true;
+    };
+    if(optimizer.needsGuideReinitialization() && !initialize_guide()) return fail(PlanFailure::Search);
+    TrajectoryAssessment assessment;
+    UniformBspline curve;
+    for(;;) {
+      if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+      const auto backend_start=PlanningBudget::Clock::now();
+      if(!optimizer.BsplineOptimizeTrajRebound(control,interval)) return fail(PlanFailure::Curve);
+      planning_timings_.backend_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-backend_start).count();
+      bind_boundaries();
+      bool feasible=false;
+      for(int retime=0;retime<4;++retime) {
+        if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+        curve=UniformBspline(control,3,interval);
+        curve.setPhysicalLimits(pp_.max_vel_,pp_.max_acc_,pp_.feasibility_tolerance_);
+        double ratio=1;
+        if(curve.checkFeasibility(ratio,false)) { feasible=true; break; }
+        // Reconstruct a uniform spline and rebind physical derivatives after
+        // stretching. A raw lengthenTime would silently change both endpoints.
+        interval*=std::max(1.1,ratio*1.05); bind_boundaries();
+      }
+      if(!feasible) return fail(PlanFailure::Curve);
+      const auto check_start=PlanningBudget::Clock::now();
+      assessment=assessTrajectory(curve,planning_view_->risk_version,planning_view_->time_s,
+          false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
+      planning_timings_.final_checks_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-check_start).count();
+      last_candidate_assessment_=assessment;
+      if(assessment.budget_exhausted) return fail(PlanFailure::Budget);
+      // Terminal speed is rechecked after optimization against the same input.
+      if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6)
+        return fail(PlanFailure::Target);
+      const bool advisory_violation=assessment.advisory_avoid_samples && !optimizer.advisoryFallbackUsed();
+      if(assessment.executable() && !advisory_violation) break;
+      if(!assessment.executable() && assessment.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
+          assessment.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
+          assessment.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED) return fail(PlanFailure::Curve);
+      if(capture_failure_map_ && assessment.first_execution_position.allFinite())
+        captureFailureMap("candidate",assessment.first_execution_position,selected.position,
+            assessment.first_execution_cell,nullptr,nullptr,&curve,&assessment);
+      if(optimizer.recoveryGuide().empty()) {
+        if(!optimizer.searchRecoveryGuide() || !initialize_guide()) return fail(PlanFailure::Search);
+      } else {
+        if(!planning_budget_->tryRepair(PlanningBudget::Repair::Reinitialize)) return fail(PlanFailure::Budget);
+        optimizer.strengthenGuideTracking();
+        optimizer.initializeFromGuide(control);
+      }
+    }
+    const bool advisory_downgraded=!std::isfinite(planning_view_->advisory_valid_until_s) ||
+        node_->now().seconds()>planning_view_->advisory_valid_until_s || grid_map_->occupancyGeneration()!=planning_view_->generation;
+    if(assessment.advisory_unknown_samples || optimizer.advisoryFallbackUsed() || advisory_downgraded)
+      RCLCPP_INFO(node_->get_logger(),"Trajectory advisory degraded: frozen_unknown=%zu fallback=%d historical_or_unavailable=%d",
+          assessment.advisory_unknown_samples,optimizer.advisoryFallbackUsed(),
+          advisory_downgraded);
+    // Capture the latest relevant corridor once. Remote updates are harmless;
+    // changes within this corridor get at most one budgeted recapture.
+    bool committed=false;
+    for(int capture=0;capture<2;++capture) {
+      if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+      const double now=node_->now().seconds();
+      if(now<planning_view_->time_s || !grid_map_->geometryMatches(*planning_view_->physical)) return fail(PlanFailure::Connection);
+      if(connection_time_ && (connection_time_->seconds()-now<.1 || local_data_.traj_id_!=connection_predecessor_))
+        return fail(PlanFailure::Connection);
+      auto release=assessTrajectory(curve,0,now);
+      if(!release.executable() || !release.physical_epoch) {
+        last_candidate_assessment_=release; return fail(PlanFailure::Release);
+      }
+      if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6) return fail(PlanFailure::Target);
       {
-        flag_first_call = false;
-        flag_force_polynomial = false;
-        // 用于存储生成的轨迹
-        PolynomialTraj gl_traj;
-
-        double dist = (start_pt - local_target_pt).norm();
-        // 判断 速度的平方/加速度 是否大于dist，并决定如何计算时间
-        double time = pow(pp_.max_vel_, 2) / pp_.max_acc_ > dist ? sqrt(dist / pp_.max_acc_) : (dist - pow(pp_.max_vel_, 2) / pp_.max_acc_) / pp_.max_vel_ + 2 * pp_.max_vel_ / pp_.max_acc_;
-
-        if (!flag_randomPolyTraj)
-        // false生成一段单一的多项式轨迹，true生成一个包含随机插入点的轨迹
-        {
-          gl_traj = PolynomialTraj::one_segment_traj_gen(start_pt, start_vel, start_acc, local_target_pt, local_target_vel, Eigen::Vector3d::Zero(), time);
-        }
-        else
-        {
-          Eigen::Vector3d horizen_dir = ((start_pt - local_target_pt).cross(Eigen::Vector3d(0, 0, 1))).normalized();
-          Eigen::Vector3d vertical_dir = ((start_pt - local_target_pt).cross(horizen_dir)).normalized();
-          Eigen::Vector3d random_inserted_pt = (start_pt + local_target_pt) / 2 +
-                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * horizen_dir * 0.8 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989) +
-                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * vertical_dir * 0.4 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989);
-          Eigen::MatrixXd pos(3, 3);
-          pos.col(0) = start_pt;
-          pos.col(1) = random_inserted_pt;
-          pos.col(2) = local_target_pt;
-          Eigen::VectorXd t(2);
-          t(0) = t(1) = time / 2;
-          gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, local_target_vel, start_acc, Eigen::Vector3d::Zero(), t);
-        }
-
-        double t;
-        bool flag_too_far;
-        ts *= 1.5; // ts will be divided by 1.5 in the next
-        do
-        {
-          ts /= 1.5;
-          point_set.clear();
-          flag_too_far = false;
-          Eigen::Vector3d last_pt = gl_traj.evaluate(0);
-          for (t = 0; t < time; t += ts)
-          {
-          if (planning_budget_->expired()) return false;
-            Eigen::Vector3d pt = gl_traj.evaluate(t);
-            if ((last_pt - pt).norm() > pp_.ctrl_pt_dist * 1.5)
-            {
-              flag_too_far = true;
-              break;
-            }
-            last_pt = pt;
-            point_set.push_back(pt);
+        // One latest corridor owns all evidence needed through the switch and
+        // terminal stopping space. Ordinary map updates outside it are allowed.
+        std::vector<Eigen::Vector3d> positions;
+        const double spacing=std::min(.01,grid_map_->getResolution()/(4*std::max(.1,pp_.max_vel_)));
+        if(connection_time_) {
+          const double from=std::max(0.0,now-local_data_.start_time_.seconds());
+          const double to=connection_time_->seconds()-local_data_.start_time_.seconds();
+          auto old=local_data_.position_traj_;
+          for(double t=from;t<=to+spacing;t+=spacing) {
+            if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+            positions.push_back(old.evaluateDeBoorT(std::min(t,to)));
           }
-        } while (flag_too_far || point_set.size() < 7); // To make sure the initial path has enough points.
-        t -= ts;
-        start_end_derivatives.push_back(gl_traj.evaluateVel(0));
-        start_end_derivatives.push_back(local_target_vel);
-        start_end_derivatives.push_back(gl_traj.evaluateAcc(0));
-        start_end_derivatives.push_back(gl_traj.evaluateAcc(t));
-      }
-      else // Initial path generated from previous trajectory.
-      {
-
-        double t;
-        double t_cur = (node_->now() - local_data_.start_time_).seconds();
-
-        vector<double> pseudo_arc_length;
-        vector<Eigen::Vector3d> segment_point;
-        pseudo_arc_length.push_back(0.0);
-        for (t = t_cur; t < local_data_.duration_ + 1e-3; t += ts)
-        {
-          if (planning_budget_->expired()) return false;
-          segment_point.push_back(local_data_.position_traj_.evaluateDeBoorT(t));
-          if (t > t_cur)
-          {
-            pseudo_arc_length.push_back((segment_point.back() - segment_point[segment_point.size() - 2]).norm() + pseudo_arc_length.back());
+        }
+        const double duration=curve.getTimeSum();
+        for(double t=0;t<=duration+spacing;t+=spacing) {
+          if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+          positions.push_back(curve.evaluateDeBoorT(std::min(t,duration)));
+        }
+        if(selected.velocity.norm()>1e-9) {
+          const double stopping=selected.velocity.squaredNorm()/(2*std::max(.1,pp_.max_acc_))+2*grid_map_->getResolution();
+          for(double d=0;d<=stopping+grid_map_->getResolution()*.5;d+=grid_map_->getResolution()*.5) {
+            if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+            positions.push_back(selected.position+selected.velocity.normalized()*std::min(d,stopping));
           }
         }
-        t -= ts;
-
-        double poly_time = (local_data_.position_traj_.evaluateDeBoorT(t) - local_target_pt).norm() / pp_.max_vel_ * 2;
-        if (poly_time > ts)
-        {
-          PolynomialTraj gl_traj = PolynomialTraj::one_segment_traj_gen(local_data_.position_traj_.evaluateDeBoorT(t),
-                                                                        local_data_.velocity_traj_.evaluateDeBoorT(t),
-                                                                        local_data_.acceleration_traj_.evaluateDeBoorT(t),
-                                                                        local_target_pt, local_target_vel, Eigen::Vector3d::Zero(), poly_time);
-
-          for (t = ts; t < poly_time; t += ts)
-          {
-          if (planning_budget_->expired()) return false;
-            if (!pseudo_arc_length.empty())
-            {
-              segment_point.push_back(gl_traj.evaluate(t));
-              pseudo_arc_length.push_back((segment_point.back() - segment_point[segment_point.size() - 2]).norm() + pseudo_arc_length.back());
-            }
-            else
-            {
-              RCLCPP_ERROR(rclcpp::get_logger("ego_planner"), "pseudo_arc_length is empty, return!");
-              continous_failures_count_++;
-              return false;
-            }
+        const auto prepared=grid_map_->preparePlanningQuery(now,release.evaluated_motion);
+        release.physical_epoch=grid_map_->captureFrozenCorridor(positions,prepared.required_clearance_m,planning_budget_);
+        if(!release.physical_epoch) return fail(PlanFailure::Release);
+        const auto context=grid_map_->preparePlanningQuery(now,release.evaluated_motion,release.physical_epoch);
+        for(const auto& point:positions) {
+          if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+          const auto cell=grid_map_->queryPlanningCell(point,0,now,planning_risk_policy_,release.evaluated_motion,false,&context);
+          if(!cell.executable()) {
+            last_candidate_assessment_.execution_reason=cell.execution_reason;
+            last_candidate_assessment_.first_execution_position=point;
+            return fail(PlanFailure::Release);
           }
         }
-
-        double sample_length = 0;
-        double cps_dist = pp_.ctrl_pt_dist * 1.5; // cps_dist will be divided by 1.5 in the next
-        size_t id = 0;
-        do
-        {
-          cps_dist /= 1.5;
-          point_set.clear();
-          sample_length = 0;
-          id = 0;
-          while ((id <= pseudo_arc_length.size() - 2) && sample_length <= pseudo_arc_length.back())
-          {
-          if (planning_budget_->expired()) return false;
-            if (sample_length >= pseudo_arc_length[id] && sample_length < pseudo_arc_length[id + 1])
-            {
-              point_set.push_back((sample_length - pseudo_arc_length[id]) / (pseudo_arc_length[id + 1] - pseudo_arc_length[id]) * segment_point[id + 1] +
-                                  (pseudo_arc_length[id + 1] - sample_length) / (pseudo_arc_length[id + 1] - pseudo_arc_length[id]) * segment_point[id]);
-              sample_length += cps_dist;
-            }
-            else
-              id++;
-          }
-          point_set.push_back(local_target_pt);
-        } while (point_set.size() < 7); // If the start point is very close to end point, this will help
-
-        start_end_derivatives.push_back(local_data_.velocity_traj_.evaluateDeBoorT(t_cur));
-        start_end_derivatives.push_back(local_target_vel);
-        start_end_derivatives.push_back(local_data_.acceleration_traj_.evaluateDeBoorT(t_cur));
-        start_end_derivatives.push_back(Eigen::Vector3d::Zero());
-
-        if (point_set.size() > pp_.planning_horizen_ / pp_.ctrl_pt_dist * 3) // The initial path is unnormally too long!
-        {
-          flag_force_polynomial = true;
-          if (!planning_budget_->tryRepair(PlanningBudget::Repair::Reinitialize)) return false;
-          flag_regenerate = true;
+      }
+      const auto gate=grid_map_->commitFrozenCorridor(*release.physical_epoch,node_->now().seconds(),
+          release.evaluated_motion.max_environment_age_s,[&]() {
+        if(planning_budget_->expired()) return false;
+        const auto current=currentMotionContext();
+        const auto odom=latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
+        const double commit_time=node_->now().seconds();
+        if(current.quality!=release.evaluated_motion_quality || !std::isfinite(current.error_proxy_m) ||
+            current.error_proxy_m>release.evaluated_motion_error_proxy_m+1e-9 ||
+            commit_time<current.stamp_s || commit_time-current.stamp_s>current.max_motion_age_s ||
+            !odom || odom->header.frame_id!=release.physical_epoch->frame_id) return false;
+        const double stamp=rclcpp::Time(odom->header.stamp).seconds();
+        if(commit_time<stamp || commit_time-stamp>motion_max_age_s_) return false;
+        const auto& p=odom->pose.pose.position;
+        const Eigen::Vector3d actual(p.x,p.y,p.z);
+        Eigen::Vector3d expected=start_pt;
+        if(connection_time_) {
+          if(local_data_.traj_id_!=connection_predecessor_ || connection_time_->seconds()-commit_time<.1 ||
+              stamp<local_data_.start_time_.seconds()) return false;
+          auto old=local_data_.position_traj_;
+          expected=old.evaluateDeBoorT(std::clamp(stamp-local_data_.start_time_.seconds(),0.0,local_data_.duration_));
+          const double t=connection_time_->seconds()-local_data_.start_time_.seconds();
+          if(t<0 || t>local_data_.duration_) return false;
+          auto velocity=old.getDerivative(); auto acceleration=velocity.getDerivative();
+          if((old.evaluateDeBoorT(t)-start_pt).norm()>1e-6 ||
+             (velocity.evaluateDeBoorT(t)-start_vel).norm()>1e-6 ||
+             (acceleration.evaluateDeBoorT(t)-start_acc).norm()>1e-6) return false;
         }
-      }
-    } while (flag_regenerate);
-
-    // 将轨迹变为B样条轨迹
-    Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
-    UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
-
-    vector<std::pair<int, int>> segments;
-    segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
-    if (bspline_optimizer_->initializationFailed()) {
-      ++continous_failures_count_;
-      return false;
-    }
-    if (bspline_optimizer_->needsGuideReinitialization()) {
-      if (!planning_budget_->tryRepair(PlanningBudget::Repair::Reinitialize)) return false;
-      const auto& guide = bspline_optimizer_->recoveryGuide();
-      std::vector<double> arc(guide.size(), 0.0);
-      for (size_t i = 1; i < guide.size(); ++i)
-        arc[i] = arc[i-1] + (guide[i] - guide[i-1]).norm();
-      const size_t samples = std::max<size_t>(7, std::ceil(arc.back() / pp_.ctrl_pt_dist) + 1);
-      point_set.clear(); size_t segment = 1;
-      for (size_t i = 0; i < samples; ++i) {
-        if (planning_budget_->expired()) return false;
-        const double d = arc.back() * i / (samples - 1);
-        while (segment + 1 < arc.size() && arc[segment] < d) ++segment;
-        const double length = arc[segment] - arc[segment-1];
-        const double alpha = length > 1e-9 ? (d - arc[segment-1]) / length : 0.0;
-        point_set.push_back(guide[segment-1] * (1-alpha) + guide[segment] * alpha);
-      }
-      ts = std::max(ts, arc.back() / (pp_.max_vel_ * (samples - 1)));
-      UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
-      bspline_optimizer_->initializeFromGuide(ctrl_pts);
-    }
-    // 计算时间差并更新时间
-    auto now = node_->now();
-    t_init = now - t_start;
-    t_start = now;
-
-    /*** STEP 2: OPTIMIZE ***/
-    bool flag_step_1_success = false;
-    vector<vector<Eigen::Vector3d>> vis_trajs;
-
-    const auto backend_started = std::chrono::steady_clock::now();
-    flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
-    planning_timings_.backend_s = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - backend_started).count();
-    t_opt = node_->now() - t_start;
-    visualization_->displayInitPathList(point_set, 0.2, 0);
-
-    cout << "plan_success=" << flag_step_1_success << endl;
-    if (!flag_step_1_success)
-    {
-      visualization_->displayOptimalList(ctrl_pts, 0);
-      continous_failures_count_++;
-      return false;
-    }
-
-    t_start = node_->now();
-    const auto refine_started = std::chrono::steady_clock::now();
-
-    UniformBspline pos = UniformBspline(ctrl_pts, 3, ts);
-    pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
-
-    /*** STEP 3: REFINE(RE-ALLOCATE TIME) IF NECESSARY ***/
-    // Note: Only adjust time in single drone mode. But we still allow drone_0 to adjust its time profile.
-    if (pp_.drone_id <= 0)
-    {
-
-      double ratio;
-      bool flag_step_2_success = true;
-      if (!pos.checkFeasibility(ratio, false))
-      {
-        cout << "Need to reallocate time." << endl;
-
-        Eigen::MatrixXd optimal_control_points;
-        flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
-        if (flag_step_2_success)
-          pos = UniformBspline(optimal_control_points, 3, ts);
-      }
-
-      if (!flag_step_2_success)
-      {
-        planning_timings_.backend_s += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - refine_started).count();
-        printf("\033[34mThis refined trajectory hits obstacles. It doesn't matter if appeares occasionally. But if continously appearing, Increase parameter \"lambda_fitness\".\n\033[0m");
-        continous_failures_count_++;
-        return false;
-      }
-    }
-    else
-    {
-      static bool print_once = true;
-      if (print_once)
-      {
-        print_once = false;
-        RCLCPP_ERROR(rclcpp::get_logger("ego_planner"), "IN SWARM MODE, REFINE DISABLED!");
-      }
-    }
-
-    // t_refine = ros::Time::now() - t_start;
-    t_refine = node_->now() - t_start;
-    planning_timings_.backend_s += std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - refine_started).count();
-
-    // Assess the final time-adjusted curve before touching the active plan.
-    double feasibility_ratio = 1.0;
-    pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
-    bool feasible = pos.checkFeasibility(feasibility_ratio, false);
-    for (int retime = 0; !feasible && retime < 2; ++retime) {
-      pos.lengthenTime(std::max(1.1, feasibility_ratio * 1.05));
-      feasible = pos.checkFeasibility(feasibility_ratio, false);
-    }
-    if (!feasible) {
-      RCLCPP_WARN(node_->get_logger(), "Candidate rejected: dynamic limits");
-      ++continous_failures_count_;
-      return false;
-    }
-    auto check_started = std::chrono::steady_clock::now();
-    auto assessment = assessTrajectory(pos, risk_version,
-        planning_view_->time_s, false, 0.0, std::numeric_limits<double>::infinity(),
-        &planning_view_->physical_context);
-    planning_timings_.final_checks_s += std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - check_started).count();
-    if (!assessment.executable()) {
-      auto detail = assessment.first_execution_cell;
-      if (assessment.first_execution_position.allFinite() &&
-          !std::isfinite(detail.raw_center_clearance_m)) {
-        const auto context=grid_map_->preparePlanningQuery(assessment.evaluation_time_s,
-            assessment.evaluated_motion,assessment.physical_epoch);
-        detail = grid_map_->queryPlanningCell(assessment.first_execution_position,0,
-            assessment.evaluation_time_s,planning_risk_policy_,assessment.evaluated_motion,true,&context);
-      }
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-                  "Candidate rejected before commit: %s at t=%.3f pos=(%.3f %.3f %.3f) required=%s nearest=%s nearest_raw=(%.3f %.3f %.3f) generation=%lu cloud=%.3f advisory=%u",
-                  gridExecutionReasonName(assessment.execution_reason),
-                  assessment.first_execution_time_s,
-                  assessment.first_execution_position.x(),
-                  assessment.first_execution_position.y(),
-                  assessment.first_execution_position.z(),
-                  clearanceText(detail.required_clearance_m).c_str(),
-                  clearanceText(detail.raw_center_clearance_m).c_str(),
-                  detail.nearest_raw_center.x(), detail.nearest_raw_center.y(),
-                  detail.nearest_raw_center.z(),
-                  static_cast<unsigned long>(detail.occupancy_generation),
-                  detail.cloud_stamp_s,
-                  static_cast<unsigned>(detail.advisory.classification));
-      if (capture_failure_map_ && !captured_failure_kinds_.count("candidate") &&
-          assessment.first_execution_position.allFinite())
-        captureFailureMap("candidate", assessment.first_execution_position,
-                          local_target_pt, assessment.first_execution_cell,
-                          nullptr, nullptr, &pos, &assessment);
-      if (std::isfinite(assessment.first_unobserved_time_s))
-        captureFailureMap("curve_unobserved", assessment.first_unobserved_position,
-            local_target_pt, assessment.first_unobserved_cell,
-            nullptr, nullptr, &pos, &assessment);
-      ++continous_failures_count_;
-      return false;
-    }
-    if (assessment.advisory_avoid_samples != 0 &&
-        !bspline_optimizer_->advisoryFallbackUsed()) {
-      // One bounded correction of a curve that cut across its guide. The
-      // original executable candidate remains available if correction fails.
-      if (!planning_budget_->tryRepair(PlanningBudget::Repair::Reinitialize)) return false;
-      Eigen::MatrixXd corrected_points = pos.getControlPoint();
-      bspline_optimizer_->initControlPoints(corrected_points, true);
-      bool correction_success = false;
-      if (!bspline_optimizer_->initializationFailed()) {
-        const auto correction_started = std::chrono::steady_clock::now();
-        correction_success = bspline_optimizer_->BsplineOptimizeTrajRebound(
-            corrected_points, pos.getInterval());
-        planning_timings_.backend_s += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - correction_started).count();
-      }
-      if (correction_success) {
-        UniformBspline corrected(corrected_points, 3, pos.getInterval());
-        corrected.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_,
-                                    pp_.feasibility_tolerance_);
-        double ratio = 1.0;
-        check_started = std::chrono::steady_clock::now();
-        const auto corrected_check = assessTrajectory(
-            corrected, risk_version, planning_view_->time_s, false, 0.0,
-            std::numeric_limits<double>::infinity(), &planning_view_->physical_context);
-        planning_timings_.final_checks_s += std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - check_started).count();
-        if (corrected.checkFeasibility(ratio, false) &&
-            corrected_check.executable() &&
-            corrected_check.advisory_avoid_samples <
-                assessment.advisory_avoid_samples) {
-          pos = corrected;
-          assessment = corrected_check;
-        }
-      }
-    }
-    if (assessment.advisory_avoid_samples != 0)
-      RCLCPP_WARN(node_->get_logger(),
-                  "Candidate uses degraded advisory fallback: %zu warning samples",
-                  assessment.advisory_avoid_samples);
-    if (assessment.advisory_unknown_samples != 0)
-      RCLCPP_INFO(node_->get_logger(),
-                  "Candidate advisory coverage incomplete: %zu/%zu samples",
-                  assessment.advisory_unknown_samples, assessment.sampled_points);
-    // Recheck the actual curve against the newest map, motion report and GLIO
-    // position after all optimization and advisory correction work.
-    check_started = std::chrono::steady_clock::now();
-    bool committed = false;
-    TrajectoryAssessment release_check;
-    GridMap::CorridorCommit gate = GridMap::CorridorCommit::Invalid;
-    for (int capture = 0; capture < 2; ++capture) {
-      if (planning_budget_->expired() || !grid_map_->geometryMatches(*planning_view_->physical)) break;
-      release_check = assessTrajectory(pos, 0, node_->now().seconds());
-      if (!release_check.executable() || !release_check.physical_epoch) break;
-      gate = grid_map_->commitFrozenCorridor(*release_check.physical_epoch,
-          node_->now().seconds(), release_check.evaluated_motion.max_environment_age_s,
-          [&]() {
-            const auto now = node_->now();
-            const auto& planned=*planning_view_->physical;
-            const auto& captured=*release_check.physical_epoch;
-            if (planned.frame_id!=captured.frame_id || planned.lattice_origin!=captured.lattice_origin ||
-                planned.voxel_dimensions!=captured.voxel_dimensions || planned.extent_m!=captured.extent_m || planned.resolution_m!=captured.resolution_m ||
-                !std::isfinite(captured.cloud_stamp_s) || now.seconds()<captured.cloud_stamp_s ||
-                now.seconds()-captured.cloud_stamp_s>release_check.evaluated_motion.max_environment_age_s) return false;
-            const auto latest = currentMotionContext();
-            if (planning_budget_->expired() || latest.quality != release_check.evaluated_motion_quality ||
-                !std::isfinite(latest.error_proxy_m) || latest.error_proxy_m >
-                    release_check.evaluated_motion_error_proxy_m + 1e-9 ||
-                !std::isfinite(latest.stamp_s) || now.seconds() < latest.stamp_s ||
-                now.seconds()-latest.stamp_s > latest.max_motion_age_s) return false;
-            const auto odom = latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
-            if (!odom || odom->header.frame_id != release_check.physical_epoch->frame_id) return false;
-            const auto& p = odom->pose.pose.position;
-            const Eigen::Vector3d actual(p.x,p.y,p.z);
-            if (!actual.allFinite() || (actual-pos.evaluateDeBoorT(0)).norm() > motion_start_tolerance_m_) return false;
-            // Relevant physical evidence and freshness remain locked through
-            // the only write to local_data_. Remote generations are harmless.
-            updateTrajInfo(pos, now); return true;
-          }, planning_budget_);
-      if (gate == GridMap::CorridorCommit::Committed) { committed = true; break; }
-      if (gate != GridMap::CorridorCommit::Changed || capture != 0 ||
+        if(!actual.allFinite() || (actual-expected).norm()>motion_start_tolerance_m_) return false;
+        if(connection_time_) {
+          LocalTrajData candidate; candidate.start_time_=*connection_time_;
+          candidate.position_traj_=curve; candidate.velocity_traj_=curve.getDerivative();
+          candidate.acceleration_traj_=candidate.velocity_traj_.getDerivative();
+          candidate.start_pos_=start_pt; candidate.duration_=curve.getTimeSum();
+          next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
+          candidate.traj_id_=next_trajectory_id_; pending_trajectory_=candidate;
+        } else updateTrajInfo(curve,node_->now());
+        return true;
+      },planning_budget_);
+      if(gate==GridMap::CorridorCommit::Committed) { committed=true; break; }
+      if(gate!=GridMap::CorridorCommit::Changed || capture ||
           !planning_budget_->tryRepair(PlanningBudget::Repair::PublicationRecheck)) break;
     }
-    planning_timings_.final_checks_s += std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - check_started).count();
-    if (!committed) {
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-          "Candidate withheld: corridor=%u physical=%s repairs=%u deadline=%d",
-          static_cast<unsigned>(gate), gridExecutionReasonName(release_check.execution_reason),
-          planning_budget_->used(), planning_budget_->expired());
-      if (release_check.first_execution_position.allFinite())
-        captureFailureMap("candidate", release_check.first_execution_position,local_target_pt,
-            release_check.first_execution_cell,nullptr,nullptr,&pos,&release_check);
-      if (std::isfinite(release_check.first_unobserved_time_s))
-        captureFailureMap("curve_unobserved",release_check.first_unobserved_position,local_target_pt,
-            release_check.first_unobserved_cell,nullptr,nullptr,&pos,&release_check);
-      ++continous_failures_count_; return false;
-    }
-
-    static double sum_time = 0;
-    static int count_success = 0;
-
-    sum_time += (t_init + t_opt + t_refine).seconds();
-
-    count_success++;
-
-    // cout << "total time:\033[42m" << (t_init + t_opt + t_refine).toSec() << "\033[0m,optimize:" << (t_init + t_opt).toSec() << ",refine:" << t_refine.toSec() << ",avg_time=" << sum_time / count_success << endl;
-    cout << "total time:\033[42m" << (t_init + t_opt + t_refine).seconds() << "\033[0m,optimize:" << (t_init + t_opt).seconds() << ",refine:" << t_refine.seconds() << ",avg_time=" << sum_time / count_success << endl;
-
-    // success. YoY
-    continous_failures_count_ = 0;
+    if(!committed) return fail(PlanFailure::Release);
+    continous_failures_count_=0;
+    visualization_->displayInitPathList(points,.2,0);
     return true;
   }
 
@@ -1331,13 +1143,15 @@ namespace ego_planner
 
   void EGOPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now)
   {
+    pending_trajectory_.reset();
+    next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
     local_data_.start_time_ = time_now;
     local_data_.position_traj_ = position_traj;
     local_data_.velocity_traj_ = local_data_.position_traj_.getDerivative();
     local_data_.acceleration_traj_ = local_data_.velocity_traj_.getDerivative();
     local_data_.start_pos_ = local_data_.position_traj_.evaluateDeBoorT(0.0);
     local_data_.duration_ = local_data_.position_traj_.getTimeSum();
-    local_data_.traj_id_ += 1;
+    local_data_.traj_id_ = next_trajectory_id_;
   }
 
   void EGOPlannerManager::reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio,

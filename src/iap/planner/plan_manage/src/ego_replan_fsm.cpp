@@ -85,6 +85,7 @@ namespace ego_planner
         node_->create_subscription<quadrotor_msgs::msg::PositionCommand>(
             "/position_cmd", rclcpp::QoS(1),
             [this](quadrotor_msgs::msg::PositionCommand::ConstSharedPtr msg) {
+              executing_trajectory_id_.store(msg->trajectory_id, std::memory_order_relaxed);
               last_command_time_s_.store(
                   rclcpp::Time(msg->header.stamp).seconds(),
                   std::memory_order_relaxed);
@@ -492,6 +493,10 @@ namespace ego_planner
   void EGOReplanFSM::execFSMCallback()
   {
     applyLatestOdometry();
+    planner_manager_->observeExecutingTrajectory(executing_trajectory_id_.load(std::memory_order_relaxed));
+    if(planner_manager_->hasPendingTrajectory() && node_->now().seconds()>
+        planner_manager_->publicationTrajectory().start_time_.seconds()+.1)
+      changeFSMExecState(EMERGENCY_STOP,"connection command missing");
     exec_timer_->cancel(); // To avoid blockage
 
     static int fsm_num = 0;
@@ -535,7 +540,7 @@ namespace ego_planner
       {
         if (have_odom_ && have_target_ && have_trigger_)
         {
-          bool success = planFromGlobalTraj(10); // zx-todo
+          bool success = planFromGlobalTraj(); // zx-todo
           if (success)
           {
             changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -560,7 +565,7 @@ namespace ego_planner
     case GEN_NEW_TRAJ:
     {
 
-      bool success = planFromGlobalTraj(10); // zx-todo
+      bool success = planFromGlobalTraj(); // zx-todo
       if (success)
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -577,12 +582,12 @@ namespace ego_planner
     case REPLAN_TRAJ:
     {
 
-      if (planFromCurrentTraj(1))
+      if (planFromCurrentTraj())
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
         publishSwarmTrajs(false);
       }
-      else
+      else if(exec_state_!=EMERGENCY_STOP)
       {
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
@@ -592,11 +597,14 @@ namespace ego_planner
 
     case EXEC_TRAJ:
     {
+      // A queued continuation is supervised by checkCollisionCallback.
+      // Rolling replans resume after the command ID confirms its activation.
+      if(planner_manager_->hasPendingTrajectory()) break;
       /* determine if need to replan */
       LocalTrajData *info = &planner_manager_->local_data_;
       rclcpp::Time time_now = node_->now();
       double t_cur = (time_now - info->start_time_).seconds();
-      t_cur = std::min(info->duration_, t_cur);
+      t_cur = std::clamp(t_cur,0.0,info->duration_);
 
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
 
@@ -610,7 +618,8 @@ namespace ego_planner
       }
       else if ((local_target_pt_ - end_pt_).norm() < 1e-3) // close to the global target
       {
-        if (t_cur > info->duration_ - 1e-2)
+        if (t_cur > info->duration_ - 1e-2 &&
+            (odom_pos_-end_pt_).norm()<tracking_error_limit_m_ && odom_vel_.norm()<.1)
         {
           have_target_ = false;
           have_trigger_ = false;
@@ -667,62 +676,37 @@ namespace ego_planner
     }
   }
 
-  bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
+  bool EGOReplanFSM::planFromGlobalTraj() // zx-todo
   {
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
     start_acc_.setZero();
 
-    bool flag_random_poly_init;
-    if (timesOfConsecutiveStateCalls().first == 1)
-      flag_random_poly_init = false;
-    else
-      flag_random_poly_init = true;
-
-    for (int i = 0; i < trial_times; i++)
-    {
-      if (callReboundReplan(true, flag_random_poly_init))
-      {
-        return true;
-      }
-    }
-    return false;
+    if(planner_manager_->hasPendingTrajectory() || !planner_manager_->beginPlanningView()) return false;
+    struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
+    return callReboundReplan(true,false);
   }
 
-  bool EGOReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
+  bool EGOReplanFSM::planFromCurrentTraj()
   {
 
-    LocalTrajData *info = &planner_manager_->local_data_;
-    // ros::Time time_now = ros::Time::now();
-    auto time_now = node_->now();
-    // double t_cur = (time_now - info->start_time_).toSec();
-    double t_cur = (time_now - info->start_time_).seconds();
-
-    start_pt_ = info->position_traj_.evaluateDeBoorT(t_cur);
-    start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_cur);
-    start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
-
-    bool success = callReboundReplan(false, false);
-
-    if (!success)
-    {
-      success = callReboundReplan(true, false);
-      if (!success)
-      {
-        for (int i = 0; i < trial_times; i++)
-        {
-          success = callReboundReplan(true, true);
-          if (success)
-            break;
-        }
-        if (!success)
-        {
-          return false;
-        }
-      }
+    if(planner_manager_->hasPendingTrajectory()) return false;
+    auto& info=planner_manager_->local_data_;
+    const auto now=node_->now();
+    const double remaining=info.start_time_.seconds()+info.duration_-now.seconds();
+    const double advance=std::min(1.6,remaining);
+    if(advance<=.1) {
+      changeFSMExecState(EMERGENCY_STOP,"insufficient connection time"); return false;
     }
-
-    return true;
+    const auto connection=now+rclcpp::Duration::from_seconds(advance);
+    const double t=connection.seconds()-info.start_time_.seconds();
+    start_pt_=info.position_traj_.evaluateDeBoorT(t);
+    start_vel_=info.velocity_traj_.evaluateDeBoorT(t);
+    start_acc_=info.acceleration_traj_.evaluateDeBoorT(t);
+    if(!planner_manager_->beginPlanningView(std::min(1.5,advance-.1))) return false;
+    struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
+    planner_manager_->setPlanningConnection(connection,info.traj_id_);
+    return callReboundReplan(false,false);
   }
 
   void EGOReplanFSM::checkCollisionCallback()
@@ -790,10 +774,15 @@ namespace ego_planner
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                            "Remaining trajectory %s, lead=%.2fs",
                            gridExecutionReasonName(assessment.execution_reason), lead);
-      if (lead > emergency_time_) {
+      if(planner_manager_->hasPendingTrajectory()) {
+        // Only an immediate checked recovery also cancels the server queue.
+        // Keeping a revoked continuation until its scheduled time is unsafe.
+        flag_escape_emergency_=true;
+        changeFSMExecState(EMERGENCY_STOP, "pending execution conditions revoked");
+      } else if (lead > emergency_time_) {
         changeFSMExecState(REPLAN_TRAJ, "SAFETY");
       } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
-                      ? planFromGlobalTraj(1)
+                      ? planFromGlobalTraj()
                       : planFromCurrentTraj())) {
         changeFSMExecState(EXEC_TRAJ, "SAFETY");
         publishSwarmTrajs(false);
@@ -871,18 +860,21 @@ namespace ego_planner
 
     wait_for_map_reason_ = GridExecutionReason::OK;
 
-    if (!planner_manager_->beginPlanningView()) {
+    const bool own_view=!planner_manager_->hasPlanningView();
+    if (own_view && !planner_manager_->beginPlanningView()) {
       last_failed_plan_time_s_ = now;
       return false;
     }
     struct EndView {
       EGOPlannerManager* manager;
-      ~EndView() { manager->endPlanningView(); }
-    } end_view{planner_manager_.get()};
+      bool own;
+      ~EndView() { if(own) manager->endPlanningView(); }
+    } end_view{planner_manager_.get(),own_view};
     const double min_distance = std::max(0.2,
         start_vel_.squaredNorm() /
             (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) +
         2.0 * planner_manager_->grid_map_->getResolution());
+    const auto predecessor=planner_manager_->local_data_;
     bool plan_and_refine_success = false;
     bool target_selected = false;
     std::optional<Eigen::Vector3d> attempted_target;
@@ -909,17 +901,24 @@ namespace ego_planner
           local_target_vel_, (have_new_target_ || flag_use_poly_init),
           flag_randomPolyTraj);
       if (plan_and_refine_success) break;
-      // A failed search/curve is not evidence that the endpoint is unknown.
-      break;
+      const auto reason=planner_manager_->lastPlanFailure();
+      if(reason==EGOPlannerManager::PlanFailure::Budget ||
+         reason==EGOPlannerManager::PlanFailure::Release ||
+         reason==EGOPlannerManager::PlanFailure::Connection ||
+         reason==EGOPlannerManager::PlanFailure::Curve) break;
+      // Exhaustion may justify a shorter execution range; timeout never does.
+      if(reason==EGOPlannerManager::PlanFailure::Search &&
+         planner_manager_->lastSearchFailure() == AStar::Failure::TIME_BUDGET) break;
     }
     if (!target_selected && !plan_and_refine_success) {
       last_failed_plan_time_s_ = now;
-      wait_for_evidence();
+      if(!budget->expired() && !budget->denied()) wait_for_evidence();
       return false;
     }
     have_new_target_ = false;
     if (!plan_and_refine_success) {
       last_failed_plan_time_s_ = now;
+      if(budget->expired() || budget->denied()) return false;
       const auto immediate_failure = planner_manager_->lastSearchFailure();
       if (immediate_failure == AStar::Failure::END_UNOBSERVED ||
           immediate_failure == AStar::Failure::NO_VALID_REPAIR_ENTRY ||
@@ -960,11 +959,13 @@ namespace ego_planner
     if (plan_and_refine_success)
     {
 
-      auto info = &planner_manager_->local_data_;
+      auto published = planner_manager_->publicationTrajectory();
+      auto* info = &published;
 
       traj_utils::msg::Bspline bspline;
       bspline.order = 3;
       bspline.start_time = info->start_time_;
+      bspline.start_mode = planner_manager_->hasPendingTrajectory() ? traj_utils::msg::Bspline::AT_TIME : traj_utils::msg::Bspline::IMMEDIATE;
       bspline.traj_id = info->traj_id_;
 
       Eigen::MatrixXd pos_pts = info->position_traj_.getControlPoint();
@@ -986,6 +987,15 @@ namespace ego_planner
         bspline.knots.push_back(knots(i));
       }
 
+      local_target_pt_=info->position_traj_.evaluateDeBoorT(info->duration_);
+      local_target_vel_=info->velocity_traj_.evaluateDeBoorT(info->duration_);
+
+      if(!planner_manager_->publicationStillTimely()) {
+        planner_manager_->discardUnpublishedTrajectory(predecessor);
+        last_failed_plan_time_s_=node_->now().seconds();
+        return false;
+      }
+
       /* 1. publish traj to traj_server */
       bspline_pub_->publish(bspline);
 
@@ -1000,11 +1010,13 @@ namespace ego_planner
 
   void EGOReplanFSM::publishSwarmTrajs(bool startup_pub)
   {
-    auto info = &planner_manager_->local_data_;
+    auto published = planner_manager_->publicationTrajectory();
+      auto* info = &published;
 
     traj_utils::msg::Bspline bspline;
     bspline.order = 3;
     bspline.start_time = info->start_time_;
+    bspline.start_mode = planner_manager_->hasPendingTrajectory() ? traj_utils::msg::Bspline::AT_TIME : traj_utils::msg::Bspline::IMMEDIATE;
     bspline.drone_id = planner_manager_->pp_.drone_id;
     bspline.traj_id = info->traj_id_;
 
@@ -1060,12 +1072,14 @@ namespace ego_planner
       planner_manager_->EmergencyStop(stop_pos);
     }
 
-    auto info = &planner_manager_->local_data_;
+    auto published = planner_manager_->publicationTrajectory();
+      auto* info = &published;
 
     /* publish traj */
     traj_utils::msg::Bspline bspline;
     bspline.order = 3;
     bspline.start_time = info->start_time_;
+    bspline.start_mode = planner_manager_->hasPendingTrajectory() ? traj_utils::msg::Bspline::AT_TIME : traj_utils::msg::Bspline::IMMEDIATE;
     bspline.traj_id = info->traj_id_;
 
     Eigen::MatrixXd pos_pts = info->position_traj_.getControlPoint();
@@ -1135,61 +1149,92 @@ namespace ego_planner
         break;
       }
     }
-    local_target_pt_ = reference.getPosition(target_t);
-    const auto nominal = planner_manager_->queryLocalTargetCell(
-        local_target_pt_, node_->now().seconds());
-    if (nominal.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
-      wait_for_map_generation_ = nominal.occupancy_generation;
-      wait_for_map_reason_ = nominal.execution_reason;
+    const Eigen::Vector3d nominal = reference.getPosition(target_t);
+    local_targets_.clear();
+    const double allowance = std::max(0.2, start_vel_.squaredNorm() /
+        (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) + 2.0 * resolution);
+    struct ReferenceSample { Eigen::Vector3d position; double time, arc; };
+    std::vector<ReferenceSample> samples;
+    Eigen::Vector3d previous = reference.getPosition(projection);
+    double arc = 0;
+    for (double t=projection; t<=target_t+step; t+=step) {
+      if (expired()) return false;
+      const double effective=std::min(t,target_t);
+      const auto point=reference.getPosition(effective);
+      arc+=(point-previous).norm(); previous=point;
+      samples.push_back({point,effective,arc});
+      if (effective==target_t) break;
+    }
+    const auto add_target = [&](const Eigen::Vector3d& point, bool final) {
+      if (expired()) return;
+      const auto cell=planner_manager_->queryLocalTargetCell(point,node_->now().seconds());
+      if (!cell.executable()) {
+        if (final) RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+            "Task endpoint unavailable: %s", gridExecutionReasonName(cell.execution_reason));
+        wait_for_map_reason_=cell.execution_reason;
+        return;
+      }
+      // Same bounded pool that will be used by the one multi-goal search.
+      const Eigen::Vector3d center=(start_pt_+nominal)/2;
+      if (!((point-center).array().abs() < 4.8).all()) return;
+      size_t nearest=0; double best=std::numeric_limits<double>::infinity();
+      for (size_t i=0; i<samples.size(); ++i) {
+        const double distance=(point-samples[i].position).squaredNorm();
+        if (distance<best-1e-12) { best=distance; nearest=i; }
+      }
+      if (!final && samples[nearest].arc < allowance) return;
+      LocalTarget candidate; candidate.position=point;
+      candidate.progress_m=samples[nearest].arc;
+      if (!final) {
+        const auto reference_velocity=reference.getVelocity(samples[nearest].time);
+        const double speed=planner_manager_->terminalSpeedLimit(point,reference_velocity);
+        if (reference_velocity.norm()>1e-9) candidate.velocity=reference_velocity.normalized()*speed;
+      }
+      local_targets_.push_back(candidate);
+    };
+    const bool final_range=target_t>=reference.global_duration_-1e-9;
+    if (final_range) {
+      add_target(end_pt_,true);
+      if (!local_targets_.empty()) {
+        local_target_pt_=end_pt_; local_target_vel_.setZero();
+        planner_manager_->setLocalTargets(local_targets_); return true;
+      }
+    }
+    // Enumerate geometric candidates before expensive clearance/prediction queries.
+    // Sorting first makes the bounded set reproducible and keeps the common case cheap.
+    Eigen::Vector3i nominal_index; planner_manager_->grid_map_->posToIndex(nominal,nominal_index);
+    std::vector<std::pair<Eigen::Vector3d,double>> nearby;
+    const int radius=static_cast<int>(std::ceil(1.0/resolution))+1;
+    for(int x=-radius;x<=radius;++x) for(int y=-radius;y<=radius;++y) for(int z=-radius;z<=radius;++z) {
+      if (expired()) return false;
+      Eigen::Vector3d point; planner_manager_->grid_map_->indexToPos(nominal_index+Eigen::Vector3i(x,y,z),point);
+      if ((point-nominal).norm()<=1.0+1e-9 && (!final_range || (point-end_pt_).norm()>1e-3)) {
+        double best=std::numeric_limits<double>::infinity(), progress=0;
+        for(const auto& sample:samples) {
+          const double separation=(point-sample.position).squaredNorm();
+          if(separation<best) {best=separation; progress=sample.arc;}
+        }
+        nearby.emplace_back(point,progress);
+      }
+    }
+    std::sort(nearby.begin(),nearby.end(),[&](const auto& a,const auto& b) {
+      const auto da=std::llround((a.first-nominal).squaredNorm()*1e9);
+      const auto db=std::llround((b.first-nominal).squaredNorm()*1e9);
+      if(da!=db) return da<db;
+      if(a.second!=b.second) return a.second>b.second;
+      for(int axis=0;axis<3;++axis) if(a.first[axis]!=b.first[axis]) return a.first[axis]<b.first[axis];
       return false;
+    });
+    for (const auto& point:nearby) {
+      add_target(point.first,false);
+      if (expired()) return false;
+      if (local_targets_.size()==16) break;
     }
-    // A gap inside a guessed reference can have an observed side route.
-    // Only an unavailable endpoint requires shortening here; obstacles and
-    // advisory are left to the existing one-guide repair.
-    if (nominal.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-        nominal.execution_reason == GridExecutionReason::OUT_OF_MAP) {
-      double arc = 0.0, available_arc = 0.0;
-      double last_t = std::numeric_limits<double>::quiet_NaN();
-      Eigen::Vector3d previous = reference.getPosition(projection);
-      for (double t = projection; t <= target_t + step; t += step) {
-        if (expired()) return false;
-        const double sample_t = std::min(t, target_t);
-        const auto probe = reference.getPosition(sample_t);
-        arc += (probe - previous).norm();
-        previous = probe;
-        const auto cell = planner_manager_->queryLocalTargetCell(probe, node_->now().seconds());
-        if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE) {
-          wait_for_map_generation_ = cell.occupancy_generation;
-          wait_for_map_reason_ = cell.execution_reason;
-          return false;
-        }
-        if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-            cell.execution_reason == GridExecutionReason::OUT_OF_MAP) break;
-        if (cell.executable() && sample_t > projection + 1e-9) {
-          last_t = sample_t;
-          available_arc = arc;
-        }
-        if (sample_t == target_t) break;
-      }
-      const double allowance = std::max(0.2, start_vel_.squaredNorm() /
-          (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) + 2.0 * resolution);
-      if (!std::isfinite(last_t) || available_arc < allowance) {
-        wait_for_map_generation_ = nominal.occupancy_generation;
-        wait_for_map_reason_ = GridExecutionReason::ENVIRONMENT_UNOBSERVED;
-        return false;
-      }
-      if (const auto budget = planner_manager_->planningBudget(); budget &&
-          !budget->tryRepair(PlanningBudget::Repair::TargetShortening)) return false;
-      target_t = last_t;
-      local_target_pt_ = reference.getPosition(target_t);
-      local_target_vel_.setZero();
-      return true;
-    }
-    local_target_vel_ = (end_pt_ - local_target_pt_).norm() <
-        planner_manager_->pp_.max_vel_ * planner_manager_->pp_.max_vel_ /
-        (2.0 * planner_manager_->pp_.max_acc_)
-        ? Eigen::Vector3d::Zero().eval() : reference.getVelocity(target_t);
-    return target_t > projection + 1e-9;
+    if (local_targets_.empty()) { local_target_pt_=nominal; return false; }
+    local_target_pt_=local_targets_.front().position;
+    local_target_vel_=local_targets_.front().velocity;
+    planner_manager_->setLocalTargets(local_targets_);
+    return true;
   }
 
 } // namespace ego_planner

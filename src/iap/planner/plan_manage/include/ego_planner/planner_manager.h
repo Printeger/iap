@@ -81,6 +81,8 @@ namespace ego_planner
     bool checkCollision(int drone_id);
 
     struct TrajectoryAssessment {
+      int trajectory_id = -1; // Owning curve for two-segment failure evidence.
+      bool budget_exhausted = false;
       GridExecutionReason execution_reason = GridExecutionReason::OK;
       double first_execution_time_s = std::numeric_limits<double>::quiet_NaN();
       Eigen::Vector3d first_execution_position = Eigen::Vector3d::Constant(
@@ -107,7 +109,7 @@ namespace ego_planner
       uint8_t evaluated_motion_quality = 0;
       double evaluated_motion_error_proxy_m =
           std::numeric_limits<double>::quiet_NaN();
-      bool executable() const { return execution_reason == GridExecutionReason::OK; }
+      bool executable() const { return !budget_exhausted && execution_reason == GridExecutionReason::OK; }
     };
     GridMotionContext currentMotionContext(bool allow_bridged = false) const;
     TrajectoryAssessment assessTrajectory(const UniformBspline& trajectory,
@@ -116,12 +118,27 @@ namespace ego_planner
                                           double from_time_s = 0.0,
                                           double to_time_s =
                                               std::numeric_limits<double>::infinity(),
-                                          const GridPlanningContext* physical_context = nullptr);
+                                          const GridPlanningContext* physical_context = nullptr,
+                                          bool check_connection = true);
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
     PlanningBudget::Ptr planningBudget() const { return planning_budget_; }
-    bool beginPlanningView();
+    bool beginPlanningView(double budget_seconds = 1.5);
+    bool hasPlanningView() const { return planning_view_.has_value(); }
+    void setPlanningConnection(rclcpp::Time start_time, int predecessor_id);
+    bool hasPendingTrajectory() const { return pending_trajectory_.has_value(); }
+    const LocalTrajData& publicationTrajectory() const {
+      return pending_trajectory_ ? *pending_trajectory_ : local_data_;
+    }
+    void observeExecutingTrajectory(int trajectory_id);
+    bool publicationStillTimely() const;
+    void discardUnpublishedTrajectory(const LocalTrajData& predecessor);
+    enum class PlanFailure { None, Budget, Target, Search, Curve, Release, Connection };
+    PlanFailure lastPlanFailure() const { return last_plan_failure_; }
+    void setLocalTargets(std::vector<LocalTarget> targets) { planning_targets_ = std::move(targets); }
+    double terminalSpeedLimit(const Eigen::Vector3d& position,
+                              const Eigen::Vector3d& reference_velocity) const;
     void endPlanningView();
     std::optional<Eigen::Vector3d> planningReferencePosition() const {
       return planning_view_ ? planning_view_->reference_position : std::nullopt;
@@ -185,10 +202,19 @@ namespace ego_planner
       GridMotionContext motion;
       std::optional<Eigen::Vector3d> reference_position;
       GridPlanningContext physical_context;
+      std::function<GridPlanningRisk(const Eigen::Vector3d&)> advisory_query;
+      double advisory_valid_until_s = 0.0;
       mutable GridPlanningQueryStats advisory_stats;
     };
     std::optional<PlanningView> planning_view_;
     PlanningBudget::Ptr planning_budget_;
+    std::vector<LocalTarget> planning_targets_;
+    std::optional<LocalTrajData> pending_trajectory_;
+    std::optional<rclcpp::Time> connection_time_;
+    int connection_predecessor_ = -1;
+    int next_trajectory_id_ = 0;
+    PlanFailure last_plan_failure_ = PlanFailure::None;
+    TrajectoryAssessment last_candidate_assessment_;
     std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>
         latest_odom_provider_;
     void captureFailureMap(const std::string& kind, const Eigen::Vector3d& point,

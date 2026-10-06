@@ -49,6 +49,32 @@ TEST(AdvisoryAStar, TakesLongerRouteAroundPredictedBand) {
   EXPECT_GT(length, 5.2);  // > 1.30 times the 4 m direct route.
 }
 
+TEST(AdvisoryAStar, OneSearchReachesAnotherGoalWhenPreferredGoalIsDisconnected) {
+  auto map=std::make_shared<GridMap>(); GridMapTestAccess::configure(*map);
+  AStar search; search.initGridMap(map,Eigen::Vector3i(60,60,10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason=std::abs(p.x())<.15 ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    cell.advisory.classification=GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=1;
+    return cell;
+  });
+  const std::vector<Eigen::Vector3d> goals={Eigen::Vector3d(1,0,1),Eigen::Vector3d(-.5,1,1)};
+  ASSERT_TRUE(search.AstarSearchGoals(.1,Eigen::Vector3d(-1,0,1),goals));
+  EXPECT_EQ(search.lastResult().selected_goal,1u);
+  EXPECT_TRUE(search.getPath().back().isApprox(goals[1],1e-9));
+  for(const auto& point:search.getPath()) EXPECT_LT(point.x(),-.15);
+}
+
+TEST(AdvisoryAStar, TimeoutWithAdvisoryRejectionsIsNotExhaustion) {
+  auto map=std::make_shared<GridMap>(); GridMapTestAccess::configure(*map);
+  AStar search; search.initGridMap(map,Eigen::Vector3i(40,40,10));
+  search.setPlanningQuery(cellFor);
+  EXPECT_FALSE(search.AstarSearchGoals(.1,Eigen::Vector3d(-1,0,1),{Eigen::Vector3d(1,0,1)},0));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::TIME_BUDGET);
+  EXPECT_FALSE(search.lastResult().exhausted);
+}
+
 TEST(AdvisoryAStar, StartInsideWarningUsesSameHighCostSearch) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);

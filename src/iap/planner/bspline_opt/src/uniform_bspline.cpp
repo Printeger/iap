@@ -1,4 +1,5 @@
 #include "bspline_opt/uniform_bspline.h"
+#include <stdexcept>
 
 namespace ego_planner
 {
@@ -208,6 +209,24 @@ namespace ego_planner
   // void UniformBspline::recomputeInit() {}
 
   // 将一组点转换为控制点
+  void UniformBspline::enforceBoundaryStates(Eigen::MatrixXd& points, double interval,
+      const Eigen::Vector3d& start, const Eigen::Vector3d& start_velocity,
+      const Eigen::Vector3d& start_acceleration, const Eigen::Vector3d& end,
+      const Eigen::Vector3d& end_velocity, const Eigen::Vector3d& end_acceleration) {
+    // Uniform cubic endpoint basis: position=(q0+4q1+q2)/6,
+    // velocity=(q2-q0)/(2dt), acceleration=(q0-2q1+q2)/dt^2.
+    if(points.rows()!=3 || points.cols()<7 || !(interval>0))
+      throw std::invalid_argument("cubic boundary states need at least seven points and positive interval");
+    const double squared=interval*interval;
+    points.col(0)=start-start_velocity*interval+start_acceleration*squared/3;
+    points.col(1)=start-start_acceleration*squared/6;
+    points.col(2)=start+start_velocity*interval+start_acceleration*squared/3;
+    const int n=points.cols();
+    points.col(n-3)=end-end_velocity*interval+end_acceleration*squared/3;
+    points.col(n-2)=end-end_acceleration*squared/6;
+    points.col(n-1)=end+end_velocity*interval+end_acceleration*squared/3;
+  }
+
   void UniformBspline::parameterizeToBspline(const double &ts, const vector<Eigen::Vector3d> &point_set,
                                              const vector<Eigen::Vector3d> &start_end_derivative,
                                              Eigen::MatrixXd &ctrl_pts)
