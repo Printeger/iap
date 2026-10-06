@@ -230,17 +230,30 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
         node.create_subscription<iap::msg::LidarBeamEvidence>(
             beam_evidence_topic_, rclcpp::SensorDataQoS().keep_last(8),
             [this](const iap::msg::LidarBeamEvidence::ConstSharedPtr evidence) {
+              received_beam_evidence_count_.fetch_add(1U, std::memory_order_relaxed);
               if (!evidence ||
+                  evidence->header.frame_id != lidar_reference_frame_id_ ||
                   !iap::local_map::validBeamEvidenceMessage(*evidence)) {
-                invalid_beam_evidence_count_.fetch_add(
-                    1U, std::memory_order_relaxed);
+                const auto invalid = invalid_beam_evidence_count_.fetch_add(
+                    1U, std::memory_order_relaxed) + 1U;
+                if (invalid == 1U || invalid % 100U == 0U)
+                  logger_->warn("[planner_local_map] beam evidence rejected invalid={} received={} reason=invalid_content_geometry_or_sensor_frame stamp={:.9f} end={:.9f} frame={}",
+                      invalid, received_beam_evidence_count_.load(),
+                      evidence ? iap::local_map::beamEvidenceStampSeconds(evidence->header.stamp) : 0.0,
+                      evidence ? evidence->scan_end_stamp_s : 0.0,
+                      evidence ? evidence->header.frame_id : "missing");
                 return;
               }
-              std::lock_guard<std::mutex> lock(beam_evidence_mutex_);
-              beam_evidence_history_.push_back(*evidence);
-              while (beam_evidence_history_.size() > 64U) {
-                beam_evidence_history_.pop_front();
+              {
+                std::lock_guard<std::mutex> lock(beam_evidence_mutex_);
+                beam_evidence_history_.push_back(*evidence);
+                while (beam_evidence_history_.size() > 64U) {
+                  beam_evidence_history_.pop_front();
+                  evicted_beam_evidence_count_.fetch_add(1U, std::memory_order_relaxed);
+                }
               }
+              beam_evidence_revision_.fetch_add(1U, std::memory_order_release);
+              condition_.notify_one();
             });
     delta_publisher_ =
         node.create_publisher<iap::msg::ActiveLidarWindowDelta>(
@@ -558,10 +571,24 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     return result.size() == raw.points.size() ? std::move(result) : raw.points;
   }
 
+  bool hasBeamEvidence(const FrameSnapshot& frame) const {
+    std::lock_guard<std::mutex> lock(beam_evidence_mutex_);
+    return std::any_of(beam_evidence_history_.begin(), beam_evidence_history_.end(),
+        [&frame](const auto& evidence) {
+          return iap::local_map::beamEvidenceScanTimesMatch(
+              evidence, frame.stamp_s, frame.scan_end_stamp_s);
+        });
+  }
+
   iap::msg::RegisteredLidarFrame makeMessage(
       const FrameSnapshot& frame,
-      std::vector<Eigen::Vector4d>* deskewed_points = nullptr) const {
-    iap::msg::RegisteredLidarFrame message;
+      std::vector<Eigen::Vector4d>* deskewed_points = nullptr,
+      const iap::msg::RegisteredLidarFrame* retained = nullptr) const {
+    // An active source keeps its certified evidence after the bounded input
+    // histories evict the original reports. Refreshing one evidence component
+    // must not erase another. The caller supplies only the same frame id.
+    iap::msg::RegisteredLidarFrame message = retained
+        ? *retained : iap::msg::RegisteredLidarFrame{};
     message.header.stamp = toMessageTime(frame.stamp_s);
     message.header.frame_id = planner_frame_id_;
     message.frame_id = frame.id;
@@ -571,13 +598,33 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     message.frame_contract_id = frame_contract_id_;
     {
       std::lock_guard<std::mutex> lock(beam_evidence_mutex_);
+      message.beam_invalid_count = invalid_beam_evidence_count_.load();
+      message.beam_evicted_count = evicted_beam_evidence_count_.load();
+      message.beam_received_count = received_beam_evidence_count_.load();
+      message.beam_history_oldest_stamp_s = beam_evidence_history_.empty()
+          ? std::numeric_limits<double>::quiet_NaN()
+          : iap::local_map::beamEvidenceStampSeconds(beam_evidence_history_.front().header.stamp);
+      message.beam_history_newest_stamp_s = beam_evidence_history_.empty()
+          ? std::numeric_limits<double>::quiet_NaN()
+          : iap::local_map::beamEvidenceStampSeconds(beam_evidence_history_.back().header.stamp);
+      message.beam_same_start_end_stamp_s = std::numeric_limits<double>::quiet_NaN();
+      message.beam_binding_reason = message.beam_evidence_complete
+          ? "retained_exact_scan" : beam_evidence_history_.empty()
+              ? "no_valid_received_evidence" : "scan_start_mismatch";
+      for (const auto& candidate : beam_evidence_history_) {
+        if (std::abs(iap::local_map::beamEvidenceStampSeconds(candidate.header.stamp) - frame.stamp_s) <= 1.0e-6) {
+          message.beam_same_start_end_stamp_s = candidate.scan_end_stamp_s;
+          if (!message.beam_evidence_complete) message.beam_binding_reason = "scan_end_mismatch";
+        }
+      }
       const auto evidence = std::find_if(
           beam_evidence_history_.rbegin(), beam_evidence_history_.rend(),
           [&frame](const auto& candidate) {
-            return iap::local_map::beamEvidenceMatchesRegisteredScan(
+            return iap::local_map::beamEvidenceScanTimesMatch(
                 candidate, frame.stamp_s, frame.scan_end_stamp_s);
           });
       if (evidence != beam_evidence_history_.rend()) {
+        message.beam_binding_reason = "matched_exact_scan";
         message.sensor_model_id = evidence->sensor_model_id;
         message.horizontal_samples = evidence->horizontal_samples;
         message.vertical_samples = evidence->vertical_samples;
@@ -659,7 +706,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     return message;
   }
 
-  void publishCurrent(const FrameSnapshot& frame) {
+  bool publishCurrent(const FrameSnapshot& frame) {
     const auto started = std::chrono::steady_clock::now();
     if (current_publish_count_.load(std::memory_order_relaxed) == 0) {
       logger_->info("[planner_local_map] serializing first current frame id={}",
@@ -667,6 +714,16 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     }
     std::vector<Eigen::Vector4d> points;
     auto message = makeMessage(frame, &points);
+    if (!message.beam_evidence_complete) {
+      const auto missing = unmatched_current_beam_count_.fetch_add(1U) + 1U;
+      if (missing == 1U || missing % 100U == 0U) {
+        logger_->warn("[planner_local_map] current beam binding missing frame={} scan_start={:.9f} scan_end={:.9f} reason={} received={} invalid={} evicted={} newest_start={:.9f} same_start_end={:.9f}",
+            frame.id, frame.stamp_s, frame.scan_end_stamp_s,
+            message.beam_binding_reason, message.beam_received_count,
+            message.beam_invalid_count, message.beam_evicted_count,
+            message.beam_history_newest_stamp_s, message.beam_same_start_end_stamp_s);
+      }
+    }
     if (current_publisher_) {
       current_publisher_->publish(message);
     }
@@ -714,6 +771,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
           "[planner_local_map] current frame {} deskew+serialize {:.3f} ms exceeds 2 ms budget",
           frame.id, latency_ms);
     }
+    return message.beam_evidence_complete;
   }
 
   void publishWindow(
@@ -743,13 +801,12 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
           delta.added.push_back(message);
           active_messages_[frame.id] = std::move(message);
         } else if (!iap::local_map::hasCertifiedSourceHealth(
-                       active_messages_[frame.id])) {
-          // The active-window callback can precede the integrity callback for
-          // the same estimator frame.  Upgrade that frame atomically once its
-          // exact frame-id/stamp report arrives.  Remove+add is an explicit
-          // replacement transaction; no adjacent-frame health is borrowed.
-          auto refreshed = makeMessage(frame);
-          if (iap::local_map::sourceHealthReplacementRequired(
+                       active_messages_[frame.id]) ||
+                   (!active_messages_[frame.id].beam_evidence_complete && hasBeamEvidence(frame))) {
+          // Integrity or beams can arrive after the estimator callback.
+          // Remove+add upgrades exactly this source scan atomically.
+          auto refreshed = makeMessage(frame, nullptr, &active_messages_[frame.id]);
+          if (iap::local_map::sourceEvidenceReplacementRequired(
                   active_messages_[frame.id], refreshed)) {
             delta.removed_frame_ids.push_back(frame.id);
             delta.added.push_back(refreshed);
@@ -882,6 +939,9 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     const auto window_period = std::chrono::duration<double>(
         1.0 / window_rate_hz_);
     auto next_window_publish = std::chrono::steady_clock::now();
+    std::optional<FrameSnapshot> latest_current;
+    bool latest_current_has_beams = false;
+    std::uint64_t handled_beam_revision = 0U;
     while (!stop_.load(std::memory_order_acquire)) {
       std::optional<FrameSnapshot> current;
       std::optional<WindowStateEvent> window_event;
@@ -898,8 +958,9 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
                                   std::chrono::milliseconds(20))
                    : std::chrono::steady_clock::now() +
                          std::chrono::milliseconds(20));
-        condition_.wait_until(lock, wake_deadline, [this] {
+        condition_.wait_until(lock, wake_deadline, [this, handled_beam_revision] {
           return stop_.load(std::memory_order_acquire) ||
+                 beam_evidence_revision_.load(std::memory_order_acquire) != handled_beam_revision ||
                  pending_current_.has_value() ||
                  std::any_of(
                      pending_window_events_.begin(),
@@ -930,8 +991,35 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
                                     window_period);
         }
       }
+      const auto beam_revision = beam_evidence_revision_.load(std::memory_order_acquire);
       if (current) {
-        publishCurrent(*current);
+        latest_current_has_beams = publishCurrent(*current);
+        latest_current = std::move(current);
+      } else if (beam_revision != handled_beam_revision && latest_current &&
+                 !latest_current_has_beams) {
+        if (hasBeamEvidence(*latest_current)) {
+          latest_current_has_beams = publishCurrent(*latest_current);
+          logger_->debug("[planner_local_map] late beam rebound current frame={}", latest_current->id);
+        }
+      }
+      // A beam callback must also refresh retained healthy keyframes, even
+      // when GLIM emits no new window callback. Reuse the same remove+add delta
+      // transaction and never promote an incomplete active window.
+      if (beam_revision != handled_beam_revision) {
+        std::vector<FrameSnapshot> active;
+        std::uint64_t serial = 0U;
+        {
+          std::lock_guard<std::mutex> lock(active_mutex_);
+          if (active_window_complete_ && std::any_of(active_messages_.begin(), active_messages_.end(),
+                  [this](const auto& entry) {
+                    return !entry.second.beam_evidence_complete && hasBeamEvidence(active_snapshots_.at(entry.first));
+                  })) {
+            for (const auto& entry : active_snapshots_) active.push_back(entry.second);
+            serial = active_producer_serial_;
+          }
+        }
+        if (!active.empty()) publishWindow(std::move(active), serial);
+        handled_beam_revision = beam_revision;
       }
       if (window_event) {
         if (window_event->complete) {
@@ -1005,6 +1093,10 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   mutable std::mutex beam_evidence_mutex_;
   std::deque<iap::msg::LidarBeamEvidence> beam_evidence_history_;
   std::atomic<std::uint64_t> invalid_beam_evidence_count_{0};
+  std::atomic<std::uint64_t> received_beam_evidence_count_{0};
+  std::atomic<std::uint64_t> evicted_beam_evidence_count_{0};
+  std::atomic<std::uint64_t> unmatched_current_beam_count_{0};
+  std::atomic<std::uint64_t> beam_evidence_revision_{0};
   rclcpp::Subscription<iap::msg::LidarBeamEvidence>::SharedPtr
       beam_evidence_subscription_;
   rclcpp::Publisher<iap::msg::RegisteredLidarFrame>::SharedPtr

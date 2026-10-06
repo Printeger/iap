@@ -47,11 +47,22 @@ inline bool hasCertifiedSourceHealth(
       frame.source_icp_gamma_lidar >= 1.0;
 }
 
-inline bool sourceHealthReplacementRequired(
+inline bool sourceEvidenceReplacementRequired(
     const iap::msg::RegisteredLidarFrame& current,
     const iap::msg::RegisteredLidarFrame& refreshed) {
-  return !hasCertifiedSourceHealth(current) &&
-      hasCertifiedSourceHealth(refreshed);
+  if (current.frame_id != refreshed.frame_id ||
+      current.header.stamp != refreshed.header.stamp ||
+      current.scan_end_stamp_s != refreshed.scan_end_stamp_s ||
+      current.frame_contract_id != refreshed.frame_contract_id)
+    return false;
+  // Refreshed messages come from the validated exact-scan history. Never
+  // replace complete beams or certified health with a partial refresh.
+  if ((current.beam_evidence_complete && !refreshed.beam_evidence_complete) ||
+      (hasCertifiedSourceHealth(current) && !hasCertifiedSourceHealth(refreshed)))
+    return false;
+  return (!hasCertifiedSourceHealth(current) &&
+          hasCertifiedSourceHealth(refreshed)) ||
+      (!current.beam_evidence_complete && refreshed.beam_evidence_complete);
 }
 
 }  // namespace iap::local_map

@@ -114,6 +114,11 @@ def inspect(directory):
                   unthinned_current_observed=bool(flags & 128),
                   last_observation_loss_producer=
                   {0: None, 1: "current_replace", 2: "active_delta", 3: "active_replace"}[loss])
+    report["beam_binding"] = {
+        key: frame.get(key) for key in (
+            "beam_binding_reason", "beam_received_count", "beam_invalid_count",
+            "beam_evicted_count", "beam_history_oldest_stamp_s",
+            "beam_history_newest_stamp_s", "beam_same_start_end_stamp_s")}
     if flags & 15:
         report["classification"] = "OBSERVATION_MASK_INCONSISTENT"
     elif flags & 128:

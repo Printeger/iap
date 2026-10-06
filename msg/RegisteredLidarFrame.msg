@@ -24,6 +24,16 @@ float32[] beam_direction_z
 float32[] beam_ranges_m
 string beam_content_hash
 
+# Diagnostic association at this scan's serialization; never observation
+# authorization. Missing old producers leave reason empty.
+string beam_binding_reason
+uint64 beam_received_count
+uint64 beam_invalid_count
+uint64 beam_evicted_count
+float64 beam_history_oldest_stamp_s
+float64 beam_history_newest_stamp_s
+float64 beam_same_start_end_stamp_s
+
 # True only for the first estimator frame that defines the planner-map datum.
 # Its pose is not the result of an ICP alignment against an older frame; scan
 # error is still charged by LocalMotionAssurance.

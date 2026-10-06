@@ -69,6 +69,9 @@ if(BUILD_TESTING)
     test/test_registered_lidar_window.cpp
   )
   target_link_libraries(test_registered_lidar_window plan_env)
+  target_compile_definitions(test_registered_lidar_window PRIVATE
+    REGISTERED_WINDOW_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures"
+  )
 
   add_executable(grid_map_startup_process_probe
     test/grid_map_startup_process_probe.cpp

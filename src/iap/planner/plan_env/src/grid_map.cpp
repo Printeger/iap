@@ -122,6 +122,13 @@ bool registeredFrameFromMessage(
   frame->max_range_m = message.max_range_m;
   frame->beam_evidence_complete = message.beam_evidence_complete;
   frame->beam_content_hash = message.beam_content_hash;
+  frame->beam_binding_reason = message.beam_binding_reason;
+  frame->beam_received_count = message.beam_received_count;
+  frame->beam_invalid_count = message.beam_invalid_count;
+  frame->beam_evicted_count = message.beam_evicted_count;
+  frame->beam_history_oldest_stamp_s = message.beam_history_oldest_stamp_s;
+  frame->beam_history_newest_stamp_s = message.beam_history_newest_stamp_s;
+  frame->beam_same_start_end_stamp_s = message.beam_same_start_end_stamp_s;
   if (message.beam_evidence_complete)
   {
     const std::size_t count = message.beam_outcomes.size();

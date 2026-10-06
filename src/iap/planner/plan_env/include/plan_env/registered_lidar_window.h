@@ -50,6 +50,13 @@ struct RegisteredLidarFrameData {
   double max_range_m = std::numeric_limits<double>::quiet_NaN();
   bool beam_evidence_complete = false;
   std::string beam_content_hash;
+  std::string beam_binding_reason;
+  std::uint64_t beam_received_count = 0;
+  std::uint64_t beam_invalid_count = 0;
+  std::uint64_t beam_evicted_count = 0;
+  double beam_history_oldest_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double beam_history_newest_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double beam_same_start_end_stamp_s = std::numeric_limits<double>::quiet_NaN();
   std::vector<RegisteredLidarBeamData> beams;
   std::string frame_contract_id;
   bool source_is_map_reference = false;

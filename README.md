@@ -319,6 +319,8 @@ python3 src/iap/scripts/dev_planner/replay_failure_map.py \
 
 v3 曲线快照独立保存 `first_unobserved_time_s`、`first_unobserved_position_m`、`first_unobserved_voxel_index` 和实际 B-spline 的控制点/完整 knot 向量、检查区间与采样间隔；短尾段也检查实际终点。即使先遇到净空或起点跟踪失败，后面的未知点也有单独的 `curve_unobserved` 首份产物；剩余轨迹快照保存失败曲线位置，飞机实际位置仍在 `state.json`。注册 LiDAR 模式还保存同代当前帧的原始点云/完整 beam CSV、`observation_sources.bin` 的当前帧与活动窗口 hit/free 贡献和最近一次观测移除来源。使用同一 C++ 射线遍历关闭端点去重得到诊断 mask，在地图锁外计算；此 mask 不回写在线地图。
 
+注册帧发布后晚到的完整 beam 现在会补发仍为最新的同一扫描；活动帧按原 remove+add 事务补齐，不能借邻帧或提升 incomplete 窗口。v3 `current_frame` 与观测报告还记录 `beam_binding_reason`、接收/拒绝/淘汰计数、历史起止时间和同起点候选结束时间，用于区分未收到合法证据和扫描时间不匹配；旧快照缺失字段时保持未知。这些诊断不授权自由空间。
+
 ```bash
 python3 src/iap/scripts/dev_planner/analyze_curve_observation.py \
   "$run_dir/export/planner/failure_map/curve_unobserved"

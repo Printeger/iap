@@ -654,6 +654,13 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_beam_evidence_binding
         "${iap_msgs_cpp_ts}"
       )
+      ament_add_gtest(test_registered_beam_delivery
+        test/test_registered_beam_delivery.cpp
+      )
+      target_link_libraries(test_registered_beam_delivery
+        planner_local_map_extension iap "${iap_msgs_cpp_ts}"
+      )
+      ament_target_dependencies(test_registered_beam_delivery rclcpp)
       ament_add_gtest(test_active_window_delta_policy
         test/test_active_window_delta_policy.cpp
       )

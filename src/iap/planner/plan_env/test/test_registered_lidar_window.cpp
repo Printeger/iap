@@ -3,6 +3,8 @@
 #include <plan_env/registered_lidar_window.h>
 
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <unistd.h>
 
 namespace {
@@ -75,6 +77,73 @@ TEST(RegisteredLidarWindow, CurrentOverlayReplacementPreservesActiveEvidence) {
             RegisteredVoxelState::OCCUPIED);
   EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 1, 0)),
             RegisteredVoxelState::UNKNOWN);
+}
+
+TEST(RegisteredLidarWindow, V3CurveVoxelLosesSupportOnCurrentReplacement) {
+  RegisteredLidarWindow::Geometry geometry;
+  geometry.origin = Eigen::Vector3d(-21, -11, 0);
+  geometry.dimensions = Eigen::Vector3i(420, 220, 80);
+  geometry.resolution_m = 0.1;
+  geometry.frame_contract_id = "contract-a";
+  RegisteredLidarWindow window(geometry);
+  const Eigen::Vector3d sensor(-17.555830653356285, 0.057274378289002892,
+                               1.4740820187327275);
+  auto current = frame(89, sensor, {});
+  current.stamp_s = current.scan_end_stamp_s = 1791257733.4700968;
+  std::ifstream input(std::string(REGISTERED_WINDOW_FIXTURE_DIR) +
+      "/20261006T033519Z_009_curve_hits.csv");
+  ASSERT_TRUE(input.good());
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    std::replace(line.begin(), line.end(), ',', ' ');
+    std::istringstream row(line);
+    Eigen::Vector3d hit;
+    ASSERT_TRUE(static_cast<bool>(row >> hit.x() >> hit.y() >> hit.z()));
+    current.hits_lidar.push_back(hit - sensor);
+  }
+  ASSERT_EQ(current.hits_lidar.size(), 3600u);
+  const Eigen::Vector3i hole(58, 110, 14);
+  const Eigen::Vector3d hole_center(-15.15, 0.05, 1.45);
+  // The prior frame here is synthetic: it supplies explicit support solely to
+  // test removal. The captured run does not contain the prior scan's beams.
+  auto prior = frame(88, sensor, {hole_center - sensor + Eigen::Vector3d(0.3, 0, 0)});
+  for (int repeat = 0; repeat < 3; ++repeat) {
+    ASSERT_TRUE(window.applyCurrentFrame(prior).accepted);
+    EXPECT_EQ(window.stateAt(hole), RegisteredVoxelState::OBSERVED_FREE);
+    ASSERT_TRUE(window.applyCurrentFrame(current).accepted);
+    EXPECT_EQ(window.stateAt(hole), RegisteredVoxelState::UNKNOWN);
+    EXPECT_EQ(window.stateAt(Eigen::Vector3i(58, 110, 13)), RegisteredVoxelState::OBSERVED_FREE);
+    EXPECT_EQ(window.stateAt(Eigen::Vector3i(58, 110, 15)), RegisteredVoxelState::OBSERVED_FREE);
+  }
+  const auto raw = window.unthinnedObservationMask(current);
+  EXPECT_EQ(raw[(58 * 220 + 110) * 80 + 14], 0u);
+  EXPECT_FALSE(window.currentFrameSource()->beam_evidence_complete);
+}
+
+TEST(RegisteredLidarWindow, LateCompleteCurrentAndActiveEvidenceReplaceSameScan) {
+  auto window = makeWindow();
+  auto incomplete = frame(89, Eigen::Vector3d(0.5, 0.5, 0.5), {});
+  ASSERT_TRUE(window.applyCurrentFrame(incomplete).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)), RegisteredVoxelState::UNKNOWN);
+  auto complete = beamFrame(89, incomplete.T_map_lidar.translation(),
+      {{Eigen::Vector3d::UnitX(), RegisteredLidarBeamOutcome::NO_RETURN, 6.0}});
+  ASSERT_TRUE(window.applyCurrentFrame(complete).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)), RegisteredVoxelState::OBSERVED_FREE);
+  ActiveLidarWindowDeltaData delta;
+  delta.frame_contract_id = "contract-a";
+  delta.complete = true;
+  delta.generation = 1;
+  delta.added.push_back(incomplete);
+  ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
+  delta.base_generation = 1;
+  delta.generation = 2;
+  delta.removed_frame_ids = {89};
+  delta.added = {complete};
+  ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
+  ASSERT_TRUE(window.applyCurrentFrame(frame(90, Eigen::Vector3d(0.5, 1.5, 0.5), {})).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)), RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.activeGeneration(), 2u);
 }
 
 TEST(RegisteredLidarWindow, SuccessfulHitRayMarksFreeAndHitWins) {

@@ -59,7 +59,10 @@ flowchart TD
 flowchart TD
     Sensors[仿真 LiDAR/IMU/GNSS] --> GLIO[GLIO 与 FGO 后验：已接入]
     GLIO --> Current[当前运动质量：同帧协方差/求解/测量支持，实验性]
-    GLIO --> Map[GridMap 物理占据/膨胀：已实现]
+    Sensors --> Beams[完整 beam：内容校验一次、精确扫描时间匹配]
+    GLIO --> Registered[注册帧与保留活动帧]
+    Beams --> Registered
+    Registered -->|晚到同扫描证据：补发当前帧或 remove+add 活动帧| Map[GridMap 物理占据/膨胀/真实观测：已实现]
     GLIO --> Advisory[PredictorModule 冻结空间 PL：已接入]
     Map --> Advisory
     Advisory --> Risk[GridMap 同索引 HPL/VPL/状态：已实现]
@@ -106,6 +109,7 @@ flowchart TD
 
 | 接口 | 当前行为 |
 |---|---|
+| registered beam 绑定 / active delta | 入站完整性、内容 hash 和 sensor frame 校验通过后进入原有 64 帧历史；匹配必须同时满足扫描起止时间，不能借邻帧。合法证据到达唤醒原序列化 worker：只补发仍为最新的当前扫描，保留活动帧按原 remove+add 事务更新；已提交来源的 beam/运动健康证据不因输入历史淘汰而丢失，incomplete 窗口不能被补证据操作提升为 complete。匹配已校验历史只比较时间，不重复计算 beam hash。未收到匹配证据时保持真实未知。 |
 | `beginPlanningView` / `queryPlanningViewCell` / `endPlanningView` | 一轮目标、初值和 A* 共用完整的 raw、膨胀及真实 observed 体素标志、云时间、运动质量与预测版本；同轮精确位置物理查询复用。地图回调写 live GridMap，A* 读取冻结副本。预测上下文与冻结代数不符时 PL 为未知；地图更新后旧 PL 不作为当前有效预测。 |
 | `getLocalTarget(distance)` / `callReboundReplan` | 保留沿全局参考选目标；按 horizon 的 1、0.65、0.35 倍顺序尝试一条完整候选，受制动距离、搜索池上限和 1.5 秒轮预算约束。未知初值或无合法修补出口时缩短；本轮无可执行轨迹则记录搜索池空间证据指纹，只有相关体素或运动条件改变才重试。物理障碍仍交给单条 guide 搜索。 |
 | `chooseRepairEndpoints` / `AstarSearch` | 修补入口和出口沿初值以最多半体素间距检查，要求未修补前后段、格点舍入连接和端点净空可执行；保持原搜索池与真实起点。A* 记录占据、净空、PL 查询耗时；退出原因保留 `TIME_BUDGET`，独立记录 `map_changed`、原搜索代数和结束时在线代数。在线地图推进不覆盖冻结搜索的退出原因；搜索视图本身变化仍返回 `MAP_STALE`。 |
@@ -114,6 +118,12 @@ flowchart TD
 `captureFailureSnapshot(include_observation_evidence)` 在同一个 occupancy 锁内拷贝完整物理/观测层、当前 registered frame 和 current/active 的 hit/free 贡献；仅显式取证时保留每体素最近一次 observed→unknown 的 producer（当前帧替换、活动 delta、活动 recovery）。`RegisteredLidarWindow::unthinnedObservationMask` 重用原遍历，只在诊断中关闭端点去重，锁释放后执行，结果只写文件。`analyze_curve_observation.py` 先按实际 B-spline 和保存的采样区间重放首个未知点，检查地图/当前帧年龄，再对照原始帧、实际 mask 与未去重诊断 mask；缺失证据或不一致不能给出空间可执行授权。保存后的 assessment 持有同代快照，后续 live 地图更新不把失败曲线拼到另一代地图；无法取得同代证据时记录采集失败。
 
 规划节点使用四线程 executor；地图回调原有独立 callback group，以及轻量里程计、完整性报告和命令时间锁存回调可在搜索时继续处理。风险绑定与 FSM 状态更新仍串行，避免把进行中的预测缓存写成另一张地图。旧轨迹只有候选通过发布闸门才会被替换。
+
+当前 v3 `current_frame` 附带 `beam_binding_reason`、`beam_received_count`、`beam_invalid_count`、`beam_evicted_count`、按接收顺序保留的首/末扫描时间与同起点候选的结束时间；观测分析报告原样给出 `beam_binding`。这些字段是接收/绑定诊断，不能授权自由空间。原因包括 `matched_exact_scan`、`retained_exact_scan`、`no_valid_received_evidence`、`scan_start_mismatch`、`scan_end_mismatch`。旧快照缺少这些字段时明确未知，不能据总消息计数推定具体扫描经过了传输。
+
+当前固定回归使用 `20261006T033519Z_009` v3 generation 43 的全部 3,600 个当前帧 hit（frame 89），在原 0.1 m 格子/尺寸/原点重放：`(58,110,14)` 仍未知，z13/z15 仍观测，关闭端点去重也不覆盖该格；用明确标为合成的前一帧支持反复验证 current replacement 的 observed→unknown 转换。它不包含真实缺失的 beam 或上一帧原始扫描，不证明 LiDAR 没扫到。原始现场前进约 4.48 m 后没有新曲线接续，旧曲线到期并由 traj_server 保持终点悬停；这是此修复之前的参考结果，不是新修订的现场验收。
+
+绑定回归通过真实 ROS beam 订阅、GLIM 公共回调和原序列化 worker，验证注册帧先到/beam 后到时当前帧补齐、已有合法健康的活动帧 remove+add、后续当前帧不会退回旧扫描、错时和坏 hash 不作观测证据。窗口测试验证同一扫描升级后 free 证据进入真实 mask，并在当前帧推进后由活动贡献保留。该缺陷已被定向测试复现，但旧现场没有接收侧绑定统计，因此尚不能认定晚到就是 frame 89 未绑定的现场根因。现场仍受无关 RViz 脏工作树规则阻挡。 六包构建、GridMap 四项、A*、EGO 三项、beam 绑定/真实交付/active policy 和 canonical launch 定向测试通过。
 
 本次回归以 `20261005T163036Z_646` 的 v2 端点快照为固定夹具：原记录的搜索起点未观测，原已观测搜索池离线重放仍为 14 个合法入口、0 个合法出口、`INCONCLUSIVE_NO_VALID_REPAIR_ENDPOINTS`。同一夹具的在线端点选择测试确认没有合法出口；初值未知控制点在 A* 扩展前返回 `END_UNOBSERVED`，由 FSM 顺序缩短目标，若仍无完整可执行轨迹则等待搜索池相关体素或运动条件变化。该结果不证明该次真实环境全局无路，也不把前一次 `20261005T162512Z_204` 的约 3.7 m 前进和最终 `TRACKING_ERROR` 合并为同一运行。
 

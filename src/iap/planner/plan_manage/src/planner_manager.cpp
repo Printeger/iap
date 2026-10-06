@@ -313,6 +313,13 @@ namespace ego_planner
                  << ",\"sensor_position_m\":" << vector(frame.T_map_lidar.translation())
                  << ",\"sensor_model_id\":" << std::quoted(frame.sensor_model_id)
                  << ",\"beam_content_hash\":" << std::quoted(frame.beam_content_hash)
+                 << ",\"beam_binding_reason\":" << std::quoted(frame.beam_binding_reason)
+                 << ",\"beam_received_count\":" << frame.beam_received_count
+                 << ",\"beam_invalid_count\":" << frame.beam_invalid_count
+                 << ",\"beam_evicted_count\":" << frame.beam_evicted_count
+                 << ",\"beam_history_oldest_stamp_s\":" << number(frame.beam_history_oldest_stamp_s)
+                 << ",\"beam_history_newest_stamp_s\":" << number(frame.beam_history_newest_stamp_s)
+                 << ",\"beam_same_start_end_stamp_s\":" << number(frame.beam_same_start_end_stamp_s)
                  << ",\"min_range_m\":" << number(frame.min_range_m)
                  << ",\"beam_evidence_complete\":" << (frame.beam_evidence_complete ? "true" : "false")
                  << ",\"max_range_m\":" << number(frame.max_range_m)

@@ -63,16 +63,26 @@ inline bool validBeamEvidenceMessage(
       evidence.content_hash == beamEvidenceContentHash(evidence);
 }
 
-inline bool beamEvidenceMatchesRegisteredScan(
+// Matching an already validated history entry must not hash all beam rows
+// again, especially for every nonmatching scan in the bounded history.
+inline bool beamEvidenceScanTimesMatch(
     const iap::msg::LidarBeamEvidence& evidence,
     const double scan_stamp_s, const double scan_end_stamp_s,
     const double tolerance_s = 1.0e-6) {
-  return validBeamEvidenceMessage(evidence) &&
-      std::isfinite(scan_stamp_s) && std::isfinite(scan_end_stamp_s) &&
+  return std::isfinite(scan_stamp_s) && std::isfinite(scan_end_stamp_s) &&
       std::isfinite(tolerance_s) && tolerance_s >= 0.0 &&
       std::abs(beamEvidenceStampSeconds(evidence.header.stamp) -
                scan_stamp_s) <= tolerance_s &&
       std::abs(evidence.scan_end_stamp_s - scan_end_stamp_s) <= tolerance_s;
+}
+
+inline bool beamEvidenceMatchesRegisteredScan(
+    const iap::msg::LidarBeamEvidence& evidence,
+    const double scan_stamp_s, const double scan_end_stamp_s,
+    const double tolerance_s = 1.0e-6) {
+  return beamEvidenceScanTimesMatch(
+      evidence, scan_stamp_s, scan_end_stamp_s, tolerance_s) &&
+      validBeamEvidenceMessage(evidence);
 }
 
 }  // namespace iap::local_map
