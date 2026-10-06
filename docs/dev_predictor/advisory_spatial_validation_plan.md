@@ -253,3 +253,17 @@ python3 src/iap/scripts/dev_predictor/advisory_prior_ab_validation.py fixture --
 ```
 
 `--show-args` 只验证已安装入口参数，不启动现场。重跑须取消 IAP_RUN_DIR，让 resolver 新分配，不能在本正式 run 覆盖同名产物；完整构建/测试/实验命令与日志登记在本 run metadata/manifests。未执行的森林 record/launch 不列为已完成命令。
+
+## 分阶段验证契约与本轮状态（2026-10-06）
+
+默认关闭 Advisory 后验代理，预测输入／来源信息／运动执行三种有效性分离。
+共享 `PredictorModule::admission` 负责来源准入，缺 GNSS 不再阻止合法 LiDAR。
+联合原始信息秩与正则化弱方向占比先于有效 PL 授予；占比上限 1%，
+官方数值退化值为空。来源独立秩亏可由联合观测补足。v2 codec 保存新参数，
+v1 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束。
+
+准入／数值、codec、生产包装器及批次回归已通过；来源密度核验、实际曲线
+修复、固定路线校准与任务对照继续实施。真实森林现场仍待测：
+`LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，不推广未经独立实测的校准参数。
+契约见 [advisory_prediction_contract.md](../spec/advisory_prediction_contract.md)。
+本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/staged/report.md)。

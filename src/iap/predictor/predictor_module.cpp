@@ -91,7 +91,7 @@ bool age_exceeds(const double query_time_s,
   if (!std::isfinite(query_time_s) || !std::isfinite(stamp_s)) {
     return true;
   }
-  return query_time_s - stamp_s > max_age_s;
+  return stamp_s > query_time_s || query_time_s - stamp_s > max_age_s;
 }
 
 double freshness_time_s(const PredictorQueryInput& input) {
@@ -138,40 +138,6 @@ std::string gnss_epoch_unavailable_reason(
                   input.snapshot.gnss_epoch.stamp,
                   params.max_gnss_age_s)) {
     return "stale_gnss_epoch";
-  }
-  return "";
-}
-
-std::string stale_reason(const PredictorQueryInput& input,
-                         const PredictorFreshnessGuardParams& params,
-                         const bool require_gnss_epoch) {
-  if (!params.enabled) {
-    return "";
-  }
-  const double reference_time_s = freshness_time_s(input);
-  if (!input.snapshot.has_pose ||
-      age_exceeds(reference_time_s,
-                  input.snapshot.pose_stamp,
-                  params.max_odom_age_s)) {
-    return "stale_odom";
-  }
-  if (!input.snapshot.current.valid ||
-      age_exceeds(reference_time_s,
-                  input.snapshot.current.stamp,
-                  params.max_integrity_age_s)) {
-    return "stale_integrity";
-  }
-  if (require_gnss_epoch) {
-    const std::string gnss_reason =
-        gnss_epoch_unavailable_reason(input, params, "stale_gnss_epoch");
-    if (!gnss_reason.empty()) {
-      return gnss_reason;
-    }
-  }
-  if (age_exceeds(reference_time_s,
-                  input.snapshot.stamp,
-                  params.max_snapshot_age_s)) {
-    return "stale_snapshot";
   }
   return "";
 }
@@ -271,7 +237,7 @@ bool apply_certified_gnss_anchor(
       std::abs(snapshot.current.gnss_epoch_stamp -
                snapshot.gnss_epoch.stamp);
   const bool anchor_input_valid = snapshot.has_pose && snapshot.p_wb.allFinite() &&
-      snapshot.current.valid && snapshot.current.gnss_valid &&
+      snapshot.current.gnss_valid &&
       std::isfinite(snapshot.current.gnss_hpl) &&
       snapshot.current.gnss_hpl >= 0.0 &&
       std::isfinite(snapshot.current.gnss_vpl) &&
@@ -497,6 +463,57 @@ void PredictorModule::set_lidar_map_points(
   lidar_.set_lidar_map_points(std::move(points));
 }
 
+PredictorAdmission PredictorModule::admission(const PredictorQueryInput& input) const {
+  PredictorAdmission out;
+  const auto& s = input.snapshot;
+  const double now = freshness_time_s(input);
+  if (!input.query_position_map.allFinite()) out.input_reason = "invalid_position";
+  else if (!std::isfinite(input.query_time_s) || !std::isfinite(now)) out.input_reason = "invalid_query_time";
+  else if (!std::isfinite(input.horizon_s) || input.horizon_s < 0) out.input_reason = "invalid_horizon";
+  else if (input.frame_id != "map" && input.frame_id != "enu") out.input_reason = "unsupported_query_frame";
+  else if (!s.has_pose || !s.p_wb.allFinite() || !s.q_wb.coeffs().allFinite() || s.q_wb.norm() < 1e-12)
+    out.input_reason = "missing_pose";
+  else if (!std::isfinite(s.pose_stamp) || s.pose_stamp > now || !std::isfinite(s.stamp) || s.stamp > now)
+    out.input_reason = "invalid_pose_timestamp";
+  else out.input_reason = stale_reason_without_current_integrity(input, params_.freshness,
+                                                                effective_gnss_epoch_required(params_));
+  out.input_valid = out.input_reason.empty();
+  if (!out.input_valid) return out;
+  out.gnss_reason = "gnss_disabled";
+  if (source_allows_gnss(params_.source_mode) && !gnss_policy_disables_gnss(params_.gnss_epoch_policy)) {
+    out.gnss_reason = gnss_epoch_unavailable_reason(input, params_.freshness,
+                                                   "no_gnss_epoch");
+    if (!params_.freshness.enabled && s.has_epoch && std::isfinite(s.gnss_epoch.stamp) && s.gnss_epoch.stamp <= now)
+      out.gnss_reason.clear();
+    if (out.gnss_reason.empty() &&
+        (!s.current.gnss_valid || !std::isfinite(s.current.stamp) || s.current.stamp > now ||
+         (params_.freshness.enabled && age_exceeds(now,s.current.stamp,params_.freshness.max_integrity_age_s)) ||
+         !std::isfinite(s.current.gnss_epoch_stamp) ||
+         std::abs(s.current.gnss_epoch_stamp-s.gnss_epoch.stamp)>params_.gnss.measured_epoch_integrity_max_delta_s ||
+         s.current.gnss_epoch_identity == 0 ||
+         s.current.gnss_epoch_identity != gnss_epoch_identity(s.gnss_epoch,s.current.excluded_prns)))
+      out.gnss_reason = "gnss_anchor_inconsistent";
+  }
+  out.gnss_allowed = out.gnss_reason.empty();
+  out.lidar_reason = source_allows_lidar(params_.source_mode) ? "" : "lidar_disabled";
+  if (out.lidar_reason.empty() && !std::isnan(input.lidar_support_stamp_s) &&
+      age_exceeds(now,input.lidar_support_stamp_s,input.lidar_support_max_age_s))
+    out.lidar_reason = "stale_lidar_support";
+  out.lidar_allowed = out.lidar_reason.empty();
+  if (params_.freshness.enabled) {
+    out.valid_until_s=std::min(s.pose_stamp+params_.freshness.max_odom_age_s,
+                              s.stamp+params_.freshness.max_snapshot_age_s);
+    if (out.gnss_allowed) out.valid_until_s=std::min({out.valid_until_s,
+        s.gnss_epoch.stamp+params_.freshness.max_gnss_age_s,
+        s.current.stamp+params_.freshness.max_integrity_age_s});
+  }
+  if(out.lidar_allowed && std::isfinite(input.lidar_support_stamp_s))
+    out.valid_until_s=std::min(out.valid_until_s,input.lidar_support_stamp_s+input.lidar_support_max_age_s);
+  if(s.has_lambda_base && s.current.valid && std::isfinite(s.current.stamp))
+    out.valid_until_s=std::min(out.valid_until_s,s.current.stamp+params_.freshness.max_integrity_age_s);
+  return out;
+}
+
 PredictorQueryResult PredictorModule::query(
     const PredictorQueryInput& input) const {
   return queryWithSpatialAdvisory(input, nullptr, nullptr, nullptr);
@@ -547,34 +564,33 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     out.source_flags = make_source_flags(out);
     return out;
   }
-  const bool require_gnss_epoch = effective_gnss_epoch_required(params_);
-  const std::string current_freshness_reason =
-      current_integrity_freshness_reason(input, params_.freshness);
-  std::string freshness_reason;
-  if (current_freshness_reason == "invalid_integrity") {
-    freshness_reason = "stale_integrity";
-  } else if (current_freshness_reason.empty()) {
-    freshness_reason = stale_reason(input, params_.freshness,
-                                    require_gnss_epoch);
-  } else {
-    freshness_reason = stale_reason_without_current_integrity(
-        input, params_.freshness, require_gnss_epoch);
-  }
-  if (!freshness_reason.empty()) {
-    out.freshness_status = PredictorFreshnessStatus::STALE;
-    out.valid = false;
-    out.available = false;
-    out.fallback = true;
-    out.fallback_reason = freshness_reason;
+  const auto admitted = admission(input);
+  if (!admitted.input_valid) {
+    out.freshness_status = admitted.input_reason.find("stale") != std::string::npos
+        ? PredictorFreshnessStatus::STALE : PredictorFreshnessStatus::NOT_EVALUATED;
+    out.fallback_reason = admitted.input_reason;
     out.source_flags = make_source_flags(out);
     return out;
   }
+  const std::string current_freshness_reason =
+      current_integrity_freshness_reason(input, params_.freshness);
   const bool stale_current_prior =
       current_freshness_reason == "stale_integrity";
   out.freshness_status = stale_current_prior
       ? PredictorFreshnessStatus::STALE
       : PredictorFreshnessStatus::FRESH;
   PredictorQueryInput working_input = input;
+  std::vector<bool> admitted_satellites;
+  if (!input.snapshot.current.excluded_prns.empty()) {
+    admitted_satellites.resize(input.snapshot.gnss_epoch.sats.size(),true);
+    for (size_t i=0;i<admitted_satellites.size();++i) {
+      const int id=input.snapshot.gnss_epoch.sats[i].sat_id;
+      admitted_satellites[i]=(gnss_satellite_mask==nullptr ||
+          (i<gnss_satellite_mask->size() && (*gnss_satellite_mask)[i])) &&
+          std::find(input.snapshot.current.excluded_prns.begin(),input.snapshot.current.excluded_prns.end(),id)==input.snapshot.current.excluded_prns.end();
+    }
+    gnss_satellite_mask=&admitted_satellites;
+  }
   const CovarianceGrowthOutcome growth = apply_covariance_growth(
       input, params_.covariance_growth, stale_current_prior,
       &working_input.snapshot);
@@ -587,14 +603,13 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     out.source_flags = make_source_flags(out);
     return out;
   }
-  if (stale_current_prior) {
+  if (stale_current_prior || !input.snapshot.current.valid) {
     working_input.snapshot.has_lambda_base = false;
     working_input.snapshot.lambda_base_pos.setZero();
   }
 
   const bool gnss_allowed =
-      source_allows_gnss(params_.source_mode) &&
-      !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
+      admitted.gnss_allowed;
   const bool reuse_gnss = reuse_cached_gnss &&
       cached_spatial_advisory != nullptr &&
       (!support_evaluation_time_sensitive_ || !gnss_allowed ||
@@ -651,14 +666,14 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
         out.gnss = disabled_gnss_result(gnss_unavailable_reason);
       }
     } else {
-      out.gnss = disabled_gnss_result("gnss_disabled");
+      out.gnss = disabled_gnss_result(admitted.gnss_reason);
     }
   }
 
   if (reuse_lidar) {
     out.lidar = cached_spatial_advisory->lidar;
   } else {
-    if (source_allows_lidar(params_.source_mode)) {
+    if (admitted.lidar_allowed) {
       const auto begin = diagnostics && diagnostics->collect_component_timing
                              ? std::chrono::steady_clock::now()
                              : std::chrono::steady_clock::time_point{};
@@ -674,7 +689,7 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
         }
       }
     } else {
-      out.lidar = disabled_lidar_result("lidar_disabled");
+      out.lidar = disabled_lidar_result(admitted.lidar_reason);
     }
   }
   if (evaluated_spatial_advisory != nullptr) {
@@ -712,7 +727,7 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
       out.available = false;
       out.valid = false;
       out.fallback = true;
-      out.fallback_reason = "stale_integrity";
+      out.fallback_reason = out.fused.fallback_reason;
       out.source_flags = make_source_flags(out);
       return out;
     }
@@ -735,6 +750,7 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     double y;
     double z;
     std::string frame_id;
+    std::size_t source_identity;
     double snapshot_stamp;
     double pose_stamp;
     double current_stamp;
@@ -745,7 +761,7 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     double evaluation_time;
     bool operator==(const Key& other) const {
       return x == other.x && y == other.y && z == other.z &&
-             frame_id == other.frame_id &&
+             frame_id == other.frame_id && source_identity == other.source_identity &&
              snapshot_stamp == other.snapshot_stamp &&
              pose_stamp == other.pose_stamp &&
              current_stamp == other.current_stamp &&
@@ -769,6 +785,7 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
         combine(std::hash<double>{}(value));
       }
       combine(std::hash<std::string>{}(key.frame_id));
+      combine(key.source_identity);
       combine(std::hash<std::uint64_t>{}(key.prior_source_generation));
       combine(std::hash<bool>{}(key.has_gnss_epoch));
       combine(std::hash<bool>{}(key.has_evaluation_time));
@@ -803,8 +820,15 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
         std::isfinite(input.snapshot.current.stamp) &&
         std::isfinite(evaluation_time) &&
         (!input.snapshot.has_epoch || std::isfinite(gnss_epoch_stamp));
+    std::size_t source_identity=gnss_epoch_identity(input.snapshot.gnss_epoch,input.snapshot.current.excluded_prns);
+    const auto mix=[&](double value) {source_identity ^= std::hash<double>{}(value)+0x9e3779b9u+(source_identity<<6)+(source_identity>>2);};
+    const auto& current=input.snapshot.current;
+    for(double value:{double(current.valid),double(current.gnss_valid),double(current.gnss_epoch_identity),
+        current.gnss_epoch_stamp,current.icp_rmse,current.icp_condition,current.icp_gamma_lidar,
+        current.tdop,double(current.n_trunks_observed),input.lidar_support_stamp_s,input.lidar_support_max_age_s,
+        input.snapshot.p_wb.x(),input.snapshot.p_wb.y(),input.snapshot.p_wb.z()}) mix(value);
     const Key key{input.query_position_map.x(), input.query_position_map.y(),
-                  input.query_position_map.z(), input.frame_id,
+                  input.query_position_map.z(), input.frame_id, source_identity,
                   input.snapshot.stamp, input.snapshot.pose_stamp,
                   input.snapshot.current.stamp,
                   input.snapshot.prior_source_generation,

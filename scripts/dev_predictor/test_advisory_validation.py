@@ -53,10 +53,10 @@ class AdvisoryValidationTest(unittest.TestCase):
 
     def test_source_admission_and_no_prior_only_authorization(self):
         row = self.tables["S5_missing_gnss"][0]
-        self.assertEqual(row["wrapper_called"], "0")
+        self.assertEqual(row["wrapper_called"], "1")
         self.assertEqual(row["module_valid"], "1")
         self.assertEqual(row["lidar_used"], "1")
-        self.assertEqual(row["reason"], "wrapper_missing_gnss_epoch")
+        self.assertEqual(row["valid"], "1")
         self.assertEqual(self.tables["S5_no_observations"][0]["module_valid"], "0")
         self.assertEqual(self.tables["S5_both_missing"][0]["module_valid"], "0")
 
@@ -64,13 +64,13 @@ class AdvisoryValidationTest(unittest.TestCase):
         expected = {"wrong_frame": "COORDINATE_ERROR", "out_of_map": "COORDINATE_ERROR",
                     "physical_occupied": "PHYSICAL_FILTERED", "physical_unobserved": "PHYSICAL_FILTERED",
                     "missing_physical": "INPUT_UNAVAILABLE", "missing_pose": "INPUT_UNAVAILABLE",
-                    "invalid_current": "INPUT_UNAVAILABLE", "preparation_budget": "BUDGET_EXCEEDED",
+                    "invalid_current": "VALID", "preparation_budget": "BUDGET_EXCEEDED",
                     "no_observations": "MODEL_INVALID"}
         for name, status in expected.items():
             row = self.tables["S5_"+name][0]
             self.assertEqual(row["status"], status, name)
             self.assertTrue(row["reason"], name)
-        for name in ("pose", "current", "snapshot", "cloud", "gnss"):
+        for name in ("pose", "snapshot"):
             self.assertEqual(self.tables["S5_stale_"+name][0]["status"], "STALE")
         self.assertEqual(self.tables["S2_weak_normal_support"][0]["status"], "DIAGNOSTIC_ONLY")
 

@@ -232,8 +232,8 @@ def report(run, label):
         cells=[summary["mechanism"][mode][group][metric]["values"] for group,metric in (("S1","hpl"),("S2","hpl"),("S3","hpl"),("S3","vpl"))]
         lines.append("| "+mode+" | "+" | ".join(", ".join(f"{v:.10g}" if v is not None else "missing" for v in values) for values in cells)+" |")
     lines += ["", "## 仍存在的问题与下一步", "",
-              f"缺 GNSS 准入差异仍存在：[OFF 请求]({link(root/(label+'_off')/'S5_missing_gnss/points.csv')}) 为 `{summary['admission_discrepancy']}`。包装器未调用的官方 PL 留空；模块仍可使用 LiDAR 是诊断事实。本轮不改来源或环境准入。",
-              "Fusion 的 epsilon 仍在每次求逆前加入。弱法向过滤保留 PCA 法向的小分量，不能自动称为严格秩亏；以导出的最小特征值为准。极端双源噪声 ×1e6 可使来源退出并由 epsilon 主导有限 PL 平台；需要后续单独定义可观测性/正则化准入。GNSS 存在 anchor/raw PL 与用于融合 FIM 的不同尺度，K_H/K_V=5、PCA 默认和固定噪声未经实际误差校准；PL 增大能反映观测变弱，但尚不能判定其绝对尺度正确。",
+              f"缺 GNSS 的共享准入结果：[OFF 请求]({link(root/(label+'_off')/'S5_missing_gnss/points.csv')}) 为 `{summary['admission_discrepancy']}`。包装器与模块共同使用合法 LiDAR；来源时间与身份检查保留。",
+              "Fusion 在求逆前检查未正则化联合矩阵，弱方向正则化占比超过 1% 时官方 PL 留空。弱法向过滤保留 PCA 法向的小分量，不能自动称为严格秩亏；以导出的最小特征值为准。极端双源噪声 ×1e6 的有限正则化解仅作为诊断，不是有效 PL。GNSS 存在 anchor/raw PL 与用于融合 FIM 的不同尺度，K_H/K_V=5、PCA 默认和固定噪声未经实际误差校准；PL 增大能反映观测变弱，但尚不能判定其绝对尺度正确。",
               "关闭此项后，FGO 后验作为 lambda_prior 再加入的这条重复信息路径已移除。GNSS 和 LiDAR 观测之间仍未建模相关性；具体因子重叠、姿态/平移耦合及实际误差需要真实输入核验。",
               "建议下一步先修融合模式的来源准入一致性，保留新鲜度与环境有效性；再明确弱方向秩判定和正则化语义；最后在固定坐标/外参/时间契约下完成至少三次配对运行以校准尺度。不得向预测器反馈真值。", "",
               "CPU 墙面规划夹具还暴露路径恢复问题：默认 OFF 时 Advisory 恢复将实际曲线推出地图，最终物理检查拒绝，未生成待发布轨迹。原成功曲线测试显式保留旧 ON 输入假设，另加 OFF 拒绝回归；没有放宽预算、代价或物理检查。该行为是规划覆盖风险，不能据机制实验宣称真实森林能正常完成路线。证据在 runtime/ros/prior_ab_tests.log 的首次失败及后续通过日志。", "",

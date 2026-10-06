@@ -51,18 +51,19 @@ class AdvisoryPriorABTest(unittest.TestCase):
         for case in ("S5_both_missing","S5_no_observations","S5_nonfinite_observations"):
             row=t[case][0];self.assertEqual(row["valid"],"0",case)
             self.assertEqual(row["fused_hpl"],"");self.assertTrue(row["reason"])
-        for source in ("pose","current","snapshot","cloud","gnss"):
+        for source in ("pose","snapshot"):
             self.assertEqual(t["S5_stale_"+source][0]["status"],"STALE")
+        for source in ("current","cloud","gnss"):
+            self.assertEqual(t["S5_stale_"+source][0]["valid"],"1")
         for table in t.values():
             for row in table:
                 self.assertEqual(row["prior_used"],"0")
                 if row["valid"]=="1":self.assertGreater(float(row["fused_hpl"]),0)
 
-    def test_gnss_admission_discrepancy_is_retained(self):
+    def test_shared_admission_accepts_lidar_without_gnss(self):
         r=self.tables["off"]["S5_missing_gnss"][0]
-        self.assertEqual(r["reason"],"wrapper_missing_gnss_epoch")
-        self.assertEqual((r["wrapper_called"],r["module_valid"],r["lidar_used"]),("0","1","1"))
-        self.assertEqual(r["fused_hpl"],"")
+        self.assertEqual((r["wrapper_called"],r["module_valid"],r["lidar_used"],r["valid"]),("1","1","1","1"))
+        self.assertTrue(r["fused_hpl"])
 
     def test_dual_degradation_and_complementary_information(self):
         for mode in ("on","off"):
@@ -72,7 +73,7 @@ class AdvisoryPriorABTest(unittest.TestCase):
         self.assertGreater(self.summary["mechanism"]["off"]["S3"]["hpl"]["values"][2],30)
         for case,m in self.matrices["off"].items():
             for point in m:
-                if point["fused_information"]:
+                if point["fused_information"] and point["module_valid"]:
                     a=np.asarray(point["gnss"]["row_major"]).reshape(3,3)
                     b=np.asarray(point["lidar"]["row_major"]).reshape(3,3)
                     total=np.asarray(point["fused_information"]["row_major"]).reshape(3,3)
@@ -91,7 +92,9 @@ class AdvisoryPriorABTest(unittest.TestCase):
             self.assertTrue(m["fused_information"])
         limit=self.matrices["off"]["S3_regularization_limit"][0]
         self.assertLess(limit["fused_information"]["eigenvalues"][0],1e-6)
-        self.assertGreater(float(self.tables["off"]["S3_regularization_limit"][0]["module_hpl"]),1000)
+        self.assertEqual(self.tables["off"]["S3_regularization_limit"][0]["module_hpl"],"")
+        self.assertGreater(limit["regularization_fraction"],.01)
+        self.assertGreater(limit["regularized_diagnostic_hpl"],1000)
 
     def test_report_links_and_synthetic_live_separation(self):
         output=ab.report(self.run_dir,"ab")

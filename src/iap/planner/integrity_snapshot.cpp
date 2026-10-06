@@ -12,11 +12,6 @@ bool finite_pose(const Eigen::Vector3d& p, const Eigen::Quaterniond& q) {
          std::isfinite(q.y()) && std::isfinite(q.z());
 }
 
-bool finite_current_integrity(const CurrentIntegrityState& state) {
-  return state.valid && std::isfinite(state.hpl) && std::isfinite(state.vpl) &&
-         std::isfinite(state.hal) && std::isfinite(state.val) &&
-         std::isfinite(state.im);
-}
 
 }  // namespace
 
@@ -65,7 +60,7 @@ IntegritySnapshot IntegritySnapshotBuilder::build_from_latest(
     out.lidar_araim_n_detected = input.lidar_araim_result->n_detected;
   }
 
-  out.valid = out.has_pose && finite_current_integrity(out.current);
+  out.valid = out.has_pose;
   return out;
 }
 

@@ -32,6 +32,16 @@ struct PredictorBatchDiagnostics {
   std::uint64_t fusion_advisory_duration_ns = 0;
 };
 
+struct PredictorAdmission {
+  double valid_until_s = std::numeric_limits<double>::infinity();
+  bool input_valid = false;
+  bool gnss_allowed = false;
+  bool lidar_allowed = false;
+  std::string input_reason;
+  std::string gnss_reason;
+  std::string lidar_reason;
+};
+
 class PredictorModule {
  public:
   PredictorModule();
@@ -48,6 +58,7 @@ class PredictorModule {
   void set_lidar_map_points(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> points);
 
+  PredictorAdmission admission(const PredictorQueryInput& input) const;
   PredictorQueryResult query(const PredictorQueryInput& input) const;
   std::vector<PredictorQueryResult> queryBatch(
       const std::vector<PredictorQueryInput>& inputs,

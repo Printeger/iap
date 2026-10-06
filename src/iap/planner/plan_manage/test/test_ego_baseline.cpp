@@ -1064,6 +1064,9 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   EXPECT_EQ(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(later));
   later.integrity.current.current_motion_error_proxy_m=.06;
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(later));
+  auto numerical=input; numerical.params.fusion.max_regularization_fraction=.005;
+  EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(numerical));
+  EXPECT_DOUBLE_EQ(ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(numerical)).params.fusion.max_regularization_fraction,.005);
   EXPECT_THROW(ego_planner::decodePredictionInput({1,2,3}),std::runtime_error);
   if (std::getenv("IAP_TEST_PREDICTION_BENCHMARK")) {
     using Clock=std::chrono::steady_clock;
@@ -1164,11 +1167,12 @@ TEST(EgoBaseline, AdvisoryCodecRetainsEpochExclusionsParametersAndFrozenTime) {
   EXPECT_DOUBLE_EQ(restored.params.lidar.fim_params.fim_range_sigma_base,.7);
   std::string reason;
   auto missing=restored;missing.integrity.has_epoch=false;
-  EXPECT_FALSE(ego_planner::makeRiskPrediction(missing,{},&reason).predict);
-  EXPECT_EQ(reason,"wrapper_missing_gnss_epoch");
+  EXPECT_TRUE(ego_planner::makeRiskPrediction(missing,{},&reason).predict);
+  EXPECT_TRUE(reason.empty());
   auto stale=restored;stale.reference_time_s=1000;
-  EXPECT_FALSE(ego_planner::makeRiskPrediction(stale,{},&reason).predict);
-  EXPECT_EQ(reason,"wrapper_stale_input");
+  auto stale_context=ego_planner::makeRiskPrediction(stale,{},&reason);
+  ASSERT_TRUE(stale_context.predict);
+  EXPECT_NE(stale_context.predict(stale.integrity.p_wb).status,GridRiskStatus::VALID);
   EXPECT_DOUBLE_EQ(stale.integrity.gnss_epoch.stamp,9.8);
   auto partial=std::make_shared<FrozenOccupancyEpoch>(*restored.occupancy);
   auto cells=std::make_shared<FrozenOccupancyCells>(*partial->cells);cells->addresses={0};partial->cells=cells;

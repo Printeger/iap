@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <iap/predictor/predictor_module.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <iap/predictor/gnss_geometry_pl_predictor.hpp>
 #include <iap/predictor/gnss_satellite_admission.hpp>
 #include <iap/map/trusted_local_map_support.hpp>
@@ -371,13 +372,8 @@ TEST(PredictorSourceUsageTest, ProjectsOnlyConfiguredSpatialSources) {
 }
 
 std::filesystem::path predictor_artifact_dir() {
-  if (const char* configured = std::getenv("IAP_TEST_ARTIFACT_DIR")) {
-    std::filesystem::path path(configured);
-    std::filesystem::create_directories(path);
-    return path;
-  }
-  std::filesystem::path path(IAP_SOURCE_ROOT);
-  path /= "docs/dev_predictor/predictor_isolated_test_coverage_artifacts";
+  auto& log=glim::RunLogManager::initialize("advisory_predictor_regression");
+  auto path=log.export_path("advisory/validation/regression");
   std::filesystem::create_directories(path);
   return path;
 }
@@ -2932,12 +2928,6 @@ TEST(PredictorModuleTest, CurrentIntegrityAnchorsPlannerGnssPrediction) {
     const iap::PredictorQueryInput input(Eigen::Vector3d::Zero(), snapshot,
                                          100.0, 0.0, "map");
     const auto result = module.query(input);
-    if (!test_case.current_valid) {
-      EXPECT_FALSE(result.gnss.valid);
-      EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
-      EXPECT_FALSE(result.valid);
-      continue;
-    }
     ASSERT_TRUE(result.valid) << test_case.id << ':' << result.fallback_reason;
     const bool copied =
         std::abs(result.gnss.hpl - test_case.current_gnss_hpl) < 1.0e-9 &&
@@ -2957,7 +2947,7 @@ TEST(PredictorModuleTest, CurrentIntegrityAnchorsPlannerGnssPrediction) {
     results.push_back(result);
   }
 
-  ASSERT_EQ(results.size(), 2u);
+  ASSERT_EQ(results.size(), 3u);
   for (std::size_t i = 1; i < results.size(); ++i) {
     EXPECT_NE(results[i].gnss.hpl, results[0].gnss.hpl);
     EXPECT_NE(results[i].gnss.vpl, results[0].gnss.vpl);
@@ -3195,12 +3185,12 @@ TEST(PredictorModuleTest,
   ASSERT_EQ(non_cacheable_batch.size(), 1U);
   expect_scientific_result_eq(
       non_cacheable_batch.front(), module.query(non_cacheable_inputs.front()));
-  ASSERT_TRUE(non_cacheable_batch.front().valid)
+  ASSERT_FALSE(non_cacheable_batch.front().valid)
       << non_cacheable_batch.front().fallback_reason;
-  EXPECT_EQ(non_cacheable_diagnostics.spatial_advisory_recompute_count, 1U);
+  EXPECT_EQ(non_cacheable_diagnostics.spatial_advisory_recompute_count, 0U);
   EXPECT_EQ(non_cacheable_diagnostics.spatial_advisory_reuse_count, 0U);
-  EXPECT_EQ(non_cacheable_diagnostics.lidar_advisory_invocations, 1U);
-  EXPECT_EQ(non_cacheable_diagnostics.fusion_advisory_invocations, 1U);
+  EXPECT_EQ(non_cacheable_diagnostics.lidar_advisory_invocations, 0U);
+  EXPECT_EQ(non_cacheable_diagnostics.fusion_advisory_invocations, 0U);
   EXPECT_EQ(non_cacheable_diagnostics.unique_positions, 0U);
   EXPECT_EQ(non_cacheable_diagnostics.lidar_evaluations, 0U);
   EXPECT_EQ(non_cacheable_diagnostics.lidar_cache_hits, 0U);
@@ -3278,7 +3268,7 @@ TEST(PredictorModuleTest,
   EXPECT_EQ(diagnostics.unique_positions, 3U);
   EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 3U);
   EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 3U);
-  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 3U);
+  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 2U);
   EXPECT_EQ(diagnostics.lidar_advisory_invocations, 3U);
   EXPECT_EQ(diagnostics.lidar_evaluations, 3U);
   EXPECT_EQ(diagnostics.lidar_cache_hits, 3U);
@@ -3726,7 +3716,7 @@ TEST(PredictorModuleTest, DisabledGnssEpochPolicyDoesNotUseGnssAdvisory) {
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
 }
 
-TEST(PredictorModuleTest, LidarOnlyDegenerateFimStaysValidAndRegularized) {
+TEST(PredictorModuleTest, ExplicitPriorCompensatesRankDeficientLidar) {
   auto params = make_params();
   params.source_mode = iap::PredictorSourceMode::LidarOnly;
   params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Disabled;
@@ -3754,7 +3744,7 @@ TEST(PredictorModuleTest, LidarOnlyDegenerateFimStaysValidAndRegularized) {
   EXPECT_TRUE(result.lidar.fim_valid);
   EXPECT_TRUE(result.lidar.fim_regularized);
   EXPECT_TRUE(result.fused.lidar_used);
-  EXPECT_TRUE(result.fused.degeneracy_regularized);
+  EXPECT_FALSE(result.fused.degeneracy_regularized);
   EXPECT_FALSE(result.fused.gnss_used);
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
   EXPECT_TRUE(flag_set(result.source_flags,
@@ -3827,7 +3817,7 @@ TEST(PredictorModuleTest, DegenerateLidarDoesNotReduceSelectedPl) {
     } else if (case_id == "degenerate_lidar") {
       EXPECT_TRUE(raw.lidar_used);
       EXPECT_TRUE(selected.lidar_used);
-      EXPECT_TRUE(selected.degeneracy_regularized);
+      EXPECT_FALSE(selected.degeneracy_regularized);
     } else {
       EXPECT_FALSE(raw.lidar_used);
       EXPECT_FALSE(selected.lidar_used);
@@ -3980,7 +3970,7 @@ TEST(PredictorModuleTest,
   EXPECT_FALSE(result.valid);
   EXPECT_FALSE(result.available);
   EXPECT_TRUE(result.fallback);
-  EXPECT_EQ(result.fallback_reason, "stale_integrity");
+  EXPECT_NE(result.fallback_reason.find("missing_lidar_normals"),std::string::npos);
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
   EXPECT_FALSE(flag_set(result.source_flags,
                         iap::PREDICTOR_RESULT_STALE_CURRENT_PRIOR));
@@ -4264,4 +4254,56 @@ TEST(PredictorModuleTest, ModuleNoGnssNoLidarIsUnavailableWithNanPl) {
   EXPECT_FALSE(std::isfinite(result.fused.pl_scalar));
   EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_AVAILABLE));
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
+}
+
+TEST(AdvisoryNumerics, ComplementaryRankDeficientSourcesSolveJointly) {
+  iap::FusionAdvisoryPredictor predictor;
+  iap::GnssAdvisoryResult gnss; gnss.fim_valid=true;
+  gnss.lambda_gnss.diagonal()<<1.,1.,0.; // No standalone GNSS PL.
+  iap::LidarAdvisoryResult lidar; lidar.valid=true;
+  lidar.lambda_lidar.diagonal()<<0.,0.,1.;
+  const auto result=predictor.query(make_snapshot(false,false),gnss,lidar);
+  ASSERT_TRUE(result.valid)<<result.fallback_reason;
+  EXPECT_TRUE(result.gnss_used); EXPECT_TRUE(result.lidar_used);
+  EXPECT_FALSE(std::isfinite(result.gnss_information_hpl));
+  EXPECT_FALSE(std::isfinite(result.lidar_only_hpl));
+  EXPECT_NEAR(result.hpl,5./std::sqrt(1.+1e-6),1e-12);
+}
+TEST(AdvisoryNumerics, RankFailureAndEpsilonDominanceNeverProduceOfficialPL) {
+  iap::FusionAdvisoryPredictor predictor;
+  iap::GnssAdvisoryResult gnss;
+  iap::LidarAdvisoryResult lidar; lidar.valid=true;
+  for(double weak:{0.,1e-10,1e-4}) {
+    lidar.lambda_lidar.diagonal()<<1.,1.,weak;
+    auto r=predictor.query(make_snapshot(false,false),gnss,lidar);
+    if(weak==1e-4) {EXPECT_TRUE(r.valid); EXPECT_GT(r.vpl,490.);}
+    else {EXPECT_FALSE(r.valid); EXPECT_FALSE(std::isfinite(r.hpl));
+      EXPECT_FALSE(std::isfinite(r.vpl)); EXPECT_TRUE(std::isfinite(r.regularized_diagnostic_vpl));
+      EXPECT_TRUE(r.degeneracy_regularized);}
+    EXPECT_DOUBLE_EQ(r.lambda_pred_min_eig,weak);
+  }
+}
+TEST(AdvisoryNumerics, AcceptedInformationStableAcrossEpsilonFactors) {
+  iap::GnssAdvisoryResult gnss; iap::LidarAdvisoryResult lidar; lidar.valid=true;
+  lidar.lambda_lidar.diagonal()<<.01,.02,.03;
+  double first=NAN;
+  for(double factor:{.1,1.,10.}) {
+    iap::FusionAdvisoryPredictorParams params;params.fim_epsilon*=factor;
+    auto r=iap::FusionAdvisoryPredictor(params).query(make_snapshot(false,false),gnss,lidar);
+    ASSERT_TRUE(r.valid);if(std::isnan(first)) first=r.hpl;
+    EXPECT_LT(std::abs(r.hpl/first-1.),.05);
+  }
+}
+TEST(AdvisoryAdmission, MotionUnavailableDoesNotAuthorizeExecutionOrBlockSources) {
+  auto params=make_params();params.freshness.enabled=true;
+  iap::PredictorModule module(params);module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto s=make_snapshot(true,false);s.current.valid=false;s.current.current_motion_quality=0;
+  iap::PredictorQueryInput q(Eigen::Vector3d::Zero(),s,100.);
+  auto a=module.admission(q);EXPECT_TRUE(a.input_valid);EXPECT_TRUE(a.gnss_allowed);EXPECT_TRUE(a.lidar_allowed);
+  const auto r=module.query(q);ASSERT_TRUE(r.valid)<<r.fallback_reason;
+  EXPECT_TRUE(r.fused.gnss_used);EXPECT_TRUE(r.fused.lidar_used);EXPECT_FALSE(q.snapshot.current.valid);
+  q.snapshot.has_epoch=false;EXPECT_TRUE(module.query(q).valid);
+  q.lidar_support_stamp_s=99.;EXPECT_FALSE(module.query(q).valid);
+  q.snapshot.has_epoch=true;EXPECT_TRUE(module.query(q).valid);EXPECT_FALSE(module.query(q).fused.lidar_used);
+  q.snapshot.current.gnss_epoch_identity++;EXPECT_FALSE(module.query(q).valid);
 }

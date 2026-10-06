@@ -102,6 +102,7 @@ struct LidarAdvisoryPredictorParams {
 
 struct FusionAdvisoryPredictorParams {
   double fim_epsilon = 1.0e-6;
+  double max_regularization_fraction = 0.01;
   double K_H_adv = 5.0;
   double K_V_adv = 5.0;
   double b_H_pred = 0.0;
@@ -286,6 +287,9 @@ struct LidarAdvisoryResult {
   double lambda_condition = 1.0e12;
 };
 
+enum class AdvisoryNumericalStatus { NOT_EVALUATED, OBSERVATION_SUPPORTED,
+  INVALID_INFORMATION, RANK_DEFICIENT, REGULARIZATION_DOMINATED };
+
 struct FusionAdvisoryResult {
   bool available = false;
   bool valid = false;
@@ -301,6 +305,13 @@ struct FusionAdvisoryResult {
   double sigma_v = std::numeric_limits<double>::quiet_NaN();
   // Diagnostic channels retain the information before the conservative GNSS
   // safety floor. They are not substitutes for hpl/vpl in P5.
+  AdvisoryNumericalStatus numerical_status = AdvisoryNumericalStatus::NOT_EVALUATED;
+  double regularization_fraction = std::numeric_limits<double>::quiet_NaN();
+  double regularized_diagnostic_hpl = std::numeric_limits<double>::quiet_NaN();
+  double regularized_diagnostic_vpl = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d weak_direction = Eigen::Vector3d::Zero();
+  double gnss_information_hpl = std::numeric_limits<double>::quiet_NaN();
+  double gnss_information_vpl = std::numeric_limits<double>::quiet_NaN();
   double prior_only_hpl = std::numeric_limits<double>::quiet_NaN();
   double prior_only_vpl = std::numeric_limits<double>::quiet_NaN();
   double lidar_only_hpl = std::numeric_limits<double>::quiet_NaN();
@@ -352,6 +363,10 @@ struct PredictorQueryInput {
         frame_id(std::move(frame_id_in)),
         evaluation_time_s(evaluation_time_s_in) {}
 
+  // Frozen support time is supplied by the input builder, independently of
+  // Current Monitor validity. NaN means no timed support supplied by this API.
+  double lidar_support_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double lidar_support_max_age_s = 0.5;
   Eigen::Vector3d query_position_map;
   IntegritySnapshot snapshot;
   double query_time_s;

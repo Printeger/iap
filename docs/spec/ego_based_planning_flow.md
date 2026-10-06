@@ -412,3 +412,17 @@ ctest --test-dir build/ego_planner -R '^test_ego_baseline$|^test_ego_pipeline$' 
 回归已执行：6 项新 A/B 合同、9 项原冻结工具合同、33 项 EGO baseline、独立可视化/规划进程管线、35 项 canonical launch 合同及 PredictorModule CTest 通过；已安装 launch 的 --show-args 确认默认 false。产物契约检查通过。日志在本轮 runtime/ros。
 
 正式代码 `f3de428` 同输入复跑：40 变体、两组各 139 请求，39 对完整编码一致，缺物理输入一对 N/A；OFF 参与标志全部 false。合成 HPL 空间跨度增至 0.142859503 m，双源 ×100 时 HPL 增至 36.2218096 m；弱方向 epsilon 平台和 GNSS 标量/FIM 尺度差异仍存在。见 [正式 report](../../log/20261006T141611Z_756/export/analysis/advisory_validation/committed_ab/report.md)、[数值解释](../../log/20261006T141611Z_756/export/analysis/advisory_validation/committed_ab/findings.md) 及方案原始表链接。GPU READY，原有四处修改仍阻止现场：`LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`。真实输入可用性/空间敏感性为 INCONCLUSIVE_INPUT_UNAVAILABLE，实际误差为 INCONCLUSIVE_LIVE_NOT_RUN；三份真实冻结输入和三次配对运行保持待测。
+
+## 分阶段验证契约与本轮状态（2026-10-06）
+
+默认关闭 Advisory 后验代理，预测输入／来源信息／运动执行三种有效性分离。
+共享 `PredictorModule::admission` 负责来源准入，缺 GNSS 不再阻止合法 LiDAR。
+联合原始信息秩与正则化弱方向占比先于有效 PL 授予；占比上限 1%，
+官方数值退化值为空。来源独立秩亏可由联合观测补足。v2 codec 保存新参数，
+v1 仅保留历史诊断读取；缓存身份与来源新鲜度同步约束。
+
+准入／数值、codec、生产包装器及批次回归已通过；来源密度核验、实际曲线
+修复、固定路线校准与任务对照继续实施。真实森林现场仍待测：
+`LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，不推广未经独立实测的校准参数。
+契约见 [advisory_prediction_contract.md](../spec/advisory_prediction_contract.md)。
+本轮正式报告：[report.md](../../log/20261006T154206Z_544/export/analysis/advisory_validation/staged/report.md)。

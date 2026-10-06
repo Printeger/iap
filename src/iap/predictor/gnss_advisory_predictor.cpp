@@ -377,7 +377,8 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
     return out;
   }
   if (diag.min_eig < 0.0) {
-    out.lambda_gnss += Eigen::Matrix3d::Identity() * (-diag.min_eig + psd_eps);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(out.lambda_gnss);
+    out.lambda_gnss = eig.eigenvectors() * eig.eigenvalues().cwiseMax(0.).asDiagonal() * eig.eigenvectors().transpose();
     diag.lambda = out.lambda_gnss;
     diag.regularized = true;
     fill_fim_diagnostics(diag);
@@ -450,7 +451,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     out.support_status = visibility.support_status;
     copy_geometry_set_diagnostics(visible_set, out);
     out.n_hypotheses = pl.n_hypotheses;
-    return out;
+    return compute_advisory_fim(query_position, snapshot.gnss_epoch, visibility, out, satellite_mask);
   }
 
   GnssAdvisoryResult out;
@@ -565,7 +566,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_receiver_measured(
   const double epoch_delta =
       std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp);
   if (!snapshot.has_epoch || !snapshot.has_pose ||
-      !snapshot.p_wb.allFinite() || !snapshot.current.valid ||
+      !snapshot.p_wb.allFinite() ||
       !snapshot.current.gnss_valid ||
       !std::isfinite(snapshot.current.stamp) ||
       !std::isfinite(snapshot.gnss_epoch.stamp) ||
@@ -586,7 +587,7 @@ GnssAdvisoryPredictor::query_receiver_measured_with_satellite_mask(
       std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp);
   if (!snapshot.has_epoch || !snapshot.has_pose ||
       satellite_mask.size() != snapshot.gnss_epoch.sats.size() ||
-      !snapshot.p_wb.allFinite() || !snapshot.current.valid ||
+      !snapshot.p_wb.allFinite() ||
       !snapshot.current.gnss_valid ||
       !std::isfinite(snapshot.current.stamp) ||
       !std::isfinite(snapshot.gnss_epoch.stamp) ||

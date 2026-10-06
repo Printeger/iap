@@ -38,7 +38,7 @@ bool valid_position_information(const Eigen::Matrix3d& lambda,
   const double max_eig = eig.eigenvalues().maxCoeff();
   const double min_eig = eig.eigenvalues().minCoeff();
   const double psd_tol = std::max(1.0e-9, 1.0e-10 * std::abs(max_eig));
-  if (max_eig <= 0.0 || min_eig < -psd_tol) {
+  if ((lambda-lambda.transpose()).cwiseAbs().maxCoeff() > psd_tol || max_eig <= 0.0 || min_eig < -psd_tol) {
     return false;
   }
   if (symmetric_lambda) {
@@ -59,6 +59,9 @@ bool information_to_pl(const Eigen::Matrix3d& lambda,
   const double eps =
       std::isfinite(params.fim_epsilon) && params.fim_epsilon > 0.0
           ? params.fim_epsilon : 1.0e-6;
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(symmetric);
+  const double minimum = eig.eigenvalues().minCoeff();
+  if (minimum <= 0 || eps/(minimum+eps) > params.max_regularization_fraction) return false;
   Eigen::LDLT<Eigen::Matrix3d> ldlt(
       symmetric + eps * Eigen::Matrix3d::Identity());
   if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) {
@@ -115,11 +118,11 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
     reasons.push_back("missing_prior");
   }
 
-  if (gnss.valid && gnss.fim_valid &&
+  if (gnss.fim_valid &&
       gnss.information_state == PredictorInformationState::Position3MapEnu &&
       valid_position_information(gnss.lambda_gnss, &out.lambda_gnss)) {
     out.gnss_used = true;
-  } else if (gnss.valid && gnss.fim_valid) {
+  } else if (gnss.fim_valid) {
     reasons.push_back("gnss:invalid_gnss_position_information");
   } else if (!gnss.fallback_reason.empty()) {
     reasons.push_back("gnss:" + gnss.fallback_reason);
@@ -155,6 +158,9 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   out.lambda_prior_trace = out.lambda_prior.trace();
   out.lambda_gnss_trace = out.lambda_gnss.trace();
   out.lambda_lidar_trace = out.lambda_lidar.trace();
+  if (out.gnss_used) {
+    information_to_pl(out.lambda_gnss, params_, &out.gnss_information_hpl, &out.gnss_information_vpl);
+  }
   if (out.prior_valid) {
     information_to_pl(out.lambda_prior, params_, &out.prior_only_hpl,
                       &out.prior_only_vpl);
@@ -167,15 +173,35 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   FimDiagnostic diag;
   diag.lambda = out.lambda_pred;
   fill_fim_diagnostics(diag);
-  out.degeneracy_regularized =
-      gnss.fim_regularized || lidar.fim_regularized ||
-      !std::isfinite(diag.min_eig) || diag.min_eig <= 0.0;
-
-  const double eps =
-      std::isfinite(params_.fim_epsilon) && params_.fim_epsilon > 0.0
-          ? params_.fim_epsilon
-          : 1.0e-6;
-  out.epsilon_applied = eps > 0.0;
+  out.lambda_pred_trace = diag.trace;
+  out.lambda_pred_min_eig = diag.min_eig;
+  out.lambda_pred_max_eig = diag.max_eig;
+  out.lambda_pred_condition = diag.condition;
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> joint(out.lambda_pred);
+  if (joint.info() != Eigen::Success || !out.lambda_pred.allFinite() ||
+      diag.min_eig < -std::max(1e-9,1e-10*std::abs(diag.max_eig))) {
+    out.numerical_status = AdvisoryNumericalStatus::INVALID_INFORMATION;
+    out.fallback_reason = "invalid_joint_information";
+    return out;
+  }
+  out.weak_direction = joint.eigenvectors().col(0);
+  const double eps = params_.fim_epsilon;
+  if (!std::isfinite(eps) || eps <= 0 ||
+      !std::isfinite(params_.max_regularization_fraction) ||
+      params_.max_regularization_fraction <= 0 || params_.max_regularization_fraction > 0.01) {
+    out.numerical_status = AdvisoryNumericalStatus::INVALID_INFORMATION;
+    out.fallback_reason = "invalid_numerical_quality_parameter";
+    return out;
+  }
+  out.regularization_fraction = eps / (std::max(0.,diag.min_eig)+eps);
+  const double rank_tolerance = std::max(0.,diag.max_eig) * 32 * std::numeric_limits<double>::epsilon();
+  out.numerical_status = diag.min_eig <= rank_tolerance
+      ? AdvisoryNumericalStatus::RANK_DEFICIENT
+      : out.regularization_fraction > params_.max_regularization_fraction
+        ? AdvisoryNumericalStatus::REGULARIZATION_DOMINATED
+        : AdvisoryNumericalStatus::OBSERVATION_SUPPORTED;
+  out.degeneracy_regularized = out.numerical_status != AdvisoryNumericalStatus::OBSERVATION_SUPPORTED;
+  out.epsilon_applied = true;
   const Eigen::Matrix3d regularized_lambda =
       out.lambda_pred + eps * Eigen::Matrix3d::Identity();
   Eigen::LDLT<Eigen::Matrix3d> ldlt(regularized_lambda);
@@ -216,8 +242,15 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
           : 5.0;
   out.sigma_h = std::sqrt(std::max(0.0, eig_h.eigenvalues().maxCoeff()));
   out.sigma_v = std::sqrt(std::max(0.0, out.sigma_pos(2, 2)));
-  out.hpl = k_h * out.sigma_h + params_.b_H_pred + params_.s_H_pred;
-  out.vpl = k_v * out.sigma_v + params_.b_V_pred + params_.s_V_pred;
+  out.regularized_diagnostic_hpl = k_h * out.sigma_h + params_.b_H_pred + params_.s_H_pred;
+  out.regularized_diagnostic_vpl = k_v * out.sigma_v + params_.b_V_pred + params_.s_V_pred;
+  if (out.degeneracy_regularized) {
+    out.fallback_reason = out.numerical_status == AdvisoryNumericalStatus::RANK_DEFICIENT
+        ? "rank_deficient_joint_information" : "regularization_dominated_joint_information";
+    return out;
+  }
+  out.hpl = out.regularized_diagnostic_hpl;
+  out.vpl = out.regularized_diagnostic_vpl;
   out.pre_conservative_hpl = out.hpl;
   out.pre_conservative_vpl = out.vpl;
 
@@ -231,16 +264,6 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
     if (out.floor_increment_v > 0.0) out.floor_source_v = "gnss";
   }
   out.pl_scalar = std::max(out.hpl, out.vpl);
-
-  FimDiagnostic regularized_diag;
-  regularized_diag.lambda = regularized_lambda;
-  regularized_diag.valid = true;
-  regularized_diag.regularized = out.degeneracy_regularized;
-  fill_fim_diagnostics(regularized_diag);
-  out.lambda_pred_trace = regularized_diag.trace;
-  out.lambda_pred_min_eig = regularized_diag.min_eig;
-  out.lambda_pred_max_eig = regularized_diag.max_eig;
-  out.lambda_pred_condition = regularized_diag.condition;
 
   out.available = std::isfinite(out.hpl) && std::isfinite(out.vpl);
   out.valid = out.available;

@@ -20,6 +20,7 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
     std::string* rejection_reason = nullptr);
 // Same frozen map/support/primitive derivation as the production binding.
 // Direct queries are diagnostic; callers must retain the binding's rejection.
+iap::PredictorQueryInput frozenPredictionQuery(const PredictionInput& input, const Eigen::Vector3d& center);
 iap::PredictorModule makeFrozenPredictor(const PredictionInput& input);
 GridRiskVoxel predictionRiskVoxel(const iap::PredictorQueryResult& result);
 std::vector<uint8_t> encodePredictionInput(const PredictionInput& input);

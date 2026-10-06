@@ -241,7 +241,7 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     iap::PredictorQueryResult result; GridRiskVoxel wrapped;
     bool repeat_equal=true,batch_equal=true,wrapper_equal=true,codec_equal=bool(context.predict)==bool(before_codec.predict),called=false;
     if(physical_ok && module) {
-      iap::PredictorQueryInput query(center,in.integrity,in.reference_time_s,0.,in.occupancy->frame_id,in.reference_time_s);
+      auto query=ego_planner::frozenPredictionQuery(in,center);
       result=module->query(query); ++direct_calls; called=true;
       const auto again=module->query(query); ++direct_calls;
       const auto batch=module->queryBatch({query,query}); direct_calls+=2;
@@ -261,6 +261,7 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
           (wrapped.status!=GridRiskStatus::VALID || (std::abs(wrapped.hpl-projected.hpl)<=1e-12 && std::abs(wrapped.vpl-projected.vpl)<=1e-12)));
         status=wrapped.status==GridRiskStatus::VALID?"VALID":wrapped.status==GridRiskStatus::STALE?"STALE":wrapped.status==GridRiskStatus::PREDICTED_DEGRADED?"MODEL_DEGRADED":"MODEL_INVALID";
         reason=result.fallback_reason;
+        if(reason=="missing_pose" || reason=="invalid_pose_timestamp") status="INPUT_UNAVAILABLE";
       } else status=binding_reason.find("stale")!=std::string::npos?"STALE":"INPUT_UNAVAILABLE";
       if(weak_normals) {status="DIAGNOSTIC_ONLY";reason="offline_normal_support_override";}
       if(!repeat_equal || !batch_equal || !wrapper_equal || !codec_equal) throw std::runtime_error("replay equivalence failed: "+label);
@@ -283,7 +284,7 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     csv<<','<<elapsed<<','<<codec_equal<<',';csvNumber(csv,wrapped.hpl);csv<<',';csvNumber(csv,wrapped.vpl);csv<<'\n';
     matrices<<"{\"id\":"<<id<<",\"label\":"<<std::quoted(label)<<",\"identity\":"<<std::quoted(identity)<<",\"module_valid\":"<<(result.valid?"true":"false");
     matrix(matrices,"prior",f.lambda_prior,called);matrix(matrices,"gnss",f.lambda_gnss,called);
-    matrix(matrices,"lidar",f.lambda_lidar,called);matrix(matrices,"fused_information",f.lambda_pred,called && result.valid);
+    matrix(matrices,"lidar",f.lambda_lidar,called);matrix(matrices,"fused_information",f.lambda_pred,called);
     matrix(matrices,"covariance",f.sigma_pos,called && result.valid);
     matrices<<",\"weak_direction_prior_fraction\":";
     if(result.valid) {
@@ -291,6 +292,12 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
       const Point weak=eig.eigenvectors().col(0);const double total_info=weak.dot(f.lambda_pred*weak);
       number(matrices,total_info>0?weak.dot(f.lambda_prior*weak)/total_info:NAN);
     } else matrices<<"null";
+    matrices<<",\"numerical_status\":"<<static_cast<int>(f.numerical_status);
+    matrices<<",\"regularization_fraction\":";number(matrices,f.regularization_fraction);
+    matrices<<",\"regularized_diagnostic_hpl\":";number(matrices,f.regularized_diagnostic_hpl);
+    matrices<<",\"regularized_diagnostic_vpl\":";number(matrices,f.regularized_diagnostic_vpl);
+    matrices<<",\"gnss_information_hpl\":";number(matrices,f.gnss_information_hpl);
+    matrices<<",\"gnss_information_vpl\":";number(matrices,f.gnss_information_vpl);
     matrices<<",\"fusion_epsilon\":";number(matrices,in.params.fusion.fim_epsilon);
     matrices<<",\"epsilon_applied\":"<<(f.epsilon_applied?"true":"false")
       <<",\"degeneracy_regularized\":"<<(f.degeneracy_regularized?"true":"false")
