@@ -311,3 +311,171 @@ TEST(AdvisoryAStar, LiveUpdateDoesNotOverwriteFrozenSearchTimeout) {
   EXPECT_EQ(search.lastResult().live_generation_at_finish,
             search.lastResult().occupancy_generation + 1);
 }
+
+TEST(AdvisoryAStar, InteriorVoxelsOnLongDiagonalCannotBeSkipped) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(20, 20, 10));
+  bool examined_interior = false;
+  search.setPlanningQuery([&](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    // This narrow interior voxel is neither an endpoint nor the midpoint of
+    // the direct 0.4 m diagonal search edge.
+    const bool obstacle = p.x() > 0.10 && p.x() < 0.20 &&
+        p.y() > 0.10 && p.y() < 0.20;
+    examined_interior = examined_interior || obstacle;
+    cell.execution_reason = obstacle ? GridExecutionReason::PHYSICAL_OBSTACLE
+                                     : GridExecutionReason::OK;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  ASSERT_TRUE(search.AstarSearch(0.4, Eigen::Vector3d(0, 0, 1),
+      Eigen::Vector3d(0.8, 0.8, 1), 1.0, Eigen::Vector3d(0, 0, 1)));
+  EXPECT_TRUE(examined_interior);
+  const auto route = search.getPath();
+  double length = 0;
+  for (size_t i = 1; i < route.size(); ++i) length += (route[i]-route[i-1]).norm();
+  EXPECT_GT(length, std::sqrt(1.28));
+}
+
+TEST(AdvisoryAStar, DiagnosticsToggleAndRoundCacheKeepIdenticalRouteAndCost) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(80, 80, 10));
+  search.setPlanningQuery(cellFor);
+  std::vector<Eigen::Vector3d> reference;
+  double cost = 0;
+  for (int round = 0; round < 3; ++round) {
+    search.setPerformanceDiagnostics(round == 1);
+    ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(-2, 0, 1),
+                                  Eigen::Vector3d(2, 0, 1)));
+    const auto route = search.getPath();
+    if (round == 0) { reference = route; cost = search.lastResult().path_cost; }
+    else {
+      ASSERT_EQ(route.size(), reference.size());
+      for (size_t i = 0; i < route.size(); ++i) EXPECT_EQ(route[i], reference[i]);
+      EXPECT_DOUBLE_EQ(cost, search.lastResult().path_cost);
+    }
+    EXPECT_GT(search.lastResult().sample_hits[0], 0u);
+    EXPECT_GT(search.lastResult().sample_hits[1], 0u);
+    EXPECT_GT(search.lastResult().sample_hits[2], 0u);
+  }
+}
+
+TEST(AdvisoryAStar, CachedPhysicalSampleRefreshesAdvisory) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(40, 40, 10));
+  size_t refreshes = 0;
+  search.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell;
+    cell.execution_reason = GridExecutionReason::OK;
+    cell.advisory.classification = GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier = 1.0;
+    return cell;
+  });
+  search.setAdvisoryQuery([&](const Eigen::Vector3d&) {
+    ++refreshes;
+    GridPlanningRisk risk;
+    risk.classification = GridAdvisoryClass::UNKNOWN;
+    risk.cost_multiplier = 1.5;
+    return risk;
+  });
+  ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+                                Eigen::Vector3d(1, 0, 1)));
+  EXPECT_GT(refreshes, 0u);
+  EXPECT_EQ(refreshes, search.lastResult().advisory_refresh_calls);
+  EXPECT_GT(search.lastResult().path_cost, 20.0);
+}
+
+TEST(AdvisoryAStar, RealGridRiskCacheRevokesExpiredAndReboundVersionsDuringSearch) {
+  GridMapFailureSnapshot snapshot;
+  snapshot.origin = Eigen::Vector3d(-2, -2, 0);
+  snapshot.max_boundary = Eigen::Vector3d(2, 2, 2);
+  snapshot.dimensions = Eigen::Vector3i(40, 40, 20);
+  snapshot.resolution_m = 0.1;
+  snapshot.cloud_stamp_s = 10;
+  snapshot.generation = 1;
+  snapshot.frame_id = "map";
+  snapshot.cell_flags.assign(40 * 40 * 20, 4);
+  auto map = GridMap::fromFailureSnapshot(snapshot);
+  GridRiskContext risk_context;
+  risk_context.frame_id = "map";
+  risk_context.occupancy_generation = map->occupancyGeneration();
+  risk_context.reference_time_s = 10;
+  risk_context.valid_until_s = 10.5;
+  risk_context.reference_position = Eigen::Vector3d::Zero();
+  risk_context.predict = [](const Eigen::Vector3d&) {
+    GridRiskVoxel risk;
+    risk.status = GridRiskStatus::VALID;
+    risk.hpl = risk.vpl = 0.1;
+    return risk;
+  };
+  const auto version = map->bindRiskContext(risk_context);
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 10;
+  motion.error_proxy_m = 0.01;
+  const auto physical = map->preparePlanningQuery(10, motion);
+  GridPlanningRiskPolicy policy;
+  size_t queries = 0, stale_hits = 0, changed_hits = 0;
+  double now = 10;
+  auto risk_query = [&](const Eigen::Vector3d& p, bool cached) {
+    if (++queries == 80) now = 10.75;
+    if (queries == 160) map->bindRiskContext(risk_context);
+    const auto risk = map->queryPlanningRisk(p, version, now, policy);
+    if (cached && queries > 80 && queries < 160) {
+      EXPECT_NE(risk.classification, GridAdvisoryClass::VALID);
+      if (risk.classification == GridAdvisoryClass::STALE_REFERENCE) ++stale_hits;
+    }
+    if (cached && queries >= 160) {
+      EXPECT_EQ(risk.query_status, GridRiskStatus::VERSION_CHANGED);
+      EXPECT_EQ(risk.classification, GridAdvisoryClass::UNKNOWN);
+      ++changed_hits;
+    }
+    return risk;
+  };
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(30, 30, 10));
+  search.setPlanningQuery([&](const Eigen::Vector3d& p) {
+    auto cell = map->queryPlanningCell(p, 0, 10, policy, motion, false, &physical);
+    if (cell.executable()) cell.advisory = risk_query(p, false);
+    return cell;
+  });
+  search.setAdvisoryQuery([&](const Eigen::Vector3d& p) { return risk_query(p, true); });
+  ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(-0.8, 0, 1),
+      Eigen::Vector3d(0.8, 0, 1)));
+  EXPECT_GT(stale_hits, 0u);
+  EXPECT_GT(changed_hits, 0u);
+}
+
+TEST(AdvisoryAStar, AdvisoryRejectionAfterCacheRefreshKeepsFirstReasonAndPoint) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(30, 30, 10));
+  search.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell;
+    cell.execution_reason = GridExecutionReason::OK;
+    cell.advisory.classification = GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier = 1;
+    return cell;
+  });
+  search.setAdvisoryQuery([](const Eigen::Vector3d&) {
+    GridPlanningRisk risk;
+    risk.classification = GridAdvisoryClass::AVOID;
+    risk.cost_multiplier = 1;
+    return risk;
+  });
+  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
+      Eigen::Vector3d(1, 0, 1)));
+  const auto& result = search.lastResult();
+  EXPECT_EQ(result.failure, AStar::Failure::ADVISORY_NO_PATH);
+  ASSERT_TRUE(result.has_first_rejection);
+  EXPECT_EQ(result.first_rejection_cell.execution_reason, GridExecutionReason::OK);
+  EXPECT_EQ(result.first_rejection_cell.advisory_class, GridAdvisoryClass::AVOID);
+  EXPECT_TRUE(result.first_rejection_position.allFinite());
+}

@@ -44,7 +44,7 @@ def _inconclusive(directory, reason):
             "classification": reason, "snapshot": str(directory)}
 
 
-def inspect(directory, budget_s=120.0, backend=None):
+def inspect(directory, budget_s=120.0, backend=None, benchmark_repeats=None, benchmark_diagnostics=True, differential=False):
     directory, meta, _ = load_snapshot(directory)
     if meta.get("schema_version") not in ("iap_gridmap_failure_v2", "iap_gridmap_failure_v3"):
         raise ValueError("same-rule replay requires a v2 failure snapshot")
@@ -91,16 +91,21 @@ def inspect(directory, budget_s=120.0, backend=None):
         return _inconclusive(directory,
                              "INCONCLUSIVE_MISSING_SEGMENT_CONTEXT")
     binary = Path(backend) if backend else _backend_path()
+    command = [str(binary), str(directory / meta["cell_flags_file"])]
+    if benchmark_repeats is not None:
+        command.extend((str(benchmark_repeats), str(int(benchmark_diagnostics)), str(int(differential))))
     try:
         completed = subprocess.run(
-            [str(binary), str(directory / meta["cell_flags_file"])],
+            command,
             input="\n".join(lines) + "\n", text=True, capture_output=True,
-            check=False, timeout=max(10.0, budget_s + 30.0))
+            check=False, timeout=max(10.0, budget_s * (1 + (benchmark_repeats or 0)) + 30.0))
     except subprocess.TimeoutExpired:
         return _inconclusive(directory, "INCONCLUSIVE_OFFLINE_BUDGET")
     if completed.returncode:
         raise RuntimeError(completed.stderr.strip() or "C++ replay failed")
-    report = json.loads(completed.stdout)
+    report = ({"samples": [json.loads(line) for line in completed.stdout.splitlines()],
+               "schema_version": "iap_search_benchmark_v1"}
+              if benchmark_repeats is not None else json.loads(completed.stdout))
     report.update(snapshot=str(directory), generation=meta["generation"],
                   online_failure=meta["search_failure"],
                   search_stage=meta.get("search_stage"),

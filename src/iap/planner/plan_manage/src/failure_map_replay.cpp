@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+
 namespace {
 using Point = Eigen::Vector3d;
 using Clock = std::chrono::steady_clock;
@@ -185,12 +186,84 @@ void report(const std::string& classification, const AStar::Result& original,
         << alternative_end->y() << ',' << alternative_end->z() << ']';
   std::cout << "}\n";
 }
+void benchmark(const Input& in, int repeats, bool diagnostics, bool differential) {
+  for (int round = -1; round < repeats; ++round) {
+    const auto began = Clock::now();
+    auto map = GridMap::fromFailureSnapshot(in.snapshot);
+    const auto reference = differential ? GridMap::fromFailureSnapshot(in.snapshot) : nullptr;
+    const auto frozen = Clock::now();
+    AStar search;
+    search.initGridMap(map, in.pool);
+    search.setPerformanceDiagnostics(diagnostics);
+    GridPlanningRiskPolicy policy;
+    policy.unknown_multiplier = 1.0;
+    const auto context = map->preparePlanningQuery(in.planning_time_s, in.motion);
+    size_t compared = 0;
+    search.setPlanningQuery([&](const Point& p) {
+      const auto cell = map->queryPlanningCell(p, 0, in.planning_time_s, policy,
+                                             in.motion, false, &context, diagnostics);
+      if (reference) {
+        const auto exact = reference->queryPlanningCell(p, 0, in.planning_time_s,
+                                                      policy, in.motion);
+        ++compared;
+        if (exact.execution_reason != cell.execution_reason ||
+            exact.observed != cell.observed || exact.voxel_index != cell.voxel_index ||
+            exact.advisory.classification != cell.advisory.classification ||
+            exact.advisory.cost_multiplier != cell.advisory.cost_multiplier)
+          throw std::runtime_error("prepared query differs from exact query");
+      }
+      return cell;
+    });
+    const auto initialized = Clock::now();
+    search.AstarSearch(in.step_m, in.start, in.end, in.budget_s, in.center);
+    const auto finished = Clock::now();
+    if (round < 0) continue;
+    const auto& r = search.lastResult();
+    const auto stats = map->planningQueryStats();
+    auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };
+    std::cout << std::setprecision(17) << "{\"round\":" << round
+      << ",\"freeze_s\":" << seconds(began, frozen)
+      << ",\"init_s\":" << seconds(frozen, initialized)
+      << ",\"search_s\":" << seconds(initialized, finished)
+      << ",\"total_s\":" << seconds(began, finished)
+      << ",\"failure\":" << std::quoted(AStar::failureName(r.failure))
+      << ",\"expanded\":" << r.expanded << ",\"queries\":" << r.query_calls
+      << ",\"queue_pushes\":" << r.queue_pushes << ",\"queue_pops\":" << r.queue_pops
+      << ",\"path_cost\":" << r.path_cost
+      << ",\"occupancy_s\":" << r.occupancy_query_s
+      << ",\"clearance_s\":" << r.clearance_query_s
+      << ",\"advisory_s\":" << r.advisory_query_s
+      << ",\"query_management_s\":" << r.query_management_s
+      << ",\"edge_s\":" << r.edge_s
+      << ",\"bounds_hits\":" << stats.bounds_hits
+      << ",\"bounds_misses\":" << stats.bounds_misses
+      << ",\"bounds_bytes_estimate\":" << stats.bounds_bytes_estimate
+      << ",\"fast_pass\":" << stats.fast_pass
+      << ",\"fast_reject\":" << stats.fast_reject
+      << ",\"exact_decisions\":" << stats.exact_decisions
+      << ",\"detailed_queries\":" << stats.detailed_queries
+      << ",\"differential_queries\":" << compared;
+    const std::array<std::pair<const char*, const std::array<size_t,3>*>,4> fields{{
+      {"hits", &r.sample_hits}, {"misses", &r.sample_misses},
+      {"entries", &r.cache_entries}, {"bytes_estimate", &r.cache_bytes}}};
+    for (const auto& field : fields) std::cout << ",\"cache_" << field.first << "\":["
+      << (*field.second)[0] << ',' << (*field.second)[1] << ',' << (*field.second)[2] << ']';
+    std::cout << ",\"path_m\":[";
+    const auto path = search.getPath();
+    for (size_t i = 0; i < path.size(); ++i) {
+      if (i) std::cout << ',';
+      std::cout << '[' << path[i].x() << ',' << path[i].y() << ',' << path[i].z() << ']';
+    }
+    std::cout << "]}\n";
+  }
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
-    if (argc != 2) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
+    if (argc < 2 || argc > 5) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
+    if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc == 5 && std::string(argv[4]) == "1"); return 0; }
     const auto began = Clock::now();
     auto elapsed = [&]() {
       return std::chrono::duration<double>(Clock::now() - began).count();
@@ -203,8 +276,9 @@ int main(int argc, char** argv) {
     auto map = GridMap::fromFailureSnapshot(in.snapshot);
     GridPlanningRiskPolicy policy;
     policy.unknown_multiplier = 1.0;
-    const auto query = [map, &in, &policy](const Point& p) {
-      auto cell = map->queryPlanningCell(p, 0, in.planning_time_s, policy, in.motion);
+    const auto context = map->preparePlanningQuery(in.planning_time_s, in.motion);
+    const auto query = [map, &in, &policy, &context](const Point& p) {
+      auto cell = map->queryPlanningCell(p, 0, in.planning_time_s, policy, in.motion, false, &context);
       cell.advisory.cost_multiplier = 1.0;
       return cell;
     };

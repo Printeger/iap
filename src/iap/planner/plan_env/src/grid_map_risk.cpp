@@ -173,83 +173,179 @@ GridPlanningRisk GridMap::queryPlanningRisk(const Eigen::Vector3d& position,
   return planning;
 }
 
+GridPlanningContext GridMap::preparePlanningQuery(
+    const double now, const GridMotionContext& motion) const {
+  GridPlanningContext context;
+  context.generation = occupancyGeneration();
+  const double stamp = occupancy_cloud_stamp_s_.load();
+  if (!std::isfinite(stamp) || !std::isfinite(now) || now < stamp ||
+      now - stamp > motion.max_environment_age_s)
+    context.environment_reason = GridExecutionReason::ENVIRONMENT_STALE;
+  context.required_clearance_m = motion.body_radius_m +
+      motion.tracking_reserve_m + motion.error_proxy_m +
+      std::sqrt(3.0) * mp_.resolution_ / 2.0;
+  if (motion.quality == 0 || (motion.quality == 2 && !motion.allow_bridged) ||
+      !std::isfinite(motion.error_proxy_m) ||
+      !std::isfinite(context.required_clearance_m) ||
+      motion.body_radius_m < 0 || motion.tracking_reserve_m < 0 ||
+      motion.error_proxy_m < 0)
+    context.motion_reason = GridExecutionReason::CURRENT_MOTION_UNAVAILABLE;
+  else if (!std::isfinite(motion.stamp_s) || now < motion.stamp_s ||
+           now - motion.stamp_s > motion.max_motion_age_s)
+    context.motion_reason = GridExecutionReason::CURRENT_MOTION_STALE;
+  else if (motion.error_proxy_m >= motion.motion_budget_m)
+    context.motion_reason = GridExecutionReason::CURRENT_MOTION_BUDGET;
+  return context;
+}
+
+double GridMap::measureRawClearance(const Eigen::Vector3d& position,
+    const Eigen::Vector3i& index, const double required,
+    const bool decision_only, Eigen::Vector3d* nearest) {
+  const int radius_cells = static_cast<int>(std::ceil(required / mp_.resolution_)) + 1;
+  double closest = std::numeric_limits<double>::infinity();
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  const auto dims = mp_.map_voxel_num_;
+  const bool indexed = frozen_raw_index_generation_ == occupancyGeneration() &&
+      !frozen_raw_row_offsets_.empty();
+  const auto examine_raw = [&](const Eigen::Vector3i& index) {
+    Eigen::Vector3d center;
+    indexToPos(index, center);
+    const double distance = (position - center).norm();
+    if (distance < closest) {
+      closest = distance;
+      if (nearest) *nearest = center;
+    }
+  };
+  const int first_z = std::max(0, index.z() - radius_cells);
+  const int last_z = std::min(dims.z() - 1, index.z() + radius_cells);
+  for (int x = std::max(0, index.x() - radius_cells);
+       x <= std::min(dims.x() - 1, index.x() + radius_cells); ++x)
+    for (int y = std::max(0, index.y() - radius_cells);
+         y <= std::min(dims.y() - 1, index.y() + radius_cells); ++y) {
+      if (indexed) {
+        const size_t row = static_cast<size_t>(x) * dims.y() + y;
+        const int base = static_cast<int>(row) * dims.z();
+        const auto begin = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row];
+        const auto end = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row + 1];
+        for (auto it = std::lower_bound(begin, end, base + first_z);
+             it != end && *it <= base + last_z; ++it) {
+          examine_raw(Eigen::Vector3i(x, y, *it - base));
+          if (decision_only && closest < required) return closest;
+        }
+        continue;
+      }
+      for (int z = first_z; z <= last_z; ++z) {
+        const Eigen::Vector3i index(x, y, z);
+        const auto address = static_cast<size_t>(toAddress(index));
+        const bool raw_cloud = address < md_.occupancy_buffer_raw_cloud_.size() &&
+            md_.occupancy_buffer_raw_cloud_[address] != 0;
+        const bool raw_fused = address < md_.occupancy_buffer_.size() &&
+            md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
+        if (raw_cloud || raw_fused) {
+          examine_raw(index);
+          if (decision_only && closest < required) return closest;
+        }
+      }
+    }
+  return closest;
+}
+
+bool GridMap::hasRequiredClearance(const Eigen::Vector3d& position,
+    const Eigen::Vector3i& index, const double required) {
+  if (frozen_raw_index_generation_ != occupancyGeneration() ||
+      frozen_raw_row_offsets_.empty())
+    return measureRawClearance(position, index, required, true, nullptr) >= required;
+  if (frozen_clearance_radius_m_ != required) {
+    frozen_clearance_bounds_.clear();
+    frozen_clearance_radius_m_ = required;
+  }
+  const int address = toAddress(index);
+  auto found = frozen_clearance_bounds_.find(address);
+  Eigen::Vector3d center;
+  indexToPos(index, center);
+  if (found == frozen_clearance_bounds_.end()) {
+    ++planning_query_stats_.bounds_misses;
+    const double nearest = measureRawClearance(center, index, required, false, nullptr);
+    const int radius = static_cast<int>(std::ceil(required / mp_.resolution_)) + 1;
+    // All unscanned raw centers lie at least this far from the voxel center.
+    // No hit in the finite cube gives a finite lower bound, never infinity.
+    const double outside = (radius + 0.5) * mp_.resolution_;
+    found = frozen_clearance_bounds_.emplace(address,
+        ClearanceBounds{std::min(nearest, outside), nearest}).first;
+  }
+  else ++planning_query_stats_.bounds_hits;
+  const double offset = (position - center).norm();
+  // Near floating point equality use the original exact comparison.
+  if (found->second.lower_m - offset > required + 1e-12) {
+    ++planning_query_stats_.fast_pass;
+    return true;
+  }
+  if (found->second.upper_m + offset < required - 1e-12) {
+    ++planning_query_stats_.fast_reject;
+    return false;
+  }
+  ++planning_query_stats_.exact_decisions;
+  return measureRawClearance(position, index, required, true, nullptr) >= required;
+}
+
+GridPlanningQueryStats GridMap::planningQueryStats() const {
+  auto stats = planning_query_stats_;
+  stats.bounds_entries = frozen_clearance_bounds_.size();
+  stats.bounds_bytes_estimate = frozen_clearance_bounds_.size() *
+      (sizeof(int) + sizeof(ClearanceBounds) + 2 * sizeof(void*)) +
+      frozen_clearance_bounds_.bucket_count() * sizeof(void*);
+  return stats;
+}
+
 GridPlanningCell GridMap::queryPlanningCell(
     const Eigen::Vector3d& position, const uint64_t version,
     const double now, const GridPlanningRiskPolicy& risk_policy,
-    const GridMotionContext& motion, const bool include_rejected_clearance)
+    const GridMotionContext& motion, const bool include_rejected_clearance,
+    const GridPlanningContext* context, const bool performance_diagnostics)
 {
   GridPlanningCell cell;
-  const auto occupancy_started = std::chrono::steady_clock::now();
-  const auto observed = queryOccupancyDiagnostic(position);
-  cell.occupancy_query_s = std::chrono::duration<double>(
+  // The prepared path is confined to the serialized frozen PlanningView.
+  // Live trajectory checks retain their independent map locking and no shared
+  // mutable query counters.
+  struct Accumulate {
+    GridPlanningQueryStats* stats;
+    const GridPlanningCell& cell;
+    ~Accumulate() {
+      if (!stats) return;
+      stats->occupancy_s += cell.occupancy_query_s;
+      stats->clearance_s += cell.clearance_query_s;
+      stats->advisory_s += cell.advisory_query_s;
+    }
+  } accumulate{context && performance_diagnostics ? &planning_query_stats_ : nullptr, cell};
+  if (context) {
+    ++planning_query_stats_.queries;
+    if (include_rejected_clearance) ++planning_query_stats_.detailed_queries;
+  }
+  const auto occupancy_started = performance_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  const auto observed = queryOccupancyDiagnostic(position,
+      !context || include_rejected_clearance);
+  if (performance_diagnostics) cell.occupancy_query_s = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - occupancy_started).count();
   cell.voxel_index = observed.voxel_index;
   cell.occupancy_generation = observed.generation;
   cell.cloud_stamp_s = observed.cloud_stamp_s;
   cell.observed = observed.observed;
-  if (std::isfinite(motion.error_proxy_m) &&
+  if (!context && std::isfinite(motion.error_proxy_m) &&
       std::isfinite(observed.resolution_m))
     cell.required_clearance_m = motion.body_radius_m +
         motion.tracking_reserve_m + motion.error_proxy_m +
         std::sqrt(3.0) * observed.resolution_m / 2.0;
+  if (context) cell.required_clearance_m = context->required_clearance_m;
   const auto measure_clearance = [&]() {
-    const auto clearance_started = std::chrono::steady_clock::now();
+    const auto clearance_started = performance_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     if (!observed.available || !std::isfinite(cell.required_clearance_m) ||
         !std::isfinite(observed.resolution_m) || observed.resolution_m <= 0.0)
       return;
-    const int radius_cells = static_cast<int>(std::ceil(
-        cell.required_clearance_m / observed.resolution_m)) + 1;
-    double closest = std::numeric_limits<double>::infinity();
-    Eigen::Vector3d nearest = Eigen::Vector3d::Constant(
-        std::numeric_limits<double>::quiet_NaN());
-    {
-      std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
-      const auto dims = mp_.map_voxel_num_;
-      const bool indexed = frozen_raw_index_generation_ == observed.generation &&
-          frozen_raw_index_generation_ == occupancyGeneration() &&
-          !frozen_raw_row_offsets_.empty();
-      const auto examine_raw = [&](const Eigen::Vector3i& index) {
-        Eigen::Vector3d center;
-        indexToPos(index, center);
-        const double distance = (position - center).norm();
-        if (distance < closest) {
-          closest = distance;
-          nearest = center;
-        }
-      };
-      const int first_z = std::max(0, observed.voxel_index.z() - radius_cells);
-      const int last_z = std::min(dims.z() - 1, observed.voxel_index.z() + radius_cells);
-      for (int x = std::max(0, observed.voxel_index.x() - radius_cells);
-           x <= std::min(dims.x() - 1, observed.voxel_index.x() + radius_cells); ++x)
-        for (int y = std::max(0, observed.voxel_index.y() - radius_cells);
-             y <= std::min(dims.y() - 1, observed.voxel_index.y() + radius_cells); ++y) {
-          if (indexed) {
-            const size_t row = static_cast<size_t>(x) * dims.y() + y;
-            const int base = static_cast<int>(row) * dims.z();
-            const auto begin = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row];
-            const auto end = frozen_raw_addresses_.begin() + frozen_raw_row_offsets_[row + 1];
-            for (auto it = std::lower_bound(begin, end, base + first_z);
-                 it != end && *it <= base + last_z; ++it)
-              examine_raw(Eigen::Vector3i(x, y, *it - base));
-            continue;
-          }
-          for (int z = first_z; z <= last_z; ++z) {
-            const Eigen::Vector3i index(x, y, z);
-            const auto address = static_cast<size_t>(toAddress(index));
-            const bool raw_cloud = address < md_.occupancy_buffer_raw_cloud_.size() &&
-                md_.occupancy_buffer_raw_cloud_[address] != 0;
-            const bool raw_fused = address < md_.occupancy_buffer_.size() &&
-                md_.occupancy_buffer_[address] > mp_.min_occupancy_log_;
-            if (raw_cloud || raw_fused) {
-              examine_raw(index);
-            }
-          }
-        }
-    }
+    const double closest = measureRawClearance(position, observed.voxel_index,
+        cell.required_clearance_m, false, &cell.nearest_raw_center);
     if (occupancyGeneration() != observed.generation) return;
     cell.raw_center_clearance_m = closest;
-    cell.nearest_raw_center = nearest;
-    cell.clearance_query_s += std::chrono::duration<double>(
+    if (performance_diagnostics) cell.clearance_query_s += std::chrono::duration<double>(
         std::chrono::steady_clock::now() - clearance_started).count();
   };
   if (!observed.available) return cell;
@@ -258,7 +354,9 @@ GridPlanningCell GridMap::queryPlanningCell(
     if (include_rejected_clearance) measure_clearance();
     return cell;
   }
-  if (!std::isfinite(observed.cloud_stamp_s) ||
+  if (context ? context->environment_reason != GridExecutionReason::OK ||
+          context->generation != observed.generation :
+      !std::isfinite(observed.cloud_stamp_s) ||
       !std::isfinite(now) || now < observed.cloud_stamp_s ||
       now - observed.cloud_stamp_s > motion.max_environment_age_s) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
@@ -270,36 +368,56 @@ GridPlanningCell GridMap::queryPlanningCell(
     if (include_rejected_clearance) measure_clearance();
     return cell;
   }
-  if (motion.quality == 0 || (motion.quality == 2 && !motion.allow_bridged) ||
-      !std::isfinite(motion.error_proxy_m)) {
-    cell.execution_reason = GridExecutionReason::CURRENT_MOTION_UNAVAILABLE;
-    return cell;
-  }
-  if (!std::isfinite(motion.stamp_s) || now < motion.stamp_s ||
-      now - motion.stamp_s > motion.max_motion_age_s) {
-    cell.execution_reason = GridExecutionReason::CURRENT_MOTION_STALE;
-    return cell;
-  }
-  if (motion.error_proxy_m >= motion.motion_budget_m) {
-    cell.execution_reason = GridExecutionReason::CURRENT_MOTION_BUDGET;
-    return cell;
+  if (context) {
+    if (context->motion_reason != GridExecutionReason::OK) {
+      cell.execution_reason = context->motion_reason;
+      return cell;
+    }
+  } else {
+    if (motion.quality == 0 || (motion.quality == 2 && !motion.allow_bridged) ||
+        !std::isfinite(motion.error_proxy_m)) {
+      cell.execution_reason = GridExecutionReason::CURRENT_MOTION_UNAVAILABLE;
+      return cell;
+    }
+    if (!std::isfinite(motion.stamp_s) || now < motion.stamp_s ||
+        now - motion.stamp_s > motion.max_motion_age_s) {
+      cell.execution_reason = GridExecutionReason::CURRENT_MOTION_STALE;
+      return cell;
+    }
+    if (motion.error_proxy_m >= motion.motion_budget_m) {
+      cell.execution_reason = GridExecutionReason::CURRENT_MOTION_BUDGET;
+      return cell;
+    }
   }
   // The raw voxel test accounts for the body's radius, tracking reserve,
   // posterior error proxy, and voxel-center uncertainty exactly once. The
   // inflated occupancy above remains a separate fast physical guard.
-  measure_clearance();
+  bool clearance_ok = true;
+  if (context && !include_rejected_clearance) {
+    const auto started = performance_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    clearance_ok = hasRequiredClearance(position, observed.voxel_index, cell.required_clearance_m);
+    if (performance_diagnostics) cell.clearance_query_s = std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+  } else {
+    measure_clearance();
+    clearance_ok = !(cell.raw_center_clearance_m < cell.required_clearance_m);
+  }
   if (occupancyGeneration() != observed.generation) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
     return cell;
   }
-  if (cell.raw_center_clearance_m < cell.required_clearance_m) {
+  if (!clearance_ok) {
     cell.execution_reason = GridExecutionReason::INSUFFICIENT_CLEARANCE;
     return cell;
   }
   cell.execution_reason = GridExecutionReason::OK;
-  const auto advisory_started = std::chrono::steady_clock::now();
+  if (context && version == 0) {
+    cell.advisory.query_status = GridRiskStatus::VERSION_CHANGED;
+    cell.advisory.cost_multiplier = std::max(1.0, risk_policy.unknown_multiplier);
+    return cell;
+  }
+  const auto advisory_started = performance_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   cell.advisory = queryPlanningRisk(position, version, now, risk_policy);
-  cell.advisory_query_s = std::chrono::duration<double>(
+  if (performance_diagnostics) cell.advisory_query_s = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - advisory_started).count();
   return cell;
 }

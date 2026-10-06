@@ -79,6 +79,31 @@ TEST(RegisteredLidarWindow, CurrentOverlayReplacementPreservesActiveEvidence) {
             RegisteredVoxelState::UNKNOWN);
 }
 
+TEST(RegisteredLidarWindow, RepeatedCurrentAdvanceKeepsValidActiveFreeSupport) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData active;
+  active.base_generation = 0;
+  active.generation = 1;
+  active.complete = true;
+  active.frame_contract_id = "contract-a";
+  active.added.push_back(frame(10, Eigen::Vector3d(0.5, 0.5, 0.5),
+                               {Eigen::Vector3d(3.0, 0.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(active).accepted);
+  for (int id = 20; id < 40; ++id) {
+    ASSERT_TRUE(window.applyCurrentFrame(frame(id, Eigen::Vector3d(0.5, 2.5, 0.5), {})).accepted);
+    EXPECT_EQ(window.stateAt(Eigen::Vector3i(1, 0, 0)), RegisteredVoxelState::OBSERVED_FREE);
+    EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)), RegisteredVoxelState::OCCUPIED);
+  }
+  ActiveLidarWindowDeltaData removed;
+  removed.base_generation = 1;
+  removed.generation = 2;
+  removed.complete = true;
+  removed.frame_contract_id = "contract-a";
+  removed.removed_frame_ids.push_back(10);
+  ASSERT_TRUE(window.applyActiveDelta(removed).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(1, 0, 0)), RegisteredVoxelState::UNKNOWN);
+}
+
 TEST(RegisteredLidarWindow, V3CurveVoxelLosesSupportOnCurrentReplacement) {
   RegisteredLidarWindow::Geometry geometry;
   geometry.origin = Eigen::Vector3d(-21, -11, 0);

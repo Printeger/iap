@@ -2599,13 +2599,15 @@ OccupancyCollisionDeltaHistory GridMap::collisionDeltasSince(
 }
 
 GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
-    const Eigen::Vector3d &pos) const
+    const Eigen::Vector3d &pos, const bool include_details) const
 {
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   OccupancyDiagnostic out;
   out.resolution_m = mp_.resolution_;
-  out.inflation_m = mp_.obstacles_inflation_;
-  out.frame_id = mp_.frame_id_;
+  if (include_details) {
+    out.inflation_m = mp_.obstacles_inflation_;
+    out.frame_id = mp_.frame_id_;
+  }
   out.cloud_stamp_s = occupancy_cloud_stamp_s_.load(
       std::memory_order_acquire);
   if (!pos.allFinite())
@@ -2615,7 +2617,7 @@ GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
       std::memory_order_acquire);
   if ((before & 1u) != 0u)
   {
-    out.source = "occupancy_update_in_progress";
+    if (include_details) out.source = "occupancy_update_in_progress";
     return out;
   }
   for (int axis = 0; axis < 3; ++axis)
@@ -2626,14 +2628,14 @@ GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
     if (out.voxel_index(axis) < 0 ||
         out.voxel_index(axis) >= mp_.map_voxel_num_(axis))
     {
-      out.source = "position_out_of_map";
+      if (include_details) out.source = "position_out_of_map";
       return out;
     }
   }
   const int address = out.voxel_index(0) * mp_.map_voxel_num_(1) *
           mp_.map_voxel_num_(2) +
       out.voxel_index(1) * mp_.map_voxel_num_(2) + out.voxel_index(2);
-  out.voxel_center =
+  if (include_details) out.voxel_center =
       (out.voxel_index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
           mp_.resolution_ + mp_.map_origin_;
   const bool raw_cloud =
@@ -2651,7 +2653,7 @@ GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
       (address >= 0 &&
        address < static_cast<int>(md_.observed_buffer_.size()) &&
        md_.observed_buffer_[static_cast<std::size_t>(address)] != 0);
-  out.state = (out.raw_occupied || out.inflated_occupied)
+  if (include_details) out.state = (out.raw_occupied || out.inflated_occupied)
       ? GridMapObservationState::OCCUPIED
       : out.observed ? GridMapObservationState::OBSERVED_FREE
                      : GridMapObservationState::UNKNOWN;
@@ -2659,12 +2661,12 @@ GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
       std::memory_order_acquire);
   if (before != after || (after & 1u) != 0u)
   {
-    out.source = "occupancy_generation_changed";
+    if (include_details) out.source = "occupancy_generation_changed";
     return out;
   }
   out.available = true;
   out.generation = after / 2u;
-  out.source = raw_cloud ? "raw_cloud" : raw_fused ? "fused_depth" :
+  if (include_details) out.source = raw_cloud ? "raw_cloud" : raw_fused ? "fused_depth" :
       out.inflated_occupied ? "inflated_neighbor" :
       out.observed ? "observed_free" : "unknown";
   return out;

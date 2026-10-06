@@ -56,6 +56,12 @@ struct GridMapTestAccess {
 };
 namespace ego_planner {
 struct EGOPlannerManagerTestAccess {
+  static AStar::Result lastSearchResult(const EGOPlannerManager& manager) {
+    return manager.bspline_optimizer_->a_star_->lastResult();
+  }
+  static double lastSearchSeconds(const EGOPlannerManager& manager) {
+    return manager.bspline_optimizer_->a_star_->lastResult().duration_s;
+  }
   static void setCapture(EGOPlannerManager& manager) {
     manager.capture_failure_map_ = true;
     manager.planning_time_s_ = 10.0;
@@ -101,10 +107,11 @@ struct EGOPlannerManagerTestAccess {
 };
 }
 namespace {
-rclcpp::Node::SharedPtr makeNode() {
+rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false) {
   if (!rclcpp::ok()) rclcpp::init(0,nullptr);
   rclcpp::NodeOptions opts;
   opts.parameter_overrides({
+    {"planning/search_performance_diagnostics", performance_diagnostics},
     {"grid_map/resolution",0.2}, {"grid_map/map_size_x",12.0},
     {"grid_map/map_size_y",12.0}, {"grid_map/map_size_z",5.0},
     {"grid_map/local_update_range_x",10.0}, {"grid_map/local_update_range_y",10.0},
@@ -156,7 +163,7 @@ TEST(EgoBaseline, RealPredictorUsesSameMapAndRejectsStaleInputs) {
   EXPECT_EQ(map->queryRisk(Eigen::Vector3d(0,0,1),stale,10).status,GridRiskStatus::STALE);
 }
 TEST(EgoBaseline, PhysicalPlanningProducesFiniteCurveAndObstacleDetour) {
-  auto node=makeNode();
+  auto node=makeNode(true);
   ego_planner::EGOPlannerManager manager;
   auto vis=std::make_shared<ego_planner::PlanningVisualization>(node);
   manager.initPlanModules(node,vis);
@@ -180,6 +187,16 @@ TEST(EgoBaseline, PhysicalPlanningProducesFiniteCurveAndObstacleDetour) {
   }
   ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
   ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+  const auto search_result = ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager);
+  EXPECT_TRUE(search_result.performance_diagnostics);
+  EXPECT_GT(search_result.advisory_query_calls, 0u);
+  EXPECT_GT(search_result.advisory_query_s, 0.0);
+  const auto& timing = manager.planningTimings();
+  std::cout << "PIPELINE_TIMING freeze_s=" << timing.freeze_s
+            << " searcher_initialization_s=" << timing.searcher_initialization_s
+            << " last_astar_s=" << ego_planner::EGOPlannerManagerTestAccess::lastSearchSeconds(manager)
+            << " backend_optimize_refine_s=" << timing.backend_s
+            << " actual_curve_checks_s=" << timing.final_checks_s << std::endl;
   auto& local=manager.local_data_;
   EXPECT_GT(local.traj_id_,0); EXPECT_GT(local.duration_,0);
   double detour=0;
@@ -494,4 +511,36 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   for (const auto& leaf : std::filesystem::directory_iterator(root))
     if (leaf.is_directory()) ++count;
   EXPECT_EQ(count, 10u);
+}
+
+TEST(EgoBaseline, FrozenMotionCannotAuthorizePublicationAfterCurrentQualityRevocation) {
+  auto node = makeNode();
+  ego_planner::EGOPlannerManager manager;
+  auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager.initPlanModules(node, vis);
+  manager.deliverTrajToOptimizer();
+  manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2, 0, 1), goal(-1, 0, 1);
+  const auto zero = Eigen::Vector3d::Zero().eval();
+  const double now = node->now().seconds();
+  GridMapTestAccess::input(*manager.grid_map_, {Eigen::Vector3d(4, 4, 1)}, now, start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager, now, 1, start);
+  ASSERT_TRUE(manager.beginPlanningView());
+  ASSERT_TRUE(manager.queryPlanningViewCell(start).executable());
+  Eigen::MatrixXd old_controls(3, 6);
+  for (int i = 0; i < 6; ++i) old_controls.col(i) = start;
+  manager.local_data_.position_traj_ = ego_planner::UniformBspline(old_controls, 3, 0.2);
+  manager.local_data_.traj_id_ = 77;
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(
+      manager, node->now().seconds(), 0, start);
+  // The frozen physical query remains valid for search. Only the independent
+  // current publication check can authorize replacing the running curve.
+  EXPECT_TRUE(manager.queryPlanningViewCell(start).executable());
+  ASSERT_TRUE(manager.planGlobalTraj(start, zero, zero, goal, zero, zero));
+  EXPECT_FALSE(manager.reboundReplan(start, zero, zero, goal, zero, true, false));
+  EXPECT_GT(manager.planningTimings().final_checks_s, 0);
+  EXPECT_EQ(manager.local_data_.traj_id_, 77);
+  EXPECT_EQ(manager.local_data_.position_traj_.getControlPoint(), old_controls);
+  manager.endPlanningView();
 }

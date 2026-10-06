@@ -203,6 +203,35 @@ struct GridPlanningCell {
   bool executable() const { return execution_reason == GridExecutionReason::OK; }
 };
 
+// Fixed physical conditions for one frozen PlanningView. Spatial rejection
+// precedence remains out-of-map, unobserved, stale, obstacle, then motion.
+struct GridPlanningContext {
+  uint64_t generation = 0;
+  GridExecutionReason environment_reason = GridExecutionReason::OK;
+  GridExecutionReason motion_reason = GridExecutionReason::OK;
+  double required_clearance_m = 0.0;
+};
+
+struct GridPlanningQueryStats {
+  size_t queries = 0, detailed_queries = 0;
+  size_t bounds_hits = 0, bounds_misses = 0;
+  size_t fast_pass = 0, fast_reject = 0, exact_decisions = 0;
+  size_t bounds_entries = 0, bounds_bytes_estimate = 0;
+  double occupancy_s = 0.0, clearance_s = 0.0, advisory_s = 0.0;
+};
+
+struct GridSearchCell {
+  GridExecutionReason execution_reason = GridExecutionReason::OUT_OF_MAP;
+  GridAdvisoryClass advisory_class = GridAdvisoryClass::UNKNOWN;
+  double cost_multiplier = 1.5;
+  GridSearchCell() = default;
+  GridSearchCell(const GridPlanningCell& cell)
+      : execution_reason(cell.execution_reason),
+        advisory_class(cell.advisory.classification),
+        cost_multiplier(cell.advisory.cost_multiplier) {}
+  bool executable() const { return execution_reason == GridExecutionReason::OK; }
+};
+
 struct GridMapFailureSnapshot {
   Eigen::Vector3d origin = Eigen::Vector3d::Zero();
   Eigen::Vector3d max_boundary = Eigen::Vector3d::Zero();
@@ -433,7 +462,12 @@ public:
                                     uint64_t version, double evaluation_time_s,
                                     const GridPlanningRiskPolicy& risk_policy,
                                     const GridMotionContext& motion,
-                                    bool include_rejected_clearance = false);
+                                    bool include_rejected_clearance = false,
+                                    const GridPlanningContext* context = nullptr,
+                                    bool performance_diagnostics = false);
+  GridPlanningQueryStats planningQueryStats() const;
+  GridPlanningContext preparePlanningQuery(double now,
+                                          const GridMotionContext& motion) const;
   std::optional<GridMapFailureSnapshot> captureFailureSnapshot(
       bool include_observation_evidence = false) const;
   void setFailureEvidenceCapture(bool enabled);
@@ -457,7 +491,7 @@ public:
   inline int getOccupancy(Eigen::Vector3i id);
   inline int getInflateOccupancy(Eigen::Vector3d pos);
   OccupancyDiagnostic queryOccupancyDiagnostic(
-      const Eigen::Vector3d &pos) const;
+      const Eigen::Vector3d &pos, bool include_details = true) const;
   OccupancyDiagnosticQuery captureOccupancyDiagnosticQuery() const;
   std::shared_ptr<const FrozenOccupancyEpoch>
   captureFrozenOccupancyEpoch() const;
@@ -512,6 +546,17 @@ private:
   // Only fromFailureSnapshot builds this index over the same raw occupancy.
   // Live mutation revokes it by generation; observed/inflated layers remain
   // authoritative full buffers. Entries preserve x/y/z scan and tie order.
+  // Clearance bounds only, not another copy of planning/advisory results.
+  // Bound to the frozen index generation and the round's clearance radius.
+  struct ClearanceBounds { double lower_m, upper_m; };
+  std::unordered_map<int, ClearanceBounds> frozen_clearance_bounds_;
+  GridPlanningQueryStats planning_query_stats_;
+  double frozen_clearance_radius_m_ = -1.0;
+  double measureRawClearance(const Eigen::Vector3d& position,
+                            const Eigen::Vector3i& index, double required,
+                            bool decision_only, Eigen::Vector3d* nearest);
+  bool hasRequiredClearance(const Eigen::Vector3d& position,
+                            const Eigen::Vector3i& index, double required);
   uint64_t frozen_raw_index_generation_ = 0;
   std::vector<int> frozen_raw_addresses_;
   std::vector<size_t> frozen_raw_row_offsets_;

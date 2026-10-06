@@ -475,6 +475,7 @@ GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
 }
 
 bool EGOPlannerManager::beginPlanningView() {
+  const auto freeze_started = std::chrono::steady_clock::now();
   planning_view_.reset();
   for (int attempt = 0; attempt < 2; ++attempt) {
     const double time_s = node_->now().seconds();
@@ -490,9 +491,12 @@ bool EGOPlannerManager::beginPlanningView() {
     view.generation = snapshot->generation;
     view.time_s = time_s;
     view.motion = motion;
+    view.physical_context = view.physical->preparePlanningQuery(time_s, motion);
     // The bound PL context has to refer to this same occupancy generation.
     view.risk_version = snapshot->risk_context_matches_map ? risk_version : 0;
     planning_view_ = std::move(view);
+    planning_timings_.freeze_s = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - freeze_started).count();
     return true;
   }
   RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
@@ -506,29 +510,31 @@ GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
     const Eigen::Vector3d& position) const {
   if (!planning_view_) return queryLocalTargetCell(position, node_->now().seconds());
   const auto& view = *planning_view_;
-  const auto key = std::make_tuple(position.x(), position.y(), position.z());
-  auto found = view.physical_cache.find(key);
-  GridPlanningCell cell;
-  if (found == view.physical_cache.end()) {
-    cell = view.physical->queryPlanningCell(position, 0, view.time_s,
-                                            planning_risk_policy_, view.motion);
-    view.physical_cache.emplace(key, cell);
-  } else {
-    cell = found->second;
-    cell.occupancy_query_s = 0.0;
-    cell.clearance_query_s = 0.0;
-  }
-  if (cell.executable() && view.risk_version != 0 &&
-      grid_map_->occupancyGeneration() == view.generation) {
-    const auto advisory_started = std::chrono::steady_clock::now();
-    cell.advisory = grid_map_->queryPlanningRisk(
-        position, view.risk_version,
-        std::max(view.time_s, node_->now().seconds()),
-        planning_risk_policy_);
-    cell.advisory_query_s = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - advisory_started).count();
-  }
+  auto cell = view.physical->queryPlanningCell(position, 0, view.time_s,
+      planning_risk_policy_, view.motion, false, &view.physical_context,
+      search_performance_diagnostics_);
+  if (cell.executable()) cell.advisory = queryPlanningViewAdvisory(position);
   return cell;
+}
+
+GridPlanningRisk EGOPlannerManager::queryPlanningViewAdvisory(
+    const Eigen::Vector3d& position) const {
+  const auto& view = *planning_view_;
+  const auto started = search_performance_diagnostics_
+      ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  GridPlanningRisk risk;
+  if (view.risk_version != 0 && grid_map_->occupancyGeneration() == view.generation) {
+    ++view.advisory_stats.queries;
+    risk = grid_map_->queryPlanningRisk(position, view.risk_version,
+        std::max(view.time_s, node_->now().seconds()), planning_risk_policy_);
+  } else {
+    risk.query_status = GridRiskStatus::VERSION_CHANGED;
+    risk.cost_multiplier = std::max(1.0, planning_risk_policy_.unknown_multiplier);
+  }
+  if (search_performance_diagnostics_)
+    view.advisory_stats.advisory_s += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+  return risk;
 }
 
 std::optional<uint64_t> EGOPlannerManager::planningEvidenceFingerprint(

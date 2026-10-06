@@ -62,6 +62,13 @@ namespace ego_planner
           assessment && assessment->map_changed);
       return;
     }
+    std::optional<GridPlanningCell> first_rejection_detail;
+    if (search && search->has_first_rejection && planning_view_ &&
+        planning_view_->generation == search->occupancy_generation) {
+      first_rejection_detail = planning_view_->physical->queryPlanningCell(
+          search->first_rejection_position, 0, planning_view_->time_s,
+          planning_risk_policy_, planning_view_->motion, true);
+    }
     const auto& capture_motion = assessment ? assessment->evaluated_motion :
         (search && planning_view_ ? planning_view_->motion : planning_motion_);
     const double capture_time = assessment ? assessment->evaluation_time_s :
@@ -231,6 +238,21 @@ namespace ego_planner
           << vector(search ? search->requested_start : Eigen::Vector3d::Zero())
           << ",\n  \"search_requested_end_m\": "
           << vector(search ? search->requested_end : Eigen::Vector3d::Zero())
+          << ",\n  \"search_first_rejection_position_m\": "
+          << (search && search->has_first_rejection
+              ? vector(search->first_rejection_position) : "null")
+          << ",\n  \"search_first_rejection_reason\": "
+          << (search && search->has_first_rejection
+              ? std::string("\"") + gridExecutionReasonName(search->first_rejection_cell.execution_reason) + "\"" : "null")
+          << ",\n  \"search_first_rejection_advisory_class\": "
+          << (search && search->has_first_rejection
+              ? std::to_string(static_cast<unsigned>(search->first_rejection_cell.advisory_class)) : "null")
+          << ",\n  \"search_first_rejection_required_clearance_m\": "
+          << number(first_rejection_detail ? first_rejection_detail->required_clearance_m : NAN)
+          << ",\n  \"search_first_rejection_nearest_raw_center_distance_m\": "
+          << number(first_rejection_detail ? first_rejection_detail->raw_center_clearance_m : NAN)
+          << ",\n  \"search_first_rejection_nearest_raw_center_m\": "
+          << (first_rejection_detail ? vector(first_rejection_detail->nearest_raw_center) : "null")
           << ",\n  \"segment_start_index\": "
           << (context ? context->segment_start : -1)
           << ",\n  \"segment_end_index\": "
@@ -244,6 +266,14 @@ namespace ego_planner
           << (search ? search->query_calls : 0) << ",\n"
           << "  \"search_cache_hits\": "
           << (search ? search->cache_hits : 0) << ",\n"
+          << "  \"search_performance_diagnostics\": "
+          << (search && search->performance_diagnostics ? "true" : "false") << ",\n"
+          << "  \"search_advisory_query_calls\": "
+          << (search ? search->advisory_query_calls : 0) << ",\n"
+          << "  \"search_advisory_refresh_calls\": "
+          << (search ? search->advisory_refresh_calls : 0) << ",\n"
+          << "  \"search_queue_pushes\": " << (search ? search->queue_pushes : 0) << ",\n"
+          << "  \"search_queue_pops\": " << (search ? search->queue_pops : 0) << ",\n"
           << "  \"search_rejected_execution\": [";
       for (size_t i = 0; i < 10; ++i)
         metadata << (i ? "," : "") <<
@@ -486,13 +516,25 @@ namespace ego_planner
     capture_failure_map_ = node->declare_parameter(
         "planning/capture_failure_map", false);
     grid_map_->setFailureEvidenceCapture(capture_failure_map_);
+    search_performance_diagnostics_ = node->declare_parameter(
+        "planning/search_performance_diagnostics", false);
 
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);
     bspline_optimizer_->setParam(node);
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
+    const auto searcher_started = std::chrono::steady_clock::now();
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
+    planning_timings_.searcher_initialization_s = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - searcher_started).count();
+    bspline_optimizer_->a_star_->setPerformanceDiagnostics(search_performance_diagnostics_);
+    bspline_optimizer_->a_star_->setAdvisoryQuery(
+        [this](const Eigen::Vector3d& position) {
+          return queryPlanningViewAdvisory(position);
+        }, [this]() {
+          return planning_view_ ? planning_view_->advisory_stats : GridPlanningQueryStats{};
+        });
     bspline_optimizer_->a_star_->setLiveGenerationProvider(
         [this]() { return grid_map_->occupancyGeneration(); });
     bspline_optimizer_->setSearchFailureObserver(
@@ -504,6 +546,18 @@ namespace ego_planner
           const auto end = diagnostic_map->queryPlanningCell(
               result.requested_end, planning_risk_version_, diagnostic_time,
               planning_risk_policy_, diagnostic_motion, true);
+          if (result.has_first_rejection && !capture_failure_map_) {
+            const auto first = diagnostic_map->queryPlanningCell(
+                result.first_rejection_position, 0, diagnostic_time,
+                planning_risk_policy_, diagnostic_motion, true);
+            RCLCPP_DEBUG(node_->get_logger(),
+                "A* first rejection reason=%s advisory=%u required=%s nearest=%s generation=%lu",
+                gridExecutionReasonName(result.first_rejection_cell.execution_reason),
+                static_cast<unsigned>(result.first_rejection_cell.advisory_class),
+                clearanceText(first.required_clearance_m).c_str(),
+                clearanceText(first.raw_center_clearance_m).c_str(),
+                static_cast<unsigned long>(first.occupancy_generation));
+          }
           const auto start = diagnostic_map->queryPlanningCell(
               result.requested_start, planning_risk_version_, diagnostic_time,
               planning_risk_policy_, diagnostic_motion, true);
@@ -548,6 +602,8 @@ namespace ego_planner
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
+    planning_timings_.backend_s = 0;
+    planning_timings_.final_checks_s = 0;
     bspline_optimizer_->a_star_->clearLastResult();
     const bool own_view = !planning_view_;
     if (own_view && !beginPlanningView()) return false;
@@ -569,7 +625,7 @@ namespace ego_planner
     };
     const auto start_cell = planning_query(start_pt);
     if (!start_cell.executable()) {
-      const auto detail = grid_map_->queryPlanningCell(
+      const auto detail = planning_view_->physical->queryPlanningCell(
           start_pt, risk_version, planning_time_s, planning_risk_policy_,
           motion, true);
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
@@ -772,7 +828,10 @@ namespace ego_planner
     bool flag_step_1_success = false;
     vector<vector<Eigen::Vector3d>> vis_trajs;
 
+    const auto backend_started = std::chrono::steady_clock::now();
     flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
+    planning_timings_.backend_s = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - backend_started).count();
     t_opt = node_->now() - t_start;
     visualization_->displayInitPathList(point_set, 0.2, 0);
 
@@ -785,6 +844,7 @@ namespace ego_planner
     }
 
     t_start = node_->now();
+    const auto refine_started = std::chrono::steady_clock::now();
 
     UniformBspline pos = UniformBspline(ctrl_pts, 3, ts);
     pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
@@ -808,6 +868,8 @@ namespace ego_planner
 
       if (!flag_step_2_success)
       {
+        planning_timings_.backend_s += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - refine_started).count();
         printf("\033[34mThis refined trajectory hits obstacles. It doesn't matter if appeares occasionally. But if continously appearing, Increase parameter \"lambda_fitness\".\n\033[0m");
         continous_failures_count_++;
         return false;
@@ -825,6 +887,8 @@ namespace ego_planner
 
     // t_refine = ros::Time::now() - t_start;
     t_refine = node_->now() - t_start;
+    planning_timings_.backend_s += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - refine_started).count();
 
     // Assess the final time-adjusted curve before touching the active plan.
     double feasibility_ratio = 1.0;
@@ -839,8 +903,11 @@ namespace ego_planner
       ++continous_failures_count_;
       return false;
     }
+    auto check_started = std::chrono::steady_clock::now();
     auto assessment = assessTrajectory(pos, risk_version,
                                        node_->now().seconds());
+    planning_timings_.final_checks_s += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - check_started).count();
     if (!assessment.executable()) {
       auto detail = assessment.first_execution_cell;
       if (assessment.first_execution_position.allFinite() &&
@@ -881,15 +948,24 @@ namespace ego_planner
       // original executable candidate remains available if correction fails.
       Eigen::MatrixXd corrected_points = pos.getControlPoint();
       bspline_optimizer_->initControlPoints(corrected_points, true);
-      if (!bspline_optimizer_->initializationFailed() &&
-          bspline_optimizer_->BsplineOptimizeTrajRebound(
-              corrected_points, pos.getInterval())) {
+      bool correction_success = false;
+      if (!bspline_optimizer_->initializationFailed()) {
+        const auto correction_started = std::chrono::steady_clock::now();
+        correction_success = bspline_optimizer_->BsplineOptimizeTrajRebound(
+            corrected_points, pos.getInterval());
+        planning_timings_.backend_s += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - correction_started).count();
+      }
+      if (correction_success) {
         UniformBspline corrected(corrected_points, 3, pos.getInterval());
         corrected.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_,
                                     pp_.feasibility_tolerance_);
         double ratio = 1.0;
+        check_started = std::chrono::steady_clock::now();
         const auto corrected_check = assessTrajectory(
             corrected, risk_version, node_->now().seconds());
+        planning_timings_.final_checks_s += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - check_started).count();
         if (corrected.checkFeasibility(ratio, false) &&
             corrected_check.executable() &&
             corrected_check.advisory_avoid_samples <
@@ -909,8 +985,11 @@ namespace ego_planner
                   assessment.advisory_unknown_samples, assessment.sampled_points);
     // Recheck the actual curve against the newest map, motion report and GLIO
     // position after all optimization and advisory correction work.
+    check_started = std::chrono::steady_clock::now();
     const auto release_check = assessTrajectory(pos, 0,
                                                  node_->now().seconds());
+    planning_timings_.final_checks_s += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - check_started).count();
     const auto release_motion = currentMotionContext();
     if (!release_check.executable() ||
         grid_map_->occupancyGeneration() !=

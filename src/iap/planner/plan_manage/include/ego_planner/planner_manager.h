@@ -3,8 +3,6 @@
 
 #include <stdlib.h>
 #include <deque>
-#include <map>
-#include <tuple>
 #include <limits>
 #include <optional>
 #include <unordered_map>
@@ -40,6 +38,14 @@ namespace ego_planner
   public:
     EGOPlannerManager();
     ~EGOPlannerManager();
+
+    struct PlanningTimings {
+      double freeze_s = 0.0;
+      double searcher_initialization_s = 0.0; // Startup allocation, not per round.
+      double backend_s = 0.0;
+      double final_checks_s = 0.0;
+    };
+    const PlanningTimings& planningTimings() const { return planning_timings_; }
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -113,6 +119,7 @@ namespace ego_planner
         nav_msgs::msg::Odometry::ConstSharedPtr()> provider) {
       latest_odom_provider_ = std::move(provider);
     }
+    GridPlanningRisk queryPlanningViewAdvisory(const Eigen::Vector3d& position) const;
     GridPlanningCell queryPlanningViewCell(const Eigen::Vector3d& position) const;
     std::optional<uint64_t> planningEvidenceFingerprint(
         const Eigen::Vector3d& start, const Eigen::Vector3d& target) const;
@@ -155,6 +162,8 @@ namespace ego_planner
     double motion_max_age_s_ = 0.5;
     double environment_max_age_s_ = 0.5;
     bool capture_failure_map_ = false;
+    bool search_performance_diagnostics_ = false;
+    PlanningTimings planning_timings_;
     std::unordered_set<std::string> captured_failure_kinds_;
     uint64_t planning_risk_version_ = 0;
     double planning_time_s_ = 0.0;
@@ -166,8 +175,8 @@ namespace ego_planner
       uint64_t generation = 0;
       double time_s = 0.0;
       GridMotionContext motion;
-      mutable std::map<std::tuple<double, double, double>, GridPlanningCell>
-          physical_cache;
+      GridPlanningContext physical_context;
+      mutable GridPlanningQueryStats advisory_stats;
     };
     std::optional<PlanningView> planning_view_;
     std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>

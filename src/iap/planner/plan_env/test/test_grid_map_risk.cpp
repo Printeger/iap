@@ -154,6 +154,30 @@ TEST(GridClearanceIndex, SameExactCubeNearestPointAndRejectionsAsLiveBuffers) {
   const auto compare = [&](const Eigen::Vector3d& p, bool diagnostics) {
     const auto a = indexed->queryPlanningCell(p, 0, 10, policy, motion, diagnostics);
     const auto b = dense->queryPlanningCell(p, 0, 10, policy, motion, diagnostics);
+    const auto context = indexed->preparePlanningQuery(10, motion);
+    const auto fast = indexed->queryPlanningCell(p, 0, 10, policy, motion,
+                                                diagnostics, &context);
+    const auto profiled = indexed->queryPlanningCell(p, 0, 10, policy, motion,
+                                                    diagnostics, &context, true);
+    EXPECT_EQ(fast.execution_reason, b.execution_reason) << p.transpose();
+    EXPECT_EQ(fast.execution_reason, profiled.execution_reason);
+    EXPECT_EQ(fast.voxel_index, b.voxel_index);
+    EXPECT_EQ(fast.observed, b.observed);
+    const auto spatial = indexed->queryOccupancyDiagnostic(p, false);
+    const auto detailed = indexed->queryOccupancyDiagnostic(p);
+    EXPECT_EQ(spatial.available, detailed.available);
+    EXPECT_EQ(spatial.generation, detailed.generation);
+    EXPECT_EQ(spatial.observed, detailed.observed);
+    EXPECT_EQ(spatial.raw_occupied, detailed.raw_occupied);
+    EXPECT_EQ(spatial.inflated_occupied, detailed.inflated_occupied);
+    EXPECT_EQ(spatial.voxel_index, detailed.voxel_index);
+    EXPECT_TRUE(spatial.frame_id.empty());
+    EXPECT_FALSE(spatial.voxel_center.allFinite());
+    EXPECT_DOUBLE_EQ(fast.required_clearance_m, b.required_clearance_m);
+    if (diagnostics && std::isfinite(b.raw_center_clearance_m)) {
+      EXPECT_DOUBLE_EQ(fast.raw_center_clearance_m, b.raw_center_clearance_m);
+      EXPECT_TRUE(fast.nearest_raw_center == b.nearest_raw_center);
+    }
     EXPECT_EQ(a.execution_reason, b.execution_reason);
     EXPECT_EQ(a.observed, b.observed);
     EXPECT_EQ(a.occupancy_generation, b.occupancy_generation);
@@ -309,4 +333,75 @@ TEST_F(GridRiskTest, CurrentMotionAndPhysicalEvidenceAreSeparateConditions) {
   map.setOccupied(point);
   EXPECT_EQ(map.queryPlanningCell(point, version, 10, policy, motion).execution_reason,
             GridExecutionReason::PHYSICAL_OBSTACLE);
+}
+
+TEST_F(GridRiskTest, PreparedConditionsKeepReasonPrecedenceAndInvalidateOnUpdate) {
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 10;
+  motion.error_proxy_m = 0.02;
+  GridPlanningRiskPolicy policy;
+  for (const double now : {9.0, 10.0, 10.6}) {
+    for (const uint8_t quality : {0, 1, 2, 3}) {
+      motion.quality = quality;
+      for (const double error : {0.02, 0.6}) {
+        motion.error_proxy_m = error;
+        const auto context = map.preparePlanningQuery(now, motion);
+        for (const auto& p : {point, Eigen::Vector3d(2, 0, 1)}) {
+          const auto reference = map.queryPlanningCell(p, 0, now, policy, motion);
+          const auto prepared = map.queryPlanningCell(p, 0, now, policy, motion,
+                                                      false, &context);
+          EXPECT_EQ(reference.execution_reason, prepared.execution_reason);
+        }
+      }
+    }
+  }
+  motion.quality = 1;
+  motion.error_proxy_m = 0.02;
+  const auto context = map.preparePlanningQuery(10, motion);
+  map.setOccupancy(point, 1);
+  EXPECT_EQ(map.queryPlanningCell(point, 0, 10, policy, motion, false, &context)
+                .execution_reason, GridExecutionReason::ENVIRONMENT_STALE);
+}
+
+TEST(GridClearanceBounds, SameVoxelOffsetsDoNotShareAnExactClearanceDecision) {
+  GridMapFailureSnapshot saved;
+  saved.dimensions = Eigen::Vector3i(20, 20, 20);
+  saved.origin = Eigen::Vector3d::Zero();
+  saved.max_boundary = Eigen::Vector3d::Constant(2);
+  saved.resolution_m = 0.1;
+  saved.cloud_stamp_s = 10;
+  saved.generation = 1;
+  saved.frame_id = "map";
+  saved.cell_flags.assign(8000, 4);
+  saved.cell_flags[(10 * 20 + 10) * 20 + 10] = 5;
+  auto map = GridMap::fromFailureSnapshot(saved);
+  GridMotionContext motion;
+  motion.quality = 1;
+  motion.stamp_s = 10;
+  motion.body_radius_m = 0.20;
+  motion.tracking_reserve_m = 0;
+  motion.error_proxy_m = 0;
+  GridPlanningRiskPolicy policy;
+  const auto context = map->preparePlanningQuery(10, motion);
+  const Eigen::Vector3d a(0.701, 1.05, 1.05), b(0.799, 1.05, 1.05);
+  auto query = [&](const Eigen::Vector3d& p) {
+    const auto exact = map->queryPlanningCell(p, 0, 10, policy, motion);
+    const auto fast = map->queryPlanningCell(p, 0, 10, policy, motion, false, &context);
+    EXPECT_EQ(exact.execution_reason, fast.execution_reason);
+    return fast.execution_reason;
+  };
+  EXPECT_EQ(query(a), GridExecutionReason::OK);
+  EXPECT_EQ(query(b), GridExecutionReason::INSUFFICIENT_CLEARANCE);
+  // Empty finite stencils, map borders, exact clearance threshold and adjacent
+  // representable doubles must all agree with the original exact query.
+  const double boundary = 1.05 - context.required_clearance_m;
+  for (const double x : {0.01, 0.15, boundary,
+                         std::nextafter(boundary, 0.0),
+                         std::nextafter(boundary, 2.0), 1.999})
+    query(Eigen::Vector3d(x, 1.05, 1.05));
+  const auto stats = map->planningQueryStats();
+  EXPECT_GT(stats.bounds_hits, 0u);
+  EXPECT_GT(stats.fast_pass, 0u);
+  EXPECT_GT(stats.exact_decisions, 0u);
 }

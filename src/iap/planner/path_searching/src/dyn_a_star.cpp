@@ -1,5 +1,7 @@
 #include "path_searching/dyn_a_star.h"
 
+#include <chrono>
+
 using namespace std;
 using namespace Eigen;
 
@@ -25,61 +27,91 @@ const char* AStar::failureName(const Failure failure) {
     return "UNKNOWN";
 }
 
-GridPlanningCell AStar::timedPlanningQuery(const Vector3d& position) {
+GridSearchCell AStar::timedPlanningQuery(const Vector3d& position) {
+    const auto started = performance_diagnostics_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     ++result_.query_calls;
     auto cell = planning_query_(position);
-    result_.occupancy_query_s += cell.occupancy_query_s;
-    result_.clearance_query_s += cell.clearance_query_s;
-    result_.advisory_query_s += cell.advisory_query_s;
+    recordFirstRejection(position, cell);
+    if (performance_diagnostics_) result_.query_management_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     return cell;
 }
 
-GridPlanningCell AStar::queryVoxelCenter(const Vector3d& position) {
-    GridPlanningCell cell;
+void AStar::recordFirstRejection(const Vector3d& position, const GridSearchCell& cell) {
+    if (!result_.has_first_rejection && (!cell.executable() ||
+        (!advisory_fallback_ && (cell.advisory_class == GridAdvisoryClass::AVOID ||
+         cell.advisory_class == GridAdvisoryClass::PREDICTED_DEGRADED)))) {
+        result_.has_first_rejection = true;
+        result_.first_rejection_position = position;
+        result_.first_rejection_cell = cell;
+    }
+}
+
+void AStar::recordCacheStats() {
+    const auto stats = grid_map_->planningQueryStats();
+    result_.occupancy_query_s = stats.occupancy_s - query_stats_at_start_.occupancy_s;
+    result_.clearance_query_s = stats.clearance_s - query_stats_at_start_.clearance_s;
+    result_.advisory_query_s = stats.advisory_s - query_stats_at_start_.advisory_s;
+    if (advisory_statistics_) {
+        const auto advisory = advisory_statistics_();
+        result_.advisory_query_s += advisory.advisory_s - advisory_stats_at_start_.advisory_s;
+        result_.advisory_query_calls = advisory.queries - advisory_stats_at_start_.queries;
+    }
+    result_.cache_entries[0] = sample_cache_.size();
+    result_.cache_bytes[0] = sample_cache_.size() *
+        (sizeof(GridSearchCell) + sizeof(uint64_t) + 2 * sizeof(void*)) +
+        sample_cache_.bucket_count() * sizeof(void*);
+}
+
+uint64_t AStar::latticeKey(const Vector3i& index) const {
+    return (static_cast<uint64_t>(index.x()) * (2 * POOL_SIZE_.y()) +
+        index.y()) * (2 * POOL_SIZE_.z()) + index.z();
+}
+
+GridSearchCell AStar::querySample(const uint64_t key,
+                                 const Vector3d& position, const size_t kind) {
+    GridSearchCell cell;
     if (grid_map_->occupancyGeneration() != search_generation_) {
         cell.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
         return cell;
     }
-    if (!grid_map_->isInMap(position)) return cell;
-    Vector3i index;
-    grid_map_->posToIndex(position, index);
-    const int address = grid_map_->toAddress(index);
-    auto cached = voxel_cache_.find(address);
-    if (cached != voxel_cache_.end()) {
+    auto found = sample_cache_.find(key);
+    const bool cached = found != sample_cache_.end();
+    if (cached) {
         ++result_.cache_hits;
-        return cached->second;
-    }
-    cell = planning_query_ ? timedPlanningQuery(position) : GridPlanningCell{};
-    if (!planning_query_)
-        cell.execution_reason = grid_map_->getInflateOccupancy(position)
+        ++result_.sample_hits[kind];
+        cell = found->second;
+    } else {
+        ++result_.sample_misses[kind];
+        if (planning_query_) cell = timedPlanningQuery(position);
+        else cell.execution_reason = grid_map_->getInflateOccupancy(position)
             ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
-    voxel_cache_.emplace(address, cell);
+        sample_cache_.emplace(key, cell);
+    }
+    // Spatial physical evidence is frozen. Advisory freshness is checked even
+    // on hits; GridMap retains sole ownership of the versioned PL voxel cache.
+    if (cached && cell.executable() && advisory_query_) {
+        ++result_.advisory_refresh_calls;
+        const auto risk = advisory_query_(position);
+        cell.advisory_class = risk.classification;
+        cell.cost_multiplier = risk.cost_multiplier;
+    }
+    recordFirstRejection(position, cell);
     return cell;
 }
 
-GridPlanningCell AStar::queryLatticePoint(const Vector3i& index) {
-    if (grid_map_->occupancyGeneration() != search_generation_) {
-        GridPlanningCell stale;
-        stale.execution_reason = GridExecutionReason::ENVIRONMENT_STALE;
-        return stale;
-    }
-    const int address = (index.x() * POOL_SIZE_.y() + index.y()) *
-        POOL_SIZE_.z() + index.z();
-    auto cached = lattice_cache_.find(address);
-    if (cached != lattice_cache_.end()) {
-        ++result_.cache_hits;
-        return cached->second;
-    }
-    const auto position = Index2Coord(index);
-    GridPlanningCell cell;
-    if (planning_query_) cell = timedPlanningQuery(position);
-    else cell.execution_reason = grid_map_->getInflateOccupancy(position)
-        ? GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
-    lattice_cache_.emplace(address, cell);
-    return cell;
+GridSearchCell AStar::queryVoxelCenter(const Vector3d& position) {
+    if (!grid_map_->isInMap(position)) return {};
+    Vector3i index;
+    grid_map_->posToIndex(position, index);
+    return querySample((uint64_t{1} << 63) | grid_map_->toAddress(index), position, 0);
+}
+
+GridSearchCell AStar::queryLatticePoint(const Vector3i& index) {
+    return querySample(latticeKey(2 * index), Index2Coord(index), 1);
 }
 
 void AStar::recordMapAtFinish() {
+    recordCacheStats();
     result_.live_generation_at_finish = live_generation_provider_
         ? live_generation_provider_() : grid_map_->occupancyGeneration();
     result_.map_changed = result_.live_generation_at_finish !=
@@ -92,9 +124,13 @@ void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
     result_.failure = failure;
     recordMapAtFinish();
     result_.duration_s = (rclcpp::Clock().now() - started).seconds();
-    static rclcpp::Clock log_clock(RCL_SYSTEM_TIME);
-    RCLCPP_WARN_THROTTLE(rclcpp::get_logger("AstarSearch"), log_clock, 1000,
-        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
+    const auto now = std::chrono::steady_clock::now();
+    const auto reason_index = static_cast<size_t>(failure);
+    if (!reported_failures_[reason_index] || now - last_failure_log_ >= std::chrono::seconds(1)) {
+      reported_failures_[reason_index] = true;
+      last_failure_log_ = now;
+      RCLCPP_WARN(rclcpp::get_logger("AstarSearch"),
+        "A* %s start=(%.2f %.2f %.2f) end=(%.2f %.2f %.2f) start_reason=%s end_reason=%s expanded=%zu queried=%zu cached=%zu rejected[out_map=%zu physical=%zu clearance=%zu unobserved=%zu stale=%zu motion_invalid=%zu motion_stale=%zu motion_budget=%zu advisory=%zu] elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs profile=%d map_changed=%d search_generation=%lu live_generation=%lu",
         failureName(result_.failure), result_.requested_start.x(), result_.requested_start.y(),
         result_.requested_start.z(), result_.requested_end.x(),
         result_.requested_end.y(), result_.requested_end.z(),
@@ -111,9 +147,10 @@ void AStar::finishFailure(const Failure failure, const rclcpp::Time& started) {
         result_.rejected_execution[static_cast<size_t>(GridExecutionReason::CURRENT_MOTION_BUDGET)],
         result_.rejected_advisory, result_.duration_s,
         result_.occupancy_query_s, result_.clearance_query_s,
-        result_.advisory_query_s, result_.map_changed,
+        result_.advisory_query_s, result_.performance_diagnostics, result_.map_changed,
         static_cast<unsigned long>(result_.occupancy_generation),
         static_cast<unsigned long>(result_.live_generation_at_finish));
+    }
     if (failure_observer_) failure_observer_(result_);
 }
 
@@ -138,14 +175,14 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
     const Vector3i first_voxel = begin.array().floor().cast<int>();
     const Vector3i last_voxel = end.array().floor().cast<int>();
     double multiplier = 1.0;
-    auto examine = [&](const GridPlanningCell& cell) {
+    auto examine = [&](const GridSearchCell& cell) {
         if (!cell.executable()) {
             ++result_.rejected_execution[static_cast<size_t>(cell.execution_reason)];
             if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE)
                 map_changed_ = true;
             return false;
         }
-        const auto cls = cell.advisory.classification;
+        const auto cls = cell.advisory_class;
         if (cls == GridAdvisoryClass::AVOID ||
             cls == GridAdvisoryClass::PREDICTED_DEGRADED) {
             if (!advisory_fallback_) {
@@ -155,7 +192,7 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
             }
             multiplier = std::max(multiplier, 3.0);
         } else {
-            multiplier = std::max(multiplier, cell.advisory.cost_multiplier);
+            multiplier = std::max(multiplier, cell.cost_multiplier);
         }
         return true;
     };
@@ -176,26 +213,26 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
     }
     if (!examine(queryLatticePoint(from_index))) return std::nullopt;
     const Vector3i mid_key = from_index + to_index;
-    const int mid_address = (mid_key.x() * (2 * POOL_SIZE_.y()) + mid_key.y()) *
-        (2 * POOL_SIZE_.z()) + mid_key.z();
-    auto mid = midpoint_cache_.find(mid_address);
-    if (mid == midpoint_cache_.end()) {
-        mid = midpoint_cache_.emplace(mid_address,
-            timedPlanningQuery((from + to) / 2.0)).first;
-    } else {
-        ++result_.cache_hits;
-    }
-    if (!examine(mid->second)) return std::nullopt;
+    // Even half-lattice coordinates are exactly node samples; odd coordinates
+    // are midpoints. Voxel centers use a separate key namespace. Arbitrary
+    // requested endpoints and connectors never use these keys.
+    const Vector3d midpoint = (mid_key.x() % 2 == 0 && mid_key.y() % 2 == 0 && mid_key.z() % 2 == 0)
+        ? Index2Coord(mid_key / 2) : Vector3d((from + to) / 2.0);
+    if (!examine(querySample(latticeKey(mid_key), midpoint, 2))) return std::nullopt;
     if (!examine(queryLatticePoint(to_index))) return std::nullopt;
     return multiplier;
 }
 
 AStar::~AStar()
 {
-    for (int i = 0; i < POOL_SIZE_(0); i++)
-        for (int j = 0; j < POOL_SIZE_(1); j++)
-            for (int k = 0; k < POOL_SIZE_(2); k++)
-                delete GridNodeMap_[i][j][k];
+    for (int i = 0; i < POOL_SIZE_(0); i++) {
+        for (int j = 0; j < POOL_SIZE_(1); j++) {
+            for (int k = 0; k < POOL_SIZE_(2); k++) delete GridNodeMap_[i][j][k];
+            delete[] GridNodeMap_[i][j];
+        }
+        delete[] GridNodeMap_[i];
+    }
+    delete[] GridNodeMap_;
 }
 
 void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)
@@ -287,9 +324,13 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
     }
 
     result_.start_cell = planning_query_ ? timedPlanningQuery(start_pt)
-        : queryLatticePoint(start_idx);
+        : GridSearchCell{};
     result_.end_cell = planning_query_ ? timedPlanningQuery(end_pt)
-        : queryLatticePoint(end_idx);
+        : GridSearchCell{};
+    if (!planning_query_) {
+        result_.start_cell.execution_reason = queryLatticePoint(start_idx).execution_reason;
+        result_.end_cell.execution_reason = queryLatticePoint(end_idx).execution_reason;
+    }
     if (!result_.start_cell.executable()) {
         result_.failure = Failure::START_BLOCKED;
         return false;
@@ -361,7 +402,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
             const auto point = a + (b - a) * (static_cast<double>(i) / samples);
             const auto cell = timedPlanningQuery(point);
             if (!cell.executable()) return false;
-            const auto cls = cell.advisory.classification;
+            const auto cls = cell.advisory_class;
             if (!advisory_fallback_ &&
                 (cls == GridAdvisoryClass::AVOID ||
                  cls == GridAdvisoryClass::PREDICTED_DEGRADED)) {
@@ -394,12 +435,13 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     rejected_advisory_ = false;
     map_changed_ = false;
     gridPath_.clear();
-    voxel_cache_.clear();
-    lattice_cache_.clear();
-    midpoint_cache_.clear();
+    sample_cache_.clear();
     result_ = Result{};
+    result_.performance_diagnostics = performance_diagnostics_;
     result_.requested_start = start_pt;
     result_.requested_end = end_pt;
+    query_stats_at_start_ = grid_map_->planningQueryStats();
+    advisory_stats_at_start_ = advisory_statistics_ ? advisory_statistics_() : GridPlanningQueryStats{};
     search_generation_ = grid_map_->occupancyGeneration();
     result_.occupancy_generation = search_generation_;
 
@@ -436,6 +478,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
     startPtr->fScore = getHeu(startPtr, endPtr);
     startPtr->state = GridNode::OPENSET; //put start node in open set
     startPtr->cameFrom = NULL;
+    ++result_.queue_pushes;
     openSet_.push({startPtr, startPtr->fScore});
 
     double tentative_gScore;
@@ -450,6 +493,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
         num_iter++;
         const auto entry = openSet_.top();
         openSet_.pop();
+        ++result_.queue_pops;
         current = entry.node;
         if (current->state == GridNode::CLOSEDSET ||
             entry.score > current->fScore + 1e-9) continue;
@@ -464,9 +508,10 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
             // if((time_2 - time_1).toSec() > 0.1)
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
+            result_.path_cost = current->gScore;
             recordMapAtFinish();
             result_.duration_s = (rclcpp::Clock().now() - time_1).seconds();
-            RCLCPP_INFO(rclcpp::get_logger("AstarSearch"),
+            RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"),
                 "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
                 result_.expanded, result_.query_calls, result_.cache_hits,
                 result_.duration_s, result_.occupancy_query_s,
@@ -506,10 +551,12 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         continue; //in closed set.
                     }
 
+                    const auto edge_started = performance_diagnostics_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     const auto multiplier = edgeMultiplier(
                         Index2Coord(current->index), Index2Coord(neighborPtr->index),
                         current->index,
                         neighborIdx);
+                    if (performance_diagnostics_) result_.edge_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - edge_started).count();
                     if (!multiplier) {
                         if (map_changed_) {
                             finishFailure(Failure::MAP_STALE, time_1);
@@ -531,6 +578,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
+                        ++result_.queue_pushes;
                         openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
                     else if (tentative_gScore < neighborPtr->gScore)
@@ -538,6 +586,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
+                        ++result_.queue_pushes;
                         openSet_.push({neighborPtr, neighborPtr->fScore});
                     }
                 }
