@@ -78,6 +78,54 @@ TEST(GnssGeometryPlPredictorTest, SubsetDegeneracyIsExplicitAndHasNoNumericPL) {
   EXPECT_FALSE(std::isfinite(result.VPL));
 }
 
+TEST(GnssGeometryPlPredictorTest, WholeConstellationFaultHasNoSingleSystemBound) {
+  std::vector<iap::GnssGeometrySat> sats;
+  for (int i=0;i<8;++i) sats.push_back({.35+.12*(i%4),.73*i,2.,i+1,'G'});
+  const auto result=iap::GnssGeometryPlPredictor().predict(sats);
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.status,iap::GnssGeometryStatus::SUBSET_DEGENERATE);
+  EXPECT_FALSE(std::isfinite(result.HPL));
+  EXPECT_FALSE(std::isfinite(result.VPL));
+  EXPECT_EQ(result.degenerate_constellation_ids,std::vector<char>{'G'});
+}
+
+TEST(GnssGeometryPlPredictorTest, WholeConstellationSubsetsUseRemainingClockAndPosition) {
+  std::vector<iap::GnssGeometrySat> sats;
+  for (int i=0;i<16;++i) sats.push_back({.35+.12*(i%4),.73*i,2.,i+1,i<8 ? 'G' : 'C'});
+  iap::GnssGeometryPlPredictorParams params;
+  params.dynamic_budget=false;
+  params.K_ff=0;params.K_fa=0;params.K_md=1;
+  const auto result=iap::GnssGeometryPlPredictor(params).predict(sats);
+  ASSERT_TRUE(result.valid);
+  // Independent weighted design SVD; no production clock builder or normal
+  // factorization. Both full-constellation removals use a single remaining
+  // clock. The comparison is only the common position covariance block.
+  Eigen::Vector3d expected=Eigen::Vector3d::Zero();
+  for (int hypothesis=0;hypothesis<18;++hypothesis) {
+    std::vector<iap::GnssGeometrySat> kept;
+    for (int row=0;row<16;++row) {
+      if (hypothesis<16 ? row==hypothesis : sats[row].constellation==(hypothesis==16 ? 'G' : 'C')) continue;
+      kept.push_back(sats[row]);
+    }
+    const bool has_g=std::any_of(kept.begin(),kept.end(),[](const auto& x){return x.constellation=='G';});
+    const bool has_c=std::any_of(kept.begin(),kept.end(),[](const auto& x){return x.constellation=='C';});
+    Eigen::MatrixXd weighted=Eigen::MatrixXd::Zero(kept.size(),3+int(has_g)+int(has_c));
+    for (size_t row=0;row<kept.size();++row) {
+      const auto& x=kept[row];
+      weighted.row(row).head<3>() << std::cos(x.elevation)*std::sin(x.azimuth),std::cos(x.elevation)*std::cos(x.azimuth),std::sin(x.elevation);
+      weighted(row,x.constellation=='G' ? 3 : 3+int(has_g))=1;
+      weighted.row(row)/=x.pr_sigma;
+    }
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(weighted,Eigen::ComputeThinV);
+    ASSERT_GT(svd.singularValues().minCoeff(),1e-8);
+    const Eigen::MatrixXd covariance=svd.matrixV()*svd.singularValues().array().square().inverse().matrix().asDiagonal()*svd.matrixV().transpose();
+    expected=expected.cwiseMax(covariance.diagonal().head<3>().cwiseSqrt());
+  }
+  EXPECT_EQ(result.n_hypotheses,18);
+  EXPECT_NEAR(result.HPL,std::max(expected[0],expected[1]),1e-8);
+  EXPECT_NEAR(result.VPL,expected[2],1e-8);
+}
+
 TEST(GnssGeometryPlPredictorTest, ExactInputUsesBoundedGeometryCache) {
   iap::GnssGeometryPlPredictorParams params;
   params.exact_cache_capacity = 2;
@@ -89,10 +137,10 @@ TEST(GnssGeometryPlPredictorTest, ExactInputUsesBoundedGeometryCache) {
 
   const auto first = predictor.predict(sats);
   const auto second = predictor.predict(sats);
-  ASSERT_TRUE(first.valid);
-  ASSERT_TRUE(second.valid);
-  EXPECT_DOUBLE_EQ(first.HPL, second.HPL);
-  EXPECT_DOUBLE_EQ(first.VPL, second.VPL);
+  ASSERT_FALSE(first.valid);
+  ASSERT_FALSE(second.valid);
+  EXPECT_EQ(first.status,second.status);
+  EXPECT_TRUE(first.S0.isApprox(second.S0,0));
   const auto stats = predictor.cacheStats();
   EXPECT_EQ(stats.misses, 1u);
   EXPECT_EQ(stats.hits, 1u);
@@ -107,7 +155,8 @@ TEST(GnssGeometryPlPredictorTest, RankOnePathMatchesDirectSubsetFactorization) {
       {0.48, 4.0, 5.1, 14}, {0.74, 5.2, 3.6, 15},
       {0.92, 5.8, 4.7, 16}};
   const auto accelerated = predictor.predict(sats);
-  ASSERT_TRUE(accelerated.valid);
+  ASSERT_FALSE(accelerated.valid);
+  EXPECT_EQ(accelerated.status,iap::GnssGeometryStatus::SUBSET_DEGENERATE);
 
   Eigen::Matrix4d a0 = Eigen::Matrix4d::Zero();
   std::vector<Eigen::Vector4d> rows;
@@ -141,34 +190,33 @@ TEST(GnssGeometryPlPredictorTest, RankOnePathMatchesDirectSubsetFactorization) {
 
 TEST(GnssGeometryPlPredictorTest, SeparationVarianceUsesSubsetMinusFullPosition) {
   iap::GnssGeometryPlPredictorParams params;
-  params.dynamic_budget = false;
-  params.K_ff = params.K_md = 0;
-  params.K_fa = 2;
-  iap::GnssGeometryPlPredictor predictor(params);
-  const std::vector<iap::GnssGeometrySat> sats{
-      {0.35,0,2.7,1}, {0.6,.9,3.1,2}, {.82,1.8,4.2,3},
-      {1.05,2.9,2.4,4}, {.48,4,5.1,5}, {.74,5.2,3.6,6}, {.92,5.8,4.7,7}};
-  const auto result = predictor.predict(sats);
+  params.dynamic_budget=false;params.K_ff=params.K_md=0;params.K_fa=2;
+  std::vector<iap::GnssGeometrySat> sats;
+  for(int i=0;i<16;++i) sats.push_back({.35+.12*(i%4),.73*i,2.,i+1,i<8 ? 'G' : 'C'});
+  const auto result=iap::GnssGeometryPlPredictor(params).predict(sats);
   ASSERT_TRUE(result.valid);
-  EXPECT_GT(result.HPL, 1);
-  EXPECT_GT(result.VPL, 1);
-  Eigen::MatrixXd design(sats.size(), 4);
-  for (std::size_t row = 0; row < sats.size(); ++row) {
-    const auto& sat = sats[row];
-    design.row(row) << std::cos(sat.elevation)*std::sin(sat.azimuth),
-        std::cos(sat.elevation)*std::cos(sat.azimuth), std::sin(sat.elevation), 1;
-  }
-  Eigen::VectorXd weights(sats.size());
-  for (std::size_t row = 0; row < sats.size(); ++row) weights[row] = 1/(sats[row].pr_sigma*sats[row].pr_sigma);
-  const Eigen::Matrix4d normal = design.transpose()*weights.asDiagonal()*design;
-  const Eigen::Matrix4d full = normal.inverse();
-  Eigen::Vector3d expected = Eigen::Vector3d::Zero();
-  for (std::size_t row = 0; row < sats.size(); ++row) {
-    const Eigen::Matrix4d subset = (normal-weights[row]*design.row(row).transpose()*design.row(row)).inverse();
-    expected = expected.cwiseMax(2*(subset-full).diagonal().head<3>().cwiseMax(0).cwiseSqrt());
-  }
-  EXPECT_NEAR(result.HPL, std::max(expected[0],expected[1]), 1e-9);
-  EXPECT_NEAR(result.VPL, expected[2], 1e-9);
+  const auto covariance=[&](int hypothesis) -> Eigen::Matrix3d {
+    std::vector<iap::GnssGeometrySat> kept;
+    for(int row=0;row<16;++row) {
+      if(hypothesis>=0 && (hypothesis<16 ? row==hypothesis : sats[row].constellation==(hypothesis==16 ? 'G' : 'C'))) continue;
+      kept.push_back(sats[row]);
+    }
+    const bool has_g=std::any_of(kept.begin(),kept.end(),[](const auto& x){return x.constellation=='G';});
+    const bool has_c=std::any_of(kept.begin(),kept.end(),[](const auto& x){return x.constellation=='C';});
+    Eigen::MatrixXd design=Eigen::MatrixXd::Zero(kept.size(),3+int(has_g)+int(has_c));
+    for(size_t row=0;row<kept.size();++row) {
+      const auto& x=kept[row];
+      design.row(row).head<3>() << std::cos(x.elevation)*std::sin(x.azimuth),std::cos(x.elevation)*std::cos(x.azimuth),std::sin(x.elevation);
+      design(row,x.constellation=='G' ? 3 : 3+int(has_g))=1;
+      design.row(row)/=x.pr_sigma;
+    }
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(design,Eigen::ComputeThinV);
+    return (svd.matrixV()*svd.singularValues().array().square().inverse().matrix().asDiagonal()*svd.matrixV().transpose()).topLeftCorner<3,3>();
+  };
+  const Eigen::Matrix3d full=covariance(-1);Eigen::Vector3d expected=Eigen::Vector3d::Zero();
+  for(int h=0;h<18;++h) expected=expected.cwiseMax(2*(covariance(h)-full).diagonal().cwiseMax(0).cwiseSqrt());
+  EXPECT_NEAR(result.HPL,std::max(expected[0],expected[1]),1e-8);
+  EXPECT_NEAR(result.VPL,expected[2],1e-8);
 }
 
 TEST(GnssGeometryPlPredictorTest, UsedClockIdentityChangesDesignAndExactCache) {
@@ -182,7 +230,7 @@ TEST(GnssGeometryPlPredictorTest, UsedClockIdentityChangesDesignAndExactCache) {
   ASSERT_EQ(mixed.S0.cols(), 5);
   for (auto& sat : sats) sat.constellation = 'G';
   const auto gps = predictor.predict(sats);
-  ASSERT_TRUE(gps.valid);
+  ASSERT_FALSE(gps.valid);
   EXPECT_EQ(gps.S0.cols(), 4);
   EXPECT_EQ(predictor.cacheStats().misses, 2);
   EXPECT_GT((mixed.S0.topLeftCorner<3,3>() - gps.S0.topLeftCorner<3,3>()).norm(), 1e-5);
@@ -204,7 +252,8 @@ TEST(GnssGeometryPlPredictorTest, ConditionedLastClockCannotUseRankOneRounding) 
   };
   iap::GnssGeometryPlPredictor predictor(params);
   const auto result = predictor.predict(sats);
-  ASSERT_TRUE(result.valid);
+  ASSERT_FALSE(result.valid);
+  EXPECT_EQ(result.degenerate_constellation_ids,std::vector<char>{'G'});
   EXPECT_GE(predictor.cacheStats().fallback_factorizations, 1u)
       << "last BDS removal must rebuild its absent clock, regardless of rounded denominator";
 }
@@ -220,7 +269,7 @@ TEST(GnssGeometryPlPredictorTest, LastOfSystemRemovalRebuildsClockStructure) {
     mixed.push_back({.91,.38,2,155,'C'});
     iap::GnssGeometryPlPredictor predictor(params), reference(params);
     const auto a = predictor.predict(mixed), b = reference.predict(gps);
-    ASSERT_TRUE(a.valid); ASSERT_TRUE(b.valid);
+    ASSERT_FALSE(a.valid); ASSERT_FALSE(b.valid);
     EXPECT_TRUE((a.S0.topLeftCorner<3,3>().isApprox(b.S0.topLeftCorner<3,3>(), 1e-5)));
     // Structure, rather than the rounded Sherman-Morrison denominator, owns
     // whether the last constellation clock survives the fault subset.
@@ -240,7 +289,7 @@ TEST(GnssGeometryPlPredictorTest,
           std::fmod(0.41 + 1.13 * static_cast<double>(index),
                     kBenchmarkTwoPi),
           2.5 + 0.17 * static_cast<double>(index % 7),
-          100 + index});
+          100 + index,index%2 ? 'C' : 'G'});
     }
     return sats;
   };
@@ -496,12 +545,26 @@ iap::GnssEpoch make_epoch(const int n_sats) {
   for (int i = 0; i < n_sats; ++i) {
     iap::SatObs sat;
     sat.sat_id = 300 + i;
-    sat.constellation = 'G';
+    sat.constellation = n_sats>=8 && i%2 ? 'C' : 'G';
     sat.elevation = 0.45 + 0.08 * static_cast<double>(i % 4);
     sat.azimuth = 2.0 * kPi * static_cast<double>(i) /
                   static_cast<double>(std::max(1, n_sats));
     sat.pr_sigma = 3.0 + static_cast<double>(i % 2);
     sat.excluded = false;
+    epoch.sats.push_back(sat);
+  }
+  return epoch;
+}
+
+// Synthetic LOS regression fixture: independently usable GPS and BDS groups.
+// A small optional BDS azimuth offset avoids sharing artificial boundary rays
+// in half-space support tests. This is not a historical observation or NAV set.
+iap::GnssEpoch make_dual_los_epoch(double bds_azimuth_offset=0.) {
+  auto epoch=make_epoch(8);
+  for(auto& sat:epoch.sats) sat.constellation='G';
+  const auto gps=epoch.sats;
+  for(auto sat:gps) {
+    sat.constellation='C';sat.sat_id+=1000;sat.azimuth+=bds_azimuth_offset;
     epoch.sats.push_back(sat);
   }
   return epoch;
@@ -583,6 +646,12 @@ iap::GnssEpoch make_epoch_from_geometry(
     sat.pr_sigma = sigma;
     sat.excluded = false;
     epoch.sats.push_back(sat);
+  }
+  // Positive geometry sweeps need two independently usable constellations.
+  // Cases with four or fewer rows stay single-source rejection fixtures.
+  if(n_sats>4) {
+    const auto gps=epoch.sats;
+    for(auto sat:gps) {sat.constellation='C';sat.sat_id+=1000;epoch.sats.push_back(sat);}
   }
   return epoch;
 }
@@ -1049,8 +1118,7 @@ TEST(PredictorModuleTest,
   params.gnss.visibility_params.hard_occlusion = true;
   params.gnss.visibility_params.ray_start_offset = 0.0;
   params.gnss.visibility_params.occ_range = 6.0;
-  iap::IntegritySnapshot snapshot = make_snapshot(true, false);
-  snapshot.gnss_epoch = make_epoch(8);
+  iap::IntegritySnapshot snapshot = make_snapshot_with_epoch(make_dual_los_epoch(),false);
 
   const auto complete_support = [](const Eigen::Vector3d&, double, double) {
       return iap::LocalMapSupportQuery{
@@ -1088,7 +1156,7 @@ TEST(PredictorModuleTest,
   const auto outside =
       outside_predictor.query(Eigen::Vector3d::Zero(), snapshot);
   EXPECT_FALSE(outside.valid);
-  EXPECT_EQ(outside.n_unknown_support, 8);
+  EXPECT_EQ(outside.n_unknown_support, 16);
   EXPECT_EQ(outside.support_status,
             iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
 
@@ -1816,7 +1884,7 @@ TEST(PredictorModuleTest,
                                   : position.x() <= 10.0 + 1.0e-9;
       });
   module.set_lidar_fim_primitives(make_lidar_primitives());
-  auto snapshot = make_snapshot(true, true);
+  auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(.01),true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "geometry|occupancy3|risk5|epoch7";
@@ -1915,7 +1983,7 @@ TEST(PredictorModuleTest,
                                   : position.x() <= 10.0 + 1.0e-9;
       });
   module.set_lidar_fim_primitives(make_lidar_primitives());
-  const auto snapshot = make_snapshot(true, true);
+  const auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(.01),true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "point-local-braking-window";
@@ -2054,7 +2122,7 @@ TEST(PredictorModuleTest,
     return false;
   });
   module.set_lidar_fim_primitives(make_lidar_primitives());
-  const auto snapshot = make_snapshot(true, true);
+  const auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(),true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "pointwise-unknown-isolation";
@@ -2187,7 +2255,7 @@ TEST(PredictorModuleTest,
                                   : position.x() <= 10.0 + 1.0e-9;
       });
   module.set_lidar_fim_primitives(make_lidar_primitives());
-  const auto snapshot = make_snapshot(true, true);
+  const auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(.01),true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "two-braking-windows";
@@ -2528,10 +2596,10 @@ TEST(PredictorModuleTest,
 TEST(PredictorModuleTest,
      LocalSatelliteMaskIgnoresUnselectedUnknownSatelliteParameters) {
   iap::GnssAdvisoryPredictor predictor(make_params().gnss);
-  auto snapshot = make_snapshot(true, false);
+  auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(),false);
   std::vector<bool> local_mask(snapshot.gnss_epoch.sats.size(), false);
   for (std::size_t index = 0; index < 5; ++index) {
-    local_mask[index] = true;
+    local_mask[index] = local_mask[index+8] = true;
   }
   const auto original_identity = iap::gnss_epoch_identity(
       snapshot.gnss_epoch, snapshot.current.excluded_prns);
@@ -2540,9 +2608,9 @@ TEST(PredictorModuleTest,
   EXPECT_EQ(original_identity, iap::gnss_epoch_identity(
       snapshot.gnss_epoch, snapshot.current.excluded_prns));
 
-  for (std::size_t index = 5; index < snapshot.gnss_epoch.sats.size();
+  for (std::size_t index = 0; index < snapshot.gnss_epoch.sats.size();
        ++index) {
-    snapshot.gnss_epoch.sats[index].pr_sigma *= 1000.0;
+    if(!local_mask[index]) snapshot.gnss_epoch.sats[index].pr_sigma *= 1000.0;
   }
   const auto changed_unselected = predictor.query_with_satellite_mask(
       Eigen::Vector3d(1.0, 0.0, 0.0), snapshot, local_mask);
@@ -2710,7 +2778,7 @@ TEST(PredictorModuleTest,
       return true;
     }
     const double azimuth = std::atan2(horizontal.y(), horizontal.x());
-    for (const double known_azimuth : {0.0, 0.25 * kPi, 0.5 * kPi}) {
+    for (const double known_azimuth : {0.0}) {
       const double wrapped = std::atan2(
           std::sin(azimuth - known_azimuth),
           std::cos(azimuth - known_azimuth));
@@ -2721,7 +2789,7 @@ TEST(PredictorModuleTest,
     return false;
   });
   module.set_lidar_fim_primitives(make_lidar_primitives());
-  auto snapshot = make_snapshot(true, true);
+  auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(),true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "geometry|occupancy3|risk5|epoch7";
@@ -2744,7 +2812,7 @@ TEST(PredictorModuleTest,
   EXPECT_EQ(result.points[0].ranking_state,
             iap::ForwardRiskRankingState::COMPARABLE);
   EXPECT_FALSE(result.points[1].gnss_supported);
-  EXPECT_EQ(result.points[1].gnss_used_satellite_count, 3);
+  EXPECT_EQ(result.points[1].gnss_used_satellite_count, 2);
   EXPECT_EQ(result.points[1].failure_reason,
             iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
   EXPECT_GT(result.points[1].gnss_unknown_satellite_count, 0);
@@ -2775,7 +2843,7 @@ TEST(PredictorModuleTest,
     return false;
   });
   module.set_lidar_fim_primitives(make_lidar_primitives());
-  const auto snapshot = make_snapshot(true, true);
+  const auto snapshot = make_snapshot_with_epoch(make_dual_los_epoch(),true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "known-four-unknown-rest";
@@ -2792,7 +2860,7 @@ TEST(PredictorModuleTest,
       << iap::forwardRiskFailureReasonName(result.failure_reason);
   ASSERT_EQ(result.points.size(), 1u);
   const auto& point = result.points.front();
-  EXPECT_EQ(point.gnss_used_satellite_count, 5);
+  EXPECT_EQ(point.gnss_used_satellite_count, 10);
   EXPECT_GT(point.gnss_unknown_satellite_count, 0);
   ASSERT_TRUE(point.pl_lower_available);
   ASSERT_TRUE(point.pl_upper_available);
@@ -2807,6 +2875,20 @@ TEST(PredictorModuleTest,
                 "excluded_from_pl_upper_unknown_support");
     }
   }
+}
+
+TEST(PredictorModuleTest, SingleConstellationFimDoesNotGrantWholeFaultBound) {
+  auto epoch=make_epoch(8);
+  for(auto& sat:epoch.sats) sat.constellation='G';
+  const auto snapshot=make_snapshot_with_epoch(epoch,false);
+  const auto result=iap::GnssAdvisoryPredictor(make_params().gnss).query(Eigen::Vector3d::Zero(),snapshot);
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.geometry_status,iap::GnssGeometryStatus::SUBSET_DEGENERATE);
+  EXPECT_EQ(result.degenerate_constellation_ids,std::vector<char>{'G'});
+  EXPECT_FALSE(std::isfinite(result.raw_hpl));
+  EXPECT_FALSE(std::isfinite(result.raw_vpl));
+  EXPECT_TRUE(result.fim_valid);
+  EXPECT_GT(result.lambda_trace,0.);
 }
 
 TEST(PredictorModuleTest, GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly) {
@@ -2834,15 +2916,14 @@ TEST(PredictorModuleTest, GnssMapOcclusionReducesVisibleCountAndDegradesProtecti
   params.gnss.visibility_params.hard_occlusion = true;
   params.gnss.visibility_params.ray_start_offset = 0.0;
   params.gnss.visibility_params.occ_range = 6.0;
-  iap::IntegritySnapshot snapshot = make_snapshot(true, false);
-  snapshot.gnss_epoch = make_epoch(8);
+  iap::IntegritySnapshot snapshot = make_snapshot_with_epoch(make_dual_los_epoch(),false);
 
   iap::GnssAdvisoryPredictor open_sky_predictor(params.gnss);
   const auto open_sky =
       open_sky_predictor.query(Eigen::Vector3d::Zero(), snapshot);
   ASSERT_TRUE(open_sky.valid);
-  ASSERT_EQ(open_sky.n_visible, 8);
-  ASSERT_EQ(open_sky.n_used, 8);
+  ASSERT_EQ(open_sky.n_visible, 16);
+  ASSERT_EQ(open_sky.n_used, 16);
 
   iap::LocalOccupancyGrid blocker_grid =
       make_los_blocker_grid(snapshot.gnss_epoch, {0, 2});
@@ -2855,8 +2936,8 @@ TEST(PredictorModuleTest, GnssMapOcclusionReducesVisibleCountAndDegradesProtecti
   EXPECT_FALSE(occluded.fallback);
   EXPECT_LT(occluded.n_visible, open_sky.n_visible);
   EXPECT_LT(occluded.n_used, open_sky.n_used);
-  EXPECT_EQ(occluded.n_visible, 6);
-  EXPECT_EQ(occluded.n_used, 6);
+  EXPECT_EQ(occluded.n_visible, 12);
+  EXPECT_EQ(occluded.n_used, 12);
   EXPECT_GT(occluded.pdop, open_sky.pdop);
   EXPECT_GT(occluded.hpl, open_sky.hpl);
   EXPECT_GT(occluded.vpl, open_sky.vpl);

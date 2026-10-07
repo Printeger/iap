@@ -191,6 +191,7 @@ struct GnssAdvisoryResult {
   GnssGeometryStatus geometry_status =
       GnssGeometryStatus::NOT_EVALUATED;
   std::vector<int> degenerate_satellite_ids;
+  std::vector<char> degenerate_constellation_ids;
   PredictorInformationState information_state =
       PredictorInformationState::Position3MapEnu;
 
@@ -213,6 +214,8 @@ struct GnssAdvisoryResult {
       std::numeric_limits<double>::quiet_NaN();
   int worst_excluded_sat_h = -1;
   int worst_excluded_sat_v = -1;
+  char worst_excluded_constellation_h = 0;
+  char worst_excluded_constellation_v = 0;
 
   // The planner GNSS channel is anchored to the current certified monitor.
   // Raw advisory values remain available for spatial-delta diagnostics and
@@ -247,7 +250,7 @@ struct GnssAdvisoryResult {
   std::vector<int> excluded_sat_ids;
 
   // R^{3x3} position-only map/ENU information after eliminating receiver
-  // clock from the 4D GNSS normal matrix.
+  // all actually used constellation clocks from the dynamic GNSS normal matrix.
   Eigen::Matrix3d lambda_gnss = Eigen::Matrix3d::Zero();
   bool fim_valid = false;
   bool fim_regularized = false;

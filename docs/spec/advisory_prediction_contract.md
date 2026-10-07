@@ -151,16 +151,28 @@ Position FIM eliminates each actual independent clock with its original
 information. Clock epsilon is a conditioning floor, never an added prior.
 The legacy `PredictedAraimComputer` FIM uses the same rule and saved ENU rotation.
 This repair does not change source eligibility or force raw/anchored validity.
-Raw geometry still has only its original single-satellite hypotheses; whole
-constellation and joint contribution fault qualification remain unfinished.
+Raw geometry enumerates every single-satellite fault and every actually used
+whole-constellation fault. Each whole fault rebuilds only the remaining active
+clocks and compares the common position covariance block; no empty clock column
+or epsilon prior survives. The existing uniform false-alarm/HMI allocation uses
+the complete hypothesis count N + active constellations. A degenerate subset
+invalidates the raw bound and records its satellite or constellation identity.
+A single-constellation whole fault therefore has no finite raw PL, even when the
+full-set position FIM remains available. Worst whole-fault identities are distinct
+from excluded satellite IDs. This geometry proxy does not qualify the joint
+GNSS/LiDAR fault model or empirical meter-scale integrity.
 A FIM available without a standalone bound remains an information diagnostic
 under the existing admission policy, not a new qualification.
 
-v6 records `clock_model=per_constellation_pseudorange_bias_v1` and includes it
-in input identity. Production GridMap binding rejects older recording versions
-and unrecognized clock models. Earlier formats remain readable with their
-original version and `legacy_common_clock` identity; re-encoding never upgrades
-recording provenance. Frozen optimizer covariance timing, rotation uncertainty
+v7 records `clock_model=per_constellation_pseudorange_bias_v1` and
+`gnss_fault_model=single_satellite_and_constellation_v1`, both in input identity.
+Production GridMap binding rejects older recording versions and unrecognized
+clock/fault models. Earlier formats v1–v6 remain readable with their original
+recording version; v6 retains its actual per-constellation clock model while its
+fault scope is `legacy_single_satellite_v1`. Older clocks retain
+`legacy_common_clock`. Re-encoding never upgrades recording provenance; an older
+wire schema cannot assert v7 authority. Diagnostic replay labels earlier input
+as HISTORICAL_INPUT_DIAGNOSTIC and never renews the original frozen time. Frozen optimizer covariance timing, rotation uncertainty
 and actual matching-residual qualifications are still pending. No formal
 9+9 or task comparison is granted by these mechanism checks.
 
@@ -181,8 +193,10 @@ fallback. Only the former describes this transaction's actual cached queries.
 `queried_risk.csv` preserves the original first five columns and adds
 `source_flags`, `gnss_raw_valid`, and `gnss_geometry_status`, with round-trip
 double precision. Flags use `PredictorResultFlags`, not a two-source bit mask.
-`gnss_raw_valid` means raw geometry status VALID; it grants neither whole
-constellation fault qualification nor joint meter-scale qualification. Invalid
+`gnss_raw_valid` means the recorded raw geometry status VALID under its original
+model identity. Legacy samples do not acquire the v7 fault scope; a new v7 valid
+geometry result still grants neither joint meter-scale qualification nor current
+motion authorization. Invalid
 raw values, including `1e9`, remain visible as INVALID and grant no current
 VALID preference. Existing eligible history retains its separately classified
 bounded STALE_REFERENCE fallback; without that history the preference is UNKNOWN.

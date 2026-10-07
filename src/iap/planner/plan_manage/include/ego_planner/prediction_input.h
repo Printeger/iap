@@ -12,8 +12,9 @@ struct PredictionInput {
   iap::PredictorParams params;
   double reference_time_s = 0.0;
   double validity_s = .5;
-  uint32_t recording_codec_version = 6;
+  uint32_t recording_codec_version = 7;
   std::string clock_model = iap::kGnssClockGeometryModel;
+  std::string gnss_fault_model = iap::kGnssGeometryFaultModel;
 };
 // Shared input authority. This only controls the Advisory posterior proxy;
 // Current Monitor fields and GLIO/FGO state are never changed.

@@ -1378,7 +1378,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto calibrated=input; calibrated.params.gnss.measurement_noise_scale=2.3;
   calibrated.params.lidar.fim_params.fim_support_voxel_m=.4;
   const auto roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(calibrated));
-  EXPECT_EQ(roundtrip.recording_codec_version,6u);
+  EXPECT_EQ(roundtrip.recording_codec_version,7u);
   EXPECT_DOUBLE_EQ(roundtrip.params.gnss.measurement_noise_scale,2.3);
   EXPECT_DOUBLE_EQ(roundtrip.params.lidar.fim_params.fim_support_voxel_m,.4);
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(calibrated));
@@ -1396,6 +1396,20 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   EXPECT_TRUE(coordinate_copy.integrity.coordinates.lever_arm_imu.isApprox(Eigen::Vector3d(.1,.2,.3),0));
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(coordinates));
   EXPECT_EQ(roundtrip.clock_model, iap::kGnssClockGeometryModel);
+  EXPECT_EQ(roundtrip.gnss_fault_model,iap::kGnssGeometryFaultModel);
+  auto other_fault=input;other_fault.gnss_fault_model="legacy_single_satellite_v1";
+  EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(other_fault));
+  const auto fault_roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(other_fault));
+  EXPECT_EQ(fault_roundtrip.gnss_fault_model,other_fault.gnss_fault_model);
+  std::string fault_rejection;
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(fault_roundtrip,{},&fault_rejection).predict);
+  EXPECT_EQ(fault_rejection,"unsupported_gnss_fault_model");
+  auto version6=input;version6.recording_codec_version=6;
+  version6=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(version6));
+  EXPECT_EQ(version6.recording_codec_version,6u);
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(version6,{},&fault_rejection).predict);
+  EXPECT_EQ(fault_rejection,"historical_codec_input");
+
   auto other_clock=input;
   other_clock.clock_model="legacy_common_clock";
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(other_clock));

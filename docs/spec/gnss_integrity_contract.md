@@ -44,11 +44,13 @@ therefore retains nominal validity but returns the degenerate 1e9 bound,
 instead of its former single-fault-only finite value. No production planner
 caller uses this deprecated proxy; its regression asserts the changed meaning.
 
-Advisory raw and FIM now use this same active clock design. Raw single-satellite
-separation compares only position blocks; its whole-constellation fault model
-is still pending. Query FIM eliminates actual clock information without an
-epsilon prior. Frozen v6 records the clock geometry model, while full optimizer
-time/covariance uncertainty qualification remains unfinished.
+Advisory raw and FIM use the same active clock design. Raw single-satellite and
+whole-constellation separation compare only position blocks. Query FIM eliminates
+actual clock information without an epsilon prior. The v7 fault model, historical
+v1–v6 reading boundary and diagnostic validity are defined in the
+[Advisory prediction contract](advisory_prediction_contract.md). Full optimizer
+time/covariance, joint fault and empirical meter-scale qualification remain
+unfinished.
 
 
 ## FGO position covariance axes

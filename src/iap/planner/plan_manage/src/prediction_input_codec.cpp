@@ -268,18 +268,24 @@ template<class Archive> void fields(Archive& ar, FrozenOccupancyEpoch& value) {
   ar & value.current_vehicle_clearance_radius_m;
 }
 template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
-  std::string schema="iap_prediction_input_v6";
+  std::string schema="iap_prediction_input_v7";
   ar & schema;
-  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6") throw std::runtime_error("unsupported prediction export schema");
+  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6" && schema!="iap_prediction_input_v7") throw std::runtime_error("unsupported prediction export schema");
   ar & input.reference_time_s & input.validity_s & input.integrity & input.params;
   // v1 reads preserve historical fields; new parameters are an explicit v2 tail.
   if (schema != "iap_prediction_input_v1") ar & input.params.fusion.max_regularization_fraction;
-  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
+  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
   else input.recording_codec_version = schema == "iap_prediction_input_v1" ? 1 : 2;
-  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6") ar & input.params.gnss.measurement_noise_scale;
-  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6") ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
-  if (schema == "iap_prediction_input_v6") ar & input.clock_model;
+  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.params.gnss.measurement_noise_scale;
+  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
+  if (schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.clock_model;
   else input.clock_model = "legacy_common_clock";
+  if(schema == "iap_prediction_input_v7") ar & input.gnss_fault_model;
+  else {
+    input.gnss_fault_model="legacy_single_satellite_v1";
+    // An older wire schema cannot claim a newer recording authority.
+    input.recording_codec_version=std::min(input.recording_codec_version,6u);
+  }
   auto epoch=std::make_shared<FrozenOccupancyEpoch>();
   if constexpr (Archive::is_saving::value) *epoch=*input.occupancy;
   fields(ar,*epoch);
@@ -371,6 +377,7 @@ uint64_t predictionInputIdentity(const PredictionInput& input) {
     if(input.recording_codec_version>=5) ar & snapshot.require_coordinates & snapshot.coordinates & snapshot.gnss_epoch.R_query_enu & snapshot.gnss_epoch.antenna_offset_query;
     ar & params.fusion.max_regularization_fraction & params.lidar.fim_params.fim_support_voxel_m & params.gnss.measurement_noise_scale;
     if(input.recording_codec_version>=6) ar & input.clock_model;
+    if(input.recording_codec_version>=7) ar & input.gnss_fault_model;
     ar << input.recording_codec_version << input.validity_s << input.occupancy->generation << input.occupancy->geometry_id;
   }
   uint64_t hash=1469598103934665603ULL;

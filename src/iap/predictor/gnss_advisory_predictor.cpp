@@ -436,6 +436,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     auto out = fallback("singular_geometry");
     out.geometry_status = pl.status;
     out.degenerate_satellite_ids = pl.degenerate_satellite_ids;
+    out.degenerate_constellation_ids = pl.degenerate_constellation_ids;
     out.n_visible = visibility.n_vis;
     out.n_unknown_support = satellite_mask == nullptr ? visibility.n_unknown : 0;
     out.n_known_support = satellite_mask == nullptr
@@ -469,6 +470,8 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
   out.weighted_geometry_condition = pl.weighted_normal_condition;
   out.worst_excluded_sat_h = pl.worst_hyp_h;
   out.worst_excluded_sat_v = pl.worst_hyp_v;
+  out.worst_excluded_constellation_h=pl.worst_hyp_constellation_h;
+  out.worst_excluded_constellation_v=pl.worst_hyp_constellation_v;
   if (pl.S0(0, 0) > 0.0 && pl.S0(1, 1) > 0.0 && pl.S0(2, 2) > 0.0) {
     out.pdop = std::sqrt(pl.S0(0, 0) + pl.S0(1, 1) + pl.S0(2, 2));
     out.hdop = std::sqrt(pl.S0(0, 0) + pl.S0(1, 1));

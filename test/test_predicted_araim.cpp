@@ -44,6 +44,8 @@ iap::PredictedAraimComputer make_predictor(const double fallback_pl = 20.0) {
 TEST(PredictedAraimComputerTest, OpenSkyWithoutOccupancyProducesResult) {
   iap::PredictedAraimComputer predictor = make_predictor();
   iap::GnssEpoch epoch = make_epoch(8);
+  // Each four-row constellation remains observable after whole-system removal.
+  for(size_t i=0;i<epoch.sats.size();++i) epoch.sats[i].constellation=i%2 ? 'C' : 'G';
   predictor.set_epoch(&epoch);
 
   const auto result = predictor.predict_araim_result(Eigen::Vector3d::Zero());
@@ -52,7 +54,7 @@ TEST(PredictedAraimComputerTest, OpenSkyWithoutOccupancyProducesResult) {
   EXPECT_FALSE(result.fallback);
   EXPECT_EQ(result.fallback_reason, "");
   EXPECT_EQ(result.n_vis, 8);
-  EXPECT_EQ(result.n_hypotheses, 8);
+  EXPECT_EQ(result.n_hypotheses, 10);
   EXPECT_GT(result.hpl, 0.0);
   EXPECT_GT(result.vpl, 0.0);
   EXPECT_DOUBLE_EQ(result.pl_scalar, std::max(result.hpl, result.vpl));
@@ -79,6 +81,8 @@ TEST(PredictedAraimComputerTest, TooFewSatellitesFallsBack) {
 TEST(PredictedAraimComputerTest, LegacyWrapperReturnsHpl) {
   iap::PredictedAraimComputer predictor = make_predictor();
   iap::GnssEpoch epoch = make_epoch(8);
+  // Each four-row constellation remains observable after whole-system removal.
+  for(size_t i=0;i<epoch.sats.size();++i) epoch.sats[i].constellation=i%2 ? 'C' : 'G';
   predictor.set_epoch(&epoch);
 
   const Eigen::Vector3d p(1.0, 2.0, 3.0);
@@ -122,4 +126,15 @@ TEST(PredictedAraimComputerTest, AdvisoryFimUsesClockSchurComplement) {
   EXPECT_NEAR((result.lambda - expected).norm(), 0.0, 1.0e-10);
   EXPECT_GT(result.trace, 0.0);
   EXPECT_GE(result.min_eig, -1.0e-9);
+}
+
+TEST(PredictedAraimComputerTest, SingleSystemWholeFaultFallbackDoesNotInvalidateFimDiagnostic) {
+  auto predictor=make_predictor(33.);
+  auto epoch=make_epoch(8);predictor.set_epoch(&epoch);
+  const auto result=predictor.predict_araim_result(Eigen::Vector3d::Zero());
+  EXPECT_FALSE(result.valid);EXPECT_TRUE(result.fallback);
+  EXPECT_EQ(result.fallback_reason,"singular_geometry");
+  EXPECT_EQ(result.n_hypotheses,9);
+  EXPECT_DOUBLE_EQ(result.hpl,33.);
+  EXPECT_TRUE(predictor.predict_advisory_fim(Eigen::Vector3d::Zero()).valid);
 }

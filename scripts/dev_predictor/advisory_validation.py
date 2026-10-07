@@ -17,8 +17,9 @@ from run_directory import (adopt_run_directory, resolve_run_directory, finalize_
                            write_subordinate_manifest, canonical_run_uses_sim_time)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
-CODEC = "iap_prediction_input_v6/boost_binary/zlib_length_u64le"
-SOURCES = ["src/iap/planner/plan_manage/src/prediction_input.cpp",
+CODEC = "iap_prediction_input_v7/boost_binary/zlib_length_u64le"
+SOURCES = ["src/iap/planner/plan_manage/include/ego_planner/prediction_input.h",
+           "src/iap/planner/plan_manage/src/prediction_input.cpp",
            "src/iap/planner/plan_manage/src/prediction_input_codec.cpp",
            "src/iap/planner/plan_manage/src/planner_risk.cpp",
            "src/iap/planner/plan_manage/src/advisory_validation.cpp"]
@@ -487,7 +488,7 @@ def report(run, dataset=None):
             "", "| 独立结论 | 状态 |", "|---|---|"]
     text += [f"| {k} | `{summary[k]}` |" for k in ("input_availability", "spatial_sensitivity", "actual_error_conformity")]
     text += ["", "[原始 summary.json](summary.json)", "", "## 已完成的合成机制实验", "",
-             "使用真实 PredictorModule、共享生产冻结准备与 v1 codec；固定参考时间 100 s，tau=0。S0 为合成六平面几何，最多 100 个唯一 0.1 m 体素中心，范围约 10×10 m。",
+             "使用真实 PredictorModule、共享生产冻结准备与 v7 codec；固定参考时间 100 s，tau=0。S0 为合成六平面几何，最多 100 个唯一 0.1 m 体素中心，范围约 10×10 m。",
              "S1/S2/S3 分别将 GNSS、LiDAR 或两者测量 sigma 乘以 1/10/100；不删除物理障碍。S4 的 alpha=1/0.1/0 仅为诊断。GNSS 合成 epoch 的身份同步重算，固定合成监测 anchor；因此还导出 raw GNSS PL，不能将其解释为重新计算的认证监测 PL。",
              "弱法向变体仅过滤离线 primitive 支持，不修改物理 flags，包装器原结果与该诊断分列；其 wrapper_equal 为 N/A。",
              "", "| 组别 | HPL (m) | VPL (m) | 单调检查 |", "|---|---|---|---|"]

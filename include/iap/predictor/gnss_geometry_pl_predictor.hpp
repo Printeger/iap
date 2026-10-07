@@ -10,6 +10,8 @@
 
 namespace iap {
 
+inline constexpr char kGnssGeometryFaultModel[] = "single_satellite_and_constellation_v1";
+
 enum class GnssGeometryStatus {
   NOT_EVALUATED = 0,
   VALID,
@@ -72,7 +74,11 @@ struct GnssGeometryPlResult {
   int    worst_hyp   = -1;
   int    worst_hyp_h = -1;
   int    worst_hyp_v = -1;
+  // Satellite and whole-constellation failures have distinct identities.
+  char worst_hyp_constellation_h = 0;
+  char worst_hyp_constellation_v = 0;
   std::vector<int> degenerate_satellite_ids;
+  std::vector<char> degenerate_constellation_ids;
   double weighted_normal_condition =
       std::numeric_limits<double>::quiet_NaN();
   Eigen::MatrixXd S0 = Eigen::MatrixXd::Identity(4,4);

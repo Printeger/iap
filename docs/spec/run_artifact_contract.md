@@ -321,9 +321,12 @@ must match; a common GNU build ID alone is insufficient. Both original hashes
 and the match method are retained. Build-cache identities join command/config/input hashes in
 the subordinate runtime identity manifest.
 
-新预测冻结传输为`iap_prediction_input_v6`，显式`clock_model`登记活动星座
-偏差模型并参与输入hash；旧v1–v5保留历史读取身份，生产GridMap拒绝旧版本
-及不支持模型。该身份没有授予优化状态时间／covariance／外参不确定性资格。
+新预测冻结传输为`iap_prediction_input_v7`，显式`clock_model`登记活动星座
+偏差模型、`gnss_fault_model`登记单星＋整星座故障集合，两者参与输入hash；
+旧v1–v6保留历史读取身份，v6保留真实钟差模型及legacy_single_satellite_v1，
+生产GridMap拒绝旧版本及不支持模型。原wire版本不能通过声明或重编码取得v7资格。
+诊断矩阵导出分别记录单星与整星座最坏假设身份、退化星座与假设总数；
+该身份没有授予优化状态时间／covariance／外参不确定性及联合米数资格。
 元数据对未识别模型写unsupported，原字段完整保留在input.bin；不能重赋新鲜度。
 
 Uniform retiming of the same frozen guide/control indexing uses

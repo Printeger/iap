@@ -1372,3 +1372,10 @@ Release server构建安装，server时间／定时执行／完整反馈3组通�
 保留、D任务收益仍未通过；异常时间跳变未验证。当前表、失败身份、自动化／现场
 及阻塞索引见[实施进度](../dev_planner/curve_advisory_channel_progress.md)，完整图文
 见本轮campaign的`export/analysis/server_ros_clock_pause/report.md`；正式0/9＋0/9、0/6。
+
+
+B raw模型接口已补齐并通过机制回归：N个单星＋每个活动整星座故障，全部子集重新确定活动钟差，
+仅比较位置块，任何退化不授予raw PL。原统一风险分配计入完整假设数；单星座
+整故障可使raw失败而完整FIM仍为信息诊断，原来源准入与prior OFF保持。
+v7冻结时钟／故障模型身份及hash，旧v1–v6只作历史读取；真实优化状态／epoch传播、
+联合GNSS/LiDAR及米数资格未授予。自动化／现场状态以实施进度为准。

@@ -120,6 +120,8 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o << ",\"recording_codec_version\":"<<in.recording_codec_version;
   o << ",\"clock_model\":"; o << std::quoted(in.clock_model==iap::kGnssClockGeometryModel ? iap::kGnssClockGeometryModel :
       in.clock_model=="legacy_common_clock" ? "legacy_common_clock" : "unsupported");
+  o << ",\"gnss_fault_model\":" << std::quoted(in.gnss_fault_model==iap::kGnssGeometryFaultModel ? iap::kGnssGeometryFaultModel :
+      in.gnss_fault_model=="legacy_single_satellite_v1" ? "legacy_single_satellite_v1" : "unsupported");
   o << ",\"pose_stamp\":"; number(o,s.pose_stamp);
   o << ",\"estimation_frame_id\":"<<s.current.estimation_frame_id;
   o << ",\"epoch_source_identity\":"<<s.gnss_epoch.source_identity;
@@ -329,6 +331,16 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
       const Point weak=eig.eigenvectors().col(0);const double total_info=weak.dot(f.lambda_pred*weak);
       number(matrices,total_info>0?weak.dot(f.lambda_prior*weak)/total_info:NAN);
     } else matrices<<"null";
+    matrices<<",\"gnss_geometry_status\":"<<std::quoted(iap::gnssGeometryStatusName(result.gnss.geometry_status))
+      <<",\"gnss_fault_hypotheses\":"<<result.gnss.n_hypotheses
+      <<",\"gnss_worst_excluded_sat_h\":"<<result.gnss.worst_excluded_sat_h
+      <<",\"gnss_worst_excluded_sat_v\":"<<result.gnss.worst_excluded_sat_v
+      <<",\"gnss_worst_excluded_constellation_h\":"<<std::quoted(result.gnss.worst_excluded_constellation_h ? std::string(1,result.gnss.worst_excluded_constellation_h) : "")
+      <<",\"gnss_worst_excluded_constellation_v\":"<<std::quoted(result.gnss.worst_excluded_constellation_v ? std::string(1,result.gnss.worst_excluded_constellation_v) : "")
+      <<",\"gnss_degenerate_constellations\":[";
+    for(size_t j=0;j<result.gnss.degenerate_constellation_ids.size();++j)
+      matrices<<(j ? "," : "")<<std::quoted(std::string(1,result.gnss.degenerate_constellation_ids[j]));
+    matrices<<"]";
     matrices<<",\"numerical_status\":"<<static_cast<int>(f.numerical_status);
     matrices<<",\"regularization_fraction\":";number(matrices,f.regularization_fraction);
     matrices<<",\"regularized_diagnostic_hpl\":";number(matrices,f.regularized_diagnostic_hpl);
@@ -491,7 +503,7 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
-      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<6?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<7?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
       for (const bool enabled : {true, false}) {
         auto variant=in;
         ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
@@ -502,8 +514,8 @@ int main(int argc,char** argv) {
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
-      evaluate(in,label,in.recording_codec_version<6?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
-      evaluate(in,label+"_current",in.recording_codec_version<6?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
+      evaluate(in,label,in.recording_codec_version<7?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
+      evaluate(in,label+"_current",in.recording_codec_version<7?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
     }
     std::cout<<log.run_dir()<<'\n';
   } catch(const std::exception& e) {std::cerr<<"advisory_validation: "<<e.what()<<'\n';return 1;}

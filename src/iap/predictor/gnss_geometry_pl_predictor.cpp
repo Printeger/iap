@@ -158,7 +158,6 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   Eigen::MatrixXd positions(N, 3);
   std::vector<int> systems;
   Eigen::VectorXd W(N);
-  const Eigen::VectorXd r = Eigen::VectorXd::Zero(N);  // r=0 for advisory
 
   for (int i = 0; i < N; ++i) {
     const double el = visible_sats[i].elevation;
@@ -216,6 +215,11 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   out.sigma_ff_N = std::sqrt(std::max(0.0, out.S0(1, 1)));
   out.sigma_ff_U = std::sqrt(std::max(0.0, out.S0(2, 2)));
 
+  const int hypothesis_count=N+std::count_if(system_counts.begin(),system_counts.end(),
+      [](int count){return count>0;});
+  out.n_hypotheses=hypothesis_count;
+
+  // The existing uniform allocation covers every enumerated fault hypothesis.
   // Dynamic budget
   double K_ff_eff = params_.K_ff;
   double K_fa_eff = params_.K_fa;
@@ -224,9 +228,9 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   if (params_.dynamic_budget && N > 0) {
     const double P_HMI_0 = params_.P_HMI_req / 2.0;
     K_ff_eff = Q_inv(P_HMI_0 / 2.0);
-    const double P_FA_per = params_.P_FA_req / static_cast<double>(N);
+    const double P_FA_per = params_.P_FA_req / static_cast<double>(hypothesis_count);
     K_fa_eff = Q_inv(P_FA_per / 2.0);
-    K_md_eff = Q_inv(params_.P_HMI_req / (2.0 * static_cast<double>(N)));
+    K_md_eff = Q_inv(params_.P_HMI_req / (2.0 * static_cast<double>(hypothesis_count)));
     K_ff_eff = std::max(1.0, K_ff_eff);
     K_fa_eff = std::max(1.0, K_fa_eff);
     K_md_eff = std::max(1.0, K_md_eff);
@@ -239,13 +243,43 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   out.pl_ff   = std::max(K_ff_eff * out.sigma_ff_E, K_ff_eff * out.sigma_ff_N);
   out.pl_ff_V = K_ff_eff * out.sigma_ff_U;
 
-  // Per-satellite subset solutions
+  // Single-satellite and whole-constellation subset solutions
   double best_PL_E = K_ff_eff * out.sigma_ff_E;
   double best_PL_N = K_ff_eff * out.sigma_ff_N;
   double best_PL_U = K_ff_eff * out.sigma_ff_U;
   int worst_hyp_e = -1;
   int worst_hyp_n = -1;
   int worst_hyp_u = -1;
+
+  char worst_constellation_e=0,worst_constellation_n=0,worst_constellation_u=0;
+  const auto include_subset=[&](const Eigen::MatrixXd& Sk,int satellite_id,char constellation) {
+    const double sigma_ss_E = std::sqrt(std::max(0.0, Sk(0, 0) - out.S0(0, 0)));
+    const double sigma_ss_N = std::sqrt(std::max(0.0, Sk(1, 1) - out.S0(1, 1)));
+    const double sigma_ss_U = std::sqrt(std::max(0.0, Sk(2, 2) - out.S0(2, 2)));
+    const double sigma_k_E = std::sqrt(std::max(0.0, Sk(0, 0)));
+    const double sigma_k_N = std::sqrt(std::max(0.0, Sk(1, 1)));
+    const double sigma_k_U = std::sqrt(std::max(0.0, Sk(2, 2)));
+
+    const double pl_e = K_fa_eff * sigma_ss_E + K_md_eff * sigma_k_E;
+    const double pl_n = K_fa_eff * sigma_ss_N + K_md_eff * sigma_k_N;
+    const double pl_u = K_fa_eff * sigma_ss_U + K_md_eff * sigma_k_U;
+
+    if (pl_e > best_PL_E) {
+      best_PL_E = pl_e;
+      worst_hyp_e = satellite_id;
+      worst_constellation_e = constellation;
+    }
+    if (pl_n > best_PL_N) {
+      best_PL_N = pl_n;
+      worst_hyp_n = satellite_id;
+      worst_constellation_n = constellation;
+    }
+    if (pl_u > best_PL_U) {
+      best_PL_U = pl_u;
+      worst_hyp_u = satellite_id;
+      worst_constellation_u = constellation;
+    }
+  };
 
   for (int k = 0; k < N; ++k) {
     const Eigen::VectorXd gi = G.row(k).transpose();
@@ -291,29 +325,34 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
       out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
       return out;
     }
-    const double sigma_ss_E = std::sqrt(std::max(0.0, Sk(0, 0) - out.S0(0, 0)));
-    const double sigma_ss_N = std::sqrt(std::max(0.0, Sk(1, 1) - out.S0(1, 1)));
-    const double sigma_ss_U = std::sqrt(std::max(0.0, Sk(2, 2) - out.S0(2, 2)));
-    const double sigma_k_E = std::sqrt(std::max(0.0, Sk(0, 0)));
-    const double sigma_k_N = std::sqrt(std::max(0.0, Sk(1, 1)));
-    const double sigma_k_U = std::sqrt(std::max(0.0, Sk(2, 2)));
+    include_subset(Sk,visible_sats[k].sat_id,0);
+  }
 
-    const double pl_e = K_fa_eff * sigma_ss_E + K_md_eff * sigma_k_E;
-    const double pl_n = K_fa_eff * sigma_ss_N + K_md_eff * sigma_k_N;
-    const double pl_u = K_fa_eff * sigma_ss_U + K_md_eff * sigma_k_U;
-
-    if (pl_e > best_PL_E) {
-      best_PL_E = pl_e;
-      worst_hyp_e = visible_sats[k].sat_id;
+  for(int system=0;system<4;++system) {
+    if(system_counts[system]==0) continue;
+    const int remaining=N-system_counts[system];
+    Eigen::MatrixXd kept_positions(remaining,3);
+    Eigen::VectorXd kept_weights(remaining);
+    std::vector<int> kept_systems;
+    char excluded_constellation=0;
+    int kept=0;
+    for(int row=0;row<N;++row) {
+      if(systems[row]==system) {excluded_constellation=visible_sats[row].constellation;continue;}
+      kept_positions.row(kept)=positions.row(row);kept_weights[kept++]=W[row];
+      kept_systems.push_back(systems[row]);
     }
-    if (pl_n > best_PL_N) {
-      best_PL_N = pl_n;
-      worst_hyp_n = visible_sats[k].sat_id;
+    // Rebuild the active clock design for this hypothesis. Removing a whole
+    // system cannot leave an empty bias column, or add an epsilon clock prior.
+    const auto Gk=gnss_clock_design(kept_positions,kept_systems);
+    const Eigen::MatrixXd Ak=Gk.transpose()*kept_weights.asDiagonal()*Gk;
+    Eigen::LDLT<Eigen::MatrixXd> ldltk;
+    if(!factorize(Ak,params_.eps_degen,&ldltk)) {
+      out.valid=false;out.status=GnssGeometryStatus::SUBSET_DEGENERATE;
+      out.degenerate_constellation_ids.push_back(excluded_constellation);continue;
     }
-    if (pl_u > best_PL_U) {
-      best_PL_U = pl_u;
-      worst_hyp_u = visible_sats[k].sat_id;
-    }
+    const Eigen::MatrixXd Sk=ldltk.solve(Eigen::MatrixXd::Identity(Ak.cols(),Ak.cols()));
+    if(!Sk.allFinite()) {out.valid=false;out.status=GnssGeometryStatus::NUMERICAL_FAILURE;return out;}
+    include_subset(Sk,-1,excluded_constellation);
   }
 
   if (!out.valid) {
@@ -325,10 +364,11 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   out.PL_U = std::max(K_ff_eff * out.sigma_ff_U, best_PL_U);
   out.HPL  = std::max(out.PL_E, out.PL_N);
   out.VPL  = out.PL_U;
-  out.n_hypotheses = N;
   out.worst_hyp_h = out.PL_E >= out.PL_N ? worst_hyp_e : worst_hyp_n;
   out.worst_hyp_v = worst_hyp_u;
   out.worst_hyp = out.worst_hyp_h;
+  out.worst_hyp_constellation_h=out.PL_E>=out.PL_N ? worst_constellation_e : worst_constellation_n;
+  out.worst_hyp_constellation_v=worst_constellation_u;
   if (!std::isfinite(out.HPL) || !std::isfinite(out.VPL) ||
       !std::isfinite(out.PL_E) || !std::isfinite(out.PL_N) ||
       !std::isfinite(out.PL_U)) {

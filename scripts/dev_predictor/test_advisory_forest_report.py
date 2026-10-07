@@ -3,10 +3,45 @@ from pathlib import Path
 import tempfile
 import unittest
 import numpy as np
+from advisory_coordinate_evidence import audit
 from advisory_forest_report import truth_at, csv_write, analyze, information_diagnostics, unique_trials, validated_replays, digest, araim_rows
 
 
 class ForestReportContract(unittest.TestCase):
+    def coordinate_input(self):
+        eye3=np.eye(3).tolist();eye4=np.eye(4).tolist()
+        return {'recording_codec_version':7,'clock_model':'per_constellation_pseudorange_bias_v1',
+                'gnss_fault_model':'single_satellite_and_constellation_v1',
+                'frame_id':'map','estimation_frame_id':'optimized','current_stamp':100.,'pose_stamp':100.,
+                'reference_time_s':100.,'gnss_stamp':99.95,'gps_sec':117.95,'has_epoch':True,
+                'epoch_source_identity':'original_epoch','gnss_satellites':[{'excluded':False,'ecef':[0.,10.,0.],
+                    'azimuth':0.,'elevation':0.}],
+                'coordinates':{'required':True,'valid':True,'reason':'','map_frame':'map','body_frame':'imu',
+                    'stamp':100.,'frame_id':'optimized','epoch_source_identity':'original_epoch',
+                    'R_ecef_world':eye3,'R_ecef_enu':eye3,'R_map_enu':eye3,
+                    'T_map_world':eye4,'T_world_imu':eye4,'T_lidar_imu':eye4,
+                    'lever_arm_imu':[0.,0.,0.],'anchor_ecef':[0.,0.,0.]}}
+
+    def test_current_fault_model_can_audit_coordinates_without_granting_uncertainty(self):
+        result=audit(self.coordinate_input())
+        self.assertTrue(result['valid']);self.assertEqual(result['directions_checked'],1)
+        self.assertIn('uncertainty is not propagated',result['conditioning'])
+
+    def test_old_or_unknown_models_cannot_acquire_current_coordinate_qualification(self):
+        for key,value in [('recording_codec_version',6),('clock_model','unknown'),('gnss_fault_model','unknown')]:
+            with self.subTest(key=key):
+                meta=self.coordinate_input();meta[key]=value
+                with self.assertRaisesRegex(ValueError,'production_coordinate_evidence_unavailable'):audit(meta)
+
+    def test_current_codec_still_checks_original_epoch_time_and_direction(self):
+        for key,value,reason in [('pose_stamp',100.1,'time_mismatch'),
+                                ('epoch_source_identity','other_epoch','epoch_identity_mismatch')]:
+            with self.subTest(key=key):
+                meta=self.coordinate_input();meta[key]=value
+                with self.assertRaisesRegex(ValueError,reason):audit(meta)
+        meta=self.coordinate_input();meta['gnss_satellites'][0]['azimuth']=.1
+        with self.assertRaisesRegex(ValueError,'direct_ecef_direction_mismatch'):audit(meta)
+
     def test_misaligned_hypothesis_rows_are_not_zero_or_valid_counts(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'araim.csv'
