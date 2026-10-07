@@ -1518,3 +1518,26 @@ physical_precondition_reason，不能借旧实际曲线检查写 checked。未�
 现场7634cb49 attempt31 的 phase5暴露该问题；生产 seam红例1→2代数错配与原binary/log
 在 campaign release_corridor_owner_red 保留。完整Release／7组规划及43入口通过，三项机制与缺epoch真实导出回归通过，
 两轴只读审查无剩余阻塞；安装已同步，新干净现场待完成；正式B0/9＋0/9、D0/6、默认不推广。
+
+
+### 原 FSM 到达证据及发布 owner 现场核验
+
+干净 `2ff5c31d` 的300秒 `225155Z_510` 已完成；54发布／48命令ID／31定时激活，
+实际前进36.056m。attempt4 base59→release63净空拒绝；末完整拒绝attempt141
+base1581→actual1584 OK→组合1585前驱未知，最新原map／motion／首违cell同代，
+后续142–146成功。Curve89原时间生产重放仍动力学失败／final not_checked；141原
+backend通过不等于组合发布通过。报告与hash索引见
+[300秒发布检查现场报告](../../log/20261007T091820Z_056/export/analysis/release_owner_live/report.md)。
+
+原到达规则保持。PRESET_TARGET 到达分支先同步调用 planNextWaypoint 重置路点，
+日志可为 `[FSM]: from REPLAN_TRAJ to WAIT_TARGET`；仅匹配EXEC_TRAJ会漏判。
+只读 `scripts/dev_planner/audit_task_arrival.py` 对原run提交源码、非初始化FSM转换
+及原log hash审计，独立输出新resolver run；启动INIT、状态打印或SAFETY转换不算到达。
+4项回归红绿（含原log缺hash／篡改拒绝）与历史审计 `230957Z_186` 确认225155与195232到达；203631与192221未到达。
+旧报告／JSON／manifest不改写，旧false结论由本段更正。末wire54独立端点与附近
+odom佐证保持分开，附近采集不冒充FSM精确应用样本。lifecycle退出0不授予到达。
+
+7次pending撤销中5次生效前成功，42／45迟到约.070／.138秒且已命令执行；
+原FSM到达不授予全接续安全资格。当前A合法发布／切换／运动及到达已观察，迟到反馈
+仍待闭环；B传播／方向／噪声与联合故障资格阻塞，C真实合格风险收益未验证，
+B0/9＋0/9、D正式0/6、默认不推广。本轮未启用GPU逐匹配导出。

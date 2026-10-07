@@ -1327,3 +1327,12 @@ B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广�
 与独立原 generation/time/motion 保存最新证明；base snapshot 和 backend 原输入保持。
 缺 epoch 显示 `not_checked` 和前置原因；同输入 backend 通过不能追认为发布授权。
 接口与回归见 [Safety Planner 契约](docs/spec/safety_planner_contract.md#a-发布前组合物理检查的取证所有权)。
+
+
+300秒干净发布owner核验 `2ff5c31d/225155Z_510`：54发布／48命令ID／31激活，原FSM到达；
+末完整拒绝141保持planning1581与release1585独立原证明。PRESET_TARGET到达日志先
+重置为REPLAN_TRAJ，旧只匹配EXEC_TRAJ的派生统计漏判；新只读审计：
+`python3 scripts/dev_planner/audit_task_arrival.py <原run目录> [<其他原run目录> ...]`，
+共享resolver另存输出，原日志／报告保持不变。历史195232亦到达，203631未到达。
+两次已激活后迟到撤销仍阻塞全接续资格；到达不计正式D，不推广默认。
+[图文报告与证据索引](log/20261007T091820Z_056/export/analysis/release_owner_live/report.md)。
