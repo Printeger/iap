@@ -285,6 +285,8 @@ diagnostic does not qualify a frozen state or grant Advisory validity.
 
 The forest driver binds installed binaries, plugins and the core library to
 their workspace Release build hashes before starting processes. An ordinary
-installed copy is permitted only when its hash matches; a symlink alone is
-insufficient proof. Build-cache identities join command/config/input hashes in
+installed copy is permitted when byte-identical or when its only byte changes
+are CMake removing the build RPATH string and dynamic entries. All other bytes
+must match; a common GNU build ID alone is insufficient. Both original hashes
+and the match method are retained. Build-cache identities join command/config/input hashes in
 the subordinate runtime identity manifest.

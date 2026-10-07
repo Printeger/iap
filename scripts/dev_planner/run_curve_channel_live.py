@@ -12,7 +12,7 @@ import time
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'scripts/dev_predictor'))
-from advisory_validation import (source_identity, binary_identity, preflight,
+from advisory_validation import (source_identity, binary_identity, installed_build_identity, preflight,
                                 manifest, sha, safe_label)
 from run_directory import resolve_run_directory, finalize_run, register_subordinate_manifest
 
@@ -75,11 +75,14 @@ def main():
             cache = build_root / package / 'CMakeCache.txt'
             if not cache.is_file() or 'CMAKE_BUILD_TYPE:STRING=Release' not in cache.read_text():
                 raise RuntimeError(f'RELEASE_BUILD_REQUIRED: {cache}')
-            if not built.is_file() or sha(installed) != sha(built):
+            if not built.is_file():
                 raise RuntimeError(f'INSTALLED_BINARY_MISMATCH: {installed} != {built}; build and install before live')
+            try:
+                match = installed_build_identity(installed, built)
+            except (ValueError, KeyError) as error:
+                raise RuntimeError(f'INSTALLED_BINARY_MISMATCH: {installed} != {built}: {error}') from error
             result = binary_identity(installed.resolve())
-            result['workspace_release_binary'] = str(built)
-            result['workspace_release_sha256'] = sha(built)
+            result.update(match)
             result['build_cache_sha256'] = sha(cache)
             return result
         runtime_binary = verified_binary('ego_planner', executable, 'ego_planner_node')

@@ -1096,4 +1096,5 @@ ros2 launch iap iap_sim.launch.py rinex_nav_file:=<绝对历史混合NAV路径> 
 联合协方差见`export/glio/constellation_clock.csv`；采样诊断不授予Advisory准入。
 生产回归：`ctest --test-dir ../../build/iap -R '^test_araim$' --output-on-failure`。
 Monitor／FIM活动列、冻结模型与真实标定仍待完成。现场驱动在启动前比较安装产物
-与当前工作区构建的hash，包括非符号链接的`libiap.so`；不一致先构建并安装。
+与当前工作区构建的内容，包括非符号链接的`libiap.so`；仅允许CMake删除构建
+RPATH的可解释字节变化，分别登记两份hash，其余不一致先构建并安装。

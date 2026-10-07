@@ -143,6 +143,47 @@ def binary_identity(binary):
             "compile_flags": flags.read_text() if flags.exists() else None}
 
 
+def installed_build_identity(installed, built):
+    """Permit byte identity or exactly CMake's removal of an ELF64 build RPATH."""
+    import struct
+    installed, built = Path(installed), Path(built)
+    source, actual = built.read_bytes(), installed.read_bytes()
+    kind = "exact_bytes"
+    if source != actual:
+        if source[:6] != b"\x7fELF\x02\x01" or len(source) < 64:
+            raise ValueError("installed binary differs from workspace build")
+        offset = struct.unpack_from("<Q", source, 40)[0]
+        entry_size, count, strings_index = struct.unpack_from("<HHH", source, 58)
+        if entry_size != 64 or strings_index >= count or offset + count * entry_size > len(source):
+            raise ValueError("invalid build ELF section table")
+        headers = [struct.unpack_from("<IIQQQQIIQQ", source, offset + i * entry_size) for i in range(count)]
+        string_header = headers[strings_index]
+        names = source[string_header[4]:string_header[4] + string_header[5]]
+        sections = {names[h[0]:].split(b"\0", 1)[0]: h for h in headers}
+        dynamic, strings = sections[b".dynamic"], sections[b".dynstr"]
+        if dynamic[5] % 16 or dynamic[4] + dynamic[5] > len(source) or strings[4] + strings[5] > len(source):
+            raise ValueError("invalid build ELF dynamic sections")
+        entries = list(struct.iter_unpack("<QQ", source[dynamic[4]:dynamic[4] + dynamic[5]]))
+        paths = [value for tag, value in entries if tag in (15, 29)]
+        if not paths:
+            raise ValueError("installed binary differs beyond an RPATH removal")
+        expected = bytearray(source)
+        for path in paths:
+            if path >= strings[5]:
+                raise ValueError("invalid build ELF RPATH offset")
+            start = strings[4] + path
+            end = source.index(b"\0", start, strings[4] + strings[5])
+            expected[start:end + 1] = bytes(end + 1 - start)
+        remaining = [entry for entry in entries if entry[0] not in (15, 29)]
+        remaining += [(0, 0)] * (len(entries) - len(remaining))
+        expected[dynamic[4]:dynamic[4] + dynamic[5]] = b"".join(struct.pack("<QQ", *entry) for entry in remaining)
+        if actual != expected:
+            raise ValueError("installed binary differs beyond an RPATH removal")
+        kind = "cmake_build_rpath_removed"
+    return {"match": kind, "workspace_release_binary": str(built),
+            "workspace_release_sha256": sha(built), "installed_sha256": sha(installed)}
+
+
 def backend(run, binary, args, name):
     stem = "runtime/ros/advisory_" + safe_label(name)
     attempt = 0
