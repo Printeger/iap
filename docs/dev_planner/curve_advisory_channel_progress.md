@@ -387,3 +387,15 @@ OFF/prior OFF、固定终点300秒run182910Z_832，进程／录制driver完成�
 通过；与旧现场路径不同，不当严格收益对照。候选原始风险139项同物理66/risk66
 全部LiDAR-only flags1433，GNSS raw未计算，不授予双源资格。图文／三维／hash
 索引analysis/guide_tube_live与guide_tube_live_final；B正式0/9+0/9、D0/6不变。
+
+
+A/C重定时绑定：抽取原生产retime清除入口后，真实单项红例
+uniform_retime_red显示实际约束成本278.525266→0、梯度消失，仅保持断言失败。
+策略：同一冻结guide／图、同控制点索引的uniform缩放保留normalized t/dt basis及
+全部实际样条约束，普通新fit仍清除；换控制点数在修改状态前拒绝。不增加额度／
+重定时次数，不放宽动力学、独立物理／route及发布门。两轴无硬问题；补非零端点
+P/V/A重绑定后的样本求值回归。Release构建／安装、七组planner通过；扩展非零PVA重绑定单项及43入口检查通过。
+保留样本加权位置与新样条求值差<1e-12，成本／梯度完全一致；现场尚待验证。
+新Curve50/gen662原参数生产重放183620Z_726复现纠正solver-1008；与重定时
+清除是独立问题，保持拒绝。B官方B1I 3.0原PDF重新取得并hash登记bds_icd_retry，
+规范逐项审计仍待完成，正式B0/9+0/9、D0/6保持。

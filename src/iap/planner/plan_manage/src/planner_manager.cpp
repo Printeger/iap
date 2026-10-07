@@ -1069,7 +1069,7 @@ namespace ego_planner
         // Rebinding physical P/V/A moves endpoint controls; unchanged interior
         // controls can retain a super-limit boundary derivative indefinitely.
         // Rebind constraints to this parameterization and refine the same guide.
-        optimizer.initializeFromGuide(control);
+        optimizer.rebindAfterUniformRetime(control);
         const auto retimed=assessTrajectory(UniformBspline(control,3,interval),0,planning_view_->time_s,
             false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
         if(retimed.budget_exhausted) return fail(PlanFailure::Budget);

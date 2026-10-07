@@ -325,3 +325,12 @@ the subordinate runtime identity manifest.
 偏差模型并参与输入hash；旧v1–v5保留历史读取身份，生产GridMap拒绝旧版本
 及不支持模型。该身份没有授予优化状态时间／covariance／外参不确定性资格。
 元数据对未识别模型写unsupported，原字段完整保留在input.bin；不能重赋新鲜度。
+
+Uniform retiming of the same frozen guide/control indexing uses
+`BsplineOptimizer::rebindAfterUniformRetime`. Actual-sample physical planes,
+guide preferences and bilateral corridor constraints retain their normalized
+`t/dt` cubic weights; costs use the current rebound endpoint controls. The
+manager and offline production replay share this binding. A changed control
+count is rejected before mutation. An ordinary new target fit still clears
+these constraints. This binding neither spends an additional repair nor grants
+execution; independent physical, dynamic, route and publication checks remain.

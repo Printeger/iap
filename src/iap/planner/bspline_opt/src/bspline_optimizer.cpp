@@ -1,5 +1,6 @@
 #include "bspline_opt/bspline_optimizer.h"
 #include "bspline_opt/gradient_descent_optimizer.h"
+#include <stdexcept>
 // using namespace std;
 
 namespace ego_planner
@@ -145,6 +146,20 @@ namespace ego_planner
         cps_.base_point[i].push_back(nearest-direction*cps_.clearance);
       }
     }
+  }
+
+  void BsplineOptimizer::rebindAfterUniformRetime(const Eigen::MatrixXd& points) {
+    if(points.rows()!=3 || points.cols()<7 || !points.allFinite() ||
+        points.cols()!=cps_.points.cols() || guide_pts_.size()<2)
+      throw std::invalid_argument("uniform retime requires the same guide and control indexing");
+    // Each sample is indexed by t/dt. Uniformly scaling all knot intervals
+    // leaves its four cubic weights and control indices unchanged, including
+    // after physical endpoint P/V/A are rebound. The frozen map/guide and their
+    // supporting planes remain the same input; independent checks still own
+    // execution. A new target fit continues to use initializeFromGuide.
+    auto constraints=std::move(curve_clearance_constraints_);
+    initializeFromGuide(points);
+    curve_clearance_constraints_=std::move(constraints);
   }
 
   bool BsplineOptimizer::addCurveClearanceConstraints(const Eigen::MatrixXd& points,

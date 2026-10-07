@@ -207,3 +207,12 @@ formula. Physical unknown/out-of-map support and independently lost risk
 preference retain their guide-directed sample constraints; no direct PL
 gradient is introduced. Re-fitting still invalidates old parameter indices.
 Independent physical, dynamics, retention and publication checks remain required.
+
+Uniform retiming of the same frozen guide/control indexing uses
+`BsplineOptimizer::rebindAfterUniformRetime`. Actual-sample physical planes,
+guide preferences and bilateral corridor constraints retain their normalized
+`t/dt` cubic weights; costs use the current rebound endpoint controls. The
+manager and offline production replay share this binding. A changed control
+count is rejected before mutation. An ordinary new target fit still clears
+these constraints. This binding neither spends an additional repair nor grants
+execution; independent physical, dynamic, route and publication checks remain.

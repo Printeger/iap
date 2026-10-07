@@ -232,7 +232,7 @@ int main(int argc,char**argv) {
     dt*=std::max(1.1,ratio*1.05);UniformBspline::enforceBoundaryStates(q,dt,start,sv,sa,end,ev,ea);
     save("retimed_bound",q,dt);
     if(mode!="retime") {
-      optimizer.initializeFromGuide(q);
+      optimizer.rebindAfterUniformRetime(q);
       const auto rebound=assess(q,dt);constraint_samples+=rebound.curve_clearance_violations.size();
       if(rebound.budget_exhausted || (!rebound.curve_clearance_violations.empty() &&
           !budget->tryRepair(PlanningBudget::Repair::CurveCorrection))) {termination="curve_correction_budget_denied";break;}

@@ -79,6 +79,28 @@ struct GridMapTestAccess {
   }
 };
 namespace ego_planner {
+struct BsplineOptimizerTestAccess {
+  static std::pair<double,Eigen::MatrixXd> curveObjective(BsplineOptimizer& optimizer,
+      const Eigen::MatrixXd& points) {
+    double cost=0;
+    Eigen::MatrixXd gradient=Eigen::MatrixXd::Zero(3,points.cols());
+    optimizer.calcCurvePhysicalCost(points,cost,gradient);
+    return {cost,gradient};
+  }
+  static double sampleEvaluationError(BsplineOptimizer& optimizer,
+      const Eigen::MatrixXd& points,double interval) {
+    UniformBspline curve(points,3,interval);
+    double maximum=0;
+    for(const auto& sample:optimizer.curve_clearance_constraints_) {
+      Eigen::Vector3d position=Eigen::Vector3d::Zero();
+      for(int j=0;j<4;++j) position+=sample.weights[j]*points.col(sample.first_control+j);
+      const double fraction=std::cbrt(6*sample.weights[3]);
+      maximum=std::max(maximum,(position-curve.evaluateDeBoorT(
+          (sample.first_control+fraction)*interval)).norm());
+    }
+    return maximum;
+  }
+};
 struct EGOReplanFSMTestAccess {
   static void configure(EGOReplanFSM& fsm, EGOPlannerManager::Ptr manager,
                         rclcpp::Node::SharedPtr node, const Eigen::Vector3d& position,
@@ -2104,6 +2126,56 @@ TEST(EgoBaseline, PureRouteCorrectionPreservesLegalDeviationInsideItsCorridor) {
         << "legal corridor samples need no correction, including warning-support fallback="
         << warning_support;
   }
+}
+
+TEST(EgoBaseline, UniformRetimeKeepsActualSampleObjectiveWhileNewFitClearsIt) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  optimizer.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;return cell;
+  },true);
+  Eigen::MatrixXd q(3,12);
+  for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  q.block(2,4,1,4).array()+=.3;
+  optimizer.setControlPoints(q);optimizer.setGuidePath({Eigen::Vector3d(-2,0,1),Eigen::Vector3d(2,0,1)});
+  optimizer.initializeFromGuide(q);
+  ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,.4,true));
+  // Include a real physical supporting plane as well as the bilateral guide
+  // tube. Under uniform time scaling both keep exactly the same cubic basis.
+  ego_planner::UniformBspline original(q,3,.4);
+  GridPlanningCell violation;violation.required_clearance_m=.55;
+  violation.nearest_raw_center=original.evaluateDeBoorT(1.3)-Eigen::Vector3d(0,.3,0);
+  ASSERT_TRUE(optimizer.addCurveClearanceConstraints(q,.4,{{1.3,violation}}));
+  const auto before=ego_planner::BsplineOptimizerTestAccess::curveObjective(optimizer,q);
+  ASSERT_GT(before.first,1.);
+  optimizer.rebindAfterUniformRetime(q);
+  const auto after=ego_planner::BsplineOptimizerTestAccess::curveObjective(optimizer,q);
+  EXPECT_DOUBLE_EQ(before.first,after.first);
+  EXPECT_TRUE(before.second.isApprox(after.second,1e-12));
+  EXPECT_THROW(optimizer.rebindAfterUniformRetime(q.leftCols(11)),std::invalid_argument);
+  EXPECT_DOUBLE_EQ(ego_planner::BsplineOptimizerTestAccess::curveObjective(optimizer,q).first,before.first);
+  ego_planner::UniformBspline stretched(q,3,.9);
+  for(double fraction:{.1,.3,.7,.9}) EXPECT_TRUE(original.evaluateDeBoorT(fraction*original.getTimeSum()).isApprox(
+      stretched.evaluateDeBoorT(fraction*stretched.getTimeSum()),1e-12));
+  // Physical derivatives are re-bound after stretching. Every retained basis
+  // must now evaluate the new candidate rather than its predecessor's points.
+  const Eigen::Vector3d start=original.evaluateDeBoorT(0),end=original.evaluateDeBoorT(original.getTimeSum());
+  const Eigen::Vector3d velocity(.2,.1,.03),acceleration(.01,.02,0),end_velocity(.15,-.02,0);
+  ego_planner::UniformBspline::enforceBoundaryStates(q,.9,start,velocity,acceleration,
+      end,end_velocity,Eigen::Vector3d::Zero());
+  const auto rebound=ego_planner::BsplineOptimizerTestAccess::curveObjective(optimizer,q);
+  optimizer.rebindAfterUniformRetime(q);
+  const auto rebound_after=ego_planner::BsplineOptimizerTestAccess::curveObjective(optimizer,q);
+  EXPECT_DOUBLE_EQ(rebound.first,rebound_after.first);
+  EXPECT_TRUE(rebound.second.isApprox(rebound_after.second,1e-12));
+  EXPECT_LT(ego_planner::BsplineOptimizerTestAccess::sampleEvaluationError(optimizer,q,.9),1e-12);
+  ego_planner::UniformBspline bound(q,3,.9);
+  EXPECT_TRUE(bound.getDerivative().evaluateDeBoorT(0).isApprox(velocity,1e-12));
+  EXPECT_TRUE(bound.getDerivative().getDerivative().evaluateDeBoorT(0).isApprox(acceleration,1e-12));
+  EXPECT_TRUE(bound.getDerivative().evaluateDeBoorT(bound.getTimeSum()).isApprox(end_velocity,1e-12));
+  // An ordinary fit cannot borrow actual-sample constraints from its predecessor.
+  optimizer.initializeFromGuide(q);
+  EXPECT_DOUBLE_EQ(ego_planner::BsplineOptimizerTestAccess::curveObjective(optimizer,q).first,0.);
 }
 
 TEST(EgoBaseline, UnknownRiskStillReportsLostGuideAndSentinelHasNoValidCoverage) {

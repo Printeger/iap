@@ -90,6 +90,7 @@ namespace ego_planner
 
   class BsplineOptimizer
   {
+    friend struct BsplineOptimizerTestAccess;
 
   public:
     struct SearchFailureContext {
@@ -174,6 +175,8 @@ namespace ego_planner
     bool needsGuideReinitialization() const { return guide_reinitialization_; }
     const vector<Eigen::Vector3d>& recoveryGuide() const { return guide_pts_; }
     void initializeFromGuide(const Eigen::MatrixXd& points);
+    // Same uniform knot/control indexing and frozen planning input only.
+    void rebindAfterUniformRetime(const Eigen::MatrixXd& points);
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
     void setPlanningQuery(std::function<GridPlanningCell(const Eigen::Vector3d&)> query,
                           bool advisory_fallback = false,
