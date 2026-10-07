@@ -334,3 +334,14 @@ manager and offline production replay share this binding. A changed control
 count is rejected before mutation. An ordinary new target fit still clears
 these constraints. This binding neither spends an additional repair nor grants
 execution; independent physical, dynamic, route and publication checks remain.
+
+
+Server lifecycle logs explicitly bind ROS clock values: successful pending
+withdrawal records `receipt_ros_time_s` and `effective_ros_time_s`; ignored
+withdrawal records receipt time and the current active ID; scheduled activation
+records `activation_ros_time_s` and effective time. These values come from the
+same authoritative callback clock used for its queue decision. The ROS logger
+prefix is a wall UTC diagnostic and must never be subtracted from a historical
+ROS effective time. Legacy logs without explicit ROS receipt time retain IDs,
+commands and disposition evidence but no qualified historical receipt margin.
+Logging fields do not authorize, acknowledge, or undo an active trajectory.

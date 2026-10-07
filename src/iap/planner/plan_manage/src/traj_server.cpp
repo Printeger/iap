@@ -62,11 +62,16 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
           "Pending withdrawal rejected: curve payload present"); return;
     }
     if(pending_traj && pending_traj->id==msg->traj_id) {
-      RCLCPP_INFO(server_node->get_logger(),"Pending trajectory %ld withdrawn; active trajectory %ld continues",msg->traj_id,traj_id_);
+      // ROS log prefixes use wall time even when /clock is historical. Bind
+      // receipt and effective time explicitly to the same node clock.
+      RCLCPP_INFO(server_node->get_logger(),
+          "Pending trajectory %ld withdrawn; active trajectory %ld continues; receipt_ros_time_s=%.9f effective_ros_time_s=%.9f",
+          msg->traj_id,traj_id_,now.seconds(),pending_traj->start.seconds());
       pending_traj.reset();
     } else {
       RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
-          "Pending withdrawal ignored: trajectory %ld is not queued",msg->traj_id);
+          "Pending withdrawal ignored: trajectory %ld is not queued; receipt_ros_time_s=%.9f active_trajectory_id=%ld",
+          msg->traj_id,now.seconds(),traj_id_);
     }
     return;
   }
@@ -287,7 +292,9 @@ void cmdCallbackAt(const rclcpp::Time& clock_now)
   if(pending_traj && clock_now>=pending_traj->start) {
     activateTrajectory(*pending_traj); pending_traj.reset();
     publishExecutedCurve();
-    RCLCPP_INFO(server_node->get_logger(),"Trajectory %ld activated",traj_id_);
+    RCLCPP_INFO(server_node->get_logger(),
+        "Trajectory %ld activated; activation_ros_time_s=%.9f effective_ros_time_s=%.9f",
+        traj_id_,clock_now.seconds(),start_time_.seconds());
   }
   /* no publishing before receive traj_ */
   if (!receive_traj_)

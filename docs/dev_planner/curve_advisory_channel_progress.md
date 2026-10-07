@@ -455,3 +455,11 @@ world_covariance_rinex_live_final绑定完整命令、身份／NAV／配置／bi
 Curve49/gen595生产重放190538Z_435复现纠正后动态1.311→1.501→3.004及refine异常；
 私有成本梯度诊断190805Z_870不是生产绿证据，条件数／约束可实现性仍待定位。
 B正式0/9+0/9、D0/6、不推广；更靠近目标不写成任务通过或严格配对收益。
+
+
+A/B server时钟取证接口：历史run190444Z_824暴露logger墙钟与/clock历史时间
+不同域；原撤销ID证据保留，但不能从前缀得到生效前余量。现权威queue callback
+直接记录receipt_ros_time_s、原effective_ros_time_s，激活记录activation_ros_time_s；
+ignored撤销保留active ID。使用原单次捕获now／clock_now，不修改排队、授权或控制。
+Release server构建安装，server时间／定时执行／完整反馈3组通过；新历史现场字段
+及完整GPU图暂停尚待验证，旧跨域分析值撤回而非重写现场。正式B0/9+0/9、D0/6。

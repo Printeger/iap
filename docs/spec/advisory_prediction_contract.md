@@ -236,3 +236,8 @@ proxy is rotation invariant and its original admission gates remain. This
 transform covers the IMU-origin position; antenna/LiDAR lever arms, rotation
 uncertainty, GNSS epoch alignment and any propagation remain separate unqualified
 requirements. No prior, synthetic freshness or integrity validity is added.
+
+
+Server lifecycle clock evidence follows the [run artifact contract](run_artifact_contract.md):
+explicit ROS receipt/effective times are comparable; wall logger prefixes are
+not historical ROS timestamps. These diagnostic fields grant no execution authority.
