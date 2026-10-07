@@ -1212,3 +1212,10 @@ FGO导出的3×3位置协方差现在属于优化位姿的世界坐标轴；原6
 历史运行的server接收／激活余量须使用日志显式的`receipt_ros_time_s`／
 `activation_ros_time_s`与`effective_ros_time_s`；ROS日志前缀是实际墙钟，不能与
 历史时间直接相减。没有这些字段的旧记录只保留原身份和处置证据，不补造余量。
+
+
+fe939ac 的历史GPS＋北斗森林诊断已验证上述显式server ROS字段，并观察完整GPU图
+使用原生 `/sim/pause` 的一次暂停／恢复。该运行的300秒steady窗口包含12秒暂停，
+历史时间推进约288秒，不计正常配对或正式校准。图文及逐ID接续证据见
+`log/20261007T091820Z_056/export/analysis/server_ros_clock_pause/report.md`。
+原FSM任务未完成；异常时间跳变、真实PL米数、9＋9和六次对照仍待取得资格。

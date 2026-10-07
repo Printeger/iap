@@ -345,3 +345,13 @@ prefix is a wall UTC diagnostic and must never be subtracted from a historical
 ROS effective time. Legacy logs without explicit ROS receipt time retain IDs,
 commands and disposition evidence but no qualified historical receipt margin.
 Logging fields do not authorize, acknowledge, or undo an active trajectory.
+
+
+An explicit `/sim/pause` diagnostic records each requested Bool value, original
+steady and ROS times, the unique clock publisher and pause subscriber counts,
+and observations after draining in-flight messages. Record the actual historical
+span separately from the steady task window. A deliberate pause diagnostic is
+not a normal paired task or calibration run. Repeated commands with frozen ROS
+stamps do not advance trajectory time; message counts alone do not establish
+clock advancement. Startup discovery counts and abnormal jump qualification
+remain separate evidence.

@@ -1363,3 +1363,12 @@ A/B server时钟取证接口：历史run190444Z_824暴露logger墙钟与/clock�
 ignored撤销保留active ID。使用原单次捕获now／clock_now，不修改排队、授权或控制。
 Release server构建安装，server时间／定时执行／完整反馈3组通过；新历史现场字段
 及完整GPU图暂停尚待验证，旧跨域分析值撤回而非重写现场。正式B0/9+0/9、D0/6。
+
+
+当前A/B取证状态：fe939ac历史GPS＋北斗现场已验证server显式ROS接收／生效／激活
+字段，并观察唯一历史clock在完整GPU图中暂停／恢复；300秒steady包含12秒暂停，
+实际历史跨度288.156秒，不计正式实验。原单次捕获时间→queue处置→曲线求值→
+命令的权威流程与所有执行门保持。A Curve及完整接续、B真实米数、C真实低风险
+保留、D任务收益仍未通过；异常时间跳变未验证。当前表、失败身份、自动化／现场
+及阻塞索引见[实施进度](../dev_planner/curve_advisory_channel_progress.md)，完整图文
+见本轮campaign的`export/analysis/server_ros_clock_pause/report.md`；正式0/9＋0/9、0/6。
