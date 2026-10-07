@@ -1191,3 +1191,8 @@ backend/initialize重放使用生产候选纠正接口；exit0须物理、动态
 
 同guide的均匀重定时现保留实际样条约束的 normalized t/dt 绑定；新目标重新拟合
 仍清除旧绑定。相关红例与最终回归见进度索引，不改变现有最终检查或现场资格。
+
+均匀重定时提交5a2f03f的新300秒OFF参考现场见run184545Z_141，图文在
+`log/20261007T091820Z_056/export/analysis/uniform_retime_live/report.md`。
+89曲线／81命令ID，末距固定目标0.328m但原规则未完成；一次撤销晚于server激活，
+完整接续仍待修复。首个与末次Curve候选及原始LiDAR-only样本保留，正式实验不计入。

@@ -1299,3 +1299,18 @@ P/V/A重绑定后的样本求值回归。Release构建／安装、七组planner�
 新Curve50/gen662原参数生产重放183620Z_726复现纠正solver-1008；与重定时
 清除是独立问题，保持拒绝。B官方B1I 3.0原PDF重新取得并hash登记bds_icd_retry，
 规范逐项审计仍待完成，正式B0/9+0/9、D0/6保持。
+
+
+A/C重定时绑定现场：干净5a2f03f、GPU三项／安装Release／配置通过，
+300秒OFF run184545Z_141。89曲线／81命令ID／49定时激活，独立wire命令P/V/A
+最大误差7.81e-8／7.54e-8／1.45e-6；定时边界差2.01e-7／9.21e-8／1.17e-7。
+八个撤销ID生效前0.084–1.104s撤下且无命令；第九个ID37已激活后才撤销，
+server忽略，planner报告ENVIRONMENT_STALE随后独立已检查制动，完整接续仍有缺口。
+另一次已检查制动拒绝无替换授权；无unverified hover。299健康样本中288条完整，
+缺项均为0.82–10.86s启动。实际前进36.322m，末[18.322028,.033121,1.551477]，
+距固定目标0.327793m、原FSM未完成；不改原到达规则，不当严格配对收益。
+首个Curve49/gen595纠正后动力学失败／refine早退；末次211/gen2766原额度重定时
+后ratio1.145056仍失败，final_check=not_checked。全部冻结候选保留。
+6/gen100/risk114原始144项全部LiDAR-only flags1433，GNSSraw未计算。
+图文／3D／命令／hash索引analysis/uniform_retime_live及uniform_retime_live_final。
+B正式0/9+0/9、D0/6、默认不推广；重定时接口回归绿不表示全部Curve／任务通过。
