@@ -1006,3 +1006,19 @@ A* 接口修改后须按依赖顺序重建 `path_searching`、`bspline_opt`、`e
 不替代完整FSM目标资格。生产目标修复实跑前进4.441m仍未到终点，末次
 attempt480/gen2762搜索成功、Curve失败且候选未保存；固定路线和预测
 资格仍未通过，9+9与6均未启动。证据run已登记hash清单并protected。
+
+### Curve候选阶段取证与参考现场
+
+新候选阶段字段与未生成／未检查语义见[EGO流程](docs/spec/ego_based_planning_flow.md)。
+在已完成构建、提交且IAP工作树干净的工作区执行：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python3 src/iap/scripts/dev_planner/run_curve_channel_live.py --duration 300 --label curve_capture
+```
+
+工具只使用`iap_sim.launch.py`与四分叉，prior/guidance OFF；运行目录由共享resolver
+分配并打印。GPU预检、完整输入、失败请求、实际执行事件与进程健康均归入该run。
+`curve_stages`保存最多24份当次候选；实际分量峰值与授权门禁的控制点包络分列。
+没有最终检查时保持null，不代表检查通过。正式历史多星座及配对任务仍待后续阶段。

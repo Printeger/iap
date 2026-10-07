@@ -749,3 +749,28 @@ GPU READY后的300s canonical run `20261007T072523Z_389` 全程关键进程
 本轮30请求/28完整输入，三份重放时间差0.199–0.209s超0.05s；GNSS
 仍拒绝，旋转/状态cov时间传播与匹配模型逐观测残差尚未合格。
 阶段一及二均未通过；校准0/9、验证0/9、任务对照0/6，无冻结参数。
+
+## Curve／真实Advisory／通道规划新轮：阶段A取证
+
+进度与阻塞见[本轮实施进度](../dev_planner/curve_advisory_channel_progress.md)。
+
+本轮起始173f0e9、dev/iap_refactor、干净工作树；统一四分叉，原版EGO只读。
+目标是guide→合法实际曲线→发布→server切换→命令→实际运动。历史末次
+attempt480/gen2762的53点guide成功，但actual_curve/final_check为空。
+已证实最早缺口仅为取证：候选保存晚于优化／动力学早退，不预设Curve根因。
+
+opt-in取证现在在初始拟合、边界绑定、guide拟合、优化退出、各轮动力学和
+重定时处保存当次控制点／knots／间隔／目标PVA／预算／solver结果。最多24份
+阶段记录，超过时保留前23份与最新一份并登记丢弃数，沿用唯一有界后台writer。
+`curve_generation_state=not_generated`、`final_check_state=not_checked`明确缺证据；
+不借用执行曲线。后台计算实际分量速度／加速度极值及其时刻，另列原授权门禁
+的导数控制点包络及原限制／tolerance，不能混淆实际峰值与保守包络。
+物理图、运动质量、PL阈值、在线预算、修复次数及发布授权不变。
+
+取证红／绿位于`log/20261007T091820Z_056/runtime/capture_{red,green}.log`。
+最终Release构建与5项规划CTest全部通过，见`capture_final_{build,checks}.log`。
+现场入口工具`run_curve_channel_live.py`采用canonical owner与GPU预检，记录完整
+输入／失败请求、执行事件、进程树及源码／安装二进制／库hash；仅关闭其启动的
+进程组。生命周期成功不是森林任务通过。阶段A真实根因与接续待新现场；
+阶段B固定历史RINEX＋统一/clock／双源9+9、阶段C连续路径代价与左右终端、
+阶段D六次配对均尚未实施，不推广任何默认参数。

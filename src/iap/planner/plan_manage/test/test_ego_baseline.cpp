@@ -137,6 +137,9 @@ struct EGOPlannerManagerTestAccess {
   }
   static std::shared_ptr<const GridMapFailureSnapshot> planningEvidence(const EGOPlannerManager& manager) { return manager.planning_view_ ? manager.planning_view_->snapshot : nullptr; }
   static void drain(EGOPlannerManager& manager) { manager.drainFailureExports(); }
+  static void recordStage(EGOPlannerManager& manager, const Eigen::MatrixXd& control, double interval) {
+    manager.recordCurveStage("initial_bound",control,interval,LocalTarget{});
+  }
   static void finalEvidence(EGOPlannerManager& manager) { manager.exportLatestFailure(true); manager.drainFailureExports(); }
   static void setCapture(EGOPlannerManager& manager) {
     manager.capture_failure_map_ = true;
@@ -646,7 +649,20 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   std::string final_text((std::istreambuf_iterator<char>(final_metadata)), {});
   EXPECT_NE(final_text.find("\"generation\": " + std::to_string(latest_cell.occupancy_generation) + ","), std::string::npos);
   EXPECT_NE(final_text.find("\"kind\": \"attempt_failure\""),std::string::npos);
+  EXPECT_NE(final_text.find("\"curve_generation_state\": \"not_generated\""),std::string::npos);
+  EXPECT_NE(final_text.find("\"curve_stages\": []"),std::string::npos);
   EXPECT_EQ(std::filesystem::last_write_time(root / "endpoint/snapshot.json"), before);
+  Eigen::MatrixXd stage_controls(3,7);
+  for(int i=0;i<stage_controls.cols();++i) stage_controls.col(i)=Eigen::Vector3d(-1+.2*i,0,1);
+  ego_planner::UniformBspline stage_curve(stage_controls,3,.3);
+  ego_planner::EGOPlannerManagerTestAccess::recordStage(manager,stage_controls,.3);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"backend_early_return",latest_cell,nullptr,nullptr,&stage_curve);
+  std::ifstream stage_file(root / "backend_early_return/snapshot.json");
+  const std::string stage_text((std::istreambuf_iterator<char>(stage_file)),{});
+  EXPECT_NE(stage_text.find("\"curve_generation_state\": \"generated\""),std::string::npos);
+  EXPECT_NE(stage_text.find("\"stage\":\"initial_bound\""),std::string::npos);
+  EXPECT_NE(stage_text.find("\"max_velocity_time_s\":"),std::string::npos);
+  EXPECT_NE(stage_text.find("\"velocity_control_bound_mps\":"),std::string::npos);
 }
 
 TEST(EgoBaseline, FrozenMotionCannotAuthorizePublicationAfterCurrentQualityRevocation) {

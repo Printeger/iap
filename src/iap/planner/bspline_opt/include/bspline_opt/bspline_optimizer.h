@@ -107,6 +107,8 @@ namespace ego_planner
         AStar::Failure& failure) const;
     BsplineOptimizer() {}
     ~BsplineOptimizer() {}
+    std::optional<int> lastOptimizationResult() const { return optimization_result_; }
+    const std::string& lastOptimizationReason() const { return optimization_reason_; }
 
     /* main API */
     void setEnvironment(const GridMap::Ptr &map);
@@ -286,6 +288,8 @@ namespace ego_planner
     double min_ellip_dist_;
 
     ControlPoints cps_;
+    std::optional<int> optimization_result_;
+    std::string optimization_reason_;
 
     /* cost function */
     /* calculate each part of cost function with control points q as input */

@@ -2032,6 +2032,7 @@ namespace ego_planner
   // 使用L-BFGS方法对目标函数进行优化，得到光滑、无碰撞、动力学可行、与其他无人机碰撞、结束项的轨迹。
   bool BsplineOptimizer::rebound_optimize(double &final_cost)
   {
+    optimization_result_.reset(); optimization_reason_="not_started";
     iter_num_ = 0;
     int start_id = order_;
     // int end_id = this->cps_.size - order_; //Fixed end
@@ -2047,9 +2048,14 @@ namespace ego_planner
     constexpr int MAX_RESART_NUMS_SET = 3;
     do
     {
-      if (budget_ && (budget_->expired() || initialization_failed_)) return false;
+      if (budget_ && (budget_->expired() || initialization_failed_)) {
+        optimization_reason_=budget_->expired() ? "budget_expired" : "initialization_failed";
+        return false;
+      }
       if ((restart_nums || rebound_times) && budget_ &&
-          !budget_->tryRepair(PlanningBudget::Repair::BackendRestart)) return false;
+          !budget_->tryRepair(PlanningBudget::Repair::BackendRestart)) {
+        optimization_reason_="backend_restart_denied"; return false;
+      }
       /* ---------- prepare ---------- */
       min_cost_ = std::numeric_limits<double>::max();
       min_ellip_dist_ = INIT_min_ellip_dist_;
@@ -2073,6 +2079,7 @@ namespace ego_planner
       t1 = clock_->now();
       // 执行优化
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRebound, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
+      optimization_result_=result; optimization_reason_=lbfgs::lbfgs_strerror(result);
       t2 = clock_->now();
       double time_ms = (t2 - t1).seconds() * 1000;
       double total_time_ms = (t2 - t0).seconds() * 1000;
@@ -2199,6 +2206,7 @@ namespace ego_planner
         ((flag_occ || ((min_ellip_dist_ != INIT_min_ellip_dist_) && (min_ellip_dist_ > swarm_clearance_))) && restart_nums < MAX_RESART_NUMS_SET) ||
         (flag_force_return && force_stop_type_ == STOP_FOR_REBOUND && rebound_times <= 20));
 
+    optimization_reason_+=success ? ";accepted" : ";postcheck_or_rebound_rejected";
     return success;
   }
 

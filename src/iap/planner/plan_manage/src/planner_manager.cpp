@@ -21,6 +21,28 @@ namespace ego_planner
   }
   }
 
+  void EGOPlannerManager::recordCurveStage(const std::string& stage,
+      const Eigen::MatrixXd& controls, double interval, const LocalTarget& target,
+      double feasibility_ratio, const TrajectoryAssessment* assessment) {
+    if (!capture_failure_map_ || controls.rows()!=3 || controls.cols()<4 ||
+        !controls.allFinite() || !std::isfinite(interval) || interval<=0) return;
+    UniformBspline curve(controls,3,interval);
+    failed_candidate_curve_=curve;
+    CurveStageEvidence evidence{stage,curve,target,
+        planning_budget_ ? planning_budget_->elapsed() : 0.,
+        planning_budget_ ? planning_budget_->used() : 0,
+        stage.rfind("optimized",0)==0 ? bspline_optimizer_->lastOptimizationResult() : std::nullopt,
+        stage.rfind("optimized",0)==0 ? bspline_optimizer_->lastOptimizationReason() : std::string{},
+        feasibility_ratio};
+    if(assessment) {
+      evidence.physical_checked=true; evidence.physical_reason=assessment->execution_reason;
+      evidence.first_physical_position=assessment->first_execution_position;
+      evidence.first_physical_time_s=assessment->first_execution_time_s;
+    }
+    if (curve_stages_.size()<24) curve_stages_.push_back(std::move(evidence));
+    else { curve_stages_.back()=std::move(evidence); ++dropped_curve_stages_; }
+  }
+
   void EGOPlannerManager::captureFailureMap(
       const std::string& kind, const Eigen::Vector3d& point,
       const Eigen::Vector3d& other, const GridPlanningCell& cell,
@@ -75,6 +97,10 @@ namespace ego_planner
     const auto search_value = search ? std::optional<AStar::Result>(*search) : std::nullopt;
     const auto context_value = context ? std::optional<BsplineOptimizer::SearchFailureContext>(*context) : std::nullopt;
     const auto curve_value = trajectory ? std::optional<UniformBspline>(*trajectory) : std::nullopt;
+    const auto stages=curve_stages_;
+    const unsigned dropped_stages=dropped_curve_stages_;
+    const double velocity_limit=pp_.max_vel_,acceleration_limit=pp_.max_acc_;
+    const double feasibility_tolerance=pp_.feasibility_tolerance_;
     const auto assessment_value = assessment ? std::optional<TrajectoryAssessment>(*assessment) : std::nullopt;
     const auto attempt_id = planning_attempt_id_;
     const auto start_p = failure_start_p_, start_v = failure_start_v_, start_a = failure_start_a_;
@@ -384,7 +410,56 @@ namespace ego_planner
           metadata << (i ? "," : "") << number(knots[i]);
         metadata << "]}";
       } else metadata << "null";
-      metadata << ",\n  \"final_check\": ";
+      metadata << ",\n  \"curve_generation_state\": " << std::quoted(curve_value ? "generated" : "not_generated")
+          << ",\n  \"final_check_state\": " << std::quoted(final_check ? "checked" : "not_checked")
+          << ",\n  \"curve_stages_dropped\": " << dropped_stages
+          << ",\n  \"curve_stages\": [";
+      for(size_t s=0;s<stages.size();++s) {
+        const auto& evidence=stages[s]; auto curve=evidence.curve;
+        const auto controls=curve.getControlPoint(); const auto knots=curve.getKnot();
+        auto velocity=curve.getDerivative(); auto acceleration=velocity.getDerivative();
+        double vmax=0,amax=0,vt=0,at=0;
+        // Exact component extrema; the independent gate still uses derivative-control bounds.
+        for(int k=3;k<knots.size()-4;++k) {
+          const double left=knots[k]-knots[3],right=knots[k+1]-knots[3];
+          if(right<=left) continue;
+          std::vector<double> times{left,right};
+          const Eigen::Vector3d a0=acceleration.evaluateDeBoorT(left),a1=acceleration.evaluateDeBoorT(right);
+          for(int axis=0;axis<3;++axis) if(std::abs(a1[axis]-a0[axis])>1e-14) {
+            const double alpha=-a0[axis]/(a1[axis]-a0[axis]);
+            if(alpha>0 && alpha<1) times.push_back(left+(right-left)*alpha);
+          }
+          for(double t:times) {
+            const double v=velocity.evaluateDeBoorT(t).cwiseAbs().maxCoeff();
+            const double a=acceleration.evaluateDeBoorT(t).cwiseAbs().maxCoeff();
+            if(v>vmax) {vmax=v;vt=t;} if(a>amax) {amax=a;at=t;}
+          }
+        }
+        metadata << (s ? "," : "") << "{\"stage\":" << std::quoted(evidence.stage)
+            << ",\"degree\":3,\"interval_s\":" << number(curve.getInterval())
+            << ",\"elapsed_s\":" << number(evidence.elapsed_s) << ",\"repairs\":" << evidence.repairs
+            << ",\"solver_result\":" << (evidence.solver_result ? std::to_string(*evidence.solver_result) : "null")
+            << ",\"solver_reason\":" << std::quoted(evidence.solver_reason)
+            << ",\"feasibility_ratio\":" << number(evidence.feasibility_ratio)
+            << ",\"physical_check_reason\":" << (evidence.physical_checked ? std::string("\"")+gridExecutionReasonName(evidence.physical_reason)+"\"" : "null")
+            << ",\"first_physical_position_m\":" << vector(evidence.first_physical_position)
+            << ",\"first_physical_time_s\":" << number(evidence.first_physical_time_s)
+            << ",\"target_p_m\":" << vector(evidence.target.position)
+            << ",\"target_v_mps\":" << vector(evidence.target.velocity)
+            << ",\"target_a_mps2\":" << vector(evidence.target.acceleration)
+            << ",\"max_component_velocity_mps\":" << number(vmax) << ",\"max_velocity_time_s\":" << number(vt)
+            << ",\"max_component_acceleration_mps2\":" << number(amax) << ",\"max_acceleration_time_s\":" << number(at)
+            << ",\"velocity_control_bound_mps\":" << number(velocity.getControlPoint().cwiseAbs().maxCoeff())
+            << ",\"acceleration_control_bound_mps2\":" << number(acceleration.getControlPoint().cwiseAbs().maxCoeff())
+            << ",\"velocity_limit_mps\":" << number(velocity_limit) << ",\"acceleration_limit_mps2\":" << number(acceleration_limit)
+            << ",\"feasibility_tolerance\":" << number(feasibility_tolerance)
+            << ",\"control_points_m\":[";
+        for(int i=0;i<controls.cols();++i) metadata << (i ? "," : "") << vector(controls.col(i));
+        metadata << "],\"knots_s\":[";
+        for(int i=0;i<knots.size();++i) metadata << (i ? "," : "") << number(knots[i]);
+        metadata << "]}";
+      }
+      metadata << "],\n  \"final_check\": ";
       if(final_check) {
         metadata << "{\"execution_reason\":" << std::quoted(gridExecutionReasonName(final_check->execution_reason))
           << ",\"generation\":" << final_check->evaluated_generation
@@ -875,7 +950,9 @@ namespace ego_planner
       optimizer.setBsplineInterval(interval);
     };
     UniformBspline::parameterizeToBspline(interval,points,derivatives,control);
+    recordCurveStage("initial_fit",control,interval,selected);
     bind_boundaries();
+    recordCurveStage("initial_bound",control,interval,selected);
     optimizer.initControlPoints(control,true);
     if(optimizer.initializationFailed()) return fail(PlanFailure::Search);
     const auto initialize_guide=[&]() {
@@ -898,7 +975,9 @@ namespace ego_planner
       }
       interval=std::max(interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
       UniformBspline::parameterizeToBspline(interval,points,derivatives,control);
-      bind_boundaries(); optimizer.initializeFromGuide(control); return true;
+      recordCurveStage("guide_fit",control,interval,selected);
+      bind_boundaries(); recordCurveStage("guide_bound",control,interval,selected);
+      optimizer.initializeFromGuide(control); return true;
     };
     if(optimizer.needsGuideReinitialization() && !initialize_guide()) return fail(PlanFailure::Search);
     const auto shorten_target=[&]() {
@@ -921,25 +1000,32 @@ namespace ego_planner
       // before either solver; the independent final/release checks still own authorization.
       const auto initial=assessTrajectory(UniformBspline(control,3,interval),0,planning_view_->time_s,
           false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
+      recordCurveStage("initial_check",control,interval,selected,NAN,&initial);
       if(initial.budget_exhausted) return fail(PlanFailure::Budget);
       optimizer.addCurveClearanceConstraints(control,interval,initial.curve_clearance_violations);
       const auto backend_start=PlanningBudget::Clock::now();
-      if(!optimizer.BsplineOptimizeTrajRebound(control,interval)) {
+      const bool optimized=optimizer.BsplineOptimizeTrajRebound(control,interval);
+      recordCurveStage(optimized ? "optimized" : "optimized_failed",control,interval,selected);
+      if(!optimized) {
         if(shorten_target()) continue;
         return fail(PlanFailure::Curve);
       }
       planning_timings_.backend_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-backend_start).count();
       bind_boundaries();
+      recordCurveStage("optimized_bound",control,interval,selected);
       bool feasible=false;
       for(int retime=0;retime<4;++retime) {
         if(planning_budget_->expired()) return fail(PlanFailure::Budget);
         curve=UniformBspline(control,3,interval);
         curve.setPhysicalLimits(pp_.max_vel_,pp_.max_acc_,pp_.feasibility_tolerance_);
         double ratio=1;
-        if(curve.checkFeasibility(ratio,false)) { feasible=true; break; }
+        const bool dynamics_ok=curve.checkFeasibility(ratio,false);
+        recordCurveStage(dynamics_ok ? "dynamics_pass" : "dynamics_fail",control,interval,selected,ratio);
+        if(dynamics_ok) { feasible=true; break; }
         // Reconstruct a uniform spline and rebind physical derivatives after
         // stretching. A raw lengthenTime would silently change both endpoints.
         interval*=std::max(1.1,ratio*1.05); bind_boundaries();
+        recordCurveStage("retimed_bound",control,interval,selected);
       }
       if(!feasible) return fail(PlanFailure::Curve);
       const auto check_start=PlanningBudget::Clock::now();

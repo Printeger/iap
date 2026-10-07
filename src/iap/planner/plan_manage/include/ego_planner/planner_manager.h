@@ -219,6 +219,27 @@ namespace ego_planner
     std::optional<AStar::Result> failed_search_result_;
     std::optional<BsplineOptimizer::SearchFailureContext> failed_search_context_;
     std::optional<UniformBspline> failed_candidate_curve_;
+    struct CurveStageEvidence {
+      std::string stage;
+      UniformBspline curve;
+      LocalTarget target;
+      double elapsed_s = 0.0;
+      unsigned repairs = 0;
+      std::optional<int> solver_result;
+      std::string solver_reason;
+      double feasibility_ratio = std::numeric_limits<double>::quiet_NaN();
+      bool physical_checked = false;
+      GridExecutionReason physical_reason = GridExecutionReason::OK;
+      Eigen::Vector3d first_physical_position = Eigen::Vector3d::Constant(NAN);
+      double first_physical_time_s = std::numeric_limits<double>::quiet_NaN();
+    };
+    // Opt-in evidence; exported by the existing bounded writer.
+    std::vector<CurveStageEvidence> curve_stages_;
+    unsigned dropped_curve_stages_ = 0;
+    void recordCurveStage(const std::string& stage, const Eigen::MatrixXd& controls,
+                          double interval, const LocalTarget& target,
+                          double feasibility_ratio = std::numeric_limits<double>::quiet_NaN(),
+                          const TrajectoryAssessment* assessment = nullptr);
     void queueFailureExport(std::function<void()> job, bool terminal);
     void exportLatestFailure(bool final = false);
     void drainFailureExports();
