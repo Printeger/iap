@@ -1,6 +1,7 @@
 #pragma once
 #include <plan_env/grid_map.h>
 #include <iap/predictor/predictor_module.hpp>
+#include <iap/gnss/clock_geometry.hpp>
 #include <atomic>
 namespace ego_planner {
 // Read-only display transport and planner binding share this input. Display
@@ -11,7 +12,8 @@ struct PredictionInput {
   iap::PredictorParams params;
   double reference_time_s = 0.0;
   double validity_s = .5;
-  uint32_t recording_codec_version = 5;
+  uint32_t recording_codec_version = 6;
+  std::string clock_model = iap::kGnssClockGeometryModel;
 };
 // Shared input authority. This only controls the Advisory posterior proxy;
 // Current Monitor fields and GLIO/FGO state are never changed.

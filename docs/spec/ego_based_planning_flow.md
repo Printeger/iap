@@ -992,3 +992,22 @@ eb1b10e干净60秒历史诊断run133003Z_100：实际c/d/h/j阈值表齐全，GP
 88.542/211.622m，实际前进4.322m，未到达。状态epoch最大差0.057s未传播，
 100项ARAIM、6组相关CTest与43canonical通过，相关生产库／组件／node构建
 安装通过；新的Monitor修复现场尚待取得。Advisory raw／FIM与冻结模型仍未合格。
+
+### Advisory 活动钟差与冻结模型接口
+
+真实SatObs星座 → raw／FIM共享活动列 → 每次查询及mask重新确定星座 →
+原始clock信息逐列Schur消元 → 原PSD／来源准入。raw实际协方差为动态矩阵，
+单星删去最后一颗某系统卫星时重建活动列；分离方差用subset−full位置对角。
+精确几何／接收端anchor缓存包含星座，旧FIM入口复用同一消元规则及ENU旋转。
+v6冻结clock_model并纳入身份；旧v1–v5及不支持模型不绑定生产GridMap。
+三条生产红例为wrong-clock FIM、missing列、零分离方差；修复后focused两组
+CTest通过；最终4组core、codec／baseline及43canonical通过，Release构建
+安装通过。前次其余7组planner行为回归亦通过；旧录制夹具clock身份缺失
+已补，格式检查3项失败单列。近退化GPS8+BDS1红例证明最后一星移除必须
+按计数重建，修复后回归通过；新的干净现场尚待取得。
+Raw仍仅单星故障；整星座与联合贡献资格、真实状态epoch对齐及不确定性、
+实际GPU残差标定尚未完成。保持诊断与PL／motion资格区分，不推广。
+
+d2d0b1c干净历史run134006Z_572：551次Monitor计算中位0.812ms、p95
+0.954ms、最大1.493ms；末HPL/VPL99.982/224.361m，前进7.705m未到达。
+原冻结5/6请求成功，图文在analysis/historical_monitor_clock_live；真实资格仍未取得。

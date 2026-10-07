@@ -117,7 +117,7 @@ TEST(PredictedAraimComputerTest, AdvisoryFimUsesClockSchurComplement) {
   const Eigen::Matrix<double, 1, 3> h_cp = result.h_full.block<1, 3>(3, 0);
   const double h_cc = result.h_full(3, 3);
   const Eigen::Matrix3d expected =
-      h_pp - (h_pc * h_cp) / (h_cc + params.fim_clock_epsilon);
+      h_pp - (h_pc * h_cp) / h_cc;
 
   EXPECT_NEAR((result.lambda - expected).norm(), 0.0, 1.0e-10);
   EXPECT_GT(result.trace, 0.0);

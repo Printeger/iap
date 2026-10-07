@@ -22,7 +22,7 @@ monitor PL are distinct diagnostic quantities, never reconstructed into FIM.
 The shared result carries numerical status, original eigenvalues and weak
 direction; GridMap does not store per-cell matrices.
 
-Frozen inputs write `iap_prediction_input_v4`; v1/v2/v3 remain readable for historical
+Frozen inputs write `iap_prediction_input_v6`; v1–v5 remain readable for historical
 diagnostics. New numerical parameters are serialized and hashed in the input
 identity. Historic payloads are not relabelled as new real recordings. Prediction
 queries use saved reference time. Per-source expiry never grants renewed
@@ -50,7 +50,7 @@ When frozen support has only observed flags, both LiDAR and GNSS map visibility
 require a fresh cloud support time. Local evidence snapshots instead check their
 own per-voxel support timestamps.
 
-Model semantics audit: GNSS eliminates one receiver pseudorange clock; LiDAR
+Model semantics audit: GNSS eliminates one bias per actually used constellation; LiDAR
 conditions on map surface normals and ignores pose/attitude marginalization.
 Both are position information in inverse square meters, with common PL conversion.
 However GNSS azimuth/elevation are ENU while map normals are in map coordinates.
@@ -135,3 +135,31 @@ SE(3)、prediction/truth frame 与 body、world→ENU／外参／时间核验声
 source_revisions 一致；代码变化后不能继续把旧尺度视为该模型的独立验证。
 请求清单为权威分母；CSV 校验失败、缺行、payload 丢失均保留对应失败 ID。
 不能匹配或重复的重放记录单列诊断，不伪造新的独立请求。
+
+## Active constellation clock geometry
+
+Current Monitor, raw Advisory geometry and query FIM share the position/clock
+design authority in `gnss/clock_geometry.hpp`. Explicit observation identity
+selects clock columns. Query and mask variants rebuild their own active set; raw single faults that
+remove a system's last observation force this rebuild regardless of rank-one
+denominator rounding,
+and exact geometry/receiver caches include constellation identity. GNSS raw
+full covariance is dynamic; subset separation uses only `Sk_position - S0_position`,
+whose positive variance was previously reversed and clamped to zero.
+
+Position FIM eliminates each actual independent clock with its original
+information. Clock epsilon is a conditioning floor, never an added prior.
+The legacy `PredictedAraimComputer` FIM uses the same rule and saved ENU rotation.
+This repair does not change source eligibility or force raw/anchored validity.
+Raw geometry still has only its original single-satellite hypotheses; whole
+constellation and joint contribution fault qualification remain unfinished.
+A FIM available without a standalone bound remains an information diagnostic
+under the existing admission policy, not a new qualification.
+
+v6 records `clock_model=per_constellation_pseudorange_bias_v1` and includes it
+in input identity. Production GridMap binding rejects older recording versions
+and unrecognized clock models. Earlier formats remain readable with their
+original version and `legacy_common_clock` identity; re-encoding never upgrades
+recording provenance. Frozen optimizer covariance timing, rotation uncertainty
+and actual matching-residual qualifications are still pending. No formal
+9+9 or task comparison is granted by these mechanism checks.

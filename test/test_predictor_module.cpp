@@ -139,6 +139,95 @@ TEST(GnssGeometryPlPredictorTest, RankOnePathMatchesDirectSubsetFactorization) {
   }
 }
 
+TEST(GnssGeometryPlPredictorTest, SeparationVarianceUsesSubsetMinusFullPosition) {
+  iap::GnssGeometryPlPredictorParams params;
+  params.dynamic_budget = false;
+  params.K_ff = params.K_md = 0;
+  params.K_fa = 2;
+  iap::GnssGeometryPlPredictor predictor(params);
+  const std::vector<iap::GnssGeometrySat> sats{
+      {0.35,0,2.7,1}, {0.6,.9,3.1,2}, {.82,1.8,4.2,3},
+      {1.05,2.9,2.4,4}, {.48,4,5.1,5}, {.74,5.2,3.6,6}, {.92,5.8,4.7,7}};
+  const auto result = predictor.predict(sats);
+  ASSERT_TRUE(result.valid);
+  EXPECT_GT(result.HPL, 1);
+  EXPECT_GT(result.VPL, 1);
+  Eigen::MatrixXd design(sats.size(), 4);
+  for (std::size_t row = 0; row < sats.size(); ++row) {
+    const auto& sat = sats[row];
+    design.row(row) << std::cos(sat.elevation)*std::sin(sat.azimuth),
+        std::cos(sat.elevation)*std::cos(sat.azimuth), std::sin(sat.elevation), 1;
+  }
+  Eigen::VectorXd weights(sats.size());
+  for (std::size_t row = 0; row < sats.size(); ++row) weights[row] = 1/(sats[row].pr_sigma*sats[row].pr_sigma);
+  const Eigen::Matrix4d normal = design.transpose()*weights.asDiagonal()*design;
+  const Eigen::Matrix4d full = normal.inverse();
+  Eigen::Vector3d expected = Eigen::Vector3d::Zero();
+  for (std::size_t row = 0; row < sats.size(); ++row) {
+    const Eigen::Matrix4d subset = (normal-weights[row]*design.row(row).transpose()*design.row(row)).inverse();
+    expected = expected.cwiseMax(2*(subset-full).diagonal().head<3>().cwiseMax(0).cwiseSqrt());
+  }
+  EXPECT_NEAR(result.HPL, std::max(expected[0],expected[1]), 1e-9);
+  EXPECT_NEAR(result.VPL, expected[2], 1e-9);
+}
+
+TEST(GnssGeometryPlPredictorTest, UsedClockIdentityChangesDesignAndExactCache) {
+  iap::GnssGeometryPlPredictor predictor;
+  std::vector<iap::GnssGeometrySat> sats;
+  for (int i = 0; i < 16; ++i) {
+    sats.push_back({.35+.12*(i%4), .73*i, 2, i+1, i<8 ? 'G' : 'C'});
+  }
+  const auto mixed = predictor.predict(sats);
+  ASSERT_TRUE(mixed.valid);
+  ASSERT_EQ(mixed.S0.cols(), 5);
+  for (auto& sat : sats) sat.constellation = 'G';
+  const auto gps = predictor.predict(sats);
+  ASSERT_TRUE(gps.valid);
+  EXPECT_EQ(gps.S0.cols(), 4);
+  EXPECT_EQ(predictor.cacheStats().misses, 2);
+  EXPECT_GT((mixed.S0.topLeftCorner<3,3>() - gps.S0.topLeftCorner<3,3>()).norm(), 1e-5);
+}
+
+TEST(GnssGeometryPlPredictorTest, ConditionedLastClockCannotUseRankOneRounding) {
+  iap::GnssGeometryPlPredictorParams params;
+  params.exact_cache_capacity = 0;
+  const std::vector<iap::GnssGeometrySat> sats{
+      {0.50006717091141095,1.4793930744754797,1.3907135857524984,1,'G'},
+      {0.50003295607195253,3.7582301557978033,1.647882735103658,2,'G'},
+      {0.50008828798996885,4.6845403729067838,1.4135081669172433,3,'G'},
+      {0.50013708170480453,5.8248016510691905,1.3391532890400915,4,'G'},
+      {0.50006825572732216,4.0705697863035226,1.1108190748260722,5,'G'},
+      {0.50004779810609445,0.98593711278621676,1.8089276514266315,6,'G'},
+      {0.50017305403624523,1.462390504146418,1.900687341001055,7,'G'},
+      {0.5001573081393853,4.9685866367744858,1.3347386678931803,8,'G'},
+      {1.0982397815357585,0.24259797137325953,1.965011227706285,155,'C'},
+  };
+  iap::GnssGeometryPlPredictor predictor(params);
+  const auto result = predictor.predict(sats);
+  ASSERT_TRUE(result.valid);
+  EXPECT_GE(predictor.cacheStats().fallback_factorizations, 1u)
+      << "last BDS removal must rebuild its absent clock, regardless of rounded denominator";
+}
+
+TEST(GnssGeometryPlPredictorTest, LastOfSystemRemovalRebuildsClockStructure) {
+  iap::GnssGeometryPlPredictorParams params;
+  params.exact_cache_capacity = 0;
+  for (const double elevation_step : {0.12, 0.01, 0.001}) {
+    std::vector<iap::GnssGeometrySat> gps;
+    for (int i = 0; i < 8; ++i)
+      gps.push_back({.45+elevation_step*(i%3), .81*i, 2, i+1, 'G'});
+    auto mixed = gps;
+    mixed.push_back({.91,.38,2,155,'C'});
+    iap::GnssGeometryPlPredictor predictor(params), reference(params);
+    const auto a = predictor.predict(mixed), b = reference.predict(gps);
+    ASSERT_TRUE(a.valid); ASSERT_TRUE(b.valid);
+    EXPECT_TRUE((a.S0.topLeftCorner<3,3>().isApprox(b.S0.topLeftCorner<3,3>(), 1e-5)));
+    // Structure, rather than the rounded Sherman-Morrison denominator, owns
+    // whether the last constellation clock survives the fault subset.
+    EXPECT_GE(predictor.cacheStats().fallback_factorizations, 1u);
+  }
+}
+
 TEST(GnssGeometryPlPredictorTest,
      FrozenBaselineAndBdsLoadReportsExactCacheBenefit) {
   constexpr double kBenchmarkTwoPi = 6.28318530717958647692;
@@ -1118,6 +1207,47 @@ TEST(PredictorModuleTest,
   const auto blocked = hard_predictor.predict(Eigen::Vector3d::Zero(), epoch);
   EXPECT_TRUE(blocked.blocked_flags[0]);
   EXPECT_FALSE(blocked.vis_flags[0]);
+}
+
+TEST(GnssAdvisoryClockModel, FimEliminatesEveryUsedClockAndRebuildsMaskedSystems) {
+  auto snapshot = make_snapshot(true, false);
+  snapshot.gnss_epoch = make_epoch(16);
+  for (int i = 8; i < 16; ++i) snapshot.gnss_epoch.sats[i].constellation = 'C';
+  auto params = make_params().gnss;
+  params.visibility_params.canopy.sigma_0 = 2;
+  iap::GnssAdvisoryPredictor predictor(params);
+  auto expected = [&](const std::vector<bool>& mask) {
+    Eigen::Matrix3d value = Eigen::Matrix3d::Zero();
+    for (char system : {'G','C'}) {
+      Eigen::Matrix3d pp = Eigen::Matrix3d::Zero();
+      Eigen::Vector3d pc = Eigen::Vector3d::Zero();
+      double cc = 0;
+      for (int i = 0; i < 16; ++i) {
+        const auto& sat = snapshot.gnss_epoch.sats[i];
+        if (!mask[i] || sat.constellation != system) continue;
+        Eigen::Vector3d row(std::cos(sat.elevation)*std::sin(sat.azimuth),
+                            std::cos(sat.elevation)*std::cos(sat.azimuth), std::sin(sat.elevation));
+        row = snapshot.gnss_epoch.R_query_enu * row.eval();
+        const double sigma = iap::sigma_eff_canopy(params.visibility_params.canopy, 0, sat.elevation);
+        const double w = 1/(sigma*sigma);
+        pp += w * row * row.transpose(); pc += w * row; cc += w;
+      }
+      if (cc > 0) value += pp - pc*pc.transpose()/cc;
+    }
+    return value;
+  };
+  std::vector<bool> all(16, true), gps(16, false);
+  std::fill(gps.begin(), gps.begin()+8, true);
+  for (const auto& mask : {all, gps}) {
+    const auto result = predictor.query_receiver_measured_with_satellite_mask(snapshot, mask);
+    ASSERT_TRUE(result.fim_valid) << result.fim_fallback_reason;
+    EXPECT_LT((result.lambda_gnss-expected(mask)).norm(), 1e-10);
+  }
+  // Same epoch/stamp, changed system: cache must not borrow the old clock model.
+  for (auto& sat : snapshot.gnss_epoch.sats) sat.constellation = 'G';
+  const auto changed = predictor.query_receiver_measured_with_satellite_mask(snapshot, all);
+  ASSERT_TRUE(changed.fim_valid);
+  EXPECT_LT((changed.lambda_gnss-expected(all)).norm(), 1e-10);
 }
 
 TEST(PredictorModuleTest,

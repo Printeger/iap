@@ -29,8 +29,8 @@ eligibility and fused-motion authority remain unchanged.
 The shared position/clock design seam is `gnss/clock_geometry.hpp`. The
 frontend uses its separate Vector2 bias/drift graph states; this integrity
 geometry marginalizes pseudorange bias only. Advisory raw geometry and
-query FIM are still being migrated and do not gain real-data qualification
-from this Monitor change. Frozen covariance time, uncertainty identities,
+query FIM use the same active design; whole-constellation and joint Advisory
+fault qualification do not follow from this Monitor change. Frozen covariance time, uncertainty identities,
 actual matching residuals and independent calibration remain prerequisites.
 
 Regression evidence uses the real evaluator: GPS+BDS augmented weighted
@@ -43,3 +43,9 @@ including configured whole-constellation hypotheses. Its GPS-only default
 therefore retains nominal validity but returns the degenerate 1e9 bound,
 instead of its former single-fault-only finite value. No production planner
 caller uses this deprecated proxy; its regression asserts the changed meaning.
+
+Advisory raw and FIM now use this same active clock design. Raw single-satellite
+separation compares only position blocks; its whole-constellation fault model
+is still pending. Query FIM eliminates actual clock information without an
+epsilon prior. Frozen v6 records the clock geometry model, while full optimizer
+time/covariance uncertainty qualification remains unfinished.

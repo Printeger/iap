@@ -1197,7 +1197,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto calibrated=input; calibrated.params.gnss.measurement_noise_scale=2.3;
   calibrated.params.lidar.fim_params.fim_support_voxel_m=.4;
   const auto roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(calibrated));
-  EXPECT_EQ(roundtrip.recording_codec_version,5u);
+  EXPECT_EQ(roundtrip.recording_codec_version,6u);
   EXPECT_DOUBLE_EQ(roundtrip.params.gnss.measurement_noise_scale,2.3);
   EXPECT_DOUBLE_EQ(roundtrip.params.lidar.fim_params.fim_support_voxel_m,.4);
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(calibrated));
@@ -1214,6 +1214,16 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   EXPECT_TRUE(coordinate_copy.integrity.coordinates.R_ecef_world.isApprox(coordinates.integrity.coordinates.R_ecef_world,0));
   EXPECT_TRUE(coordinate_copy.integrity.coordinates.lever_arm_imu.isApprox(Eigen::Vector3d(.1,.2,.3),0));
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(coordinates));
+  EXPECT_EQ(roundtrip.clock_model, iap::kGnssClockGeometryModel);
+  auto other_clock=input;
+  other_clock.clock_model="legacy_common_clock";
+  EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(other_clock));
+  std::string clock_rejection;
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(other_clock,{},&clock_rejection).predict);
+  EXPECT_EQ(clock_rejection,"unsupported_clock_model");
+  other_clock.recording_codec_version=5;
+  EXPECT_FALSE(ego_planner::makeRiskPrediction(other_clock,{},&clock_rejection).predict);
+  EXPECT_EQ(clock_rejection,"historical_codec_input");
   auto historical=input; historical.recording_codec_version=1;
   historical=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(historical));
   EXPECT_EQ(historical.recording_codec_version,1u);

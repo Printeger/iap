@@ -290,3 +290,8 @@ are CMake removing the build RPATH string and dynamic entries. All other bytes
 must match; a common GNU build ID alone is insufficient. Both original hashes
 and the match method are retained. Build-cache identities join command/config/input hashes in
 the subordinate runtime identity manifest.
+
+新预测冻结传输为`iap_prediction_input_v6`，显式`clock_model`登记活动星座
+偏差模型并参与输入hash；旧v1–v5保留历史读取身份，生产GridMap拒绝旧版本
+及不支持模型。该身份没有授予优化状态时间／covariance／外参不确定性资格。
+元数据对未识别模型写unsupported，原字段完整保留在input.bin；不能重赋新鲜度。

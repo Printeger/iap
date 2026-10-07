@@ -12,7 +12,7 @@ from advisory_coordinates import rigid
 
 def audit(meta):
     c=meta['coordinates']
-    if meta.get('recording_codec_version')!=5 or not c.get('required') or not c.get('valid'):
+    if (meta.get('recording_codec_version')!=6 or meta.get('clock_model')!='per_constellation_pseudorange_bias_v1') or not c.get('required') or not c.get('valid'):
         raise ValueError('production_coordinate_evidence_unavailable')
     matrix=lambda key,n:np.asarray(c[key],dtype=float).reshape(n,n)
     R_ew,R_en,R_mn=(matrix(key,3) for key in ('R_ecef_world','R_ecef_enu','R_map_enu'))

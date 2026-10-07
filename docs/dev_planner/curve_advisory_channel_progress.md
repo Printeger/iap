@@ -137,3 +137,25 @@ B4修复：共享实际星座活动列；单星／整星座故障重建剩余列
 回归加入；100项ARAIM与共6项CTest、43canonical通过，相关Release库／组件／
 node构建安装通过；新的Monitor现场待登记。Advisory raw／FIM未迁移，冻结
 时间／外参／实际残差仍阻塞，正式B0/9+0/9、D0/6。
+
+B5事实：d2d0b1c干净60秒history134006Z_572；551次Monitor计算中位
+0.812ms、p95 0.954ms、max1.493ms；末HPL/VPL99.982/224.361m，
+前进7.705m未到达，冻输入5/6、首个失败留存。图文／hash在
+analysis/historical_monitor_clock_live。不能以链路正常授予B资格。
+B5红例：mixed S0只有4列；FIM差0.1544；raw把subset−full写反得到
+0m分离项。B5修复：raw／query／legacy FIM共用活动列与原信息消元，
+缓存包含星座，raw单星最后系统移除重建列；新v6冻结模型身份，旧格式
+只保留诊断资格。focused回归绿；最终4组core与codec／baseline复核通过，相关Release构建安装
+通过、43canonical通过。首次全包测试的录制夹具失败已修复，其余7组行为
+检查当次通过；flake8／CMake／uncrustify仍失败并单列。新的干净现场待登记。
+B5阻塞：raw整星座及联合故障、状态epoch／cov同步、外参旋转不确定性、
+实际GPU残差／噪声与9＋9均未合格；B0/9+0/9、D0/6，不推广。
+
+审查P2复现：近退化GPS8＋BDS1，最后BDS移除时rank-one分母舍入为正，
+没有重建列。原阈值真实红例捕获；按实际星座计数强制删除该列，保留原秩门。
+原Advisory录制测试另缺owner clock契约，补SYNTHETIC_TEST_DOUBLE字段；
+不改变生产拒绝。全包flake8／CMake／uncrustify失败单列，不能称所有检查通过。
+
+v5真实冻结原输入复核：clock_v5_history_diag保持recording_version=5、
+legacy_common_clock、原reference1657108856.628；历史诊断身份及生产wrapper
+拒绝旧版本均保留。未改写原run记录，不借重编码变为v6资格。

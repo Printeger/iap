@@ -50,7 +50,7 @@ struct FimDiagnostic {
 };
 
 struct GnssAdvisoryFimResult : FimDiagnostic {
-  Eigen::Matrix4d h_full = Eigen::Matrix4d::Zero();
+  Eigen::MatrixXd h_full = Eigen::MatrixXd::Zero(4,4);
   int n_visible = 0;
   int n_used = 0;
 };

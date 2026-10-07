@@ -5,5 +5,5 @@ string reason
 string frame_id
 string geometry_id
 uint64 generation
-# iap_prediction_input_v5: zlib-compressed field-wise binary archive.
+# iap_prediction_input_v6: zlib-compressed field-wise binary archive.
 uint8[] payload

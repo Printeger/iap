@@ -25,6 +25,9 @@ class AdvisoryValidationTest(unittest.TestCase):
         cls.root = Path(cls.temporary.name)
         with patch.dict(os.environ, {"IAP_RUN_ROOT": str(cls.root)}):
             cls.run_dir = validation.resolve_run_directory(entrypoint="advisory_validation")
+        validation.write_subordinate_manifest(cls.run_dir, "full_stack", {
+            "clock_contract": "system_clock_for_ros_and_simulated_sensor_stamps",
+            "identity": "SYNTHETIC_TEST_DOUBLE"})
         validation.backend(cls.run_dir, Path(ARGS.binary), ["fixture", "fixture"], "fixture")
         cls.summary = validation.summary_for(cls.run_dir, "fixture")
         cls.tables = cls.summary["tables"]

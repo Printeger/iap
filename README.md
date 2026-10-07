@@ -1107,3 +1107,8 @@ Current Monitor现在按实际观测星座建立活动钟差列，每个单星�
 子集重新确定活动列，仅比较位置子块；旧混合共钟差输入拒绝。接口与退化
 语义见[GNSS完整性契约](docs/spec/gnss_integrity_contract.md)。Advisory raw／FIM
 迁移、冻结时间与实际残差资格仍待完成，不能据此启动正式9＋9。
+
+Advisory raw几何和查询FIM现在按活动星座分别消元钟差，缓存包含星座身份，
+raw分离方差改为subset−full；epsilon不作钟差先验。新冻结输入为v6并绑定
+clock_model，v1–v5只保留历史诊断读取；禁止借重编码升级来源资格。raw整星座
+与联合故障处理、冻结优化协方差时间和实际残差资格仍缺，正式9＋9／六次对照不启动。

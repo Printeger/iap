@@ -1,4 +1,5 @@
 #include <iap/predictor/gnss_advisory_predictor.hpp>
+#include <iap/gnss/clock_geometry.hpp>
 
 #include <Eigen/Eigenvalues>
 
@@ -67,6 +68,7 @@ VisibleGeometrySet visible_geometry(
             : epoch.sats[i].pr_sigma;
     sat.pr_sigma *= noise_scale;
     sat.sat_id = epoch.sats[i].sat_id;
+    sat.constellation = epoch.sats[i].constellation;
     out.geom.push_back(sat);
     out.used_sat_ids.push_back(sat.sat_id);
     out.effective_sigma_sum += sat.pr_sigma;
@@ -87,6 +89,7 @@ std::size_t receiver_epoch_identity(const GnssEpoch& epoch) {
   for(double value:epoch.antenna_offset_query) combine(std::hash<double>{}(value));
   for (const auto& sat : epoch.sats) {
     combine(std::hash<int>{}(sat.sat_id));
+    combine(std::hash<char>{}(sat.constellation));
     combine(std::hash<bool>{}(sat.excluded));
     combine(std::hash<double>{}(sat.elevation));
     combine(std::hash<double>{}(sat.azimuth));
@@ -106,34 +109,6 @@ void copy_geometry_set_diagnostics(const VisibleGeometrySet& set,
       out.n_used > 0 ? set.effective_sigma_sum / static_cast<double>(out.n_used)
                      : std::numeric_limits<double>::quiet_NaN();
   out.effective_sigma_max = set.effective_sigma_max;
-}
-
-bool eliminate_clock_by_schur_complement(const Eigen::Matrix4d& lambda_gnss_4d,
-                                         const double clock_epsilon,
-                                         Eigen::Matrix3d* lambda_position) {
-  if (!lambda_position || !lambda_gnss_4d.allFinite()) {
-    return false;
-  }
-  const double lambda_cc = lambda_gnss_4d(3, 3);
-  const double eps =
-      std::isfinite(clock_epsilon) && clock_epsilon > 0.0 ? clock_epsilon
-                                                          : 1.0e-6;
-  if (!std::isfinite(lambda_cc) || lambda_cc <= eps) {
-    return false;
-  }
-
-  const Eigen::Matrix3d lambda_pp = lambda_gnss_4d.block<3, 3>(0, 0);
-  const Eigen::Matrix<double, 3, 1> lambda_pc =
-      lambda_gnss_4d.block<3, 1>(0, 3);
-  const Eigen::Matrix<double, 1, 3> lambda_cp =
-      lambda_gnss_4d.block<1, 3>(3, 0);
-  // epsilon is a clock solve-conditioning floor, not a pseudo clock prior.
-  // Adding it to the Schur denominator manufactures position information and
-  // breaks the measurement-noise inverse-square scaling contract.
-  *lambda_position = lambda_pp - (lambda_pc * lambda_cp) / lambda_cc;
-  *lambda_position =
-      0.5 * (*lambda_position + lambda_position->transpose());
-  return lambda_position->allFinite();
 }
 
 }  // namespace
@@ -351,24 +326,31 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
     return out;
   }
 
-  Eigen::Matrix4d h_full = Eigen::Matrix4d::Zero();
-  for (const auto& sat : geom) {
-    Eigen::Vector4d g;
-    g << std::cos(sat.elevation) * std::sin(sat.azimuth),
-         std::cos(sat.elevation) * std::cos(sat.azimuth),
-         std::sin(sat.elevation),
-         1.0;
-    g.head<3>() = epoch.R_query_enu * g.head<3>().eval();
+  Eigen::MatrixXd positions(geom.size(), 3);
+  Eigen::VectorXd weights(geom.size());
+  std::vector<int> systems;
+  for (std::size_t row = 0; row < geom.size(); ++row) {
+    const auto& sat = geom[row];
+    const Eigen::Vector3d direction(std::cos(sat.elevation)*std::sin(sat.azimuth),
+        std::cos(sat.elevation)*std::cos(sat.azimuth), std::sin(sat.elevation));
+    positions.row(row) = (epoch.R_query_enu * direction).transpose();
     const double sigma = std::max(sat.pr_sigma, 0.01);
-    h_full += (1.0 / (sigma * sigma)) * (g * g.transpose());
+    weights[row] = 1/(sigma*sigma);
+    systems.push_back(gnss_constellation_id(sat.constellation));
   }
-
+  const auto design = gnss_clock_design(positions, systems);
+  if (design.rows() != static_cast<int>(geom.size())) {
+    out.fim_valid = false;
+    out.fim_fallback_reason = "unsupported_constellation_clock";
+    return out;
+  }
+  const Eigen::MatrixXd h_full = design.transpose() * weights.asDiagonal() * design;
   const double clock_eps =
       std::isfinite(params_.fim_clock_epsilon) &&
               params_.fim_clock_epsilon > 0.0
           ? params_.fim_clock_epsilon
           : 1.0e-6;
-  if (!eliminate_clock_by_schur_complement(h_full, clock_eps,
+  if (!gnss_eliminate_active_clocks(h_full, clock_eps,
                                            &out.lambda_gnss)) {
     out.fim_valid = false;
     out.fim_fallback_reason = "degenerate_clock_information";

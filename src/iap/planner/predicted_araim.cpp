@@ -1,6 +1,7 @@
 // IAP-RQ-331: GNSS advisory PL proxy for planning (geometry-only mode).
 
 #include <iap/planner/predicted_araim.hpp>
+#include <iap/gnss/clock_geometry.hpp>
 #include <spdlog/spdlog.h>
 #include <Eigen/Eigenvalues>
 #include <algorithm>
@@ -83,6 +84,7 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
                     ? vis.sigma_effs[i]
                     : epoch_->sats[i].pr_sigma;
     sg.sat_id    = epoch_->sats[i].sat_id;
+    sg.constellation = epoch_->sats[i].constellation;
     geom.push_back(sg);
   }
 
@@ -166,6 +168,7 @@ GnssAdvisoryFimResult PredictedAraimComputer::predict_advisory_fim(
                       ? vis.sigma_effs[i]
                       : epoch_->sats[i].pr_sigma;
     sg.sat_id = epoch_->sats[i].sat_id;
+    sg.constellation = epoch_->sats[i].constellation;
     geom.push_back(sg);
   }
   out.n_used = static_cast<int>(geom.size());
@@ -173,34 +176,28 @@ GnssAdvisoryFimResult PredictedAraimComputer::predict_advisory_fim(
     return fallback("too_few_sats");
   }
 
-  Eigen::Matrix4d h = Eigen::Matrix4d::Zero();
-  for (const auto& sat : geom) {
-    const double el = sat.elevation;
-    const double az = sat.azimuth;
-    Eigen::Vector4d g;
-    g << std::cos(el) * std::sin(az),
-         std::cos(el) * std::cos(az),
-         std::sin(el),
-         1.0;
-    const double sigma = std::max(sat.pr_sigma, 0.01);
-    h += (1.0 / (sigma * sigma)) * (g * g.transpose());
+  Eigen::MatrixXd positions(geom.size(),3);
+  Eigen::VectorXd weights(geom.size());
+  std::vector<int> systems;
+  for (std::size_t row = 0; row < geom.size(); ++row) {
+    const auto& sat = geom[row];
+    const Eigen::Vector3d direction(std::cos(sat.elevation)*std::sin(sat.azimuth),
+        std::cos(sat.elevation)*std::cos(sat.azimuth), std::sin(sat.elevation));
+    positions.row(row) = (epoch_->R_query_enu * direction).transpose();
+    const double sigma = std::max(sat.pr_sigma,0.01);
+    weights[row] = 1/(sigma*sigma);
+    systems.push_back(gnss_constellation_id(sat.constellation));
   }
-  out.h_full = h;
-
-  const double h_cc = h(3, 3);
+  const auto design = gnss_clock_design(positions, systems);
+  if (design.rows() != static_cast<int>(geom.size())) return fallback("unsupported_constellation_clock");
+  out.h_full = design.transpose() * weights.asDiagonal() * design;
   const double clock_eps =
       std::isfinite(params_.fim_clock_epsilon) && params_.fim_clock_epsilon > 0.0
           ? params_.fim_clock_epsilon
           : 1.0e-6;
-  if (!std::isfinite(h_cc) || h_cc + clock_eps <= 0.0) {
+  if (!gnss_eliminate_active_clocks(out.h_full, clock_eps, &out.lambda)) {
     return fallback("degenerate_clock_information");
   }
-
-  const Eigen::Matrix3d h_pp = h.block<3, 3>(0, 0);
-  const Eigen::Matrix<double, 3, 1> h_pc = h.block<3, 1>(0, 3);
-  const Eigen::Matrix<double, 1, 3> h_cp = h.block<1, 3>(3, 0);
-  out.lambda = h_pp - (h_pc * h_cp) / (h_cc + clock_eps);
-  out.lambda = 0.5 * (out.lambda + out.lambda.transpose());
 
   if (!out.lambda.allFinite()) {
     return fallback("invalid_gnss_fim");

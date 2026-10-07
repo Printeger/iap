@@ -2,9 +2,12 @@
 
 #include <Eigen/Core>
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace iap {
+
+inline constexpr char kGnssClockGeometryModel[] = "per_constellation_pseudorange_bias_v1";
 
 // Measurement constellation is authoritative; wire satellite numbering is not
 // a second system classifier. These IDs also index the existing fault priors.
@@ -35,6 +38,27 @@ inline Eigen::MatrixXd gnss_clock_design(
     design(row, 3 + col) = 1.0;
   }
   return design;
+}
+
+inline bool gnss_eliminate_active_clocks(
+    const Eigen::MatrixXd& normal, double clock_epsilon,
+    Eigen::Matrix3d* position_information) {
+  if (!position_information || !std::isfinite(clock_epsilon) || clock_epsilon <= 0 || normal.rows() != normal.cols() ||
+      normal.cols() < 4 || !normal.allFinite()) return false;
+  Eigen::Matrix3d result = normal.topLeftCorner<3,3>();
+  for (int col = 3; col < normal.cols(); ++col) {
+    const double information = normal(col,col);
+    if (information <= clock_epsilon) return false;
+    // Indicator columns are disjoint. Off-diagonal clock information would
+    // represent a different model and cannot use this independent-bias solve.
+    for (int other = 3; other < normal.cols(); ++other) {
+      if (other != col && normal(col,other) != 0) return false;
+    }
+    const Eigen::Vector3d cross = normal.block<3,1>(0,col);
+    result -= cross * cross.transpose() / information;
+  }
+  *position_information = 0.5 * (result + result.transpose());
+  return position_information->allFinite();
 }
 
 }  // namespace iap

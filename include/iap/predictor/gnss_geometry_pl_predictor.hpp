@@ -26,6 +26,7 @@ struct GnssGeometrySat {
   double azimuth   = 0.0;
   double pr_sigma  = 5.0;
   int    sat_id    = -1;
+  char   constellation = 'G';
 };
 
 struct GnssGeometryPlPredictorParams {
@@ -74,7 +75,7 @@ struct GnssGeometryPlResult {
   std::vector<int> degenerate_satellite_ids;
   double weighted_normal_condition =
       std::numeric_limits<double>::quiet_NaN();
-  Eigen::Matrix4d S0 = Eigen::Matrix4d::Identity();
+  Eigen::MatrixXd S0 = Eigen::MatrixXd::Identity(4,4);
 };
 
 class GnssGeometryPlPredictor {

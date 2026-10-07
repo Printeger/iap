@@ -2,9 +2,11 @@
 // This class does NOT include current ARAIM solver headers.
 
 #include <iap/predictor/gnss_geometry_pl_predictor.hpp>
+#include <iap/gnss/clock_geometry.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <deque>
@@ -40,12 +42,12 @@ inline double Q_inv(double p) {
              (1.0 + d1 * t + d2 * t * t + d3 * t * t * t);
 }
 
-inline bool factorize(const Eigen::Matrix4d& A, double eps,
-                       Eigen::LDLT<Eigen::Matrix4d>* out) {
+inline bool factorize(const Eigen::MatrixXd& A, double eps,
+                       Eigen::LDLT<Eigen::MatrixXd>* out) {
   out->compute(A);
   if (out->info() != Eigen::Success) return false;
   const auto& D = out->vectorD();
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < D.size(); ++i) {
     // G'WG is positive semidefinite. A non-positive pivot therefore means
     // degenerate/numerically invalid geometry, not an invertible covariance
     // that can safely be clamped after the solve.
@@ -77,13 +79,14 @@ std::string exactGeometryKey(
     const std::vector<GnssGeometrySat>& visible_sats) {
   std::string key;
   key.reserve(sizeof(std::size_t) + visible_sats.size() *
-      (3 * sizeof(double) + sizeof(int)));
+      (3 * sizeof(double) + sizeof(int) + sizeof(char)));
   appendExact(&key, visible_sats.size());
   for (const auto& sat : visible_sats) {
     appendExact(&key, sat.elevation);
     appendExact(&key, sat.azimuth);
     appendExact(&key, sat.pr_sigma);
     appendExact(&key, sat.sat_id);
+    appendExact(&key, sat.constellation);
   }
   return key;
 }
@@ -152,7 +155,8 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   }
 
   // Build design matrix G (ENU + clock) and weight vector W
-  Eigen::MatrixXd G(N, 4);
+  Eigen::MatrixXd positions(N, 3);
+  std::vector<int> systems;
   Eigen::VectorXd W(N);
   const Eigen::VectorXd r = Eigen::VectorXd::Zero(N);  // r=0 for advisory
 
@@ -164,36 +168,38 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
       out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
       return out;
     }
-    G(i, 0) = std::cos(el) * std::sin(az);
-    G(i, 1) = std::cos(el) * std::cos(az);
-    G(i, 2) = std::sin(el);
-    G(i, 3) = 1.0;
+    positions(i, 0) = std::cos(el) * std::sin(az);
+    positions(i, 1) = std::cos(el) * std::cos(az);
+    positions(i, 2) = std::sin(el);
+    systems.push_back(gnss_constellation_id(visible_sats[i].constellation));
     const double sigma = std::max(visible_sats[i].pr_sigma, 0.01);
     W(i) = 1.0 / (sigma * sigma);
   }
 
-  // Full solution: S0 = (G^T W G)^-1
-  Eigen::Matrix4d A0 = Eigen::Matrix4d::Zero();
+  const auto G = gnss_clock_design(positions, systems);
+  if (G.rows() != N) { out.status = GnssGeometryStatus::NUMERICAL_FAILURE; return out; }
+  // Full solution: E,N,U followed by only actually used receiver clocks.
+  Eigen::MatrixXd A0 = Eigen::MatrixXd::Zero(G.cols(), G.cols());
   for (int i = 0; i < N; ++i) {
-    const Eigen::Vector4d gi = G.row(i).transpose();
+    const Eigen::VectorXd gi = G.row(i).transpose();
     A0 += W(i) * (gi * gi.transpose());
   }
 
-  Eigen::LDLT<Eigen::Matrix4d> ldlt0;
+  Eigen::LDLT<Eigen::MatrixXd> ldlt0;
   if (!factorize(A0, params_.eps_degen, &ldlt0)) {
     out.valid = false;
     out.status = GnssGeometryStatus::FULL_GEOMETRY_DEGENERATE;
     return out;
   }
 
-  out.S0 = ldlt0.solve(Eigen::Matrix4d::Identity());
+  out.S0 = ldlt0.solve(Eigen::MatrixXd::Identity(G.cols(), G.cols()));
   if (!out.S0.allFinite()) {
     out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
     return out;
   }
   out.valid = true;
   out.status = GnssGeometryStatus::VALID;
-  Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> eigensolver(A0);
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigensolver(A0);
   if (eigensolver.info() == Eigen::Success) {
     const double smallest = eigensolver.eigenvalues().minCoeff();
     const double largest = eigensolver.eigenvalues().maxCoeff();
@@ -201,6 +207,9 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
       out.weighted_normal_condition = largest / smallest;
     }
   }
+
+  std::array<int,4> system_counts{};
+  for (const int system : systems) ++system_counts[system];
 
   // Position std from full covariance
   out.sigma_ff_E = std::sqrt(std::max(0.0, out.S0(0, 0)));
@@ -231,12 +240,6 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   out.pl_ff_V = K_ff_eff * out.sigma_ff_U;
 
   // Per-satellite subset solutions
-  std::vector<Eigen::Matrix4d> row_outer(N, Eigen::Matrix4d::Zero());
-  for (int i = 0; i < N; ++i) {
-    const Eigen::Vector4d gi = G.row(i).transpose();
-    row_outer[i] = W(i) * (gi * gi.transpose());
-  }
-
   double best_PL_E = K_ff_eff * out.sigma_ff_E;
   double best_PL_N = K_ff_eff * out.sigma_ff_N;
   double best_PL_U = K_ff_eff * out.sigma_ff_U;
@@ -245,40 +248,52 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
   int worst_hyp_u = -1;
 
   for (int k = 0; k < N; ++k) {
-    const Eigen::Vector4d gi = G.row(k).transpose();
-    const Eigen::Vector4d u = std::sqrt(W(k)) * gi;
-    const Eigen::Vector4d s0u = out.S0 * u;
+    const Eigen::VectorXd gi = G.row(k).transpose();
+    const Eigen::VectorXd u = std::sqrt(W(k)) * gi;
+    const Eigen::VectorXd s0u = out.S0 * u;
     const double denominator = 1.0 - u.dot(s0u);
-    Eigen::Matrix4d Sk;
+    Eigen::MatrixXd Sk;
     const double downdate_guard = std::max(params_.eps_degen, 1.0e-12);
-    if (std::isfinite(denominator) && denominator > downdate_guard) {
+    if (system_counts[systems[k]] > 1 &&
+        std::isfinite(denominator) && denominator > downdate_guard) {
       Sk = out.S0 + (s0u * s0u.transpose()) / denominator;
     } else {
-      // Near the Sherman-Morrison singularity, preserve the legacy LDLT
-      // verdict rather than allowing a fast-path rounding decision to alter
-      // the safety state.
+      // Removing the last observation of a system structurally removes its
+      // clock, regardless of floating-point rank-one denominator rounding.
+      // Near other singularities, preserve the original LDLT rank verdict.
       {
         std::lock_guard<std::mutex> lock(cache_state_->mutex);
         ++cache_state_->fallback_factorizations;
       }
-      const Eigen::Matrix4d Ak = A0 - row_outer[k];
-      Eigen::LDLT<Eigen::Matrix4d> ldltk;
+      Eigen::MatrixXd kept_positions(N-1,3);
+      Eigen::VectorXd kept_weights(N-1);
+      std::vector<int> kept_systems;
+      int kept = 0;
+      for (int row = 0; row < N; ++row) {
+        if (row == k) continue;
+        kept_positions.row(kept) = positions.row(row);
+        kept_weights[kept++] = W[row];
+        kept_systems.push_back(systems[row]);
+      }
+      const auto Gk = gnss_clock_design(kept_positions, kept_systems);
+      const Eigen::MatrixXd Ak = Gk.transpose() * kept_weights.asDiagonal() * Gk;
+      Eigen::LDLT<Eigen::MatrixXd> ldltk;
       if (!factorize(Ak, params_.eps_degen, &ldltk)) {
         out.valid = false;
         out.status = GnssGeometryStatus::SUBSET_DEGENERATE;
         out.degenerate_satellite_ids.push_back(visible_sats[k].sat_id);
         continue;
       }
-      Sk = ldltk.solve(Eigen::Matrix4d::Identity());
+      Sk = ldltk.solve(Eigen::MatrixXd::Identity(Ak.cols(), Ak.cols()));
     }
     if (!Sk.allFinite()) {
       out.valid = false;
       out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
       return out;
     }
-    const double sigma_ss_E = std::sqrt(std::max(0.0, out.S0(0, 0) - Sk(0, 0)));
-    const double sigma_ss_N = std::sqrt(std::max(0.0, out.S0(1, 1) - Sk(1, 1)));
-    const double sigma_ss_U = std::sqrt(std::max(0.0, out.S0(2, 2) - Sk(2, 2)));
+    const double sigma_ss_E = std::sqrt(std::max(0.0, Sk(0, 0) - out.S0(0, 0)));
+    const double sigma_ss_N = std::sqrt(std::max(0.0, Sk(1, 1) - out.S0(1, 1)));
+    const double sigma_ss_U = std::sqrt(std::max(0.0, Sk(2, 2) - out.S0(2, 2)));
     const double sigma_k_E = std::sqrt(std::max(0.0, Sk(0, 0)));
     const double sigma_k_N = std::sqrt(std::max(0.0, Sk(1, 1)));
     const double sigma_k_U = std::sqrt(std::max(0.0, Sk(2, 2)));

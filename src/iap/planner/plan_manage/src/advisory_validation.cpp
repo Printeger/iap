@@ -118,6 +118,8 @@ void describe(const Input& in,const std::filesystem::path& path) {
   std::ofstream o(path); const auto& s=in.integrity;
   o << "{\"schema\":\"iap_advisory_frozen_metadata_v1\",\"reference_time_s\":"; number(o,in.reference_time_s);
   o << ",\"recording_codec_version\":"<<in.recording_codec_version;
+  o << ",\"clock_model\":"; o << std::quoted(in.clock_model==iap::kGnssClockGeometryModel ? iap::kGnssClockGeometryModel :
+      in.clock_model=="legacy_common_clock" ? "legacy_common_clock" : "unsupported");
   o << ",\"pose_stamp\":"; number(o,s.pose_stamp);
   o << ",\"estimation_frame_id\":"<<s.current.estimation_frame_id;
   o << ",\"epoch_source_identity\":"<<s.gnss_epoch.source_identity;
@@ -489,7 +491,7 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
-      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<5?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<6?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
       for (const bool enabled : {true, false}) {
         auto variant=in;
         ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
@@ -500,8 +502,8 @@ int main(int argc,char** argv) {
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
-      evaluate(in,label,in.recording_codec_version<5?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
-      evaluate(in,label+"_current",in.recording_codec_version<5?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
+      evaluate(in,label,in.recording_codec_version<6?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
+      evaluate(in,label+"_current",in.recording_codec_version<6?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
     }
     std::cout<<log.run_dir()<<'\n';
   } catch(const std::exception& e) {std::cerr<<"advisory_validation: "<<e.what()<<'\n';return 1;}
