@@ -238,7 +238,7 @@ prior OFF300秒run160125Z_356。27条曲线／26个命令ID、8次定时激活�
 真值末[11.289083,.231779,2.419395]，前进29.289m、距终点6.778m，原规则未完成。
 ID4提前0.714918s撤下，未激活／命令；检查制动拒绝后旧ID3继续，在预定生效后
 确认并退役本地pending。2次检查制动拒绝、未见unchecked hover；不能据此声称
-安全停止或整轮安全。末次362/gen2151 Search、首个Curve12/gen55与完整原图保留。
+安全停止或整轮安全。末次362/gen2151 Target、首个Curve12/gen55与完整原图保留。
 图文／独立wire→command核对在analysis/checked_recovery_live；物理时效仍阻塞。
 
 B真实空间诊断：原历史v6 input SHA296d38f5...未经重编码，原时刻1657108846.095、
@@ -261,3 +261,24 @@ snapshot构造稳定69–73ms，形成可重复性能红例；身份与每项原
 一致；相同时间、乱序加入、旧命中不被新free覆盖的回归含旧生产hash oracle。
 原缓存、物理时效、预算及运动门保持。23项registered、两组GridMap及六组
 planner行为与43入口通过，Release plan_env构建／安装通过，新现场待提交。
+
+
+A物理快照现场：干净61f6425、三项GPU／安装身份通过，OFF300秒run161537Z_154。
+32曲线／29命令ID、11次定时激活；三条撤销7/15/27均未激活／命令，撤销余量
+0.830/0.594/0.322s，未见unchecked hover。本轮未出现制动拒绝，不扩展拒绝证明。
+真值末[12.464440,.360832,1.856333]，前进30.464m、距目标5.559m，任务未完成。
+末次631/gen2759 Budget及首个Curve45/gen231留存；实际净空／未知覆盖和额度
+仍阻塞。141条限频warning中位41.671ms／max136.977ms，非严格配对性能资格。
+图文与独立wire核对analysis/physical_snapshot_live；命令P/V/A最大线缆误差
+7.32e-8m／4.63e-8mps／1.64e-6mps²，不替代现场物理或真实误差资格。
+
+同输入12/gen55 audit run161348Z_545：23阶段均检查，fit0.147885、优化0.232996m
+超过原0.136603m corridor。initialize run162232Z_462在原时刻／图／剩余额度下
+动态与601点物理通过，但路线仍丢失0.232996m；wrapper physical verdict=true不是
+路线通过。尚无新增修复，原动态与路线红例保留。此前362/gen2151的枚举阶段
+正确为Target，已校正本进度／流程误写的Search；原raw记录未更改。
+
+C原始风险导出红例：同一真实attempt3/gen18已查询793次冻结风险，候选CSV0行、
+context_matches=false。冻结query局部缓存与旧全局缓存导出分离，且物理snapshot
+取得早于当前风险绑定；不借插值／色标补值。assert_frozen_risk_export.py一条命令
+复现，原代码／input／binary hash在frozen_risk_export_red_before。修复待实施。

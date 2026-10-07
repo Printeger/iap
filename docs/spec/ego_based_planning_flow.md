@@ -1141,7 +1141,7 @@ relaxation, timing budget or motion qualification is introduced.
 941fe41干净OFF300秒森林run160125Z_356验证ID4提前0.715s撤下且未激活；
 检查刹车拒绝后旧ID3在原生效时刻后确认取消，本地pending释放。27曲线／26命令ID、
 8次定时激活、2次制动拒绝且无unchecked hover；前进29.289m、距目标6.778m，
-原任务规则未完成。末次362/gen2151 Search及首个Curve12/gen55留存，物理时效
+原任务规则未完成。末次362/gen2151 Target及首个Curve12/gen55留存，物理时效
 仍阻塞；不声明安全停止或正式任务收益。图文／hash见analysis/checked_recovery_live。
 
 历史v6原input、原时间／gen326重放100物理样本：63可查询、37物理过滤；
@@ -1166,3 +1166,12 @@ callback指标未满足，不能据局部测量解释完整300ms现场锁等待�
 risk与occupancy epoch三组回归，以及六组生产Curve／执行回归、43入口通过。
 等时多来源回归保留cbeed83生产hash oracle，检查命中优先和来源编号。
 图文与命令／input/source/binary身份在analysis/registered_window_latency；新现场待提交。
+
+
+61f6425干净OFF300秒run161537Z_154：32曲线／29命令ID、11次定时激活，
+撤销7/15/27未激活，未见unchecked hover；前进30.464m、距目标5.559m，未完成。
+141条限频warning中位41.671ms／max136.977ms仅为不同路线现场观察，非配对因果结论。
+末次631/gen2759 Budget与首个Curve45/gen231原图保留。图文／hash在
+analysis/physical_snapshot_live。12/gen55同输入initialize物理／动态通过而路线0.233m
+仍超0.137m，physical verdict不能授予路线资格；原预算／修复与时刻保留。
+上轮362/gen2151的阶段是Target，先前文档误读为Search已校正，原枚举数据保持。
