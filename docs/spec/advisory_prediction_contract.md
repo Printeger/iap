@@ -294,3 +294,21 @@ owner/layout/coordinate均值错配0；5/6冻结及5份同原时间重放／审�
 `log/20261007T091820Z_056/export/analysis/optimized_bundle/report.md`。
 该短运行不是正式300秒任务；原FSM未到达，B空间／米数、真实GPU残差／联合故障、
 C真实通道保留、D0/6与B0/9＋0/9仍阻塞。继续可独立执行的生产取证工作。
+
+## 冻结误差与后续到达误差的不同资格
+
+冻结receiver诊断使用原 `position`／`pose_stamp`，与原truth消息header时间配对；
+不得用采集接收时间替代状态时刻。空间请求的后续到达诊断使用原地图的origin、
+resolution、dimensions和体素索引，匹配第一个不早于原reference_time的GLIO位置。
+地图外、物理过滤、无有效预测、未到达及无truth支持的请求均保留原分母。
+最近truth时间差须逐项记录，不能宣称精确同时间；体素匹配不能换成任意邻域。
+
+原tau=0预测与之后到达误差不是同时间检验；未取得实测F/Q传播资格时只能作
+诊断。map XY/Z误差不能在Up、ENU旋转及IMU／truth外参尚未资格时命名为正式
+ENU H/V验证。有限VALID只表示当前接口返回；1e9、无效和非有限值不进入有效界限。
+条件经验覆盖和排序须给出完整请求与配对子集分母，重复体素／共享到达样本相关性
+及独立运行数量；不得据一个运行的条件统计授予联合95%或9＋9资格。
+
+bd580c91原运行诊断：28冻结位置配对、2800空间请求仅7体素后来到达，2693未到达、
+100地图外；本轮配对truth时间差均为0，但传播、物理方向和噪声资格仍未通过。
+[逐请求、图表与hash索引](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/prediction_error_report.md)。

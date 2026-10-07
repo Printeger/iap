@@ -4,6 +4,13 @@
 
 本轮当前状态与独立 A/B/C/D 结论见 [Curve／真实Advisory／通道实施进度](../dev_planner/curve_advisory_channel_progress.md)；下方旧阶段结果保留其历史版本身份。
 
+原时间预测误差补充：28冻结receiver与之后到达的7/2800空间请求分开统计，
+2693未到达及100地图外保留，不用局部条件覆盖追认B米数／9＋9或D六次任务。
+安全撤销分类补充：bd580c91的8次server撤销成功包含7次生效前、1次生效后仍在队列；
+另1次已激活后撤销被忽略。队列状态与生效时刻独立记录，不按时间自行推断激活。
+当前流程、预算和资格门不变，详见
+[原时间误差与撤销分类补充](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/prediction_error_report.md)。
+
 历史 Advisory 工具验证见 [方案与实施结果](../dev_predictor/advisory_spatial_validation_plan.md)、[冻结验证工具契约](advisory_validation_contract.md) 和 [21f692e 正式报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/committed/report.md)。本段描述该历史版本；后续准入／数值修复及本轮待测状态见下方分阶段契约。完整录制、原 codec/生产 PredictorModule 重放、来源拆分、S1–S5 合成机制对照与报告已实施；生产包装器增加拒绝原因并共享相同冻结准备/状态映射，来源准入、物理地图、执行授权和阈值不变。缺 GNSS 阻断有效 LiDAR 的准入差异及强先验主导已在合成输入复现；未擅自修正模型。真实 start/middle/stop 扫描和三次 GLIO 误差重复仍为 INCONCLUSIVE，现场受无关 RViz 修改阻止，不声明风险地图已验证正确。
 
 结构基线：`../ego-planner-swarm`，提交 `23a8d5a191711dd65633df689bd00f55d4dea8f9`。原版目录只读。

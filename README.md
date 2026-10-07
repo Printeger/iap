@@ -1351,3 +1351,9 @@ B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广�
 2022历史C59/C60轨道身份已用IGS带时间区间metadata独立核验，本地NAV44个北斗
 PRN分类差异0；该结果不外推2026重新编号、健康／信号或Advisory资格。
 [原始来源及hash补证](log/20261007T091820Z_056/export/analysis/rinex_identity/report.md)。
+
+冻结receiver误差与空间点之后到达误差已分开诊断：28receiver配对，空间仅7/2800
+实际进入原体素；2693未到达、100地图外及2缺冻结payload保持完整分母。这些单运行
+map误差／条件覆盖不代表ENU米数、传播或正式9＋9资格。撤销时间也分别记录：
+8次队列撤销成功中7次生效前、34生效后仍在队列；48已激活后撤销被忽略。
+[逐请求误差图与分类补充](log/20261007T091820Z_056/export/analysis/safety_feedback_live/prediction_error_report.md)。

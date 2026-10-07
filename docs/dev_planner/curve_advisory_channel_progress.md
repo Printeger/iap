@@ -720,7 +720,8 @@ planner精确收包时间。生产FSM red-capable fixture缓冲真实新ID命令
 ## 安全反馈修复后的300秒现场与完整冻结扫描
 
 干净bd580c91，run231557Z_065：91发布／83命令ID／53激活、9pending撤销中8条
-生效前成功；48的撤销在生效后约2ms到达server，3次checked brake拒绝、hover0。
+server队列撤销成功（7条生效前，34生效后约6ms仍未激活）；48已激活、撤销在
+生效后约2ms到达server而被忽略，3次checked brake拒绝、hover0。
 任务未到达，truth前进35.288682m，末距原目标.974341m。正确更新命令owner的机制
 红绿不等于所有时序竞态消除；不得用一次计数变化声明因果改善或全接续通过。
 末完整拒绝182：base2518／release2521实际曲线未知local6.52s，首违map／cell同代；
@@ -748,3 +749,19 @@ C60→C229均BDS-3G，历史有效区间覆盖300秒。2026已有重分配，不
 headers／UTC／metadata与NAV hash及全映射见
 [历史轨道身份独立补证](../../log/20261007T091820Z_056/export/analysis/rinex_identity/report.md)。
 只关闭独立身份依据缺口，旧报告与RTKLIB数值验证保持原身份。
+
+## 冻结位置与之后到达误差对照
+
+事实：原header时间配对28冻结receiver，H(map XY)误差.001697–.101582m、
+V(map Z).004536–.153650m；2800空间scan仅7原体素之后到达、2693未到达、100地图外，
+7次到达延迟1.866–35.155秒，全部请求保留。两组最近truth时间差均0。
+条件模型覆盖分别28/28和7/7；后者完整请求配对率7/2800，不作删失后的总体通过。
+原30冻结中2无payload继续保留，不补生成。没有新运行、调参、传播或更新时间戳。
+
+假设／资格：单次运行、多冻结体素共享未来误差可能相关；map误差仍受Up、外参、
+旋转和未传播时间身份限制。tau=0模型不由之后到达条件统计获得长期／联合95%资格。
+策略：只登记诊断，B0/9＋0/9、D0/6与默认不推广保持。A仍有48迟到／3 brake拒绝，
+C真实低风险收益仍依赖B。逐项JSON、四面板图、脚本和输入hash通过共享resolver
+登记safety_feedback_prediction_error；原报告关于“8次生效前”的分类由本节及补充
+纠正，原产物不改写。
+[图文补充报告](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/prediction_error_report.md)。
