@@ -880,38 +880,13 @@ namespace ego_planner
     const auto predecessor=planner_manager_->local_data_;
     bool plan_and_refine_success = false;
     bool target_selected = false;
-    std::optional<Eigen::Vector3d> attempted_target;
     const auto budget = planner_manager_->planningBudget();
-    for (const double fraction : {1.0, 0.65, 0.35}) {
-      const double distance = std::min(planning_horizen_ * fraction,
-                                       search_pool_target_limit_m_);
-      if (distance < min_distance ||
-          budget->expired()) break;
-      if (fraction != 1.0 &&
-          !budget->tryRepair(PlanningBudget::Repair::TargetShortening)) break;
-      if (!getLocalTarget(distance)) {
-        if (wait_for_map_reason_ == GridExecutionReason::ENVIRONMENT_STALE) break;
-        continue;
-      }
-      if (attempted_target &&
-          (local_target_pt_ - *attempted_target).norm() <
-              planner_manager_->grid_map_->getResolution() * 0.5)
-        continue;
-      attempted_target = local_target_pt_;
-      target_selected = true;
-      plan_and_refine_success = planner_manager_->reboundReplan(
-          start_pt_, start_vel_, start_acc_, local_target_pt_,
-          local_target_vel_, (have_new_target_ || flag_use_poly_init),
-          flag_randomPolyTraj);
-      if (plan_and_refine_success) break;
-      const auto reason=planner_manager_->lastPlanFailure();
-      if(reason==EGOPlannerManager::PlanFailure::Budget ||
-         reason==EGOPlannerManager::PlanFailure::Release ||
-         reason==EGOPlannerManager::PlanFailure::Connection ||
-         reason==EGOPlannerManager::PlanFailure::Curve) break;
-      // Exhaustion may justify a shorter execution range; timeout never does.
-      if(reason==EGOPlannerManager::PlanFailure::Search &&
-         planner_manager_->lastSearchFailure() == AStar::Failure::TIME_BUDGET) break;
+    const double distance=std::min(planning_horizen_,search_pool_target_limit_m_);
+    if(distance>=min_distance && !budget->expired() && getLocalTarget(distance)) {
+      target_selected=true;
+      plan_and_refine_success=planner_manager_->reboundReplan(
+          start_pt_,start_vel_,start_acc_,local_target_pt_,local_target_vel_,
+          (have_new_target_ || flag_use_poly_init),flag_randomPolyTraj);
     }
     if (!target_selected && !plan_and_refine_success) {
       planner_manager_->recordTargetSelectionFailure(start_pt_,start_vel_,start_acc_,local_target_pt_);
@@ -1171,6 +1146,7 @@ namespace ego_planner
     }
     const auto add_target = [&](const Eigen::Vector3d& point, bool final) {
       if (expired()) return;
+      for (const auto& target:local_targets_) if((target.position-point).norm()<1e-9) return;
       const auto cell=planner_manager_->queryLocalTargetCell(point,node_->now().seconds());
       if (!cell.executable()) {
         if (final) RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
@@ -1199,40 +1175,58 @@ namespace ego_planner
     const bool final_range=target_t>=reference.global_duration_-1e-9;
     if (final_range) {
       add_target(end_pt_,true);
-      if (!local_targets_.empty()) {
-        local_target_pt_=end_pt_; local_target_vel_.setZero();
-        planner_manager_->setLocalTargets(local_targets_); return true;
-      }
     }
-    // Enumerate geometric candidates before expensive clearance/prediction queries.
-    // Sorting first makes the bounded set reproducible and keeps the common case cheap.
-    Eigen::Vector3i nominal_index; planner_manager_->grid_map_->posToIndex(nominal,nominal_index);
-    std::vector<std::pair<Eigen::Vector3d,double>> nearby;
+    // The existing execution ranges share one bounded goal set and search.
+    // A far disconnected island must not consume the budget before a legal
+    // intermediate target is even offered. Task progress still comes only
+    // from the vehicle projection above, and every target keeps its checks.
+    std::array<std::vector<std::pair<Eigen::Vector3d,double>>,3> nearby;
+    const std::array<double,3> fractions{{1.,.65,.35}};
     const int radius=static_cast<int>(std::ceil(1.0/resolution))+1;
-    for(int x=-radius;x<=radius;++x) for(int y=-radius;y<=radius;++y) for(int z=-radius;z<=radius;++z) {
-      if (expired()) return false;
-      Eigen::Vector3d point; planner_manager_->grid_map_->indexToPos(nominal_index+Eigen::Vector3i(x,y,z),point);
-      if ((point-nominal).norm()<=1.0+1e-9 && (!final_range || (point-end_pt_).norm()>1e-3)) {
-        double best=std::numeric_limits<double>::infinity(), progress=0;
-        for(const auto& sample:samples) {
-          const double separation=(point-sample.position).squaredNorm();
-          if(separation<best) {best=separation; progress=sample.arc;}
+    for(size_t range=0;range<fractions.size();++range) {
+      Eigen::Vector3d anchor=nominal;
+      if(range>0) for(const auto& sample:samples) {
+        if((sample.position-start_pt_).norm()>=distance*fractions[range]) {
+          anchor=sample.position; break;
         }
-        nearby.emplace_back(point,progress);
+      }
+      Eigen::Vector3i anchor_index; planner_manager_->grid_map_->posToIndex(anchor,anchor_index);
+      for(int x=-radius;x<=radius;++x) for(int y=-radius;y<=radius;++y) for(int z=-radius;z<=radius;++z) {
+        if (expired()) return false;
+        Eigen::Vector3d point; planner_manager_->grid_map_->indexToPos(anchor_index+Eigen::Vector3i(x,y,z),point);
+        if ((point-anchor).norm()<=1.0+1e-9 && (!final_range || (point-end_pt_).norm()>1e-3)) {
+          double best=std::numeric_limits<double>::infinity(), progress=0;
+          for(const auto& sample:samples) {
+            const double separation=(point-sample.position).squaredNorm();
+            if(separation<best) {best=separation; progress=sample.arc;}
+          }
+          nearby[range].emplace_back(point,progress);
+        }
+      }
+      std::sort(nearby[range].begin(),nearby[range].end(),[&](const auto& a,const auto& b) {
+        const auto da=std::llround((a.first-anchor).squaredNorm()*1e9);
+        const auto db=std::llround((b.first-anchor).squaredNorm()*1e9);
+        if(da!=db) return da<db;
+        if(a.second!=b.second) return a.second>b.second;
+        for(int axis=0;axis<3;++axis) if(a.first[axis]!=b.first[axis]) return a.first[axis]<b.first[axis];
+        return false;
+      });
+    }
+    std::array<size_t,3> next{};
+    // Keep the existing total cap; reserve some slots for each existing range.
+    for(size_t range=0;range<nearby.size();++range) {
+      const size_t quota=range==0?6:5;
+      const size_t before=local_targets_.size();
+      while(next[range]<nearby[range].size() && local_targets_.size()-before<quota && local_targets_.size()<16) {
+        add_target(nearby[range][next[range]++].first,false);
+        if(expired()) return false;
       }
     }
-    std::sort(nearby.begin(),nearby.end(),[&](const auto& a,const auto& b) {
-      const auto da=std::llround((a.first-nominal).squaredNorm()*1e9);
-      const auto db=std::llround((b.first-nominal).squaredNorm()*1e9);
-      if(da!=db) return da<db;
-      if(a.second!=b.second) return a.second>b.second;
-      for(int axis=0;axis<3;++axis) if(a.first[axis]!=b.first[axis]) return a.first[axis]<b.first[axis];
-      return false;
-    });
-    for (const auto& point:nearby) {
-      add_target(point.first,false);
-      if (expired()) return false;
-      if (local_targets_.size()==16) break;
+    for(size_t range=0;range<nearby.size() && local_targets_.size()<16;++range) {
+      while(next[range]<nearby[range].size() && local_targets_.size()<16) {
+        add_target(nearby[range][next[range]++].first,false);
+        if(expired()) return false;
+      }
     }
     if (local_targets_.empty()) { local_target_pt_=nominal; return false; }
     local_target_pt_=local_targets_.front().position;

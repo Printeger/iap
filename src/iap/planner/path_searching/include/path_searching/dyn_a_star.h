@@ -89,7 +89,17 @@ public:
 		bool map_changed = false;
 		bool performance_diagnostics = false;
 	};
+	// Offline component evidence uses the production traversal and edge authority.
+	// Never installed by the online planner; it cannot authorize a trajectory.
+	struct ComponentDiagnostic {
+		struct Goal { bool eligible=false, reached=false; Eigen::Vector3d lattice=Eigen::Vector3d::Constant(NAN); Failure failure=Failure::NONE; };
+		bool stop_on_first_goal=false;
+		std::vector<Goal> goals;
+		std::function<void(const Eigen::Vector3d&, const Eigen::Vector3d&)> visit;
+		std::function<void(const Eigen::Vector3d&, const Eigen::Vector3d&, const Eigen::Vector3d&, const char*)> boundary;
+	};
 private:
+	ComponentDiagnostic* component_diagnostic_ = nullptr;
 	GridMap::Ptr grid_map_;
     PlanningBudget::Ptr budget_;
     bool active_search_=false;
@@ -167,6 +177,7 @@ private:
 	int rounds_{0};
 
 public:
+	void setComponentDiagnostic(ComponentDiagnostic* diagnostic) { component_diagnostic_ = diagnostic; }
 	typedef std::shared_ptr<AStar> Ptr;
 
 	AStar(){};

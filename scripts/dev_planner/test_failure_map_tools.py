@@ -133,6 +133,103 @@ class FailureMapToolsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "v2 failure snapshot"):
             inspect(self.directory, 10)
 
+    def test_attribution_distinguishes_unknown_barrier_without_mutating_map(self):
+        self.meta.update(real_start_p_m=self.meta["search_requested_start_m"],
+                         planning_goals_m=[self.meta["search_requested_end_m"]],
+                         guide_fitting_reserve_m=0., guide_reserve_taper_distance_m=.5)
+        self.flags[10,:,:]=0
+        self.write()
+        before=(self.directory/"cells.bin").read_bytes()
+        report=inspect(self.directory,10,attribution=True)
+        self.assertTrue(report["observed"]["exhausted"])
+        self.assertFalse(report["observed"]["goals_reachable"])
+        self.assertTrue(report["geometry_only"]["goals_reachable"])
+        self.assertFalse(report["geometry_only"]["execution_authorized"])
+        self.assertGreater(report["observed"]["component_nodes"],0)
+        self.assertEqual(before,(self.directory/"cells.bin").read_bytes())
+        self.assertTrue(report["production_authorization_unchanged"])
+        self.assertTrue(report["cut_complete"])
+        self.assertGreater(report["cut_edges"], 0)
+
+    def attribution(self, budget_s=10):
+        self.meta.update(real_start_p_m=self.meta["search_requested_start_m"],
+                         guide_fitting_reserve_m=0., guide_reserve_taper_distance_m=.5)
+        self.meta.setdefault("planning_goals_m", [self.meta["search_requested_end_m"]])
+        self.write()
+        return inspect(self.directory, budget_s, attribution=True)
+
+    def test_attribution_recorded_obstacles_cut_both_graphs(self):
+        self.flags[10,:,:] |= 1
+        report = self.attribution()
+        self.assertTrue(report["geometry_only"]["exhausted"])
+        self.assertFalse(report["geometry_only"]["goals_reachable"])
+        self.assertIn("RECORDED_GEOMETRY_SUFFICIENT_TO_CUT_ORIGINAL_POOL", report["causes"])
+        self.assertGreater(report["boundary_reasons"]["INSUFFICIENT_CLEARANCE"], 0)
+
+    def test_attribution_unknown_never_erases_raw_obstacle(self):
+        self.flags[10,:,:] = 1
+        report = self.attribution()
+        self.assertFalse(report["geometry_only"]["goals_reachable"])
+        self.assertTrue(report["geometry_only"]["exhausted"])
+
+    def test_attribution_invalid_targets_still_measure_real_start_component(self):
+        self.flags[15,10,2] |= 3
+        report = self.attribution()
+        self.assertGreater(report["observed"]["component_nodes"], 0)
+        self.assertFalse(report["observed"]["goals"][0]["eligible"])
+        self.assertEqual(report["goal_components"][0], -2)
+
+    def test_attribution_pool_truncation_keeps_original_lattice(self):
+        self.meta["search_pool_dimensions"] = [20,10,10]
+        self.flags[10,5:15,:] |= 1
+        report = self.attribution()
+        self.assertFalse(report["observed"]["goals_reachable"])
+        self.assertTrue(report["observed_expanded"]["goals_reachable"])
+        self.assertIn("ORIGINAL_POOL_TRUNCATES_OBSERVED_PATH", report["causes"])
+        delta = (np.array(report["observed_expanded"]["pool_center_m"])-
+                 np.array(self.meta["search_pool_center_m"]))/self.meta["search_step_size_m"]
+        np.testing.assert_allclose(delta, np.round(delta), atol=1e-12)
+
+    def test_attribution_targets_register_separate_components(self):
+        self.flags[10,:,:] |= 1
+        self.meta["planning_goals_m"] = [[.5,0,.25],[-.2,0,.25]]
+        report = self.attribution()
+        self.assertTrue(report["observed"]["goals"][1]["reached"])
+        self.assertFalse(report["observed"]["goals"][0]["reached"])
+        self.assertEqual(report["goal_components"][1], 0)
+        self.assertGreater(report["goal_components"][0], 0)
+
+    def test_attribution_timeout_never_claims_no_route(self):
+        self.flags[10,:,:] |= 1
+        report = self.attribution(.000001)
+        self.assertFalse(report["observed"]["exhausted"])
+        self.assertEqual(report["observed"]["failure"], "TIME_BUDGET")
+        self.assertEqual(report["causes"], [])
+
+    def test_attribution_processing_loss_requires_current_support(self):
+        self.flags[10,:,:] = 0
+        self.meta.update(observation_evidence_available=True,
+            observation_sources_file="observation_sources.bin",
+            current_frame={"frame_id": 9, "stamp_s": 10., "sensor_position_m": [-.5,.05,.25],
+                "beam_evidence_complete": True, "max_range_m": 1.,
+                "hits_file": "current_frame_hits.csv", "beams_file": "current_frame_beams.csv"})
+        (self.directory/"current_frame_beams.csv").write_text(
+            "lidar_dx,lidar_dy,lidar_dz,outcome,range_m,map_dx,map_dy,map_dz\n1,0,0,1,.9,1,0,0\n")
+        (self.directory/"current_frame_hits.csv").write_text(
+            "lidar_x,lidar_y,lidar_z,map_x,map_y,map_z\n.9,0,0,.4,.05,.25\n")
+        sources = np.zeros_like(self.flags)
+        sources[10,10,2] = 128|16
+        sources.tofile(self.directory/"observation_sources.bin")
+        report = self.attribution()
+        self.assertGreater(report["unknown_boundary_classifications"]["PROCESSING_SUPPORT_LOSS"], 0)
+        witness = report["key_ray_evidence"][0]
+        self.assertEqual(witness["loss_producer"], "current_replace")
+        self.assertEqual(witness["beam_witnesses"][0]["relation"], "PREFIX_INTERSECTION")
+        sources[10,10,2] = 16
+        sources.tofile(self.directory/"observation_sources.bin")
+        report = self.attribution()
+        self.assertNotIn("PROCESSING_SUPPORT_LOSS", report["unknown_boundary_classifications"])
+
     def test_old_curve_snapshot_cannot_explain_missing_ray_provenance(self):
         self.write()
         self.assertEqual(inspect_curve(self.directory)["classification"],

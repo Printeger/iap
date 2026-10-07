@@ -11,6 +11,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <unordered_set>
+#include <sstream>
 
 
 namespace {
@@ -263,12 +266,171 @@ void benchmark(const Input& in, int repeats, bool diagnostics, bool differential
     std::cout << "]}\n";
   }
 }
+
+void pointJson(std::ostream& out, const Point& p) {
+  out << '[' << p.x() << ',' << p.y() << ',' << p.z() << ']';
+}
+
+void attribution(const Input& in, const std::filesystem::path& destination) {
+  double reserve, taper; size_t count;
+  if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || count > 100000)
+    throw std::invalid_argument("invalid full-guide attribution context");
+  std::vector<Point> goals;
+  for (size_t i=0; i<count; ++i) goals.push_back(readPoint());
+  std::filesystem::create_directories(destination);
+  auto map=GridMap::fromFailureSnapshot(in.snapshot);
+  const auto epoch=map->captureFrozenOccupancyEpoch();
+  GridPlanningRiskPolicy policy; policy.unknown_multiplier=1.;
+  const auto context=map->preparePlanningQuery(in.planning_time_s,in.motion,epoch);
+  if(context.environment_reason!=GridExecutionReason::OK || context.motion_reason!=GridExecutionReason::OK) {
+    std::cout << "{\"classification\":\"INCONCLUSIVE_STALE_OR_INVALID_EVIDENCE\"}\n";
+    return;
+  }
+  std::string sources_path;
+  if (!(std::cin >> std::quoted(sources_path))) throw std::invalid_argument("missing observation source identity");
+  std::vector<uint8_t> sources(in.snapshot.cell_flags.size(),0);
+  if (!sources_path.empty()) {
+    std::ifstream stream(sources_path,std::ios::binary|std::ios::ate);
+    if(!stream || static_cast<size_t>(stream.tellg())!=sources.size())
+      throw std::invalid_argument("observation source length differs from map");
+    stream.seekg(0); stream.read(reinterpret_cast<char*>(sources.data()),sources.size());
+    if(!stream) throw std::invalid_argument("observation sources read failed");
+  }
+  const auto bytes_before=epoch->cells->flags;
+  auto physicalQuery = [&](const Point& p, int geometry_mode) {
+    auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,geometry_mode==1,&context);
+    bool replace_unknown=geometry_mode==1;
+    if(geometry_mode==2 && cell.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED) {
+      const auto& index=cell.voxel_index;
+      const size_t address=(static_cast<size_t>(index.x())*in.snapshot.dimensions.y()+index.y())*in.snapshot.dimensions.z()+index.z();
+      replace_unknown=address<sources.size() && (sources[address]&128);
+      if(replace_unknown)cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,true,&context);
+    }
+    if (replace_unknown && cell.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED) {
+      // A counterfactual graph of recorded geometry, never an observation authorization.
+      const auto occupancy=GridMap::queryFrozenOccupancy(*epoch,p);
+      if (occupancy.raw_occupied || occupancy.inflated_occupied)
+        cell.execution_reason=GridExecutionReason::PHYSICAL_OBSTACLE;
+      else if (!std::isnan(cell.raw_center_clearance_m))
+        cell.execution_reason=cell.raw_center_clearance_m < cell.required_clearance_m ?
+          GridExecutionReason::INSUFFICIENT_CLEARANCE : GridExecutionReason::OK;
+    }
+    if (cell.executable()) {
+      double distance=(p-in.start).norm();
+      for (const auto& goal:goals) distance=std::min(distance,(p-goal).norm());
+      const double required=cell.required_clearance_m+reserve*std::clamp(distance/taper,0.,1.);
+      // The ordinary fast query may not have measured exact clearance yet.
+      if (reserve>0 && std::isnan(cell.raw_center_clearance_m))
+        cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,true,&context);
+      if (reserve>0 && cell.raw_center_clearance_m < required)
+        cell.execution_reason=GridExecutionReason::INSUFFICIENT_CLEARANCE;
+    }
+    cell.advisory.cost_multiplier=1.; return cell;
+  };
+  std::vector<int> goal_components(goals.size(),-1);
+  std::vector<Point> goal_seeds(goals.size(),Point::Constant(NAN));
+  bool main_exhausted=false;
+  auto run = [&](const std::string& name, const Eigen::Vector3i& pool, const Point& center,
+                 int geometry_mode, const Point& start, const std::vector<Point>& targets,
+                 int component_id, bool stop_on_goal) {
+    AStar search; search.initGridMap(map,pool); search.setFrozenEpoch(epoch);
+    search.setPlanningQuery([&](const Point& p) {return physicalQuery(p,geometry_mode);});
+    AStar::ComponentDiagnostic trace; trace.stop_on_first_goal=stop_on_goal;
+    std::ofstream nodes(destination/(name+"_nodes.csv"));
+    std::ofstream boundary(destination/(name+"_boundary.csv"));
+    nodes << "x,y,z,parent_x,parent_y,parent_z\n" << std::setprecision(17);
+    boundary << "from_x,from_y,from_z,to_x,to_y,to_z,sample_x,sample_y,sample_z,reason\n" << std::setprecision(17);
+    size_t boundary_count=0, nodes_count=0, pool_edges=0;
+    trace.visit=[&](const Point& p,const Point& parent) {
+      nodes << p.x()<<','<<p.y()<<','<<p.z()<<','<<parent.x()<<','<<parent.y()<<','<<parent.z()<<'\n';
+      ++nodes_count;
+    };
+    trace.boundary=[&](const Point& from,const Point& to,const Point& p,const char* reason) {
+      boundary << from.x()<<','<<from.y()<<','<<from.z()<<','<<to.x()<<','<<to.y()<<','<<to.z()<<','
+               <<p.x()<<','<<p.y()<<','<<p.z()<<','<<reason<<'\n';
+      ++boundary_count; if (std::string(reason)=="POOL_BOUNDARY") ++pool_edges;
+    };
+    search.setComponentDiagnostic(&trace);
+    search.AstarSearchGoals(in.step_m,start,targets,in.budget_s,center);
+    const auto& result=search.lastResult();
+    bool reachable=false;
+    std::ostringstream out; out<<std::setprecision(17);
+    out<<"{\"exhausted\":"<<(result.exhausted?"true":"false")
+       <<",\"failure\":"<<std::quoted(AStar::failureName(result.failure))
+       <<",\"classification\":"<<std::quoted(result.exhausted?"EXHAUSTED_COMPONENT":
+           result.failure==AStar::Failure::TIME_BUDGET?"INCONCLUSIVE_OFFLINE_BUDGET":"PATH_WITNESS_OR_INVALID_START")
+       <<",\"execution_authorized\":false,\"component_nodes\":"<<nodes_count
+       <<",\"boundary_edges\":"<<boundary_count<<",\"pool_boundary_edges\":"<<pool_edges
+       <<",\"seconds\":"<<result.duration_s<<",\"pool_dimensions\":["<<pool.x()<<','<<pool.y()<<','<<pool.z()
+       <<"],\"pool_center_m\":"; pointJson(out,center);
+    out<<",\"goals\":[";
+    for (size_t i=0;i<trace.goals.size();++i) {
+      if(i)out<<',';
+      const auto& goal=trace.goals[i]; reachable=reachable||goal.reached;
+      out<<"{\"eligible\":"<<(goal.eligible?"true":"false")<<",\"reached\":"<<(goal.reached?"true":"false")
+         <<",\"preparation_failure\":"<<std::quoted(AStar::failureName(goal.failure))<<",\"lattice_m\":";
+      if(goal.lattice.allFinite())pointJson(out,goal.lattice);else out<<"null";out<<'}';
+      if(name=="observed") {
+        if(!goal.eligible)goal_components[i]=-2;
+        else goal_seeds[i]=goal.lattice;
+        if(goal.reached)goal_components[i]=0;
+      }
+      if(component_id>0 && goal.reached && goal_components[i]!=-2)goal_components[i]=component_id;
+    }
+    out<<"],\"goals_reachable\":"<<(reachable?"true":"false")<<",\"path_m\":[";
+    const auto path=search.getPath();
+    for(size_t i=0;i<path.size();++i){if(i)out<<',';pointJson(out,path[i]);}out<<"]}";
+    if(name=="observed") main_exhausted=result.exhausted;
+    return out.str();
+  };
+  std::vector<Point> probes=goals; probes.push_back(in.start);
+  for(size_t address=0;address<sources.size();++address)if(sources[address]&128 && !(in.snapshot.cell_flags[address]&7)) {
+    const int yz=in.snapshot.dimensions.y()*in.snapshot.dimensions.z();
+    Eigen::Vector3i index(address/yz,(address%yz)/in.snapshot.dimensions.z(),address%in.snapshot.dimensions.z());
+    probes.push_back(in.snapshot.origin+(index.cast<double>()+Point::Constant(.5))*in.snapshot.resolution_m);
+  }
+  std::vector<GridExecutionReason> before;
+  for(const auto& probe:probes)before.push_back(physicalQuery(probe,0).execution_reason);
+  const auto observed=run("observed",in.pool,in.center,false,in.start,goals,0,false);
+  const auto geometry=run("geometry_only",in.pool,in.center,true,in.start,goals,-1,true);
+  const auto unthinned=run("unthinned_counterfactual",in.pool,in.center,2,in.start,goals,-1,true);
+  // Extend to frozen bounds by integer shifts of the original lattice only.
+  Eigen::Vector3i lower,upper,expanded_pool; Point expanded_center;
+  for(int i=0;i<3;++i) {
+    lower[i]=static_cast<int>(std::floor((in.snapshot.origin[i]-in.center[i])/in.step_m))-1;
+    upper[i]=static_cast<int>(std::ceil((in.snapshot.max_boundary[i]-in.center[i])/in.step_m))+1;
+    expanded_pool[i]=upper[i]-lower[i]+1;
+    expanded_center[i]=in.center[i]+(lower[i]+expanded_pool[i]/2)*in.step_m;
+  }
+  const auto expanded=run("observed_expanded",expanded_pool,expanded_center,false,in.start,goals,-1,false);
+  std::vector<std::string> other_components;
+  if(main_exhausted)for(size_t i=0;i<goals.size();++i)if(goal_components[i]==-1 && goal_seeds[i].allFinite()) {
+    const int component=static_cast<int>(other_components.size())+1;
+    other_components.push_back(run("goal_component_"+std::to_string(component),in.pool,in.center,false,
+                                  goal_seeds[i],goals,component,false));
+
+  }
+  bool authorization_unchanged=bytes_before==map->captureFrozenOccupancyEpoch()->cells->flags;
+  for(size_t i=0;i<probes.size();++i)authorization_unchanged=authorization_unchanged &&
+      before[i]==physicalQuery(probes[i],0).execution_reason;
+  if(!authorization_unchanged)throw std::runtime_error("diagnostic changed production map or authorization");
+  std::cout<<"{\"schema_version\":\"iap_failure_attribution_v1\",\"observed\":"<<observed
+    <<",\"production_authorization_unchanged\":true,\"authorization_probe_count\":"<<probes.size()
+    <<",\"unthinned_evidence_available\":"<<(sources_path.empty()?"false":"true")
+    <<",\"unthinned_counterfactual\":"<<unthinned
+    <<",\"geometry_only\":"<<geometry<<",\"observed_expanded\":"<<expanded<<",\"goal_components\":[";
+  for(size_t i=0;i<goal_components.size();++i){if(i)std::cout<<',';std::cout<<goal_components[i];}
+  std::cout<<"],\"other_components\":[";
+  for(size_t i=0;i<other_components.size();++i){if(i)std::cout<<',';std::cout<<other_components[i];}
+  std::cout<<"]}\n";
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     if (argc < 2 || argc > 6) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
+    if (argc==4 && std::string(argv[2])=="--attribution") { attribution(in,argv[3]); return 0; }
     if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc >= 5 && std::string(argv[4]) == "1", argc >= 6 && std::string(argv[5]) == "1"); return 0; }
     const auto began = Clock::now();
     auto elapsed = [&]() {

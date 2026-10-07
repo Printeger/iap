@@ -953,8 +953,8 @@ ros2 launch iap iap_sim.launch.py run_dir:="$IAP_RUN_DIR" scenario:=icra_dense_f
 `run_dir` 只接受同一场景、entrypoint=`iap_sim`、lifecycle=`active` 的 resolver
 主运行；完成的旧运行拒绝复用。guide OFF 搜索跳过未使用的偏好刷新，独立预测
 和曲线诊断仍保留。失败证据随完整物理 epoch 在同一锁内捕获，不能事后重捕
-地图。离线 reachability 目前仅重放基础物理净空，尚不重放 guide 拟合余量/
-多目标选择；报告 scope 明确该限制。
+地图。离线 reachability 默认模式仅重放基础物理净空；`--attribution` 模式重放
+guide 拟合余量和完整保存目标集，两个模式的报告 scope 分别说明。
 
 GNSS 已有 debug CSV 开启时，`export/glio/advisory_coordinate_dynamics.csv` 记录
 同次优化 pose 原时间、接收 UTC、世界→ECEF/ENU、机体旋转、R(0) tangent
@@ -977,3 +977,24 @@ GNSS 已有 debug CSV 开启时，`export/glio/advisory_coordinate_dynamics.csv`
 末次attempt265/gen2398在原已观测池内离线穷尽无路。固定路线/时间与旋转
 资格/双源尚未通过，9+9和6均未启动，默认不推广。报告含全部四轮失败、
 原始命令/配置hash、同输入对照、地图/曲线及未合格误差诊断图。
+
+同图断路归因使用 v3 `terminal_final` 的完整目标集和 guide 余量，输出必须放在新分配 run 的 `export/analysis` 空目录内：
+
+```bash
+cd /home/dev/ws_iap
+export IAP_RUN_DIR="$(python3 - <<'PY'
+import sys
+sys.path.insert(0,'src/iap/launch/_includes')
+from run_directory import resolve_run_directory
+print(resolve_run_directory(entrypoint='failure_attribution', scenario='icra_dense_forest_four_fork_v2'))
+PY
+)"
+python3 src/iap/scripts/dev_planner/analyze_failure_map.py \
+  src/iap/log/20261007T060542Z_204/export/planner/failure_map/terminal_final \
+  --attribution --budget-s 120 --plots \
+  --output "$IAP_RUN_DIR/export/analysis/attempt265_gen2398"
+```
+
+`--budget-s` 在归因模式下是每个离线分量的搜索时限；扩大冻结地图范围和目标分量各有独立结果。只有 `exhausted=true` 的范围才可作无路结论。`observed_cut.csv` 登记真实可达分量指向分量外的拒绝边；节点文件保存父节点，可重放前方通路。`report.json`、`unknown_boundary_evidence.json`、两个 PNG 和 `replay_input.txt` 绑定原始 SHA-256。目标分量 `-2` 表示原终点连接不合法，`-1` 表示未判定，不能混作另一个已证实分量。仅保留已记录障碍的几何图，以及仅补未稀疏支持的反事实图，均明确不授予执行权限；历史 observation-loss producer 不证明当前射线覆盖。
+
+A* 接口修改后须按依赖顺序重建 `path_searching`、`bspline_opt`、`ego_planner`，避免静态后端仍使用旧头文件布局。生产 FSM 将原有 1.0/0.65/0.35 前进距离放入同一组最多 16 个目标，随后执行同一次搜索；保留各目标的前进、合法性、终端速度及所有曲线/发布检查，在线预算不变。

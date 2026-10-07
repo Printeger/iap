@@ -200,9 +200,11 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
     const Vector3i first_voxel = begin.array().floor().cast<int>();
     const Vector3i last_voxel = end.array().floor().cast<int>();
     double multiplier = 1.0;
-    auto examine = [&](const GridSearchCell& cell) {
+    auto examine = [&](const GridSearchCell& cell, const Vector3d& sample) {
         if (!cell.executable()) {
             ++result_.rejected_execution[static_cast<size_t>(cell.execution_reason)];
+            if (component_diagnostic_ && component_diagnostic_->boundary && !deadlineExpired())
+                component_diagnostic_->boundary(from, to, sample, gridExecutionReasonName(cell.execution_reason));
             if (cell.execution_reason == GridExecutionReason::ENVIRONMENT_STALE)
                 map_changed_ = true;
             return false;
@@ -231,20 +233,21 @@ std::optional<double> AStar::edgeMultiplier(const Vector3d& from,
             // midpoint below, and retain centre checks for interior voxels.
             if (index != first_voxel && index != last_voxel &&
                 !examine(queryVoxelCenter(
-                    origin + (voxel.array() + 0.5).matrix() * resolution)))
+                    origin + (voxel.array() + 0.5).matrix() * resolution),
+                    origin + (voxel.array() + 0.5).matrix() * resolution))
                 return std::nullopt;
             if (!more) break;
         } while (true);
     }
-    if (!examine(queryLatticePoint(from_index))) return std::nullopt;
+    if (!examine(queryLatticePoint(from_index), from)) return std::nullopt;
     const Vector3i mid_key = from_index + to_index;
     // Even half-lattice coordinates are exactly node samples; odd coordinates
     // are midpoints. Voxel centers use a separate key namespace. Arbitrary
     // requested endpoints and connectors never use these keys.
     const Vector3d midpoint = (mid_key.x() % 2 == 0 && mid_key.y() % 2 == 0 && mid_key.z() % 2 == 0)
         ? Index2Coord(mid_key / 2) : Vector3d((from + to) / 2.0);
-    if (!examine(querySample(latticeKey(mid_key), midpoint, 2))) return std::nullopt;
-    if (!examine(queryLatticePoint(to_index))) return std::nullopt;
+    if (!examine(querySample(latticeKey(mid_key), midpoint, 2), midpoint)) return std::nullopt;
+    if (!examine(queryLatticePoint(to_index), to)) return std::nullopt;
     return multiplier;
 }
 
@@ -491,9 +494,17 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt,
 }
 
 bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
-                            const std::vector<Vector3d>& goals, double max_duration_s,
+                            const std::vector<Vector3d>& requested_goals, double max_duration_s,
                             std::optional<Vector3d> center_override)
 {
+    std::vector<Vector3d> diagnostic_goals;
+    if (component_diagnostic_) {
+        diagnostic_goals = requested_goals;
+        component_diagnostic_->goals.assign(requested_goals.size(), {});
+        // Auxiliary self endpoint prepares the real start even when every target is invalid.
+        diagnostic_goals.push_back(start_pt);
+    }
+    const auto& goals = component_diagnostic_ ? diagnostic_goals : requested_goals;
     if (goals.empty()) { recordPresearchFailure(Failure::END_BLOCKED, start_pt, start_pt); return false; }
     const Vector3d end_pt = goals.front();
     const auto steady_start = PlanningBudget::Clock::now();
@@ -534,8 +545,13 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     for (size_t i = 0; i < goals.size(); ++i) {
         if (deadlineExpired()) { advisory_fallback_ = preference_fallback;
             finishFailure(Failure::TIME_BUDGET, time_1); return false; }
-        if (ConvertToIndexAndAdjustStartEndPoints(start_pt, goals[i], start_idx, end_idx))
-            valid_goals.push_back({i, end_idx, result_.end_cell});
+        const bool eligible = ConvertToIndexAndAdjustStartEndPoints(start_pt, goals[i], start_idx, end_idx);
+        if (component_diagnostic_ && i < requested_goals.size()) {
+            auto& evidence = component_diagnostic_->goals[i];
+            evidence.eligible = eligible; evidence.failure = eligible ? Failure::NONE : result_.failure;
+            evidence.lattice = eligible ? result_.end_lattice : Vector3d::Constant(NAN);
+        }
+        if (eligible) valid_goals.push_back({i, end_idx, result_.end_cell});
         else if (result_.failure == Failure::START_BLOCKED || result_.failure == Failure::START_OUT_OF_POOL ||
                  result_.failure == Failure::CURRENT_MOTION || result_.failure == Failure::END_STALE) break;
     }
@@ -547,6 +563,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     }
     result_.failure = Failure::NONE;
     const auto heuristic = [&](GridNodePtr node) {
+        if (component_diagnostic_ && !component_diagnostic_->stop_on_first_goal) return 0.0;
         double best = inf;
         for (const auto& goal : valid_goals) {
             GridNode terminal; terminal.index = goal.index;
@@ -623,12 +640,20 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         //     cout << "current=" << current->index.transpose() << endl;
 
         auto reached = std::find_if(valid_goals.begin(), valid_goals.end(), [&](const Goal& goal) {
-            return current->index == goal.index &&
+            return (!component_diagnostic_ || goal.original < requested_goals.size()) &&
+                current->index == goal.index &&
                 connector_allowed(Index2Coord(current->index), goals[goal.original]);
         });
         if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET, time_1); return false; }
         if (reached != valid_goals.end())
         {
+            if (component_diagnostic_) {
+                for (const auto& goal : valid_goals) {
+                    if (goal.original < requested_goals.size() && current->index == goal.index &&
+                        connector_allowed(Index2Coord(current->index), goals[goal.original]))
+                        component_diagnostic_->goals[goal.original].reached = true;
+                }
+            }
             result_.selected_goal = reached->original;
             result_.requested_end = goals[reached->original];
             result_.end_lattice = Index2Coord(reached->index);
@@ -639,20 +664,25 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
             result_.path_cost = current->gScore;
-            recordMapAtFinish();
-            result_.duration_s = std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
-            RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"),
-                "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
-                result_.expanded, result_.query_calls, result_.cache_hits,
-                result_.duration_s, result_.occupancy_query_s,
-                result_.clearance_query_s, result_.advisory_query_s,
-                result_.map_changed,
-                static_cast<unsigned long>(result_.occupancy_generation),
-                static_cast<unsigned long>(result_.live_generation_at_finish));
-            return true;
+            if (!component_diagnostic_ || component_diagnostic_->stop_on_first_goal) {
+                recordMapAtFinish();
+                result_.duration_s = std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
+                RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"),
+                    "A* path expanded=%zu queries=%zu cached=%zu elapsed=%.3fs occupancy=%.3fs clearance=%.3fs PL=%.3fs map_changed=%d search_generation=%lu live_generation=%lu",
+                    result_.expanded, result_.query_calls, result_.cache_hits,
+                    result_.duration_s, result_.occupancy_query_s,
+                    result_.clearance_query_s, result_.advisory_query_s,
+                    result_.map_changed,
+                    static_cast<unsigned long>(result_.occupancy_generation),
+                    static_cast<unsigned long>(result_.live_generation_at_finish));
+                return true;
+            }
         }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.
         ++result_.expanded;
+        if (component_diagnostic_ && component_diagnostic_->visit)
+            component_diagnostic_->visit(Index2Coord(current->index), current->cameFrom ?
+                Index2Coord(current->cameFrom->index) : start_pt);
 
         for (int dx = -1; dx <= 1; dx++)
             for (int dy = -1; dy <= 1; dy++)
@@ -668,6 +698,9 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
 
                     if (neighborIdx(0) < 1 || neighborIdx(0) >= POOL_SIZE_(0) - 1 || neighborIdx(1) < 1 || neighborIdx(1) >= POOL_SIZE_(1) - 1 || neighborIdx(2) < 1 || neighborIdx(2) >= POOL_SIZE_(2) - 1)
                     {
+                        if (component_diagnostic_ && component_diagnostic_->boundary)
+                            component_diagnostic_->boundary(Index2Coord(current->index), Index2Coord(neighborIdx),
+                                Index2Coord(neighborIdx), "POOL_BOUNDARY");
                         continue;
                     }
 
@@ -735,6 +768,11 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
 
     if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET, time_1); return false; }
     result_.exhausted = true;
+    if (component_diagnostic_ && !gridPath_.empty()) {
+        result_.failure = Failure::NONE; recordMapAtFinish();
+        result_.duration_s = std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
+        return true;
+    }
     const bool unknown_rejected = result_.rejected_execution[
         static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)] != 0;
     finishFailure(unknown_rejected ? Failure::NO_PATH_WITH_UNOBSERVED :

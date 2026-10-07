@@ -101,6 +101,11 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static std::vector<Eigen::Vector3d> targetPositions(const EGOPlannerManager& manager) {
+    std::vector<Eigen::Vector3d> points;
+    for (const auto& target : manager.planning_targets_) points.push_back(target.position);
+    return points;
+  }
   static iap::IntegritySnapshot snapshot(const EGOPlannerManager& manager, double now) {
     return manager.capturePredictionSnapshot(now);
   }
@@ -730,6 +735,34 @@ TEST(EgoBaseline, UnknownOrObstacleInsideReferenceDoesNotForbidKnownEndpoint) {
   ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, position, goal);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 3));
   EXPECT_GT(ego_planner::EGOReplanFSMTestAccess::target(fsm).x(), 0.8);
+}
+
+TEST(EgoBaseline, OneGoalSetIncludesReachableForwardRangeAcrossUnknownBarrier) {
+  auto node=makeNode(false,1.,false,false);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>(); auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1), goal(4,0,1), zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  for(double y=-5.9;y<6;y+=.2)for(double z=.1;z<5;z+=.2)
+    GridMapTestAccess::clearObserved(*manager->grid_map_,Eigen::Vector3d(.1,y,z));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  const auto targets=ego_planner::EGOPlannerManagerTestAccess::targetPositions(*manager);
+  ASSERT_LE(targets.size(),16u);
+  AStar search; search.initGridMap(manager->grid_map_,Eigen::Vector3i(100,100,100));
+  search.setPlanningQuery([&](const Eigen::Vector3d& p){return manager->queryPlanningViewCell(p);});
+  ASSERT_TRUE(search.AstarSearchGoals(.1,start,targets,10));
+  const auto reached=targets[search.lastResult().selected_goal];
+  EXPECT_LT(reached.x(),0);
+  EXPECT_GT(reached.x(),start.x()+.4);
+  EXPECT_EQ(manager->queryPlanningViewCell(Eigen::Vector3d(.1,0,1)).execution_reason,
+            GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_LT(manager->global_data_.last_progress_time_,.1);
 }
 
 TEST(EgoBaseline, CurvedReferenceUsesForwardArcAndFirstSelfIntersection) {
