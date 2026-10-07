@@ -1340,3 +1340,14 @@ B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广�
 安全监督与执行FSM均先消费真实command ID，再选择active/pending曲线。该机制避免
 已到反馈仍被安全入口当作pending撤销；不按scheduled时间自行激活，不放宽物理门。
 接口见[安全监督契约](docs/spec/safety_planner_contract.md#安全监督消费真实执行反馈)。
+
+
+安全入口反馈修复bd580c91已完成干净300秒核验：91发布／83命令ID／53激活，
+本轮未到原终点，末距.974m；保留1次约2ms迟到撤销与3 checked brake拒绝。
+28可用冻结输入全部原时间生产重放，2800空间与28receiver分开统计，代数通过
+仍不授予噪声／传播／联合米数资格；B0/9＋0/9、D0/6、默认不推广。
+[最新图文与完整证据索引](log/20261007T091820Z_056/export/analysis/safety_feedback_live/report.md)。
+
+2022历史C59/C60轨道身份已用IGS带时间区间metadata独立核验，本地NAV44个北斗
+PRN分类差异0；该结果不外推2026重新编号、健康／信号或Advisory资格。
+[原始来源及hash补证](log/20261007T091820Z_056/export/analysis/rinex_identity/report.md)。

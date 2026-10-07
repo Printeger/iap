@@ -565,3 +565,20 @@ observeExecutingTrajectory确认active/pending所有权，然后绑定被检查�
 跟踪期望。安全定时器不得等待执行定时器才更新实际command ID；仅经过scheduled时间
 不授予激活。原命令身份／撤销确认规则、物理拒绝、紧急窗口和预算保持。
 此入口修复不保证检查过程中发生的server切换或反馈尚未送达时的竞态已消除。
+
+
+安全入口消费机制已完成Release及7组规划／43入口／4到达回归，干净300秒现场
+91发布／83命令ID／53激活。仍有已生效48的撤销晚约2ms和3次checked brake拒绝；
+不得以机制修复授予全部接续资格。原时间2828请求按2800空间和28receiver分母分别
+登记，GNSS＋LiDAR information标志不能替代raw故障界限／米数／联合故障资格。
+当前首违owner与时序／输入hash证据见
+[现场报告](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/report.md)。
+
+
+独立历史轨道身份补证：IGS带时间区间SATELLITE/PRN＋IDENTIFIER与本地NAV全部
+44个北斗PRN在2022-07-06T12:00UTC匹配，2022生产GEO类别差异0。C59→C217、
+C60→C229均BDS-3G，历史有效区间覆盖300秒。2026已有重分配，不能把PRN-only
+类别实现外推为2026或未来输入资格；健康／信号及Advisory资格仍分开。原HTTP bytes、
+headers／UTC／metadata与NAV hash及全映射见
+[历史轨道身份独立补证](../../log/20261007T091820Z_056/export/analysis/rinex_identity/report.md)。
+只关闭独立身份依据缺口，旧报告与RTKLIB数值验证保持原身份。

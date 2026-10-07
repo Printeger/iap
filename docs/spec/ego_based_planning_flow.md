@@ -1551,3 +1551,21 @@ B0/9＋0/9、D正式0/6、默认不推广。本轮未启用GPU逐匹配导出。
 的机制红例：已有新ID命令但safety先运行，旧实现仍撤销pending；修复先消费新ID。
 完整Release构建／7组规划／43入口／4到达回归通过，288ms机制绿例保留；安装已同步。
 两轴审查无阻塞；干净300秒现场仍待完成。证据在campaign safety_feedback_owner_red／green。
+
+
+安全feedback入口修复的干净300秒核验已完成（bd580c91／231557Z_065）：91发布／
+83实际命令ID／53激活；原FSM未到达，48迟到约2ms与3 checked brake拒绝完整保留。
+末完整拒绝182 base2518→release2521实际曲线未知，同输入backend通过不授予发布。
+28原时间冻结重放和坐标代数通过；实际模块一致性分母1815 scan＋28 receiver，
+原PL／information标志不授予联合米数资格。完整时序及各阶段阻塞见
+[当前现场图文报告](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/report.md)。
+A全接续、B米数和C真实风险收益未资格；D正式0/6、B0/9＋0/9，默认不推广。
+
+
+独立历史轨道身份补证：IGS带时间区间SATELLITE/PRN＋IDENTIFIER与本地NAV全部
+44个北斗PRN在2022-07-06T12:00UTC匹配，2022生产GEO类别差异0。C59→C217、
+C60→C229均BDS-3G，历史有效区间覆盖300秒。2026已有重分配，不能把PRN-only
+类别实现外推为2026或未来输入资格；健康／信号及Advisory资格仍分开。原HTTP bytes、
+headers／UTC／metadata与NAV hash及全映射见
+[历史轨道身份独立补证](../../log/20261007T091820Z_056/export/analysis/rinex_identity/report.md)。
+只关闭独立身份依据缺口，旧报告与RTKLIB数值验证保持原身份。
