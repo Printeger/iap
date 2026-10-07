@@ -128,6 +128,10 @@ namespace ego_planner
                                           bool check_connection = true,
                                           const GridMotionContext* bound_motion = nullptr);
     TrajectoryAssessment assessRemainingTrajectory(double now_s);
+    // Forensic scalar query, tied to the assessed epoch/time/motion. Missing
+    // proof returns nullopt and never substitutes the current live map.
+    std::optional<GridPlanningCell> queryAssessmentCell(
+        const TrajectoryAssessment& assessment,const Eigen::Vector3d& position) const;
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
     PlanningBudget::Ptr planningBudget() const { return planning_budget_; }

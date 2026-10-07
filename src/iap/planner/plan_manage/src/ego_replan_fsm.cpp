@@ -731,9 +731,22 @@ namespace ego_planner
         info.duration_);
     const auto expected = info.position_traj_.evaluateDeBoorT(
         measured_elapsed);
-    if ((expected - odom_pos_).norm() > tracking_error_limit_m_) {
-      assessment.execution_reason = GridExecutionReason::TRACKING_ERROR;
-      assessment.first_execution_time_s = measured_elapsed;
+    const double active_tracking_error=(expected-odom_pos_).norm();
+    if(active_tracking_error>tracking_error_limit_m_) {
+      if(assessment.trajectory_id==info.traj_id_) {
+        assessment.execution_reason=GridExecutionReason::TRACKING_ERROR;
+        assessment.first_execution_time_s=measured_elapsed;
+        assessment.first_execution_position=expected;
+        if(const auto cell=planner_manager_->queryAssessmentCell(assessment,expected))
+          assessment.first_execution_cell=*cell;
+      } else {
+        // A pending physical rejection already requires withdrawal/recovery.
+        // Keep its curve/time ownership; the active tracking observation is
+        // still saved separately in the stop state's reference/error fields.
+        RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+            "Active trajectory %d tracking error %.3fm also observed; retaining failure owned by trajectory %d",
+            info.traj_id_,active_tracking_error,assessment.trajectory_id);
+      }
     }
     const auto capture_remaining = [&](const std::string& kind,
                                        const GridExecutionReason reason) {

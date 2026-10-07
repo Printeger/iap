@@ -15,6 +15,8 @@
 #include <rcl/time.h>
 #include <boost/property_tree/json_parser.hpp>
 
+namespace { std::filesystem::path owned_failure_capture_test_run; }
+
 struct GridMapTestAccess {
   static uint64_t riskVersion(const GridMap& map) { return map.risk_version_; }
   static void attachRegisteredSource(GridMap& map) {
@@ -552,6 +554,7 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   const char* temporary = mkdtemp(name);
   ASSERT_NE(temporary, nullptr);
   const std::filesystem::path run(temporary);
+  owned_failure_capture_test_run=run;
   struct Cleanup {
     std::filesystem::path path;
     ~Cleanup() { std::filesystem::remove_all(path); }
@@ -762,6 +765,10 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   const auto proof_generation=overridden.evaluated_generation;
   GridMapTestAccess::input(*manager.grid_map_,{},10.1,proof_position);
   ASSERT_GT(manager.grid_map_->occupancyGeneration(),proof_generation);
+  const auto original_cell=manager.queryAssessmentCell(overridden,proof_position);
+  ASSERT_TRUE(original_cell);
+  EXPECT_EQ(original_cell->occupancy_generation,proof_generation);
+  EXPECT_FALSE(manager.queryAssessmentCell({},proof_position));
   overridden.execution_reason=GridExecutionReason::TRACKING_ERROR;
   manager.local_data_.position_traj_=proof_curve;
   manager.captureRemainingFailure("tracking_epoch_override",proof_position,
@@ -1120,6 +1127,23 @@ TEST(EgoBaseline, TimeAdjustmentPreservesPhysicalEndpointDerivatives) {
 }
 
 TEST(EgoBaseline, ScheduledCandidateKeepsPredecessorUntilMatchingCommand) {
+  // Dedicated invocations own a temporary evidence run. The full suite's
+  // earlier capture fixture already owns its temporary RunLogManager.
+  std::filesystem::path owned_run;
+  struct EvidenceCleanup {
+    std::filesystem::path& path;
+    ~EvidenceCleanup() { if(!path.empty()) std::filesystem::remove_all(path); }
+  } evidence_cleanup{owned_run};
+  if(!glim::RunLogManager::get_if_initialized()) {
+    char name[]="/tmp/iap_pending_owner_XXXXXX";
+    const auto temporary=mkdtemp(name);ASSERT_NE(temporary,nullptr);
+    owned_run=temporary;ASSERT_EQ(setenv("IAP_RUN_DIR",temporary,1),0);
+    glim::RunLogManager::initialize("pending_owner_test");
+  } else {
+    const auto& run=glim::RunLogManager::get_if_initialized()->run_dir();
+    if(run==owned_failure_capture_test_run && !std::filesystem::exists(run))
+      owned_run=run; // Only this suite's known temporary fixture may be reclaimed.
+  }
   auto node=makeNode();
   auto owner=std::make_unique<ego_planner::EGOPlannerManager>();
   auto& manager=*owner;
@@ -1155,18 +1179,41 @@ TEST(EgoBaseline, ScheduledCandidateKeepsPredecessorUntilMatchingCommand) {
   manager.observeExecutingTrajectory(predecessor.traj_id_);
   EXPECT_TRUE(manager.hasPendingTrajectory());
   ego_planner::EGOReplanFSM fsm;
-  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,measured_position,end);
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,measured_position+Eigen::Vector3d(0,2,0),end);
   std::vector<traj_utils::msg::Bspline> withdrawals;
   auto subscription=node->create_subscription<traj_utils::msg::Bspline>(
       "pending_withdrawal_test",10,[&](traj_utils::msg::Bspline::ConstSharedPtr msg){withdrawals.push_back(*msg);});
   auto publisher=node->create_publisher<traj_utils::msg::Bspline>("pending_withdrawal_test",10);
   ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::rejectsPendingReplan(fsm));
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);
+  manager.grid_map_->setFailureEvidenceCapture(true);
   GridMapTestAccess::changeEvidence(*manager.grid_map_,end,true,true,true);
   const auto supervision=manager.assessRemainingTrajectory(node->now().seconds());
   EXPECT_FALSE(supervision.executable());
   EXPECT_EQ(supervision.trajectory_id,pending.traj_id_);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,measured));
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
+  const auto evidence=glim::RunLogManager::get_if_initialized()->export_path(
+      "planner/failure_map/remaining_failure");
+  ASSERT_TRUE(std::filesystem::exists(evidence/"snapshot.json"));
+  boost::property_tree::ptree metadata,state;
+  boost::property_tree::read_json((evidence/"snapshot.json").string(),metadata);
+  boost::property_tree::read_json((evidence/"state.json").string(),state);
+  EXPECT_EQ(metadata.get<std::string>("curve_execution_reason"),
+      gridExecutionReasonName(supervision.execution_reason));
+  EXPECT_EQ(state.get<int>("trajectory_id"),predecessor.traj_id_);
+  EXPECT_EQ(state.get<int>("failed_curve_id"),pending.traj_id_);
+  EXPECT_EQ(metadata.get<uint64_t>("generation"),supervision.evaluated_generation);
+  const double offset=pending.start_time_.seconds()-predecessor.start_time_.seconds();
+  EXPECT_NEAR(metadata.get<double>("curve_first_execution_time_s"),
+      supervision.first_execution_time_s-offset,1e-9);
+  Eigen::Vector3d failed_position;int coordinate=0;
+  for(const auto& component:metadata.get_child("curve_first_execution_position_m"))
+    failed_position[coordinate++]=component.second.get_value<double>();
+  ASSERT_EQ(coordinate,3);
+  EXPECT_TRUE(failed_position.isApprox(supervision.first_execution_position,1e-9));
+  EXPECT_GT(state.get<double>("error_m"),1.);
   for(int i=0;i<100 && withdrawals.empty();++i) {
     rclcpp::spin_some(node);
     std::this_thread::sleep_for(std::chrono::milliseconds(2));

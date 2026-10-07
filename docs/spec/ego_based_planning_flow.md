@@ -1405,3 +1405,8 @@ A新现场921d340／203631Z_733：111发布、91命令ID、45定时激活；原F
 -0.578234m/s超过原0.525m/s容差上限，精确边界使重定时仍拒绝，最终未检查。
 FSM在物理检查通过后追加tracking拒绝时，导出使用原assessment持有的epoch及time/motion；
 记录capture与evaluation两个时间域，保留原代数一致性门，修复现场46→47/50导出缺口。
+
+pending物理拒绝与active tracking并发时，物理失败保留pending曲线／原因／本地时间／位置；
+active误差与参考ID在stopstate单列。仅active所属assessment可获active tracking覆写，
+首个违反cell仍从原物理epoch/time/motion查询，无epoch不借live图。原撤销／恢复／命令
+确认链保持；组合生产红→绿、7组规划＋43入口通过。新现场导出验证待完成。

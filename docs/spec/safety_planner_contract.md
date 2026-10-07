@@ -498,3 +498,11 @@ cells use that original epoch, evaluation time and motion. `state.json` distingu
 `capture_ros_time_s` from `assessment_time_s` and `assessment_generation`; the former
 is capture receipt, while the latter identifies the frozen check. Generation checks and
 all execution decisions remain mandatory.
+
+When pending physical rejection and active tracking error coexist, the pending failure
+retains its cause, curve ID, local violation time and position. Active tracking is a
+separate reference observation in stop-state fields; it must not rename a pending
+curve failure. Withdrawal and checked recovery retain their existing authority.
+`curve_first_execution_time_s` and `curve_first_execution_position_m` identify the
+first violation in the saved owning curve; for pending evidence the time is local
+to that pending curve.

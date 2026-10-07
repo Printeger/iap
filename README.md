@@ -1245,3 +1245,10 @@ Curve99 correctly rejects its captured start speed above the original limit.
 FSM-added tracking rejection now exports the assessment-owned frozen map,
 evaluation time and motion, while recording capture receipt separately.
 [Live evidence and remaining blockers](log/20261007T091820Z_056/export/analysis/voxel_sampling_live/report.md).
+
+Pending physical rejection keeps its owning curve/cause/local violation time
+when active tracking error is also observed. Active reference/error is logged
+separately; withdrawal and checked recovery stay in effect. Frozen forensic
+queries never substitute a current map when the assessed epoch is missing.
+The production FSM combination regression, seven planner groups and 43 entry
+contracts pass; the next live diagnostic verifies the new export identity.

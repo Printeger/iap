@@ -446,6 +446,10 @@ namespace ego_planner
           << ",\n  \"curve_execution_reason\": "
           << (assessment ? std::string("\"") +
               gridExecutionReasonName(assessment->execution_reason) + "\"" : "null")
+          << ",\n  \"curve_first_execution_time_s\": "
+          << number(assessment ? assessment->first_execution_time_s : NAN)
+          << ",\n  \"curve_first_execution_position_m\": "
+          << (assessment ? vector(assessment->first_execution_position) : "null")
           << ",\n  \"curve_checked_from_time_s\": "
           << number(assessment ? assessment->checked_from_time_s : NAN)
           << ",\n  \"curve_checked_to_time_s\": "
@@ -631,6 +635,15 @@ namespace ego_planner
     captureFailureMap("stall", target, start, cell);
   }
 
+  std::optional<GridPlanningCell> EGOPlannerManager::queryAssessmentCell(
+      const TrajectoryAssessment& assessment,const Eigen::Vector3d& position) const {
+    if(!assessment.physical_epoch) return std::nullopt;
+    const auto context=grid_map_->preparePlanningQuery(assessment.evaluation_time_s,
+        assessment.evaluated_motion,assessment.physical_epoch);
+    return grid_map_->queryPlanningCell(position,0,assessment.evaluation_time_s,
+        planning_risk_policy_,assessment.evaluated_motion,true,&context);
+  }
+
   void EGOPlannerManager::captureRemainingFailure(
       const std::string& kind, const Eigen::Vector3d& expected,
       const Eigen::Vector3d& actual, const double error_m,
@@ -660,14 +673,9 @@ namespace ego_planner
     planning_time_s_ = node_->now().seconds();
     planning_motion_ = currentMotionContext();
     planning_risk_version_ = 0;
-    std::optional<GridPlanningContext> capture_context;
-    if(assessment && assessment->physical_epoch)
-      capture_context=grid_map_->preparePlanningQuery(assessment->evaluation_time_s,
-          assessment->evaluated_motion,assessment->physical_epoch);
-    auto cell = grid_map_->queryPlanningCell(actual, 0,
-        capture_context ? assessment->evaluation_time_s : planning_time_s_,
-        planning_risk_policy_,capture_context ? assessment->evaluated_motion : planning_motion_,
-        true,capture_context ? &*capture_context : nullptr);
+    const auto assessed_cell=assessment ? queryAssessmentCell(*assessment,actual) : std::nullopt;
+    auto cell=assessed_cell ? *assessed_cell : grid_map_->queryPlanningCell(actual,0,
+        planning_time_s_,planning_risk_policy_,planning_motion_,true);
     Eigen::Vector3d point = actual;
     if (assessment && assessment->first_execution_position.allFinite()) {
       point = assessment->first_execution_position;
@@ -687,6 +695,8 @@ namespace ego_planner
           << actual.y() << ',' << actual.z() << ']'
           << ",\"error_m\":" << error_m
           << ",\"trajectory_id\":" << trajectory_id
+          << ",\"tracking_reference_trajectory_id\":" << trajectory_id
+          << ",\"tracking_reference_error_m\":" << error_m
           << ",\"failed_curve_id\":" << (assessment ? assessment->trajectory_id : trajectory_id)
           << ",\"last_command_time_s\":"
           << (std::isfinite(command_time_s) ? command_time_s : -1.0)

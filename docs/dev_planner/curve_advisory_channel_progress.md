@@ -580,3 +580,12 @@ epoch_override_capture_red保留test/binary/log hash。原物理检查通过后F
 组及43入口通过，两轴审查通过；新现场导出闭环待验证。审查另记既有组合身份风险：
 pending物理拒绝＋active跟踪异常同时出现时，原FSM覆盖reason/time却保留pending ID，
 仍需单独纠正，不据当前代数修复声明该组合通过。
+
+pending＋tracking所有权生产红例：原pending物理失败被active tracking覆写，生成tracking_error
+而非原remaining_failure；原test/binary/log hash登记pending_tracking_owner_red。
+现pending物理原因／ID／本地首违时间位置保持，active tracking参考单列，原撤销与
+匹配命令确认前保留predecessor均保持。首个物理违反为INSUFFICIENT_CLEARANCE，
+首次绿检错误期待PHYSICAL_OBSTACLE的失败保留；改为精确原assessment原因，无放宽。
+缺物理epoch的scalar query明确nullopt，live推进仍查原代数；组合测试还核对原代数、
+pending本地首违时间位置。仅重建并清理本进程已登记临时test路径，外部run不认领。
+Release构建／7组规划／43入口通过，两轴审查通过，新现场验证待执行。
