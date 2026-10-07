@@ -371,3 +371,19 @@ OFF_GEOMETRY_ONLY，execution_authorized=false；不授予现场发布或Advisor
 动态／物理通过但route丢失仍复合拒绝。两项审查最终无硬问题。
 命令与源码／binary／配置／input／日志hash登记guide_tube_production_implementation。
 新森林接续与重定时同guide保留仍待验证；B正式0/9+0/9、D0/6保持阻塞。
+
+
+A/C双侧纠正现场：干净aa83f77、GPU三项与安装Release／配置身份通过，
+OFF/prior OFF、固定终点300秒run182910Z_832，进程／录制driver完成。84曲线／
+70命令ID，25次定时激活；14个撤销ID均未激活／命令，生效前余量0.041–0.954s。
+独立wire→command P/V/A最大误差1.33e-7m／3.68e-8mps／2.05e-6mps²，
+定时接续边界P/V/A差最大9.01e-8／7.21e-8／8.34e-8；无unchecked hover，
+本轮无制动拒绝，不扩展拒绝证明。300健康采样中间288条全部所需进程存活；
+其余为启动0.81–10.86s和正常结束301.68s，不能声称300条均已启动。
+实际前进34.810m，末[16.810230,.518368,1.968758]、距目标1.380m，原FSM未完成。
+首个Curve50/gen662：初始unknown、优化后净空与route拒绝，再纠正solver-1008，
+当前final_check=not_checked；末次387/gen2640 Curve保留unknown与route0.179288m。
+此轮验证合法发布／server接续／命令／运动的链条，但其余Curve根因及完整任务仍未
+通过；与旧现场路径不同，不当严格收益对照。候选原始风险139项同物理66/risk66
+全部LiDAR-only flags1433，GNSS raw未计算，不授予双源资格。图文／三维／hash
+索引analysis/guide_tube_live与guide_tube_live_final；B正式0/9+0/9、D0/6不变。
