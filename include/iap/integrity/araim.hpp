@@ -61,6 +61,7 @@ class GnssAraimEvaluator {
     double azimuth   = 0.0;
     double pr_sigma  = 5.0;
     int    sat_id    = -1;
+    char   constellation = 'G';
   };
 
   GnssAraimEvaluator();
@@ -85,13 +86,6 @@ class GnssAraimEvaluator {
   static double Q_inv(double p);
 
  private:
-  static Eigen::MatrixXd build_G(const GnssEpoch& epoch);
-  static Eigen::VectorXd build_W(const GnssEpoch& epoch);
-  static Eigen::VectorXd build_r(const GnssEpoch& epoch);
-
-  static std::vector<FaultHypothesis> enumerate_hypotheses(
-      const GnssEpoch& epoch, int n_trunk, const GnssAraimParams& params);
-
   /// Step 8: Enumerate hypotheses from linearized input.
   static std::vector<FaultHypothesis> enumerate_hypotheses(
       const GnssAraimLinearizedInput& input,

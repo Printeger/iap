@@ -977,3 +977,18 @@ Monitor/FIM仍单列基线，不能称整个双星座模型已完成。
 131459Z_623 虽正常退出，其实际类型阈值表缺 d，GTSAM 查询可能解引用 end；
 保留为未合格诊断。生产缺键断言红例及修复后96项ARAIM、真实扩展注入回归
 通过；后者使用生产按类型阈值表。新的干净历史现场待登记，Monitor／FIM仍待修复。
+
+### Current Monitor 活动钟差修复
+
+实际观测星座 → 共享position／clock设计 → ENU＋每个实际使用星座的偏差列 →
+nominal WLS → 每个单星／整星座故障重建剩余活动列 → 仅比较3D位置及协方差
+→ 原准入／Current Motion接口。无数据系统不占列，未知身份及旧mixed四列拒绝。
+删去未调用的epoch矩阵／假设重复构造，线性输入成为唯一求解入口；deprecated
+geometry代理亦使用同一入口。真实退化／1e9哨兵保留，不更改预算或故障概率。
+接口见[GNSS完整性契约](gnss_integrity_contract.md)。
+
+eb1b10e干净60秒历史诊断run133003Z_100：实际c/d/h/j阈值表齐全，GPS/BDS
+观测4744/11860，24行clock诊断及12份ISB协方差；Monitor末HPL/VPL
+88.542/211.622m，实际前进4.322m，未到达。状态epoch最大差0.057s未传播，
+100项ARAIM、6组相关CTest与43canonical通过，相关生产库／组件／node构建
+安装通过；新的Monitor修复现场尚待取得。Advisory raw／FIM与冻结模型仍未合格。

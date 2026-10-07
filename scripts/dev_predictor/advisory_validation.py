@@ -37,7 +37,10 @@ SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predict
 SOURCES += ["include/iap/gnss/broadcast_ephemeris.hpp",
             "include/iap/gnss/constellation_clock.hpp", "src/iap/gnss/gnss_handler.cpp",
             "include/iap/gnss/gnss_handler.hpp", "include/iap/gnss/gnss_extension.hpp"]
-SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp"]
+SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp",
+            "include/iap/gnss/clock_geometry.hpp", "src/iap/integrity/araim.cpp",
+            "include/iap/integrity/araim.hpp", "include/iap/integrity/araim_types.hpp",
+            "src/iap/integrity/integrity_monitor.cpp"]
 
 
 def git(*args):

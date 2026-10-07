@@ -180,10 +180,10 @@ void IntegrityMonitor::run_gnss_gating(const GnssEpoch& epoch,
       global_nis += nis;
       ++n_used;
       // Track active constellations
-      if (sat.sat_id >= 1  && sat.sat_id <= 32)  has_gps = true;
-      else if (sat.sat_id >= 33 && sat.sat_id <= 56)  has_glo = true;
-      else if (sat.sat_id >= 57 && sat.sat_id <= 88)  has_gal = true;
-      else if (sat.sat_id >= 89 && sat.sat_id <= 152) has_bds = true;
+      if (sat.constellation == 'G') has_gps = true;
+      else if (sat.constellation == 'R') has_glo = true;
+      else if (sat.constellation == 'E') has_gal = true;
+      else if (sat.constellation == 'C') has_bds = true;
     }
   }
 

@@ -345,3 +345,10 @@ this type-keyed threshold map. Missing symbols are a contract violation:
 GTSAM's per-type lookup assumes registration. The 131459Z_623 diagnostic
 preceded this repair and remains unqualified even though its processes exited
 normally. This optimizer repair does not qualify Monitor/FIM or Advisory.
+
+Current Monitor classifies observations by their explicit constellation and
+uses separate active pseudorange clock columns. Each fault subset reconstructs
+its remaining clocks before comparing position solutions. See the
+[Current GNSS integrity contract](spec/gnss_integrity_contract.md). The
+frontend clock-policy live diagnostic at eb1b10e confirms registered c/d/h/j;
+it is not independent Advisory, residual calibration or task qualification.

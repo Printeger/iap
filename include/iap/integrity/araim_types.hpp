@@ -143,8 +143,8 @@ struct GnssAraimResult {
   double K_ff_used   = 0.0;   ///< K_{ff} used this epoch
   double K_fa_used   = 0.0;   ///< worst-case K_{fa} for reference
 
-  // --- Full-solution covariance (4×4: E, N, U, clock) --------------------
-  Eigen::Matrix4d S0 = Eigen::Matrix4d::Identity();
+  // --- Full covariance: E,N,U then active clocks, ascending constellation ID ---
+  Eigen::MatrixXd S0 = Eigen::MatrixXd::Identity(4,4);
   double HDOP_full = 0.0;  ///< sqrt(S0_EE + S0_NN), weighted covariance-derived [m]
   double VDOP_full = 0.0;  ///< sqrt(S0_UU), weighted covariance-derived [m]
   double PDOP_full = 0.0;  ///< sqrt(S0_EE + S0_NN + S0_UU), weighted covariance-derived [m]
@@ -180,7 +180,7 @@ using AraimResult [[deprecated("Use GnssAraimResult")]] = GnssAraimResult;
 // ---------------------------------------------------------------------------
 
 struct GnssAraimLinearizedInput {
-  Eigen::MatrixXd G;               ///< N x 4 design matrix (E,N,U,clock)
+  Eigen::MatrixXd G;               ///< N x (3+active systems), E,N,U then per-system clock columns
   Eigen::VectorXd W;               ///< N weights = 1/sigma^2
   Eigen::VectorXd r;               ///< N pseudorange residuals [m]
   std::vector<int> prns;           ///< satellite PRNs, size N

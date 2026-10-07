@@ -5,6 +5,7 @@
 //   VPL = PL_U
 
 #include <iap/integrity/araim.hpp>
+#include <iap/gnss/clock_geometry.hpp>
 #include <iap/util/timing_csv.hpp>
 #include <Eigen/Cholesky>
 #include <spdlog/spdlog.h>
@@ -22,17 +23,6 @@ namespace iap {
 
 namespace {
 
-using Matrix4d = Eigen::Matrix4d;
-using Vector4d = Eigen::Vector4d;
-
-int infer_constellation_id(int sat_id) {
-  if (sat_id >= 1 && sat_id <= 32) return 0;       // GPS
-  if (sat_id >= 33 && sat_id <= 56) return 3;      // GLONASS
-  if (sat_id >= 57 && sat_id <= 88) return 1;      // Galileo
-  if (sat_id >= 89 && sat_id <= 152) return 2;     // BeiDou
-  return -1;
-}
-
 double constellation_prior(int const_id, const GnssAraimParams& p) {
   switch (const_id) {
     case 0: return p.p_const_GPS;
@@ -43,15 +33,15 @@ double constellation_prior(int const_id, const GnssAraimParams& p) {
   }
 }
 
-bool factorize_normal_matrix(const Matrix4d& A,
+bool factorize_normal_matrix(const Eigen::MatrixXd& A,
                              double eps_degen,
-                             Eigen::LDLT<Matrix4d>* ldlt) {
+                             Eigen::LDLT<Eigen::MatrixXd>* ldlt) {
   ldlt->compute(A);
   if (ldlt->info() != Eigen::Success) {
     return false;
   }
 
-  const Eigen::Vector4d d = ldlt->vectorD();
+  const Eigen::VectorXd d = ldlt->vectorD();
   if (!d.allFinite()) {
     return false;
   }
@@ -59,27 +49,27 @@ bool factorize_normal_matrix(const Matrix4d& A,
   return d.minCoeff() >= eps_degen;
 }
 
-Matrix4d covariance_from_factorization(const Eigen::LDLT<Matrix4d>& ldlt) {
-  return ldlt.solve(Matrix4d::Identity());
+Eigen::MatrixXd covariance_from_factorization(const Eigen::LDLT<Eigen::MatrixXd>& ldlt) {
+  return ldlt.solve(Eigen::MatrixXd::Identity(ldlt.rows(), ldlt.cols()));
 }
 
 double safe_sqrt_diag(double value) {
   return std::sqrt(std::max(0.0, value));
 }
 
-double weighted_hdop(const Matrix4d& S) {
+double weighted_hdop(const Eigen::MatrixXd& S) {
   return safe_sqrt_diag(S(0, 0) + S(1, 1));
 }
 
-double weighted_vdop(const Matrix4d& S) {
+double weighted_vdop(const Eigen::MatrixXd& S) {
   return safe_sqrt_diag(S(2, 2));
 }
 
-double weighted_pdop(const Matrix4d& S) {
+double weighted_pdop(const Eigen::MatrixXd& S) {
   return safe_sqrt_diag(S(0, 0) + S(1, 1) + S(2, 2));
 }
 
-void populate_full_geometry(GnssAraimResult& result, const Matrix4d& S0) {
+void populate_full_geometry(GnssAraimResult& result, const Eigen::MatrixXd& S0) {
   result.HDOP_full = weighted_hdop(S0);
   result.VDOP_full = weighted_vdop(S0);
   result.PDOP_full = weighted_pdop(S0);
@@ -127,71 +117,13 @@ double GnssAraimEvaluator::Q_inv(double p) {
 // Static builders
 // ---------------------------------------------------------------------------
 
-Eigen::MatrixXd GnssAraimEvaluator::build_G(const GnssEpoch& epoch) {
-  int N = 0;
-  for (const auto& s : epoch.sats) {
-    if (!s.excluded) ++N;
-  }
-
-  Eigen::MatrixXd G(N, 4);
-  int row = 0;
-  for (const auto& s : epoch.sats) {
-    if (s.excluded) continue;
-    const double el = s.elevation;
-    const double az = s.azimuth;
-    G(row, 0) = std::cos(el) * std::sin(az);  // East
-    G(row, 1) = std::cos(el) * std::cos(az);  // North
-    G(row, 2) = std::sin(el);                  // Up
-    G(row, 3) = 1.0;                           // clock
-    ++row;
-  }
-  return G;
-}
-
-Eigen::VectorXd GnssAraimEvaluator::build_W(const GnssEpoch& epoch) {
-  int N = 0;
-  for (const auto& s : epoch.sats) {
-    if (!s.excluded) ++N;
-  }
-
-  Eigen::VectorXd W(N);
-  int row = 0;
-  for (const auto& s : epoch.sats) {
-    if (s.excluded) continue;
-    const double sigma = std::max(s.pr_sigma, 0.01);
-    W(row) = 1.0 / (sigma * sigma);
-    ++row;
-  }
-  return W;
-}
-
-Eigen::VectorXd GnssAraimEvaluator::build_r(const GnssEpoch& epoch) {
-  int N = 0;
-  for (const auto& s : epoch.sats) {
-    if (!s.excluded) ++N;
-  }
-
-  Eigen::VectorXd r(N);
-  int row = 0;
-  for (const auto& s : epoch.sats) {
-    if (s.excluded) continue;
-    r(row) = s.pr_residual;
-    ++row;
-  }
-  return r;
-}
-
-// ---------------------------------------------------------------------------
-// Step 8: Build linearized input from GnssEpoch
-// ---------------------------------------------------------------------------
-
 GnssAraimLinearizedInput GnssAraimEvaluator::buildLinearizedInputFromGnssEpoch(
     const GnssEpoch& epoch) {
   GnssAraimLinearizedInput out;
   out.stamp = epoch.stamp;
   int N = 0;
   for (const auto& s : epoch.sats) { if (!s.excluded) ++N; }
-  out.G.resize(N, 4); out.W.resize(N); out.r.resize(N);
+  out.G.resize(N, 3); out.W.resize(N); out.r.resize(N);
   out.prns.resize(N); out.constellation_ids.resize(N);
   out.elevations_rad.resize(N); out.sigmas_m.resize(N);
   int row = 0;
@@ -199,79 +131,16 @@ GnssAraimLinearizedInput GnssAraimEvaluator::buildLinearizedInputFromGnssEpoch(
     if (s.excluded) continue;
     const double el = s.elevation, az = s.azimuth;
     out.G(row,0)=std::cos(el)*std::sin(az); out.G(row,1)=std::cos(el)*std::cos(az);
-    out.G(row,2)=std::sin(el); out.G(row,3)=1.0;
+    out.G(row,2)=std::sin(el);
     const double sigma = std::max(s.pr_sigma, 0.01);
     out.W(row) = 1.0/(sigma*sigma); out.r(row)=s.pr_residual;
     out.prns[row]=s.sat_id;
-    out.constellation_ids[row]=infer_constellation_id(s.sat_id);
+    out.constellation_ids[row]=gnss_constellation_id(s.constellation);
     out.elevations_rad[row]=el; out.sigmas_m[row]=sigma;
     ++row;
   }
+  out.G = gnss_clock_design(out.G, out.constellation_ids);
   return out;
-}
-
-// ---------------------------------------------------------------------------
-// Hypothesis enumeration (§1.7: N + C + K hypotheses)
-// ---------------------------------------------------------------------------
-
-std::vector<FaultHypothesis> GnssAraimEvaluator::enumerate_hypotheses(
-    const GnssEpoch& epoch, int n_trunk, const Params& params) {
-
-  std::vector<FaultHypothesis> hyps;
-  hyps.reserve(epoch.sats.size() + 10 +
-               (params.enable_trunk_hypotheses ? static_cast<std::size_t>(n_trunk) : 0));
-
-  // ── (1) GNSS satellite single-fault hypotheses (always) ──
-  std::unordered_map<int, std::vector<int>> const_rows;
-  int row = 0;
-  for (const auto& s : epoch.sats) {
-    if (s.excluded) continue;
-    FaultHypothesis h;
-    h.type    = FaultHypothesis::Type::GNSS_SAT;
-    h.row     = row;
-    h.sat_id  = s.sat_id;
-    h.p_fault = params.p_sat_default;
-    hyps.push_back(h);
-
-    const int cid = infer_constellation_id(s.sat_id);
-    if (cid >= 0) {
-      const_rows[cid].push_back(row);
-    }
-    ++row;
-  }
-
-  // ── (2) Constellation-wide fault hypotheses (only if enabled) ──
-  if (params.enable_constellation_faults) {
-    for (const auto& [cid, rows] : const_rows) {
-      if (rows.empty()) continue;
-      FaultHypothesis h;
-      h.type      = FaultHypothesis::Type::CONSTELLATION;
-      h.row       = -1;
-      h.sat_id    = -1;
-      h.const_id  = cid;
-      h.p_fault   = constellation_prior(cid, params);
-      h.const_rows = rows;
-      hyps.push_back(h);
-    }
-  }
-
-  // ── (3) Trunk landmark hypotheses (only if explicitly enabled) ──
-  // NOTE: Current GNSS ARAIM has NO trunk measurement residual/subset
-  // model. These are unsupported placeholders even when enabled.
-  // Trunk/LiDAR integrity is handled separately by LidarIntegrityEvaluator.
-  if (params.enable_trunk_hypotheses) {
-    for (int k = 0; k < n_trunk; ++k) {
-      FaultHypothesis h;
-      h.type     = FaultHypothesis::Type::TRUNK;
-      h.row      = -1;
-      h.sat_id   = -1;
-      h.trunk_id = k;
-      h.p_fault  = params.p_trunk_default;
-      hyps.push_back(h);
-    }
-  }
-
-  return hyps;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,13 +187,6 @@ std::vector<FaultHypothesis> GnssAraimEvaluator::enumerate_hypotheses(
 
 namespace {
 
-struct NominalEqns {
-  Eigen::Matrix4d A0;
-  Eigen::Vector4d rhs0;
-  std::vector<Eigen::Matrix4d> row_outer;
-  std::vector<Eigen::Vector4d> row_rhs;
-};
-
 struct IntegrityBudget {
   double K_ff_eff;
   double K_fa_eff;
@@ -344,34 +206,14 @@ void initializeResultMetadata(GnssAraimResult& result,
   }
 }
 
-// H2: Build nominal normal equations A0, rhs0 and per-row contributions.
-NominalEqns buildNominalNormalEqns(const Eigen::MatrixXd& G,
-                                   const Eigen::VectorXd& W,
-                                   const Eigen::VectorXd& r) {
-  const int N = static_cast<int>(G.rows());
-  NominalEqns eqns;
-  eqns.row_outer.resize(static_cast<std::size_t>(N), Eigen::Matrix4d::Zero());
-  eqns.row_rhs.resize(static_cast<std::size_t>(N), Eigen::Vector4d::Zero());
-  eqns.A0 = Eigen::Matrix4d::Zero();
-  eqns.rhs0 = Eigen::Vector4d::Zero();
-  for (int i = 0; i < N; ++i) {
-    const Eigen::Vector4d gi = G.row(i).transpose();
-    eqns.row_outer[static_cast<std::size_t>(i)] = W(i) * (gi * gi.transpose());
-    eqns.row_rhs[static_cast<std::size_t>(i)] = W(i) * gi * r(i);
-    eqns.A0 += eqns.row_outer[static_cast<std::size_t>(i)];
-    eqns.rhs0 += eqns.row_rhs[static_cast<std::size_t>(i)];
-  }
-  return eqns;
-}
-
 // H3: Factorize A0 (LDLT), compute S0, solve full position p0.
 // Returns true on success.
-bool solveFullSolution(const Eigen::Matrix4d& A0,
-                       const Eigen::Vector4d& rhs0,
+bool solveFullSolution(const Eigen::MatrixXd& A0,
+                       const Eigen::VectorXd& rhs0,
                        double eps_degen,
-                       Eigen::Matrix4d& S0_out,
-                       Eigen::Vector4d& p0_out) {
-  Eigen::LDLT<Eigen::Matrix4d> ldlt0;
+                       Eigen::MatrixXd& S0_out,
+                       Eigen::VectorXd& p0_out) {
+  Eigen::LDLT<Eigen::MatrixXd> ldlt0;
   if (!factorize_normal_matrix(A0, eps_degen, &ldlt0)) {
     spdlog::trace("[ARAIM] Degenerate geometry in nominal solve; returning invalid.");
     return false;
@@ -397,7 +239,7 @@ IntegrityBudget allocateBudget(int N_f, const GnssAraimParams& p) {
 
 // H5: Compute fault-free protection levels from S0, initialize worst-case totals.
 void computeFaultFreePL(GnssAraimResult& result,
-                        const Eigen::Matrix4d& S0,
+                        const Eigen::MatrixXd& S0,
                         double K_ff_eff,
                         double& worst_PL_E,
                         double& worst_PL_N,
@@ -418,12 +260,12 @@ void computeFaultFreePL(GnssAraimResult& result,
 SubsetSolution evalSubset(const FaultHypothesis& hyp,
                           int hi,
                           int N,
-                          const Eigen::Matrix4d& A0,
-                          const Eigen::Vector4d& rhs0,
-                          const std::vector<Eigen::Matrix4d>& row_outer,
-                          const std::vector<Eigen::Vector4d>& row_rhs,
-                          const Eigen::Vector4d& p0,
-                          const Eigen::Matrix4d& S0,
+                          const Eigen::MatrixXd& G,
+                          const Eigen::VectorXd& W,
+                          const Eigen::VectorXd& r,
+                          const std::vector<int>& constellation_ids,
+                          const Eigen::VectorXd& p0,
+                          const Eigen::MatrixXd& S0,
                           const std::vector<int>& prns,
                           double K_fa_eff,
                           double K_md_base,
@@ -457,21 +299,15 @@ SubsetSolution evalSubset(const FaultHypothesis& hyp,
     return ss;
   }
 
-  Eigen::Matrix4d Ak = A0;
-  Eigen::Vector4d rhsk = rhs0;
   if (hyp.type == FaultHypothesis::Type::CONSTELLATION) {
     for (int cr : hyp.const_rows) {
       if (cr >= 0 && cr < N) {
         mark_removed(cr);
-        Ak -= row_outer[static_cast<std::size_t>(cr)];
-        rhsk -= row_rhs[static_cast<std::size_t>(cr)];
       }
     }
   } else {
     if (hyp.row >= 0 && hyp.row < N) {
       mark_removed(hyp.row);
-      Ak -= row_outer[static_cast<std::size_t>(hyp.row)];
-      rhsk -= row_rhs[static_cast<std::size_t>(hyp.row)];
     } else {
       return ss;
     }
@@ -485,7 +321,22 @@ SubsetSolution evalSubset(const FaultHypothesis& hyp,
     }
   }
 
-  Eigen::LDLT<Eigen::Matrix4d> ldltk;
+  Eigen::MatrixXd positions(ss.n_remaining_after_hyp, 3);
+  Eigen::VectorXd weights(ss.n_remaining_after_hyp), residuals(ss.n_remaining_after_hyp);
+  std::vector<int> active_systems;
+  int kept = 0;
+  for (int row = 0; row < N; ++row) {
+    if (removed[row]) continue;
+    positions.row(kept) = G.row(row).head(3);
+    weights[kept] = W[row];
+    residuals[kept] = r[row];
+    active_systems.push_back(constellation_ids[row]);
+    ++kept;
+  }
+  const auto Gk = gnss_clock_design(positions, active_systems);
+  const Eigen::MatrixXd Ak = Gk.transpose() * weights.asDiagonal() * Gk;
+  const Eigen::VectorXd rhsk = Gk.transpose() * weights.asDiagonal() * residuals;
+  Eigen::LDLT<Eigen::MatrixXd> ldltk;
   if (!factorize_normal_matrix(Ak, p.eps_degen, &ldltk)) {
     ss.valid = false;
     ss.degenerate = true;
@@ -507,17 +358,17 @@ SubsetSolution evalSubset(const FaultHypothesis& hyp,
     return ss;
   }
 
-  const Eigen::Matrix4d Sk = covariance_from_factorization(ldltk);
-  const Eigen::Vector4d pk = ldltk.solve(rhsk);
+  const Eigen::MatrixXd Sk = covariance_from_factorization(ldltk);
+  const Eigen::VectorXd pk = ldltk.solve(rhsk);
 
-  const Eigen::Vector4d dk = p0 - pk;
+  const Eigen::Vector3d dk = p0.head<3>() - pk.head<3>();
   ss.d_E     = dk(0);
   ss.d_N     = dk(1);
   ss.d_U     = dk(2);
   ss.d_horiz = std::sqrt(dk(0) * dk(0) + dk(1) * dk(1));
   ss.d_vert  = std::abs(dk(2));
 
-  const Eigen::Matrix4d dS = Sk - S0;
+  const Eigen::Matrix3d dS = Sk.topLeftCorner<3,3>() - S0.topLeftCorner<3,3>();
   ss.sigma_ss_E     = std::sqrt(std::max(0.0, dS(0, 0)));
   ss.sigma_ss_N     = std::sqrt(std::max(0.0, dS(1, 1)));
   ss.sigma_ss_U     = std::sqrt(std::max(0.0, dS(2, 2)));
@@ -569,12 +420,12 @@ SubsetSolution evalSubset(const FaultHypothesis& hyp,
 std::vector<SubsetSolution> evalAllSubsets(
     const std::vector<FaultHypothesis>& hyps,
     int N,
-    const Eigen::Matrix4d& A0,
-    const Eigen::Vector4d& rhs0,
-    const std::vector<Eigen::Matrix4d>& row_outer,
-    const std::vector<Eigen::Vector4d>& row_rhs,
-    const Eigen::Vector4d& p0,
-    const Eigen::Matrix4d& S0,
+    const Eigen::MatrixXd& G,
+    const Eigen::VectorXd& W,
+    const Eigen::VectorXd& r,
+    const std::vector<int>& constellation_ids,
+    const Eigen::VectorXd& p0,
+    const Eigen::MatrixXd& S0,
     const std::vector<int>& prns,
     double K_fa_eff,
     double K_md_base,
@@ -592,7 +443,7 @@ std::vector<SubsetSolution> evalAllSubsets(
       for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
         subsets[static_cast<std::size_t>(hi)] = evalSubset(
             hyps[static_cast<std::size_t>(hi)], hi, N,
-            A0, rhs0, row_outer, row_rhs, p0, S0,
+            G, W, r, constellation_ids, p0, S0,
             prns, K_fa_eff, K_md_base, N_f, p);
       }
     } else {
@@ -600,7 +451,7 @@ std::vector<SubsetSolution> evalAllSubsets(
       for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
         subsets[static_cast<std::size_t>(hi)] = evalSubset(
             hyps[static_cast<std::size_t>(hi)], hi, N,
-            A0, rhs0, row_outer, row_rhs, p0, S0,
+            G, W, r, constellation_ids, p0, S0,
             prns, K_fa_eff, K_md_base, N_f, p);
       }
     }
@@ -608,7 +459,7 @@ std::vector<SubsetSolution> evalAllSubsets(
     for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
       subsets[static_cast<std::size_t>(hi)] = evalSubset(
           hyps[static_cast<std::size_t>(hi)], hi, N,
-          A0, rhs0, row_outer, row_rhs, p0, S0,
+          G, W, r, constellation_ids, p0, S0,
           prns, K_fa_eff, K_md_base, N_f, p);
     }
   }
@@ -616,7 +467,7 @@ std::vector<SubsetSolution> evalAllSubsets(
   for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
     subsets[static_cast<std::size_t>(hi)] = evalSubset(
         hyps[static_cast<std::size_t>(hi)], hi, N,
-        A0, rhs0, row_outer, row_rhs, p0, S0,
+        G, W, r, constellation_ids, p0, S0,
         prns, K_fa_eff, K_md_base, N_f, p);
   }
 #endif
@@ -697,7 +548,6 @@ GnssAraimResult GnssAraimEvaluator::compute_core(const Eigen::MatrixXd& G,
                                  const std::vector<int>& prns,
                                  const std::vector<int>& constellation_ids) {
   GnssAraimResult result;
-  (void)constellation_ids;
 
   // H1: Initialize metadata
   initializeResultMetadata(result, hyps, p);
@@ -707,12 +557,13 @@ GnssAraimResult GnssAraimEvaluator::compute_core(const Eigen::MatrixXd& G,
   }
 
   // H2: Build nominal normal equations
-  const auto eqns = buildNominalNormalEqns(G, W, r);
+  const Eigen::MatrixXd A0 = G.transpose() * W.asDiagonal() * G;
+  const Eigen::VectorXd rhs0 = G.transpose() * W.asDiagonal() * r;
 
   // H3: Solve full solution
-  Eigen::Matrix4d S0;
-  Eigen::Vector4d p0;
-  if (!solveFullSolution(eqns.A0, eqns.rhs0, p.eps_degen, S0, p0)) {
+  Eigen::MatrixXd S0;
+  Eigen::VectorXd p0;
+  if (!solveFullSolution(A0, rhs0, p.eps_degen, S0, p0)) {
     result.valid = false;
     return result;
   }
@@ -732,8 +583,7 @@ GnssAraimResult GnssAraimEvaluator::compute_core(const Eigen::MatrixXd& G,
 
   // H6 + H7: Evaluate all subset solutions
   result.subsets = evalAllSubsets(hyps, static_cast<int>(G.rows()),
-                                  eqns.A0, eqns.rhs0,
-                                  eqns.row_outer, eqns.row_rhs,
+                                  G, W, r, constellation_ids,
                                   p0, S0, prns,
                                   budget.K_fa_eff, p.K_md, p);
 
@@ -768,9 +618,14 @@ GnssAraimResult GnssAraimEvaluator::runLinearized(
   const int N = static_cast<int>(input.G.rows());
 
   if (N < params_.min_sats) { GnssAraimResult r; r.valid=false; return r; }
-  if (input.G.cols() != 4 || input.W.size() != N || input.r.size() != N ||
+  if (input.G.cols() < 4 || input.W.size() != N || input.r.size() != N ||
       static_cast<int>(input.prns.size()) != N ||
       static_cast<int>(input.constellation_ids.size()) != N) {
+    GnssAraimResult r; r.valid=false; return r;
+  }
+  const auto expected = gnss_clock_design(input.G.leftCols(3), input.constellation_ids);
+  if (expected.cols() != input.G.cols() || !input.G.allFinite() ||
+      !input.G.rightCols(input.G.cols()-3).isApprox(expected.rightCols(expected.cols()-3), 0)) {
     GnssAraimResult r; r.valid=false; return r;
   }
   for (int i = 0; i < N; ++i) {
@@ -817,39 +672,18 @@ GnssAraimResult GnssAraimEvaluator::predict_geometry(
     return res;
   }
 
-  Eigen::MatrixXd G(N, 4);
-  Eigen::VectorXd W(N);
-  const Eigen::VectorXd r = Eigen::VectorXd::Zero(N);
-
-  for (int i = 0; i < N; ++i) {
-    const double el = visible_sats[i].elevation;
-    const double az = visible_sats[i].azimuth;
-    G(i, 0) = std::cos(el) * std::sin(az);
-    G(i, 1) = std::cos(el) * std::cos(az);
-    G(i, 2) = std::sin(el);
-    G(i, 3) = 1.0;
-    const double sigma = std::max(visible_sats[i].pr_sigma, 0.01);
-    W(i) = 1.0 / (sigma * sigma);
+  GnssEpoch epoch;
+  for (const auto& geometry : visible_sats) {
+    SatObs sat;
+    sat.elevation = geometry.elevation;
+    sat.azimuth = geometry.azimuth;
+    sat.pr_sigma = geometry.pr_sigma;
+    sat.sat_id = geometry.sat_id;
+    sat.constellation = geometry.constellation;
+    sat.pr_residual = 0;
+    epoch.sats.push_back(sat);
   }
-
-  std::vector<FaultHypothesis> hyps;
-  hyps.reserve(N);
-  for (int i = 0; i < N; ++i) {
-    FaultHypothesis h;
-    h.type    = FaultHypothesis::Type::GNSS_SAT;
-    h.row     = i;
-    h.sat_id  = visible_sats[i].sat_id;
-    h.p_fault = params_.p_sat_default;
-    hyps.push_back(h);
-  }
-
-  GnssAraimResult result = compute_core(G, W, r, hyps, params_);
-  result.n_hypotheses = N;
-
-  spdlog::trace("[ARAIM advisory_geometry_proxy] N={} HPL={:.3f} VPL={:.3f}",
-                N, result.HPL, result.VPL);
-
-  return result;
+  return run(epoch);
 }
 
 }  // namespace iap

@@ -210,6 +210,100 @@ class GnssAraimEvaluatorTest : public ::testing::Test {
   }
 };
 
+TEST_F(GnssAraimEvaluatorTest, MixedClockColumnsAndSubsetPositionAreIndependentOfBias) {
+  auto epoch = make_epoch(8);
+  // Deliberately do not infer system from legacy numeric PRN ranges.
+  for (int i = 0; i < 8; ++i) {
+    auto bds = epoch.sats[i];
+    bds.sat_id = 155 + i;
+    bds.constellation = 'C';
+    bds.azimuth += 0.13;
+    bds.elevation += 0.02;
+    epoch.sats.push_back(bds);
+  }
+  const auto input = GnssAraimEvaluator::buildLinearizedInputFromGnssEpoch(epoch);
+  ASSERT_EQ(input.G.cols(), 5);
+  for (int i = 0; i < 16; ++i) {
+    EXPECT_EQ(input.constellation_ids[i], i < 8 ? 0 : 2);
+    EXPECT_DOUBLE_EQ(input.G(i,3), i < 8 ? 1 : 0);
+    EXPECT_DOUBLE_EQ(input.G(i,4), i < 8 ? 0 : 1);
+  }
+  GnssAraimEvaluator evaluator(default_params());
+  const auto original = evaluator.run(epoch);
+  ASSERT_TRUE(original.valid);
+  ASSERT_EQ(original.S0.cols(), 5);
+  const Eigen::MatrixXd reference =
+      (input.G.transpose() * input.W.asDiagonal() * input.G).inverse();
+  EXPECT_TRUE(original.S0.isApprox(reference, 1e-9));
+  auto shifted = epoch;
+  for (auto& sat : shifted.sats) sat.pr_residual += sat.constellation == 'G' ? 10 : -7;
+  const auto changed = evaluator.run(shifted);
+  ASSERT_TRUE(changed.valid);
+  EXPECT_NEAR(original.HPL, changed.HPL, 1e-8);
+  EXPECT_NEAR(original.VPL, changed.VPL, 1e-8);
+  int system_subsets = 0;
+  for (std::size_t i = 0; i < original.hypotheses.size(); ++i) {
+    if (original.hypotheses[i].type != FaultHypothesis::Type::CONSTELLATION) continue;
+    ++system_subsets;
+    const auto& ss = original.subsets[i];
+    ASSERT_TRUE(ss.valid) << ss.failure_reason;
+    EXPECT_EQ(ss.n_remaining_after_hyp, 8);
+    GnssEpoch remaining = epoch;
+    for (auto& sat : remaining.sats)
+      sat.excluded = (sat.constellation == (original.hypotheses[i].const_id == 0 ? 'G' : 'C'));
+    const auto single = evaluator.run(remaining);
+    ASSERT_TRUE(single.valid);
+    EXPECT_NEAR(ss.HDOP_subset, single.HDOP_full, 1e-9);
+    EXPECT_NEAR(ss.VDOP_subset, single.VDOP_full, 1e-9);
+    EXPECT_GE(ss.sigma_ss_E, 0);
+    EXPECT_NEAR(ss.d_E, changed.subsets[i].d_E, 1e-8);
+    EXPECT_NEAR(ss.d_N, changed.subsets[i].d_N, 1e-8);
+    EXPECT_NEAR(ss.d_U, changed.subsets[i].d_U, 1e-8);
+  }
+  EXPECT_EQ(system_subsets, 2);
+}
+
+TEST_F(GnssAraimEvaluatorTest, UnknownClockIdentityAndLegacyMixedDesignAreRejected) {
+  auto epoch = make_epoch(8);
+  epoch.sats.front().constellation = '?';
+  EXPECT_FALSE(GnssAraimEvaluator(default_params()).run(epoch).valid);
+  auto input = GnssAraimEvaluator::buildLinearizedInputFromGnssEpoch(make_epoch(8));
+  input.constellation_ids.front() = 2;
+  EXPECT_FALSE(GnssAraimEvaluator(default_params()).runLinearized(input).valid);
+}
+
+TEST_F(GnssAraimEvaluatorTest, RemovingLastSatelliteDropsItsClockButKeepsTrueDegeneracy) {
+  auto epoch = make_epoch(8);
+  auto bds = epoch.sats.front();
+  bds.constellation = 'C';
+  bds.sat_id = 155;
+  epoch.sats.push_back(bds);
+  const auto result = GnssAraimEvaluator(default_params()).run(epoch);
+  ASSERT_TRUE(result.valid);
+  ASSERT_EQ(result.S0.cols(), 5);
+  int valid_bds_removal = 0, invalid_gps_removal = 0;
+  for (std::size_t i = 0; i < result.hypotheses.size(); ++i) {
+    const auto& hyp = result.hypotheses[i];
+    const auto& ss = result.subsets[i];
+    if ((hyp.type == FaultHypothesis::Type::GNSS_SAT && hyp.sat_id == 155) ||
+        (hyp.type == FaultHypothesis::Type::CONSTELLATION && hyp.const_id == 2)) {
+      ASSERT_TRUE(ss.valid);
+      EXPECT_NEAR(ss.HDOP_subset, result.HDOP_full, 1e-8);
+      ++valid_bds_removal;
+    }
+    if (hyp.type == FaultHypothesis::Type::CONSTELLATION && hyp.const_id == 0) {
+      EXPECT_TRUE(ss.degenerate);
+      EXPECT_FALSE(ss.valid);
+      EXPECT_EQ(ss.failure_reason, "degenerate_subset_geometry");
+      ++invalid_gps_removal;
+    }
+  }
+  EXPECT_EQ(valid_bds_removal, 2);
+  EXPECT_EQ(invalid_gps_removal, 1);
+  EXPECT_TRUE(result.has_degenerate_hypothesis);
+  EXPECT_EQ(result.HPL, 1e9);
+}
+
 class LidarAraimTest : public ::testing::Test {
  protected:
   LidarAraim::Params default_params() {
@@ -976,8 +1070,11 @@ TEST_F(GnssAraimEvaluatorTest, PredictGeometryNoResiduals) {
     EXPECT_DOUBLE_EQ(ss.d_U, 0.0);
   }
 
-  // HPL should still be positive (geometry-driven)
-  EXPECT_GT(r.HPL, 0.0);
+  // The deprecated proxy now shares the current fault model. Its default
+  // whole-GPS removal is unobservable, even though the nominal solve is valid.
+  EXPECT_TRUE(r.has_degenerate_hypothesis);
+  EXPECT_DOUBLE_EQ(r.HPL, 1e9);
+  EXPECT_DOUBLE_EQ(r.VPL, 1e9);
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,6 +1273,8 @@ TEST_F(GnssAraimEvaluatorTest, ConstellationHypothesisDiagnosticsPopulated) {
   const std::vector<int> prns = {1, 2, 57, 58, 101, 102, 33, 34};
   for (std::size_t i = 0; i < epoch.sats.size(); ++i) {
     epoch.sats[i].sat_id = prns[i];
+    const char systems[] = {'G','G','E','E','C','C','R','R'};
+    epoch.sats[i].constellation = systems[i];
   }
 
   const GnssAraimResult result = eval.run(epoch, 0);
@@ -3259,6 +3358,25 @@ TEST_F(IntegrityMonitorBaselineTest, FinalSourceFieldsReflectFusion) {
   EXPECT_FALSE(report.final_VPL_source.empty());
   EXPECT_FALSE(report.final_PL_source.empty());
   EXPECT_FALSE(report.fusion_mode_str.empty());
+}
+
+TEST_F(IntegrityMonitorBaselineTest, UsedConstellationsComeFromObservationIdentity) {
+  GnssEpoch epoch;
+  epoch.stamp = 100;
+  for (const char system : {'G','C','E','R'}) {
+    SatObs sat;
+    sat.sat_id = 155 + epoch.sats.size();
+    sat.constellation = system;
+    sat.nis_pr = 0;
+    epoch.sats.push_back(sat);
+  }
+  IntegrityMonitor monitor(default_monitor_params());
+  auto report = monitor.compute(make_frame(), &epoch, nullptr, nullptr, nullptr);
+  EXPECT_EQ(report.n_constellations, 4);
+  epoch.sats[1].excluded = true;
+  report = monitor.compute(make_frame(), &epoch, nullptr, nullptr, nullptr);
+  EXPECT_EQ(report.n_constellations, 3);
+  EXPECT_EQ(report.n_sv_used, 3);
 }
 
 // C3: Fallback-only output unchanged (enhanced T0.1)
