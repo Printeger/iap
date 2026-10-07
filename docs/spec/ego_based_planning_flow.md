@@ -503,3 +503,19 @@ GNSS 仍因监测最坏整 GPS 星座故障退化而拒绝，时间配对仍不�
 超过最近格点的额外一步。分辨率、池大小、预算、guide 起点及所有实际曲线／
 发布检查不变。最近格点仍物理不可用的连接恢复保持待测，不凭合法请求点
 授权未经检查的连接；此修正需新的 canonical 现场回归。
+
+本轮正式汇总：
+[图文报告](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/report.md)、
+[原始请求／误差配对](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/error_pair_requests.csv)、
+[弱方向与正则化](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/weak_directions.csv)。
+三次干净版本探索实测（非配对 seed 校准）：76 请求、74 完整录制、73 重放；
+两个超时和一个未重放请求保留。三轮前进 9.777、4.661、4.640 m，均未到分叉。
+取整修正通过回归但未恢复完整森林执行，起点—格点连接仍失败，固定路线待测。
+ENU 方向闭合误差约 1e-16；优化后 Up 对齐漂移最大 6.529°，参考—位姿差
+0.124–0.273 s，不满足 0.05 s；同参考时刻误差合格配对为 0。
+GNSS 原始观测已运输，但整 GPS 星座故障不可监测导致当前来源拒绝；融合
+有效结果均由 LiDAR 提供、prior_used=false，不能证明实际双源互补。
+真实已观测范围出现 PL 差异，9 份单层抽查各 100 唯一体素；分叉覆盖、趋势／
+95%经验覆盖、9 校准＋9 独立验证、6 引导对照仍 INCONCLUSIVE／待测，默认不推广。
+新报告工具校验历史 replay 产物 hash、拒绝重复独立 run；旧 manifest 未登记
+receiver sibling CSV，其米数仅列诊断，不追认校准资格。报告相关 7 项检查通过。

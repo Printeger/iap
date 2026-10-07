@@ -911,3 +911,17 @@ ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 \
 不再独立重建测距／星历缓存。被监测器拒绝的 GNSS 观测仍保留作诊断，不能
 因此参与融合。参考—位姿差超过 0.05 s 的输入可以重放空间诊断，但不能用于
 本轮同参考时刻误差校准；录制／重放不会修改其时间戳。
+
+三次探索运行的汇总命令（保留原始版本与失败请求，不进行参数拟合）：
+
+```bash
+export IAP_RUN_DIR=/home/dev/ws_iap/src/iap/log/20261007T032125Z_369
+python3 scripts/dev_predictor/advisory_forest_report.py \
+  --trial /home/dev/ws_iap/src/iap/log/20261007T033528Z_495 \
+  --trial /home/dev/ws_iap/src/iap/log/20261007T035010Z_435 \
+  --trial /home/dev/ws_iap/src/iap/log/20261007T040151Z_586 --label final
+```
+
+该命令已执行，报告位于 run 的 `export/analysis/advisory_validation/final/`。
+同名产物不可覆盖；再次汇总使用新的安全标签。报告只统计不同 run，校验历史
+重放 manifest 中的输入、点 CSV 和矩阵 hash，缺失值不会变成有效零风险。
