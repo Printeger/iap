@@ -744,6 +744,35 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
     EXPECT_NE(text.find("\"stage\":\"initial_bound\""),std::string::npos);
     EXPECT_NE(text.find("\"max_velocity_time_s\":"),std::string::npos);
     EXPECT_NE(text.find("\"final_check_state\": \"not_checked\""),std::string::npos); }
+  // Production FSM can override a successful physical check with tracking
+  // rejection after live occupancy advances. Export still owns the old epoch.
+  const Eigen::Vector3d proof_position(-2,2,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},10.,proof_position);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  manager.grid_map_->setFailureEvidenceCapture(true);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,10.,1,proof_position);
+  const ego_planner::UniformBspline proof_curve(
+      proof_position.replicate(1,7),3,.3);
+  auto overridden=manager.assessTrajectory(proof_curve,0,10.1,false,0,
+      std::numeric_limits<double>::infinity(),nullptr,false);
+  ASSERT_TRUE(overridden.executable());
+  ASSERT_TRUE(overridden.physical_epoch);
+  ASSERT_TRUE(overridden.physical_epoch->failure_evidence);
+  ASSERT_FALSE(overridden.failure_snapshot);
+  const auto proof_generation=overridden.evaluated_generation;
+  GridMapTestAccess::input(*manager.grid_map_,{},10.1,proof_position);
+  ASSERT_GT(manager.grid_map_->occupancyGeneration(),proof_generation);
+  overridden.execution_reason=GridExecutionReason::TRACKING_ERROR;
+  manager.local_data_.position_traj_=proof_curve;
+  manager.captureRemainingFailure("tracking_epoch_override",proof_position,
+      proof_position+Eigen::Vector3d(.4,0,0),.4,7,10.,.1,.1,
+      GridExecutionReason::TRACKING_ERROR,&overridden);
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
+  ASSERT_TRUE(std::filesystem::exists(root/"tracking_epoch_override/snapshot.json"));
+  boost::property_tree::ptree proof_metadata;
+  boost::property_tree::read_json((root/"tracking_epoch_override/snapshot.json").string(),proof_metadata);
+  EXPECT_EQ(proof_metadata.get<uint64_t>("generation"),proof_generation);
+  EXPECT_DOUBLE_EQ(proof_metadata.get<double>("planning_time_s"),overridden.evaluation_time_s);
   // A non-candidate execution/diagnostic capture cannot inherit the active attempt.
   EXPECT_NE(stage_text.find("\"curve_stages\": []"),std::string::npos);
   EXPECT_NE(stage_text.find("\"final_check_state\": \"not_applicable\""),std::string::npos);

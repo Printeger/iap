@@ -1237,3 +1237,11 @@ test groups and 43 canonical entry contracts pass. New captures freeze the
 nominal interval and sampling model for reproducible initialization. Live
 publication/server/motion verification is pending; formal B/D remain blocked.
 Evidence: [Curve initialization report](log/20261007T091820Z_056/export/analysis/voxel_sampling_production/report.md).
+
+The 300 s historical OFF run `203631Z_733` observed 111 publications, 91
+command trajectory IDs and 45 scheduled activations with independently checked
+P/V/A. It did not complete the fixed-goal task (final distance 1.511774 m).
+Curve99 correctly rejects its captured start speed above the original limit.
+FSM-added tracking rejection now exports the assessment-owned frozen map,
+evaluation time and motion, while recording capture receipt separately.
+[Live evidence and remaining blockers](log/20261007T091820Z_056/export/analysis/voxel_sampling_live/report.md).

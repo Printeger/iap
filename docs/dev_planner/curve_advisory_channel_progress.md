@@ -560,3 +560,23 @@ Curve12 initialize203402Z_572／backend203403Z_221均完整通过。
 起终P/V/A及9.6秒由独立导数计算核验。图文analysis/voxel_sampling_production/report.md，
 生产重放／边界／图／commands/hash登记voxel_sampling_production_{replays,report,green}。
 现场接续待执行；B0/9＋0/9、D0/6、默认不推广。
+
+A新现场921d340／203631Z_733：canonical干净/GPU3/安装Release/配置导航身份全通过；
+111发布／91命令ID／45定时激活／19生效前安全撤销、无对应激活/命令；ignored0。
+命令与wire P/V/A误差6.83e-8／2.44e-8／1.53e-6，定时边界1.57e-7／6.48e-8／1.99e-7。
+实际前进35.290398m，末truth[17.290398,.084167,2.832231]、原终点距1.511774m，原FSM未到达。
+3次checked brake拒绝，无unchecked hover；不据本轮宣称全接续／安全事件通过。
+Curve99/gen1204新采样身份204344Z_809重放：名义1.2000000000000002／实际.4000000000000001、
+初始control完全相同。真实起点速度X=-.578234m/s超过原.525m/s容差上限；精确PVA下四次
+重定时均正确动态拒绝，最终未检查。不能提高阈值或替换真实起点来造绿例。
+B2992双信号wire、2945双星座Monitor均UNSAFE，C−G联合协方差59/59，47–59ms未传播；
+冻结28/30全部失败保持，正式0/9＋0/9、D0/6、默认不推广。完整3D/raw/命令/时间/hash
+见analysis/voxel_sampling_live/report.md和voxel_sampling_live_final。
+
+取证修复：现场两次assessment46 vs live47/50拒绝保存；生产红例epoch4→5同症状，
+epoch_override_capture_red保留test/binary/log hash。原物理检查通过后FSM追加tracking拒绝，
+现优先复用原physical_epoch.failure_evidence并在同epoch/time/motion查询补充cell，
+不重捕新图，不改一致性门或执行决定。capture/evaluation时间分列。Release构建、7规划
+组及43入口通过，两轴审查通过；新现场导出闭环待验证。审查另记既有组合身份风险：
+pending物理拒绝＋active跟踪异常同时出现时，原FSM覆盖reason/time却保留pending ID，
+仍需单独纠正，不据当前代数修复声明该组合通过。

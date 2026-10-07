@@ -491,3 +491,10 @@ Curve 初始化采样模型 `guide_arc_voxel_diagonal_v1` 的 `guide_fit` 权威
 初始化重放使用明确的名义输入，缺失名义值或未知模型时拒绝；旧无模型字段的粗采样
 捕获仅按 `LEGACY_COARSE_STAGE_INTERVAL` 历史规则读取。输出分别登记捕获／应用模型，
 不更新冻结时刻或授予执行资格。TargetShortening 重拟合仍使用本轮原名义输入。
+
+Remaining-curve evidence retains the assessment-owned immutable physical epoch even when
+the FSM adds tracking or swarm rejection after a successful physical scan. Supplemental
+cells use that original epoch, evaluation time and motion. `state.json` distinguishes
+`capture_ros_time_s` from `assessment_time_s` and `assessment_generation`; the former
+is capture receipt, while the latter identifies the frozen check. Generation checks and
+all execution decisions remain mandatory.

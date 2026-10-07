@@ -72,6 +72,10 @@ namespace ego_planner
     }
     auto snapshot = assessment ? assessment->failure_snapshot :
         std::shared_ptr<const GridMapFailureSnapshot>{};
+    // FSM may add tracking/swarm rejection after a successful physical scan.
+    // Its immutable epoch still owns the proof; do not recapture a newer map.
+    if(!snapshot && assessment && assessment->physical_epoch)
+      snapshot=assessment->physical_epoch->failure_evidence;
     if (!snapshot && planning_view_ && (!search ||
         planning_view_->generation == search->occupancy_generation))
       snapshot = planning_view_->snapshot;
@@ -656,8 +660,14 @@ namespace ego_planner
     planning_time_s_ = node_->now().seconds();
     planning_motion_ = currentMotionContext();
     planning_risk_version_ = 0;
+    std::optional<GridPlanningContext> capture_context;
+    if(assessment && assessment->physical_epoch)
+      capture_context=grid_map_->preparePlanningQuery(assessment->evaluation_time_s,
+          assessment->evaluated_motion,assessment->physical_epoch);
     auto cell = grid_map_->queryPlanningCell(actual, 0,
-        planning_time_s_, planning_risk_policy_, planning_motion_, true);
+        capture_context ? assessment->evaluation_time_s : planning_time_s_,
+        planning_risk_policy_,capture_context ? assessment->evaluated_motion : planning_motion_,
+        true,capture_context ? &*capture_context : nullptr);
     Eigen::Vector3d point = actual;
     if (assessment && assessment->first_execution_position.allFinite()) {
       point = assessment->first_execution_position;
@@ -668,6 +678,9 @@ namespace ego_planner
           << "{\"schema_version\":\"iap_planner_stop_state_v1\","
           << "\"reason\":" << std::quoted(gridExecutionReasonName(reason))
           << ",\"time_s\":" << planning_time_s_
+          << ",\"capture_ros_time_s\":" << planning_time_s_
+          << ",\"assessment_time_s\":" << (assessment ? assessment->evaluation_time_s : planning_time_s_)
+          << ",\"assessment_generation\":" << (assessment ? assessment->evaluated_generation : cell.occupancy_generation)
           << ",\"expected_position_m\":[" << expected.x() << ','
           << expected.y() << ',' << expected.z() << ']'
           << ",\"glio_position_m\":[" << actual.x() << ','
