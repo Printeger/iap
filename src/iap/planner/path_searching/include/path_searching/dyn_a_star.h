@@ -58,6 +58,9 @@ public:
 		Failure failure = Failure::NONE;
 		Eigen::Vector3d requested_start = Eigen::Vector3d::Zero();
 		Eigen::Vector3d requested_end = Eigen::Vector3d::Zero();
+        Eigen::Vector3d start_lattice = Eigen::Vector3d::Constant(NAN);
+        Eigen::Vector3d end_lattice = Eigen::Vector3d::Constant(NAN);
+        bool start_attachment_recovered = false;
 		GridSearchCell start_cell, end_cell;
 		bool has_first_rejection = false;
 		Eigen::Vector3d first_rejection_position = Eigen::Vector3d::Zero();

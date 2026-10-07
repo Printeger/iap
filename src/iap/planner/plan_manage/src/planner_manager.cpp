@@ -30,7 +30,6 @@ namespace ego_planner
       const TrajectoryAssessment* assessment)
   {
     if (!capture_failure_map_) return;
-    if (captured_failure_kinds_.count(kind)) return;
     auto* artifacts = glim::RunLogManager::get_if_initialized();
     if (!artifacts) {
       RCLCPP_ERROR(node_->get_logger(),
@@ -39,8 +38,8 @@ namespace ego_planner
     }
     auto snapshot = assessment ? assessment->failure_snapshot :
         std::shared_ptr<const GridMapFailureSnapshot>{};
-    if (!snapshot && search && planning_view_ &&
-        planning_view_->generation == search->occupancy_generation)
+    if (!snapshot && planning_view_ && (!search ||
+        planning_view_->generation == search->occupancy_generation))
       snapshot = planning_view_->snapshot;
     if (!snapshot) {
       const auto live = grid_map_->captureFailureSnapshot(true);
@@ -73,10 +72,31 @@ namespace ego_planner
         (search && planning_view_ ? planning_view_->motion : planning_motion_);
     const double capture_time = assessment ? assessment->evaluation_time_s :
         (search && planning_view_ ? planning_view_->time_s : planning_time_s_);
-    const std::string relative = "planner/failure_map/" + kind;
+    const auto search_value = search ? std::optional<AStar::Result>(*search) : std::nullopt;
+    const auto context_value = context ? std::optional<BsplineOptimizer::SearchFailureContext>(*context) : std::nullopt;
+    const auto curve_value = trajectory ? std::optional<UniformBspline>(*trajectory) : std::nullopt;
+    const auto assessment_value = assessment ? std::optional<TrajectoryAssessment>(*assessment) : std::nullopt;
+    const auto attempt_id = planning_attempt_id_;
+    const auto start_p = failure_start_p_, start_v = failure_start_v_, start_a = failure_start_a_;
+    const int executing_id = local_data_.traj_id_, feedback_id = server_feedback_id_;
+    const int candidate_id = publicationTrajectory().traj_id_;
+    const double effective_time = connection_time_ ? connection_time_->seconds() : 0.;
+    const double budget_elapsed = planning_budget_ ? planning_budget_->elapsed() : 0.;
+    const unsigned repairs = planning_budget_ ? planning_budget_->used() : 0;
+    const unsigned failure_phase = static_cast<unsigned>(last_plan_failure_);
+    const auto guide = bspline_optimizer_ ? bspline_optimizer_->recoveryGuide() : std::vector<Eigen::Vector3d>{};
+    const auto state_json = std::exchange(failure_state_json_, std::string{});
+    const auto node = node_;
+    auto write = [=](const std::string& label) mutable {
+    const auto* search = search_value ? &*search_value : nullptr;
+    const auto* context = context_value ? &*context_value : nullptr;
+    const auto* trajectory = curve_value ? &*curve_value : nullptr;
+    const auto* assessment = assessment_value ? &*assessment_value : nullptr;
+    const std::string relative = "planner/failure_map/" + label;
+
     const auto directory = artifacts->export_path(relative);
     const auto manifest_path = artifacts->metadata_path(
-        "manifests/planner_failure_map_" + kind + ".json");
+        "manifests/planner_failure_map_" + label + ".json");
     const auto number = [](const double value) {
       if (!std::isfinite(value)) return std::string("null");
       std::ostringstream text;
@@ -103,7 +123,6 @@ namespace ego_planner
               !std::filesystem::exists(directory / "current_frame_beams.csv"))) ||
             !std::filesystem::exists(manifest_path))
           throw std::runtime_error("existing failure map artifact is incomplete");
-        captured_failure_kinds_.insert(kind);
         return;
       }
       const auto pending = artifacts->export_path(relative + ".pending");
@@ -167,9 +186,30 @@ namespace ego_planner
         beams.close();
         if (!hits || !beams) throw std::runtime_error("current frame evidence write failed");
       }
+      if (!state_json.empty()) {
+        std::ofstream state(pending / "state.json"); state << state_json;
+        state.close(); if (!state) throw std::runtime_error("state.json write failed");
+      }
       std::ofstream metadata(pending / "snapshot.json");
       metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v3\",\n"
           << "  \"kind\": " << std::quoted(kind) << ",\n"
+          << "  \"planning_attempt_id\": " << attempt_id << ",\n"
+          << "  \"run_id\": " << std::quoted(artifacts->run_dir().filename().string()) << ",\n"
+          << "  \"run_manifest\": \"../../../../metadata/run_manifest.json\",\n"
+          << "  \"artifact_label\": " << std::quoted(label) << ",\n"
+          << "  \"executing_trajectory_id\": " << executing_id << ",\n"
+          << "  \"server_feedback_id\": " << feedback_id << ",\n"
+          << "  \"candidate_trajectory_id\": " << candidate_id << ",\n"
+          << "  \"expected_effective_time_s\": " << number(effective_time) << ",\n"
+          << "  \"real_start_p_m\": " << vector(start_p) << ",\n"
+          << "  \"real_start_v_mps\": " << vector(start_v) << ",\n"
+          << "  \"real_start_a_mps2\": " << vector(start_a) << ",\n"
+          << "  \"shared_budget_elapsed_s\": " << number(budget_elapsed) << ",\n"
+          << "  \"shared_budget_repairs\": " << repairs << ",\n"
+          << "  \"plan_failure_phase\": " << failure_phase << ",\n"
+          << "  \"guide_m\": [";
+      for(size_t i=0;i<guide.size();++i) metadata << (i ? "," : "") << vector(guide[i]);
+      metadata << "],\n"
           << "  \"frame_id\": " << std::quoted(snapshot->frame_id) << ",\n"
           << "  \"generation\": " << snapshot->generation << ",\n"
           << "  \"cloud_stamp_s\": " << number(snapshot->cloud_stamp_s) << ",\n"
@@ -234,6 +274,9 @@ namespace ego_planner
           << (search ? search->pool_dimensions.z() : 0) << "],\n"
           << "  \"search_pool_center_m\": "
           << vector(search ? search->pool_center : Eigen::Vector3d::Zero())
+          << ",\n  \"search_start_lattice_m\": " << (search ? vector(search->start_lattice) : "null")
+          << ",\n  \"search_end_lattice_m\": " << (search ? vector(search->end_lattice) : "null")
+          << ",\n  \"search_start_attachment_recovered\": " << (search && search->start_attachment_recovered ? "true" : "false")
           << ",\n  \"search_requested_start_m\": "
           << vector(search ? search->requested_start : Eigen::Vector3d::Zero())
           << ",\n  \"search_requested_end_m\": "
@@ -310,7 +353,7 @@ namespace ego_planner
           << ",\n  \"curve_sample_step_s\": "
           << number(assessment ? assessment->sample_step_s : NAN)
           << ",\n  \"actual_curve\": ";
-      if (trajectory && assessment) {
+      if (trajectory) {
         auto curve = *trajectory;
         const auto points = curve.getControlPoint();
         const auto knots = curve.getKnot();
@@ -376,52 +419,42 @@ namespace ego_planner
                  << std::quoted(relative + "/current_frame_hits.csv")
                  << ",\"current_frame_beams\":"
                  << std::quoted(relative + "/current_frame_beams.csv");
-      if (kind == "stall" || kind == "tracking_error" ||
-          kind == "remaining_failure" || kind == "remaining_stop")
+      if (!state_json.empty())
         manifest << ",\"state\":" << std::quoted(relative + "/state.json");
       manifest << "}\n";
       manifest.close();
       if (!manifest) throw std::runtime_error("subordinate manifest write failed");
       std::filesystem::rename(manifest_pending, manifest_path);
-      captured_failure_kinds_.insert(kind);
-      RCLCPP_INFO(node_->get_logger(),
+      RCLCPP_INFO(node->get_logger(),
           "planner failure map %s saved at %s generation=%lu voxels=%zu",
           kind.c_str(), directory.c_str(), static_cast<unsigned long>(snapshot->generation),
           snapshot->cell_flags.size());
     } catch (const std::exception& error) {
-      RCLCPP_ERROR(node_->get_logger(),
+      RCLCPP_ERROR(node->get_logger(),
           "planner failure map %s save failed: %s", kind.c_str(), error.what());
     }
+    };
+    latest_failure_export_ = write;
+    if (captured_failure_kinds_.insert(kind).second)
+      queueFailureExport([write, kind]() mutable { write(kind); }, false);
   }
 
   void EGOPlannerManager::capturePlanningStall(
       const Eigen::Vector3d& start, const Eigen::Vector3d& target) {
-    if (!capture_failure_map_ || captured_failure_kinds_.count("stall")) return;
+    if (!capture_failure_map_) return;
+    // Export the last rejected frozen attempt before capturing this later state.
+    exportLatestFailure();
+    if (captured_failure_kinds_.count("stall")) return;
     planning_time_s_ = node_->now().seconds();
     planning_motion_ = currentMotionContext();
     planning_risk_version_ = 0;
     const auto cell = grid_map_->queryPlanningCell(target, 0,
         planning_time_s_, planning_risk_policy_, planning_motion_, true);
+    std::ostringstream state;
+    state << "{\"schema_version\":\"iap_planner_stall_state_v1\",\"target_reason\":"
+          << std::quoted(gridExecutionReasonName(cell.execution_reason)) << "}\n";
+    failure_state_json_ = state.str();
     captureFailureMap("stall", target, start, cell);
-    if (!captured_failure_kinds_.count("stall")) return;
-    auto* artifacts = glim::RunLogManager::get_if_initialized();
-    if (!artifacts) return;
-    const auto path = artifacts->export_path(
-        "planner/failure_map/stall/state.json");
-    const auto fingerprint = planningEvidenceFingerprint(start, target);
-    std::ofstream state(path.string() + ".pending");
-    state << std::setprecision(17)
-          << "{\"schema_version\":\"iap_planner_stall_state_v1\","
-          << "\"target_reason\":"
-          << std::quoted(gridExecutionReasonName(cell.execution_reason))
-          << ",\"evidence_hash\":" << (fingerprint ? *fingerprint : 0)
-          << ",\"search_pool_margin_m\":5.0}\n";
-    state.close();
-    if (state) std::filesystem::rename(path.string() + ".pending", path);
-    else {
-      captured_failure_kinds_.erase("stall");
-      RCLCPP_ERROR(node_->get_logger(), "planner stall state write failed");
-    }
   }
 
   void EGOPlannerManager::captureRemainingFailure(
@@ -450,7 +483,6 @@ namespace ego_planner
       captureFailureMap("curve_unobserved", assessment->first_unobserved_position,
           expected, assessment->first_unobserved_cell, nullptr, nullptr,
           evidence_curve, assessment);
-    if (captured_failure_kinds_.count(kind)) return;
     planning_time_s_ = node_->now().seconds();
     planning_motion_ = currentMotionContext();
     planning_risk_version_ = 0;
@@ -461,14 +493,7 @@ namespace ego_planner
       point = assessment->first_execution_position;
       cell = assessment->first_execution_cell;
     }
-    captureFailureMap(kind, point, expected, cell, nullptr, nullptr,
-        assessment ? evidence_curve : nullptr, assessment);
-    if (!captured_failure_kinds_.count(kind)) return;
-    auto* artifacts = glim::RunLogManager::get_if_initialized();
-    if (!artifacts) return;
-    const auto path = artifacts->export_path(
-        "planner/failure_map/" + kind + "/state.json");
-    std::ofstream state(path.string() + ".pending");
+    std::ostringstream state;
     state << std::setprecision(17)
           << "{\"schema_version\":\"iap_planner_stop_state_v1\","
           << "\"reason\":" << std::quoted(gridExecutionReasonName(reason))
@@ -487,18 +512,62 @@ namespace ego_planner
               ? planning_time_s_ - command_time_s : -1.0)
           << ",\"glio_age_s\":" << odom_age_s
           << ",\"map_age_s\":" << map_age_s << "}\n";
-    state.close();
-    if (state) std::filesystem::rename(path.string() + ".pending", path);
-    else {
-      captured_failure_kinds_.erase(kind);
-      RCLCPP_ERROR(node_->get_logger(), "planner %s state write failed",
-                   kind.c_str());
-    }
+    failure_state_json_ = state.str();
+    captureFailureMap(kind, point, expected, cell, nullptr, nullptr,
+        assessment ? evidence_curve : nullptr, assessment);
+    exportLatestFailure();
   }
 
   EGOPlannerManager::EGOPlannerManager() {}
 
-  EGOPlannerManager::~EGOPlannerManager() {}
+  void EGOPlannerManager::queueFailureExport(std::function<void()> job, bool terminal) {
+    std::lock_guard<std::mutex> lock(failure_writer_mutex_);
+    if (!failure_writer_.joinable()) {
+      failure_writer_ = std::thread([this]() {
+        std::unique_lock<std::mutex> lock(failure_writer_mutex_);
+        while (true) {
+          failure_writer_cv_.wait(lock, [this]() { return failure_writer_stopping_ || !failure_exports_.empty(); });
+          if (failure_exports_.empty() && failure_writer_stopping_) break;
+          auto work = std::move(failure_exports_.front()); failure_exports_.pop_front();
+          failure_writer_busy_ = true; lock.unlock();
+          try { work(); }
+          catch (const std::exception& error) {
+            RCLCPP_ERROR(node_->get_logger(), "planner failure export worker failed: %s", error.what());
+          }
+          lock.lock();
+          failure_writer_busy_ = false; failure_writer_cv_.notify_all();
+        }
+      });
+    }
+    if (failure_exports_.size() == 2) {
+      if (!terminal) {
+        RCLCPP_WARN(node_->get_logger(), "failure export queue full: first-kind export omitted; latest failure retained");
+        return;
+      }
+      failure_exports_.pop_front();
+      RCLCPP_WARN(node_->get_logger(), "failure export queue full: terminal evidence supersedes queued export");
+    }
+    failure_exports_.push_back(std::move(job)); failure_writer_cv_.notify_one();
+  }
+
+  void EGOPlannerManager::exportLatestFailure(bool final) {
+    if (!latest_failure_export_ || (!final && terminal_exports_ >= 3)) return;
+    const auto label = final ? "terminal_final" : "terminal_" + std::to_string(++terminal_exports_);
+    auto write = latest_failure_export_;
+    queueFailureExport([write, label]() mutable { write(label); }, true);
+  }
+
+  void EGOPlannerManager::drainFailureExports() {
+    std::unique_lock<std::mutex> lock(failure_writer_mutex_);
+    failure_writer_cv_.wait(lock, [this]() { return failure_exports_.empty() && !failure_writer_busy_; });
+  }
+
+  EGOPlannerManager::~EGOPlannerManager() {
+    exportLatestFailure(true);
+    { std::lock_guard<std::mutex> lock(failure_writer_mutex_); failure_writer_stopping_ = true; }
+    failure_writer_cv_.notify_one();
+    if (failure_writer_.joinable()) failure_writer_.join();
+  }
 
   void EGOPlannerManager::initPlanModules(rclcpp::Node::SharedPtr &node, PlanningVisualization::Ptr vis)
   {
@@ -555,6 +624,7 @@ namespace ego_planner
     bspline_optimizer_->setSearchFailureObserver(
         [this](const AStar::Result& result,
                const BsplineOptimizer::SearchFailureContext& context) {
+          if (capture_failure_map_) { failed_search_result_=result; failed_search_context_=context; }
           const auto diagnostic_map = grid_map_;
           const auto* diagnostic_context = planning_view_ ? &planning_view_->physical_context : nullptr;
           const double diagnostic_time = planning_view_ ? planning_view_->time_s : planning_time_s_;
@@ -603,7 +673,7 @@ namespace ego_planner
                    result.failure == AStar::Failure::NO_PATH_WITH_UNOBSERVED ||
                    result.failure == AStar::Failure::ADVISORY_NO_PATH)
             kind = "exhausted";
-          if (capture_failure_map_ && !captured_failure_kinds_.count(kind))
+          if (capture_failure_map_)
             captureFailureMap(kind, result.requested_end,
                               result.requested_start, end, &result, &context);
           if (result.map_changed && kind != "map_changed")
@@ -619,6 +689,7 @@ namespace ego_planner
   }
 
   void EGOPlannerManager::observeExecutingTrajectory(int trajectory_id) {
+    server_feedback_id_ = trajectory_id;
     if(pending_trajectory_ && pending_trajectory_->traj_id_==trajectory_id) {
       local_data_=*pending_trajectory_; pending_trajectory_.reset();
       RCLCPP_INFO(node_->get_logger(),"Trajectory %d executing at its scheduled connection",trajectory_id);
@@ -645,6 +716,7 @@ namespace ego_planner
     struct EndView { EGOPlannerManager* manager; bool own;
       ~EndView() { if(own) manager->endPlanningView(); } } end_view{this,own_view};
     last_plan_failure_=PlanFailure::None;
+    failure_start_p_=start_pt; failure_start_v_=start_vel; failure_start_a_=start_acc;
     const auto fail=[&](PlanFailure reason) {
       last_plan_failure_=planning_budget_->expired() || planning_budget_->denied() ? PlanFailure::Budget : reason;
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
@@ -653,6 +725,18 @@ namespace ego_planner
           last_plan_failure_==PlanFailure::Search ? "search" : last_plan_failure_==PlanFailure::Curve ? "curve" :
           last_plan_failure_==PlanFailure::Release ? "release" : "connection", gridExecutionReasonName(last_candidate_assessment_.execution_reason),
           planning_budget_->expired(), planning_budget_->denied());
+      if(capture_failure_map_ && planning_view_ && planning_view_->snapshot) {
+        // Final disposition of this attempt, including backend/budget failures
+        // that happen after an earlier search rejection. Do not read a later map.
+        const auto* search=failed_search_result_ && failed_search_result_->occupancy_generation==planning_view_->generation
+            ? &*failed_search_result_ : nullptr;
+        const auto* context=search && failed_search_context_ ? &*failed_search_context_ : nullptr;
+        const auto cell=queryPlanningViewCell(start_pt);
+        const auto* assessment=last_candidate_assessment_.failure_snapshot &&
+            last_candidate_assessment_.evaluated_generation==planning_view_->generation ? &last_candidate_assessment_ : nullptr;
+        captureFailureMap("attempt_failure",start_pt,target_pt,cell,search,context,
+            failed_candidate_curve_ ? &*failed_candidate_curve_ : nullptr,assessment);
+      }
       ++continous_failures_count_; return false;
     };
     if(pending_trajectory_ || planning_budget_->expired()) return fail(PlanFailure::Connection);
@@ -808,6 +892,7 @@ namespace ego_planner
           false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
       planning_timings_.final_checks_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-check_start).count();
       last_candidate_assessment_=assessment;
+      if(capture_failure_map_) failed_candidate_curve_=curve;
       if(assessment.budget_exhausted) return fail(PlanFailure::Budget);
       // Terminal speed is rechecked after optimization against the same input.
       if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6)

@@ -503,6 +503,8 @@ GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
 }
 
 bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
+  ++planning_attempt_id_;
+  failed_search_result_.reset(); failed_search_context_.reset(); failed_candidate_curve_.reset();
   planning_view_.reset();
   planning_targets_.clear();
   connection_time_.reset(); connection_predecessor_=-1;

@@ -271,12 +271,9 @@ inline void AraimDebugCSV::write_worst_hyp_row(const IntegrityReport& report,
         << std::fixed << std::setprecision(6)
         << report.stamp << ","
         << to_string(report.state) << ","
-        << ",,,,,"                        // HPL VPL HAL VAL IM
-        << ",,,"                          // PL_E PL_N PL_U
-        << ",,,,"                         // pl_ff K_ff K_fa
-        << ",,,,,"                        // n_sv n_const PDOP sigma_H n_hyp
-        << ",,,,,"                        // n_det n_trunks tdop lidar_valid
-        << ",,,,"                         // lidar_n_hyp lidar_n_det lidar_HPL lidar_mode
+        // Exactly columns HPL through lidar_mode (24 absent epoch fields).
+        // The delimiter after state already begins the first empty field.
+        << std::string(24, ',')
         << hyp_index << "," << sat_id << ","
         << ss.d_E << "," << ss.d_N << "," << ss.d_U << ","
         << ss.sigma_ss_E << "," << ss.sigma_ss_N << "," << ss.sigma_ss_U << ","

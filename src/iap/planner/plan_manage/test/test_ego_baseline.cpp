@@ -129,6 +129,8 @@ struct EGOPlannerManagerTestAccess {
       return std::atomic_load(&manager.risk_odom_);
     };
   }
+  static void drain(EGOPlannerManager& manager) { manager.drainFailureExports(); }
+  static void finalEvidence(EGOPlannerManager& manager) { manager.exportLatestFailure(true); manager.drainFailureExports(); }
   static void setCapture(EGOPlannerManager& manager) {
     manager.capture_failure_map_ = true;
     manager.planning_time_s_ = 10.0;
@@ -145,6 +147,7 @@ struct EGOPlannerManagerTestAccess {
     manager.captureFailureMap(kind, Eigen::Vector3d(0, 0, 1),
                               Eigen::Vector3d(-1, 0, 1), cell,
                               result, context, curve, assessment);
+    manager.drainFailureExports();
   }
   static void setExternalSupportAge(EGOPlannerManager& manager, double age) {
     manager.current_integrity_.current_external_support_age_s = age;
@@ -517,15 +520,20 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   }
   manager.capturePlanningStall(Eigen::Vector3d(-1, 0, 1),
                                Eigen::Vector3d(0, 0, 1));
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
   manager.captureRemainingFailure("tracking_error",
       Eigen::Vector3d(0, 0, 1), Eigen::Vector3d(-0.4, 0, 1),
       0.4, 7, 9.9, 0.1, 0.2, GridExecutionReason::TRACKING_ERROR);
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
   manager.captureRemainingFailure("remaining_failure",
       Eigen::Vector3d(0, 0, 1), Eigen::Vector3d(-0.4, 0, 1),
       0.4, 7, 9.9, 0.1, 0.2, GridExecutionReason::PHYSICAL_OBSTACLE);
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
   manager.captureRemainingFailure("remaining_stop",
       Eigen::Vector3d(0, 0, 1), Eigen::Vector3d(-0.4, 0, 1),
       0.4, 7, 9.9, 0.1, 0.2, GridExecutionReason::TRACKING_ERROR);
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
   for (const char* kind : {"stall", "tracking_error",
                            "remaining_failure", "remaining_stop"}) {
     const auto leaf = root / kind;
@@ -598,7 +606,22 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   size_t count = 0;
   for (const auto& leaf : std::filesystem::directory_iterator(root))
     if (leaf.is_directory()) ++count;
-  EXPECT_EQ(count, 10u);
+  EXPECT_EQ(count, 13u);
+  manager.capturePlanningStall(Eigen::Vector3d(-1, 0, 1), Eigen::Vector3d(0, 0, 1));
+  ego_planner::EGOPlannerManagerTestAccess::drain(manager);
+  EXPECT_TRUE(std::filesystem::exists(root / "terminal_1/snapshot.json"));
+  // A repeated reason must retain its own frozen generation while the first
+  // artifact remains immutable, even when live data subsequently changes.
+  auto latest_cell = cell;
+  latest_cell.occupancy_generation = manager.grid_map_->occupancyGeneration();
+  result.occupancy_generation = latest_cell.occupancy_generation;
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager, "endpoint", latest_cell, &result, &context);
+  GridMapTestAccess::input(*manager.grid_map_, {Eigen::Vector3d(3, 2, 1)}, 10.3, Eigen::Vector3d(0, 0, 1));
+  ego_planner::EGOPlannerManagerTestAccess::finalEvidence(manager);
+  std::ifstream final_metadata(root / "terminal_final/snapshot.json");
+  std::string final_text((std::istreambuf_iterator<char>(final_metadata)), {});
+  EXPECT_NE(final_text.find("\"generation\": " + std::to_string(latest_cell.occupancy_generation) + ","), std::string::npos);
+  EXPECT_EQ(std::filesystem::last_write_time(root / "endpoint/snapshot.json"), before);
 }
 
 TEST(EgoBaseline, FrozenMotionCannotAuthorizePublicationAfterCurrentQualityRevocation) {

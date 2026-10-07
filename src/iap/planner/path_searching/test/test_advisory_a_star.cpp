@@ -518,3 +518,29 @@ TEST(AdvisoryAStar, AdvisoryRejectionAfterCacheRefreshKeepsFirstReasonAndPoint) 
   EXPECT_EQ(result.first_rejection_cell.advisory_class, GridAdvisoryClass::AVOID);
   EXPECT_TRUE(result.first_rejection_position.allFinite());
 }
+
+TEST(AdvisoryAStar, LegalRealStartConnectsAroundBlockedRoundedNode) {
+  auto map=std::make_shared<GridMap>(); GridMapTestAccess::configure(*map);
+  AStar search; search.initGridMap(map,Eigen::Vector3i(40,40,20));
+  const Eigen::Vector3d start(-1.04,0,1), goal(1,0,1);
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell c; c.execution_reason=p.x()>-1.025 && p.x()<-0.975 && std::abs(p.y())<.025
+        ? GridExecutionReason::INSUFFICIENT_CLEARANCE : GridExecutionReason::OK;
+    c.advisory.classification=GridAdvisoryClass::VALID; c.advisory.cost_multiplier=1.; return c;
+  });
+  ASSERT_TRUE(search.AstarSearch(.1,start,goal,1.,Eigen::Vector3d(0,0,1)));
+  EXPECT_TRUE(search.getPath().front().isApprox(start,1e-10));
+}
+
+TEST(AdvisoryAStar, StartRecoveryCannotCrossUnknownConnector) {
+  auto map=std::make_shared<GridMap>(); GridMapTestAccess::configure(*map);
+  AStar search; search.initGridMap(map,Eigen::Vector3i(40,40,20));
+  const Eigen::Vector3d start(-1.04,0,1);
+  search.setPlanningQuery([start](const Eigen::Vector3d& p) {
+    GridPlanningCell c; c.execution_reason=(p-start).norm()<.005 || (p-start).norm()>.9
+        ? GridExecutionReason::OK : GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+    c.advisory.classification=GridAdvisoryClass::VALID; return c;
+  });
+  EXPECT_FALSE(search.AstarSearch(.1,start,Eigen::Vector3d(1,0,1),1.,Eigen::Vector3d(0,0,1)));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::START_BLOCKED);
+}

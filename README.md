@@ -925,3 +925,16 @@ python3 scripts/dev_predictor/advisory_forest_report.py \
 该命令已执行，报告位于 run 的 `export/analysis/advisory_validation/final/`。
 同名产物不可覆盖；再次汇总使用新的安全标签。报告只统计不同 run，校验历史
 重放 manifest 中的输入、点 CSV 和矩阵 hash，缺失值不会变成有效零风险。
+
+
+末次森林失败取证使用统一入口与 opt-in 参数：
+
+```bash
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 start_rviz:=false start_grid_map_visualizer:=true advisory_posterior_prior:=false advisory_guidance:=false capture_failure_map:=true run_duration_s:=180
+```
+
+以启动打印的 `IAP_RUN_DIR` 为准。`export/planner/failure_map/<reason>` 保留首次，
+`terminal_1..3` 与 `terminal_final` 保留停止/退出触发的最近冻结失败；后台有界导出，
+队列丢失会记录原因。按 `planning_attempt_id`、generation、原时间及 run manifest
+核对身份，不能用首次图解释后来停车。`terminal_final` 需要正常进程退出。
+当前四阶段实测状态见 [实施进度](docs/dev_planner/forest_four_stage_progress.md)。

@@ -9,6 +9,59 @@
 阶段 1 已恢复 EGO 主线、同一个 GridMap 的空间 PL 缓存与真实 PredictorModule 接入；阶段 1a 已实测 GLIO 驱动的仿真和同图显示。本次实施把当前融合运动质量、物理环境与 advisory 预测分开查询，在原 EGO 触发点做完整性避让，并在写入 `local_data` 前检查实际曲线。以下「当前阶段」描述代码；新行为尚无四分叉现场验收记录，不能把旧运行结果当作本次功能的成功证据。原版流程图保持固定基线。
 从本轮起，`iap_sim.launch.py` 默认且统一使用 `icra_dense_forest_four_fork_v2` 做完整仿真和可视化回归；单元测试可以保留小型定向 fixture，历史 `fused_nominal` 运行记录保持原场景身份，不迁写为四分叉结论。
 
+## 四阶段实施：末次失败与格点接入（2026-10-07 当前轮）
+
+实施进度见 [forest_four_stage_progress.md](../dev_planner/forest_four_stage_progress.md)。
+起始 HEAD `5de1ec0`、`dev/iap_refactor`、干净工作树，GPU 三项预检均通过。
+原版 EGO 只读。历史 `20261007T040151Z_586` 的 endpoint 是 generation 234，
+末轮性能记录是 generation 1628，两者不可合并成最后停车根因。
+
+```mermaid
+flowchart TD
+    O[GLIO / 优化后 Current Monitor] --> F[唯一 GridMap 冻结物理 / 运动 / Advisory 输入]
+    F --> T[真实 P/V/A 与合法局部目标集合]
+    T --> A[A* 原在线预算：合法真实起点接入搜索格点]
+    A --> G[一条 guide / EGO 实际 B-spline / 动力学与完整曲线检查]
+    G --> R[最新物理走廊 / 当前运动 / 未来接续 / 发布前检查]
+    R --> S[traj_server 实际切换与 position / SO3 命令]
+    A --> E[同代失败 / 尝试身份 / 输入原时间，保留最近一份]
+    G --> E
+    R --> E
+    E --> W[有界后台导出：首次类型 + 至多三次停止 + 最终失败]
+```
+
+A* 起点的真实坐标保持不变。其最近格点或连接被拒绝时，在已有 1 m 端点
+恢复范围内按真实距离、格点索引确定顺序选择可连接格点；每个候选和完整连接
+仍查询同一冻结物理层，检查共享 deadline。未知、净空、实际起点非法仍拒绝。
+原终点恢复、搜索边检查、原在线预算不变。Result 追加实际接入格点和恢复标志。
+已存在的有限端点范围也约束起点接入；不推进 GLIO 实际参考进度。
+
+取证仍为 opt-in，复用 PlanningView/TrajectoryAssessment 不可变快照。
+每次失败更新唯一最近记录，不再让首次错误类型遮蔽后来同类型失败。
+规划尝试序号绑定真实 P/V/A、执行/候选/反馈 ID、生效时刻、共享预算、guide、
+实际候选曲线（若已产生）与原地图/运动时间。最终失败补充该尝试最终阶段；
+缺数据为 null，不借用事后地图。run_manifest 链接绑定代码与配置原始身份。
+后台一个写入线程、最多两个待写任务、一个最近记录（活动写入另占一份）；
+停止导出至多三份，正常进程退出另导出 terminal_final，原首次产物不覆盖。
+队列拥塞明确记录丢失，末次导出优先；异常强杀不能保证最终导出。
+这些上限约束 opt-in 取证，不能独立授予执行或替代完整失败分析。
+
+独立 live capture 追加 GLIO 实际消费的 `/sim/drone_0/imu_iap` 与 SO3Command，
+记录采集 header 与接收 ROS/steady 原时间；仅供离线重力方向与命令核验。
+
+ARAIM worst_hyp 生产 CSV 的 absent epoch 字段修正为表头对应的 24 个空字段；
+历史 62 列坏行不挪列、不追认。新生产回归验证 60 列表头、epoch 与 worst_hyp
+字段身份一致。Current Monitor 拒绝与 Advisory 缺失仍保持原权限。
+
+自动化红/绿证据在 `log/20261007T050106Z_396/runtime/`：
+`capture_red.log` 复现缺末次证据，`capture_green2.log` 验证首次不覆盖及末次
+仍绑定失败时旧代数；`start_red.log` 复现合法真实起点被非法舍入节点拒绝，
+`astar_green.log` 24 项通过，含未知连接拒绝；`csv_red.log` 复现 62/60 列，
+`csv_green.log` 验证生产写入修复。`final_build.log` 最终 Release 构建通过；`final_planner_tests.log` 五项行为 CTest、
+`final_astar_tests.log` 与 `final_araim_tests.log` 均通过。现场结果须继续补记。
+阶段一尚未完成固定路线/任务到达，二尚缺物理竖直/传播/真实双源实测，
+三、四前置条件未满足。保留显式 EGO 基线，不推广参数或声明森林 PASS。
+
 ## 运行时检查时序与实际曲线修正（当前修正）
 
 本轮基线 `2d63cb8`，诊断依据 `20261006T110434Z_515`。保存的 remaining_stop 地图时间比检查参考时间新 0.100629 s；候选实际曲线距原始障碍中心 0.550945 m，原要求为 0.551355 m，欠缺 0.000411 m。原始快照保持不变。CSV 中 130 轮、114 次 repair_denied、0 次截止时间过期，advisory avoid / 回退均为零；本轮不把这些失败归因于 PL 或此前已修复的反馈/beam 接线。

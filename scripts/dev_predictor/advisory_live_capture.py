@@ -47,7 +47,8 @@ def main():
                     for topic,types in node.get_topic_names_and_types():
                         if topic in subscriptions or len(types)!=1:continue
                         selected=(topic=='/iap/integrity' or topic in ('/drone_0_visual_slam/odom','/sim/drone_0/truth_odom',
-                                  '/drone_0_planning/bspline','/drone_0_planning/pos_cmd') or
+                                  '/drone_0_planning/bspline','/drone_0_planning/pos_cmd',
+                                  '/sim/drone_0/imu_iap') or types[0]=='quadrotor_msgs/msg/SO3Command' or
                                   ('planning' in topic and types[0]=='std_msgs/msg/String'))
                         if selected:
                             subscriptions[topic]=node.create_subscription(get_message(types[0]),topic,

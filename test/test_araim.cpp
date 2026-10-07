@@ -14,6 +14,9 @@
 #include <vector>
 
 #include <iap/integrity/araim.hpp>
+#include <iap/integrity/araim_debug.hpp>
+#include <filesystem>
+#include <unistd.h>
 #include <iap/integrity/araim_types.hpp>
 #include <iap/integrity/fgo_information_matrix.hpp>
 #include <iap/integrity/lidar_araim.hpp>
@@ -3304,4 +3307,34 @@ TEST(GnssAraimCompatibilityTest, DeprecatedAraimAliasStillCompiles) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+TEST(AraimDebugCSVTest, HypothesisRowsHaveHeaderWidthAndCorrectIdentity) {
+  const auto path = std::filesystem::temp_directory_path() /
+      ("iap_araim_csv_test_" + std::to_string(getpid()) + ".csv");
+  struct Cleanup { std::filesystem::path path; ~Cleanup() { std::filesystem::remove(path); } } cleanup{path};
+  {
+    AraimDebugCSV writer(true, path.string());
+    IntegrityReport report; report.stamp=17.;
+    GnssAraimResult result; result.valid=true; result.worst_hyp=0;
+    result.subsets.emplace_back(); result.hypotheses.emplace_back();
+    result.hypotheses[0].sat_id=23; result.subsets[0].d_E=1.25;
+    writer.write(report,result);
+  }
+  std::ifstream input(path); std::vector<std::vector<std::string>> rows;
+  std::string line;
+  while(std::getline(input,line)) {
+    std::vector<std::string> row; std::istringstream stream(line); std::string field;
+    while(std::getline(stream,field,',')) row.push_back(field);
+    if(!line.empty() && line.back()==',') row.emplace_back();
+    rows.push_back(row);
+  }
+  ASSERT_EQ(rows.size(),3u);
+  EXPECT_EQ(rows[1].size(),rows[0].size());
+  ASSERT_EQ(rows[2].size(),rows[0].size());
+  const auto column=[&](const std::string& name) { return std::find(rows[0].begin(),rows[0].end(),name)-rows[0].begin(); };
+  EXPECT_EQ(rows[2][column("hyp_index")],"0");
+  EXPECT_EQ(rows[2][column("sat_id")],"23");
+  EXPECT_DOUBLE_EQ(std::stod(rows[2][column("d_E")]),1.25);
+  EXPECT_TRUE(rows[2][column("gnss_valid")].empty());
 }

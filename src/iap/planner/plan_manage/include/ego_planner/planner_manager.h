@@ -7,6 +7,8 @@
 
 #include <stdlib.h>
 #include <deque>
+#include <thread>
+#include <condition_variable>
 #include <limits>
 #include <optional>
 #include <unordered_map>
@@ -198,6 +200,26 @@ namespace ego_planner
     bool search_performance_diagnostics_ = false;
     PlanningTimings planning_timings_;
     std::unordered_set<std::string> captured_failure_kinds_;
+    // One writer, at most two queued exports and one retained immutable failure.
+    std::thread failure_writer_;
+    std::mutex failure_writer_mutex_;
+    std::condition_variable failure_writer_cv_;
+    std::deque<std::function<void()>> failure_exports_;
+    bool failure_writer_stopping_ = false, failure_writer_busy_ = false;
+    std::function<void(const std::string&)> latest_failure_export_;
+    unsigned terminal_exports_ = 0;
+    int server_feedback_id_ = -1;
+    uint64_t planning_attempt_id_ = 0;
+    Eigen::Vector3d failure_start_p_ = Eigen::Vector3d::Constant(NAN);
+    Eigen::Vector3d failure_start_v_ = Eigen::Vector3d::Constant(NAN);
+    Eigen::Vector3d failure_start_a_ = Eigen::Vector3d::Constant(NAN);
+    std::string failure_state_json_;
+    std::optional<AStar::Result> failed_search_result_;
+    std::optional<BsplineOptimizer::SearchFailureContext> failed_search_context_;
+    std::optional<UniformBspline> failed_candidate_curve_;
+    void queueFailureExport(std::function<void()> job, bool terminal);
+    void exportLatestFailure(bool final = false);
+    void drainFailureExports();
     uint64_t planning_risk_version_ = 0;
     double planning_time_s_ = 0.0;
     GridMotionContext planning_motion_;

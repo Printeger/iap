@@ -110,7 +110,7 @@ struct BudgetExceeded {};
 
 bool inPool(const Input& in, const Point& p) {
   const Eigen::Vector3i index =
-      (((p - in.center) / in.step_m + Point::Constant(0.5)).cast<int>() +
+      (((p - in.center) / in.step_m + Point::Constant(0.5)).array().floor().cast<int>().matrix() +
        in.pool / 2).eval();
   return (index.array() >= 0).all() &&
       (index.array() < in.pool.array()).all();
@@ -175,6 +175,10 @@ void report(const std::string& classification, const AStar::Result& original,
       << "\"classification\":" << std::quoted(classification)
       << ",\"original_replay_failure\":"
       << std::quoted(AStar::failureName(original.failure))
+      << ",\"real_start_reason\":" << std::quoted(gridExecutionReasonName(original.start_cell.execution_reason))
+      << ",\"expanded\":" << original.expanded
+      << ",\"exhausted\":" << (original.exhausted ? "true" : "false")
+      << ",\"start_attachment_recovered\":" << (original.start_attachment_recovered ? "true" : "false")
       << ",\"entry_candidates\":" << entries
       << ",\"exit_candidates\":" << exits
       << ",\"attempted_pairs\":" << attempted
@@ -348,7 +352,7 @@ int main(int argc, char** argv) {
                entry.size(), exit.size(), attempted, elapsed());
         return 0;
       }
-      searched_graph = searched_graph || result.expanded > 0;
+      searched_graph = searched_graph || result.exhausted;
     }
     report(searched_graph ? "NO_ROUTE_IN_OBSERVED_SEARCH_POOL" :
         "INCONCLUSIVE_NO_VALID_REPAIR_ENDPOINTS", original,

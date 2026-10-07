@@ -375,9 +375,59 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
         return false;
     }
 
-    if (!queryLatticePoint(start_idx).executable()) {
-        result_.failure = Failure::START_BLOCKED;
-        return false;
+    const auto connector_ok = [this](const Vector3d& a, const Vector3d& b) {
+        if (!planning_query_) return true;
+        const int samples = std::max(1, static_cast<int>(std::ceil(
+            (a - b).norm() / ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * 0.5))));
+        for (int i = 0; i <= samples; ++i) {
+            const auto point = a + (b - a) * (static_cast<double>(i) / samples);
+            const auto cell = timedPlanningQuery(point);
+            if (!cell.executable()) return false;
+            const auto cls = cell.advisory_class;
+            if (!advisory_fallback_ &&
+                (cls == GridAdvisoryClass::AVOID ||
+                 cls == GridAdvisoryClass::PREDICTED_DEGRADED)) {
+                rejected_advisory_ = true;
+                ++result_.rejected_advisory;
+                return false;
+            }
+        }
+        return true;
+    };
+    result_.start_lattice = Index2Coord(start_idx);
+    result_.end_lattice = Index2Coord(end_idx);
+    if (!queryLatticePoint(start_idx).executable() ||
+        !connector_ok(start_pt, Index2Coord(start_idx))) {
+        // Recover the search lattice attachment, never the measured real start.
+        // Use the same existing 1 m endpoint bound, deterministic nearest first,
+        // and the complete physical connector under the shared search deadline.
+        struct Attachment { Vector3i index; double distance2; };
+        std::vector<Attachment> attachments;
+        const int radius = std::min(static_cast<int>(std::ceil(1.0 / step_size_)), POOL_SIZE_.maxCoeff());
+        for (int x=-radius; x<=radius; ++x) {
+          if (deadlineExpired()) { result_.failure=Failure::TIME_BUDGET; return false; }
+          for (int y=-radius; y<=radius; ++y) for (int z=-radius; z<=radius; ++z) {
+            const Vector3i index=start_idx+Vector3i(x,y,z);
+            if((index.array()<0).any() || (index.array()>=POOL_SIZE_.array()).any()) continue;
+            const double distance2=(Index2Coord(index)-start_pt).squaredNorm();
+            if(distance2<=1.0+1e-12) attachments.push_back({index,distance2});
+          }
+        }
+        std::sort(attachments.begin(),attachments.end(),[](const Attachment& a,const Attachment& b) {
+          if(a.distance2!=b.distance2) return a.distance2<b.distance2;
+          for(int i=0;i<3;++i) if(a.index[i]!=b.index[i]) return a.index[i]<b.index[i];
+          return false;
+        });
+        bool attached=false;
+        for(const auto& candidate:attachments) {
+          if(deadlineExpired()) { result_.failure=Failure::TIME_BUDGET; return false; }
+          if(!queryLatticePoint(candidate.index).executable() ||
+             !connector_ok(start_pt,Index2Coord(candidate.index))) continue;
+          start_idx=candidate.index; attached=true; break;
+        }
+        if(!attached) { result_.failure=Failure::START_BLOCKED; return false; }
+        result_.start_lattice=Index2Coord(start_idx);
+        result_.start_attachment_recovered=true;
     }
     if (!queryLatticePoint(end_idx).executable()) {
         // Rounding to the search lattice can place an otherwise valid target
@@ -408,6 +458,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
                 }
                 if (connected) {
                     end_idx = candidate_index;
+                    result_.end_lattice = candidate_position;
                     adjusted = true;
                     break;
                 }
@@ -419,25 +470,6 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
         }
     }
 
-    const auto connector_ok = [this](const Vector3d& a, const Vector3d& b) {
-        if (!planning_query_) return true;
-        const int samples = std::max(1, static_cast<int>(std::ceil(
-            (a - b).norm() / ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * 0.5))));
-        for (int i = 0; i <= samples; ++i) {
-            const auto point = a + (b - a) * (static_cast<double>(i) / samples);
-            const auto cell = timedPlanningQuery(point);
-            if (!cell.executable()) return false;
-            const auto cls = cell.advisory_class;
-            if (!advisory_fallback_ &&
-                (cls == GridAdvisoryClass::AVOID ||
-                 cls == GridAdvisoryClass::PREDICTED_DEGRADED)) {
-                rejected_advisory_ = true;
-                ++result_.rejected_advisory;
-                return false;
-            }
-        }
-        return true;
-    };
     if (!connector_ok(start_pt, Index2Coord(start_idx))) {
         result_.failure = rejected_advisory_ ? Failure::ADVISORY_NO_PATH :
             Failure::START_BLOCKED;
