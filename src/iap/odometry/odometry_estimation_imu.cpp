@@ -15,6 +15,7 @@
 #include <iap/util/convert_to_string.hpp>
 #include <iap/util/key_lifecycle_monitor.hpp>
 #include <iap/util/relinearization_policy.hpp>
+#include <iap/gnss/constellation_clock.hpp>
 #include <iap/util/shared_state.hpp>
 #include <iap/util/timing_csv.hpp>
 #include <iap/common/imu_integration.hpp>
@@ -155,8 +156,8 @@ OdometryEstimationIMU::OdometryEstimationIMU(std::unique_ptr<OdometryEstimationI
     policy_registry.register_policy('x', 6, gtsam::Vector6::Constant(t));
     policy_registry.register_policy('v', 3, gtsam::Vector3::Constant(t));
     policy_registry.register_policy('b', 6, gtsam::Vector6::Constant(t));
-    policy_registry.register_policy('c', 2, (gtsam::Vector2() << params->clk_bias_relin_thresh,
-                                                                params->clk_drift_relin_thresh).finished());
+    iap::register_gnss_clock_relinearization(policy_registry,
+        gtsam::Vector2(params->clk_bias_relin_thresh, params->clk_drift_relin_thresh));
     policy_registry.register_policy('e', 3, gtsam::Vector3::Constant(t));  // ECEF origin (rarely moves)
     policy_registry.register_policy('r', 3, gtsam::Vector3::Constant(t));  // world→ECEF rotation (rarely moves)
     policy_registry.register_policy('l', 2, gtsam::Vector2::Constant(t));  // trunk landmark Point2

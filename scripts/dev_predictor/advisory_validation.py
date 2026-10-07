@@ -37,6 +37,7 @@ SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predict
 SOURCES += ["include/iap/gnss/broadcast_ephemeris.hpp",
             "include/iap/gnss/constellation_clock.hpp", "src/iap/gnss/gnss_handler.cpp",
             "include/iap/gnss/gnss_handler.hpp", "include/iap/gnss/gnss_extension.hpp"]
+SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp"]
 
 
 def git(*args):

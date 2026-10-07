@@ -35,6 +35,19 @@
 
 using namespace iap;
 
+TEST(GnssHandlerEpochBindingTest, ProductionClockPolicyRegistersEveryFactorKey) {
+  glim::RelinearizationPolicyRegistry registry;
+  register_gnss_clock_relinearization(registry, gtsam::Vector2(500, 5));
+  const auto thresholds = registry.build_map();
+  for (const char system : {'G', 'C', 'E', 'R'}) {
+    const auto symbol = gnss_clock_symbol(system);
+    ASSERT_NE(thresholds.find(symbol), thresholds.end()) << "unregistered clock " << system;
+    EXPECT_EQ(thresholds.at(symbol).size(), 2);
+    EXPECT_DOUBLE_EQ(thresholds.at(symbol)[0], 500);
+    EXPECT_DOUBLE_EQ(thresholds.at(symbol)[1], 5);
+  }
+}
+
 TEST(GnssHandlerEpochBindingTest, GpsAndBeiDouUseIndependentBiasAndDrift) {
   GnssHandler handler;
   GnssEpoch epoch;

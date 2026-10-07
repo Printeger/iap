@@ -1098,3 +1098,7 @@ ros2 launch iap iap_sim.launch.py rinex_nav_file:=<绝对历史混合NAV路径> 
 Monitor／FIM活动列、冻结模型与真实标定仍待完成。现场驱动在启动前比较安装产物
 与当前工作区构建的内容，包括非符号链接的`libiap.so`；仅允许CMake删除构建
 RPATH的可解释字节变化，分别登记两份hash，其余不一致先构建并安装。
+
+优化器的按符号重线性化表现在由同一钟差键映射注册 GPS／北斗／GAL／GLO，
+全部沿用原 GPS 偏差／漂移阈值。`test_gnss_clock_injection` 使用生产类型阈值表
+验证实际扩展链；不再用标量默认阈值掩盖缺键。该修复尚不授予联合预测资格。

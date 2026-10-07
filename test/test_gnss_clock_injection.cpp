@@ -39,6 +39,19 @@ struct GnssClockInjectionTestAccess {
 };
 }  // namespace iap
 
+namespace {
+gtsam::ISAM2Params production_clock_params() {
+  glim::RelinearizationPolicyRegistry registry;
+  registry.register_policy('x', 6, gtsam::Vector6::Constant(0.1));
+  for (const char symbol : {'v', 'e', 'r'}) registry.register_policy(symbol, 3, gtsam::Vector3::Constant(0.1));
+  iap::register_gnss_clock_relinearization(registry, gtsam::Vector2(500, 5));
+  registry.validate_or_throw();
+  gtsam::ISAM2Params params;
+  params.setRelinearizeThreshold(registry.build_map());
+  return params;
+}
+}  // namespace
+
 TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
   const auto root = std::filesystem::temp_directory_path() /
       ("iap_clock_injection_" + std::to_string(::getpid()));
@@ -67,7 +80,7 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
           epoch.sats.push_back(satellite);
         }
       }
-      gtsam_points::IncrementalFixedLagSmootherExtWithFallback smoother(5, gtsam::ISAM2Params());
+      gtsam_points::IncrementalFixedLagSmootherExtWithFallback smoother(5, production_clock_params());
       gtsam::NonlinearFactorGraph factors;
       gtsam::Values values;
       std::map<std::uint64_t, double> stamps;
@@ -101,7 +114,7 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
 
   // Drive the production chains across independent drift, GPS disappearance,
   // the original two-second gap guard, and reset; no replay gets a new time.
-  gtsam_points::IncrementalFixedLagSmootherExtWithFallback smoother(20, gtsam::ISAM2Params());
+  gtsam_points::IncrementalFixedLagSmootherExtWithFallback smoother(20, production_clock_params());
   const double times[] = {100.0, 100.1, 100.2, 103.2, 103.3};
   const std::string systems[] = {"GC", "GC", "C", "GC", "GC"};
   for (long frame = 1; frame <= 5; ++frame) {

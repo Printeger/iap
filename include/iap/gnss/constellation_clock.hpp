@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gtsam/inference/Symbol.h>
+#include <iap/util/relinearization_policy.hpp>
 #include <Eigen/Core>
 #include <stdexcept>
 
@@ -23,6 +24,13 @@ inline char gnss_clock_symbol(char constellation) {
 
 inline gtsam::Key gnss_clock_key(char constellation, std::uint64_t frame_id) {
   return gtsam::Symbol(gnss_clock_symbol(constellation), frame_id);
+}
+
+inline void register_gnss_clock_relinearization(
+    glim::RelinearizationPolicyRegistry& registry, const gtsam::Vector2& threshold) {
+  for (const char system : {'G', 'C', 'E', 'R'}) {
+    registry.register_policy(gnss_clock_symbol(system), 2, threshold);
+  }
 }
 
 // Marginalize the actual linearized graph jointly, preserving the cross terms

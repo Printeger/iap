@@ -336,3 +336,12 @@ require their active-clock-column repair and frozen model identity before this
 frontend change can qualify dual-source prediction. The preceding clean
 005ce84 historical diagnostic used the old common clock; its original report
 is `log/20261007T091820Z_056/export/analysis/historical_clock_live/report.md`.
+
+The odometry optimizer registers every receiver-clock symbol through the same
+constellation mapping used by the factor factory. Bias/drift relinearization
+thresholds retain the original GPS configuration for every system; no new
+threshold or prior is introduced. The production injection regression uses
+this type-keyed threshold map. Missing symbols are a contract violation:
+GTSAM's per-type lookup assumes registration. The 131459Z_623 diagnostic
+preceded this repair and remains unqualified even though its processes exited
+normally. This optimizer repair does not qualify Monitor/FIM or Advisory.
