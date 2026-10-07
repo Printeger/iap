@@ -148,3 +148,12 @@ float64[16] advisory_t_world_imu
 float64[16] advisory_t_lidar_imu
 float64[3] advisory_lever_arm_imu
 string advisory_coordinates_failure_reason
+
+# Frozen epoch used by this monitor, including rejected-source observations.
+# Availability is not GNSS admission or motion authorization.
+bool advisory_has_gnss_epoch
+float64 advisory_gnss_stamp
+float64 advisory_gnss_gps_sec
+uint64 advisory_gnss_source_identity
+float64[] advisory_gnss_iono_params
+iap/AdvisoryGnssObservation[] advisory_gnss_observations

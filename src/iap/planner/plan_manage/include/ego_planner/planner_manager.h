@@ -182,7 +182,6 @@ namespace ego_planner
     // Input callbacks and planning run on the original serial executor.
     void initRiskInputs(const rclcpp::Node::SharedPtr& node);
     uint64_t beginRiskQuery();
-    void rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg);
     rclcpp::Node::SharedPtr node_;
     iap::PredictorParams predictor_params_;
     double risk_validity_s_ = 0.5;
@@ -248,22 +247,10 @@ namespace ego_planner
     rclcpp::CallbackGroup::SharedPtr integrity_callback_group_;
     nav_msgs::msg::Odometry::ConstSharedPtr risk_odom_;
     bool risk_frame_valid_ = false;
-    bool origin_set_ = false;
-    Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
-    std::vector<double> iono_params_;
-    std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache_;
-    std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache_;
-    std::deque<iap::GnssEpoch> epochs_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr risk_odom_sub_;
     rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr integrity_sub_;
-    rclcpp::Subscription<gnss_comm::msg::GnssMeasMsg>::SharedPtr range_sub_;
-    rclcpp::Subscription<gnss_comm::msg::GnssEphemMsg>::SharedPtr ephem_sub_;
-    rclcpp::Subscription<gnss_comm::msg::GnssGloEphemMsg>::SharedPtr glo_ephem_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr receiver_lla_sub_;
-    rclcpp::Subscription<gnss_comm::msg::GnssIonosphereParameter>::SharedPtr iono_sub_;
     std::ofstream planning_metrics_, export_metrics_;
     uint64_t planning_calls_at_start_=0;
-    mutable std::mutex epochs_mutex_;
     rclcpp::CallbackGroup::SharedPtr export_callback_group_;
     rclcpp::Service<iap::srv::GetGridMapPredictionInput>::SharedPtr prediction_export_service_;
     std::shared_ptr<std::atomic<uint64_t>> predictor_calls_ = std::make_shared<std::atomic<uint64_t>>(0);

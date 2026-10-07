@@ -1,3 +1,4 @@
+#include <iap/gnss/gnss_epoch_wire.hpp>
 // IAP-RQ-200/210/220/240: Integrity extension module — ROS2 plugin that
 // wires IntegrityMonitor, FGOInformationManager, and ARAIM into GLIM.
 //
@@ -550,6 +551,7 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   msg.tdop              = report.tdop;
 
   fill_integrity_report_msg(report, msg);
+  write_advisory_epoch(epoch_ptr, msg);
 
   auto coordinates=IapSharedState::instance().get_gnss_coordinates();
   coordinates.T_map_world=advisory_T_map_world_;

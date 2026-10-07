@@ -2,6 +2,16 @@
 
 状态：**工具与合成机制对照已实施；真实森林扫描和误差校准 INCONCLUSIVE，现场阻止**。日期：2026-10-06。
 
+续轮（2026-10-07）：四处原有修改已授权审阅、独立提交 `534cd4a`，现场阻塞已解除。
+坐标 v5 实现 `88b3c8b` 后完成一次 canonical 实测；该轮未到分叉／终点，
+GNSS epoch 重建未关联，参考—位姿约 0.2 s 不满足 0.05 s 校准门限。
+本轮将监测实际使用的完整优化后 epoch 与坐标记录一起传递，删除 planner
+独立重建；保留 GNSS 拒绝和全部执行规则。原始证据：
+[23 份录制及一次超时](../../log/20261007T033528Z_495/export/advisory/validation/recordings/survey_requests.csv)、
+[起点附近扫描](../../log/20261007T033528Z_495/export/advisory/validation/real_start/points.csv)、
+[当次物理搜索重放](../../log/20261007T033528Z_495/export/analysis/failure_map_timeout.json)。
+真实双源互补、同参考时刻米数校准、完整任务与默认推广仍待证据。
+
 当前实现依据：`d05d792fac3d831a2dd474bc7ca650500499fe32`。
 现有运行依据：`20261006T114500Z_605`，场景 `icra_dense_forest_four_fork_v2`。
 现有运行保留了无关 RViz 修改，因此这里只引用诊断观察，不作为干净版本的现场验收。

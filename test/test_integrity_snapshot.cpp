@@ -8,6 +8,8 @@
 #include <vector>
 
 #include <iap/planner/integrity_snapshot.hpp>
+#include <iap/gnss/gnss_epoch_wire.hpp>
+#include <iap/msg/integrity_report.hpp>
 
 namespace {
 
@@ -45,6 +47,33 @@ iap::GnssEpoch make_epoch() {
 }
 
 }  // namespace
+
+TEST(IntegritySnapshotBuilderTest, RejectedGnssTransportPreservesOptimizedObservations) {
+  auto epoch=make_epoch(); epoch.source_identity=123;
+  epoch.sats[0].pr_residual=2.75; epoch.sats[0].excluded=true;
+  epoch.sats[0].sat_pos=Eigen::Vector3d(2e7,3e7,4e7);
+  epoch.sats[1].pr_residual=std::numeric_limits<double>::quiet_NaN();
+  epoch.sats[0].pr_sigma=7.5; epoch.sats[0].nis_pr=1.25;
+  epoch.sats[0].sat_vel=Eigen::Vector3d(1,2,3);
+  epoch.iono_params={1,2,3,4,5,6,7,8};
+  iap::msg::IntegrityReport msg; msg.gnss_valid=false;
+  iap::write_advisory_epoch(&epoch,msg);
+  const auto decoded=iap::read_advisory_epoch(msg);
+  ASSERT_TRUE(decoded); EXPECT_FALSE(msg.gnss_valid);
+  EXPECT_EQ(decoded->source_identity,123u);
+  EXPECT_EQ(decoded->sats.size(),epoch.sats.size());
+  EXPECT_EQ(decoded->iono_params,epoch.iono_params);
+  EXPECT_DOUBLE_EQ(decoded->sats[0].pr_residual,2.75);
+  EXPECT_TRUE(decoded->sats[0].excluded);
+  EXPECT_TRUE(decoded->sats[0].sat_pos.isApprox(epoch.sats[0].sat_pos));
+  EXPECT_TRUE(std::isnan(decoded->sats[1].pr_residual));
+  EXPECT_DOUBLE_EQ(decoded->sats[0].pr_sigma,7.5);
+  EXPECT_DOUBLE_EQ(decoded->sats[0].nis_pr,1.25);
+  EXPECT_TRUE(decoded->sats[0].sat_vel.isApprox(epoch.sats[0].sat_vel));
+  iap::write_advisory_epoch(nullptr,msg);
+  EXPECT_FALSE(iap::read_advisory_epoch(msg));
+  EXPECT_TRUE(msg.advisory_gnss_observations.empty());
+}
 
 TEST(IntegritySnapshotBuilderTest, FullInputProducesValidSnapshot) {
   iap::IntegritySnapshotBuilder builder;

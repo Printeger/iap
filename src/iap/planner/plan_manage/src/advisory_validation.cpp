@@ -144,7 +144,12 @@ void describe(const Input& in,const std::filesystem::path& path) {
     o<<"{\"id\":"<<sat.sat_id<<",\"ecef\":";array(o,sat.sat_pos);
     o<<",\"azimuth\":";number(o,sat.azimuth);o<<",\"elevation\":";number(o,sat.elevation);
     o<<",\"nominal_sigma_m\":";number(o,sat.pr_sigma);
-    o<<",\"measurement_residual_available\":false";
+    const bool residual_available=std::isfinite(sat.pr_residual) && s.require_coordinates &&
+        s.coordinates.valid && s.has_epoch &&
+        s.coordinates.epoch_source_identity==s.gnss_epoch.source_identity;
+    o<<",\"measurement_residual_available\":"<<(residual_available?"true":"false");
+    o<<",\"pr_residual_m\":";number(o,sat.pr_residual);
+    o<<",\"pseudorange_m\":";number(o,sat.pr_meas);
     o<<",\"excluded\":"<<(sat.excluded?"true":"false")<<"}";
   }o<<']';
   o << ",\"excluded_prns\": [";

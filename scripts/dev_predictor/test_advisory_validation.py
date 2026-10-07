@@ -110,6 +110,11 @@ class AdvisoryValidationTest(unittest.TestCase):
                                         {"generation": 1, "geometry_id": "fixture"})
         sidecar = payload.with_name("record.json")
         validation.validate_record(payload, sidecar)
+        with patch.object(validation, "source_identity", return_value={**identity, "revision":"documentation-only-head"}):
+            validation.validate_record(payload, sidecar)
+        with patch.object(validation, "source_identity", return_value={**identity, "source_sha256":{}}):
+            with self.assertRaisesRegex(ValueError, "cross-version"):
+                validation.validate_record(payload, sidecar)
         with self.assertRaises(FileExistsError):
             validation.save_record(self.run_dir, "transport_test", source.read_bytes(), identity, {})
         with payload.open("ab") as stream: stream.write(b"corrupted")

@@ -906,3 +906,8 @@ ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 \
 使用 `advisory_validation.py record` 保存完整输入，`replay` 查询原时刻；
 `advisory_coordinate_evidence.py --input <重放的input.json> --record <原始record.json> --label <名称>`
 核验实际转换，输出位于该 run 的 `export/analysis/advisory_validation/coordinates/`。
+
+监测消息同时运输实际参与该次监测的完整 GNSS epoch 和后验测距残差；planner
+不再独立重建测距／星历缓存。被监测器拒绝的 GNSS 观测仍保留作诊断，不能
+因此参与融合。参考—位姿差超过 0.05 s 的输入可以重放空间诊断，但不能用于
+本轮同参考时刻误差校准；录制／重放不会修改其时间戳。

@@ -358,6 +358,7 @@ if(DEFINED ENV{ROS_VERSION})
     find_package(geometry_msgs REQUIRED)
     rosidl_generate_interfaces(${PROJECT_NAME}_msgs
       "msg/IntegrityReport.msg"
+      "msg/AdvisoryGnssObservation.msg"
       "msg/DynamicALResult.msg"
       "msg/TrunkLandmark.msg"
       "msg/MDPState.msg"
@@ -631,6 +632,9 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_predicted_araim iap iap_prediction_integrity)
       ament_add_gtest(test_integrity_snapshot test/test_integrity_snapshot.cpp)
       target_link_libraries(test_integrity_snapshot iap iap_prediction_integrity)
+      if(DEFINED iap_msgs_cpp_ts)
+        target_link_libraries(test_integrity_snapshot "${iap_msgs_cpp_ts}")
+      endif()
       ament_add_gtest(test_lidar_observability_fim test/test_lidar_observability_fim.cpp)
       target_link_libraries(test_lidar_observability_fim iap)
       ament_add_gtest(test_pl_grid test/test_pl_grid.cpp)

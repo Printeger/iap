@@ -22,8 +22,10 @@ def audit(meta):
     if c.get('reason') or c['map_frame']!=meta['frame_id'] or c['body_frame']!='imu':
         raise ValueError('coordinate_frame_or_body_mismatch')
     if (abs(c['stamp']-meta['current_stamp'])>1e-6 or abs(c['stamp']-meta['pose_stamp'])>1e-6 or
-        c['frame_id']!=meta['estimation_frame_id'] or c['epoch_source_identity']!=meta['epoch_source_identity']):
+        c['frame_id']!=meta['estimation_frame_id']):
         raise ValueError('coordinate_estimator_time_mismatch')
+    if not meta['has_epoch']:raise ValueError('gnss_epoch_missing_from_frozen_input')
+    if c['epoch_source_identity']!=meta['epoch_source_identity']:raise ValueError('coordinate_epoch_identity_mismatch')
     algebra=float(np.linalg.norm(R_mn-T_mw[:3,:3]@R_ew.T@R_en))
     if algebra>1e-9:raise ValueError('direction_rotation_mismatch')
     lever=np.asarray(c['lever_arm_imu'])
@@ -43,6 +45,7 @@ def audit(meta):
     return {'valid':True,'rotation_algebra_error':algebra,'max_direction_error':max(errors),
             'directions_checked':len(errors),'coordinate_frame_id':c['frame_id'],
             'reference_pose_delta_s':meta['reference_time_s']-meta['pose_stamp'],
+            'calibration_time_qualified':abs(meta['reference_time_s']-meta['pose_stamp'])<=.05,
             'gnss_pose_delta_s':meta['pose_stamp']-meta['gnss_stamp'],
             'gpst_utc_delta_s':meta['gps_sec']-meta['gnss_stamp'],
             'map_up_enu_angle_deg':math.degrees(math.acos(float(np.clip(R_mn[2,2],-1,1)))),

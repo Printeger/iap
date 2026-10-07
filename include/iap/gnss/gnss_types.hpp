@@ -108,8 +108,8 @@ inline std::uint64_t gnss_measurement_source_identity(
 /// Stable identity for the common measurement epoch consumed by both
 /// Integrity and the planning Predictor. Consumer-derived fields (residuals,
 /// NIS, canopy kappa, and FDE exclusions) are deliberately excluded here:
-/// Integrity receives those after smoother optimization while P0 reconstructs
-/// the same source epoch directly from the range message. Certification-time
+/// Integrity and Advisory share the post-optimization epoch transported with
+/// the monitor result. Certification-time
 /// exclusions are bound by the overload below.
 inline std::uint64_t gnss_epoch_identity(const GnssEpoch& epoch) {
   if (epoch.source_identity != 0) {

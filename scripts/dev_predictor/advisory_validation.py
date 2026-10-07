@@ -29,7 +29,7 @@ SOURCES += ["src/iap/gnss/visibility_predictor.cpp", "include/iap/gnss/visibilit
             "src/iap/planner/plan_env/include/plan_env/grid_map.h",
             "src/iap/planner/plan_env/src/local_evidence_snapshot.cpp",
             "src/iap/planner/plan_env/include/plan_env/local_evidence_snapshot.h"]
-SOURCES += ["include/iap/gnss/gnss_types.hpp", "include/iap/planner/integrity_snapshot.hpp",
+SOURCES += ["include/iap/gnss/gnss_types.hpp", "include/iap/gnss/gnss_epoch_wire.hpp", "msg/AdvisoryGnssObservation.msg", "include/iap/planner/integrity_snapshot.hpp",
             "include/iap/util/shared_state.hpp", "msg/IntegrityReport.msg",
             "src/iap/gnss/gnss_extension.cpp", "src/iap/integrity/integrity_extension.cpp"]
 SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predictor/compare_advisory_error.py",
@@ -103,7 +103,14 @@ def validate_record(payload, sidecar):
     if info["payload_sha256"] != sha(payload):
         raise ValueError("payload checksum mismatch")
     current = source_identity()
-    if info["revision"] != current["revision"] or info["source_sha256"] != current["source_sha256"]:
+    # Documentation/report commits may advance HEAD without changing the model.
+    # The recording retains its clean revision; source and producer hashes bind
+    # replay behavior. A different production source is still rejected.
+    try:
+        git("cat-file", "-e", info["revision"] + "^{commit}")
+    except subprocess.CalledProcessError as error:
+        raise ValueError("cross-version input replay rejected") from error
+    if info["source_sha256"] != current["source_sha256"]:
         raise ValueError("cross-version input replay rejected")
     if info.get("dirty"):
         raise ValueError("recording is not bound to a clean live revision")

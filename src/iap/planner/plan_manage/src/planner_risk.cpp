@@ -1,7 +1,5 @@
 #include <ego_planner/planner_manager.h>
-#include <gnss_comm/gnss_constant.hpp>
-#include <gnss_comm/gnss_ros.hpp>
-#include <gnss_comm/gnss_utility.hpp>
+#include <iap/gnss/gnss_epoch_wire.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <algorithm>
 #include <chrono>
@@ -13,7 +11,6 @@
 
 namespace ego_planner {
 namespace {
-constexpr double kLightSpeed = 2.99792458e8;
 double stampToSec(const builtin_interfaces::msg::Time& t) { return t.sec + t.nanosec * 1e-9; }
 iap::CurrentIntegrityState currentFromMsg(
     const iap::msg::IntegrityReport& msg) {
@@ -162,141 +159,6 @@ void EGOPlannerManager::initRiskInputs(const rclcpp::Node::SharedPtr& node) {
       [this](iap::msg::IntegrityReport::ConstSharedPtr msg) {
         std::atomic_store(&pending_integrity_, msg);
       }, integrity_options);
-  range_sub_ = node->create_subscription<gnss_comm::msg::GnssMeasMsg>("risk/range", qos,
-      [this](gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg) { rangeCallback(msg); });
-  ephem_sub_ = node->create_subscription<gnss_comm::msg::GnssEphemMsg>("risk/ephem", qos,
-      [this](gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg) {
-        auto ephem = gnss_comm::msg2ephem(msg);
-        if (ephem) ephem_cache_[ephem->sat] = ephem;
-      });
-  glo_ephem_sub_ = node->create_subscription<gnss_comm::msg::GnssGloEphemMsg>("risk/glo_ephem", qos,
-      [this](gnss_comm::msg::GnssGloEphemMsg::ConstSharedPtr msg) {
-        auto ephem = gnss_comm::msg2glo_ephem(msg);
-        if (ephem) glo_ephem_cache_[ephem->sat] = ephem;
-      });
-  receiver_lla_sub_ = node->create_subscription<sensor_msgs::msg::NavSatFix>("risk/receiver_lla", qos,
-      [this](sensor_msgs::msg::NavSatFix::ConstSharedPtr msg) {
-        if (!origin_set_ && std::isfinite(msg->latitude) && std::isfinite(msg->longitude) &&
-            std::isfinite(msg->altitude) && std::abs(msg->latitude) <= 90 && std::abs(msg->longitude) <= 180) {
-          origin_ecef_ = gnss_comm::geo2ecef(Eigen::Vector3d(msg->latitude, msg->longitude, msg->altitude));
-          origin_set_ = true;
-        }
-      });
-  iono_sub_ = node->create_subscription<gnss_comm::msg::GnssIonosphereParameter>("risk/iono", qos,
-      [this](gnss_comm::msg::GnssIonosphereParameter::ConstSharedPtr msg) {
-        if (msg->type == 0 && msg->parameters.size() >= 8)
-          iono_params_.assign(msg->parameters.begin(), msg->parameters.begin() + 8);
-      });
-}
-
-void EGOPlannerManager::rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg) {
-  grid_map_->invalidateRiskContext();
-  if (!origin_set_) { std::lock_guard<std::mutex> lock(epochs_mutex_); epochs_.clear(); return; }
-  const auto obs_list = gnss_comm::msg2meas(msg);
-  if (obs_list.empty() || !obs_list.front()) { std::lock_guard<std::mutex> lock(epochs_mutex_); epochs_.clear(); return; }
-  const auto origin_ecef = origin_ecef_;
-  const auto& ephem_cache = ephem_cache_;
-  const auto& glo_ephem_cache = glo_ephem_cache_;
-  iap::GnssEpoch epoch;
-  const auto utc = gnss_comm::gpst2utc(obs_list.front()->time);
-  epoch.stamp = static_cast<double>(utc.time) + utc.sec;
-  epoch.gps_sec = static_cast<double>(obs_list.front()->time.time) + obs_list.front()->time.sec;
-  epoch.iono_params = iono_params_;
-  epoch.source_identity = iap::gnss_measurement_source_identity(*msg);
-    for (const auto& obs : obs_list) {
-      if (!obs) {
-        continue;
-      }
-      int l1_idx = -1;
-      const double freq = gnss_comm::L1_freq(obs, &l1_idx);
-      if (l1_idx < 0 || freq < 0.0 ||
-          static_cast<int>(obs->psr.size()) <= l1_idx) {
-        continue;
-      }
-      const double pr = obs->psr[l1_idx];
-      if (pr <= 0.0 || !std::isfinite(pr)) {
-        continue;
-      }
-
-      const uint32_t sat_id = obs->sat;
-      const uint32_t sys = gnss_comm::satsys(sat_id, nullptr);
-      Eigen::Vector3d sat_ecef_pos = Eigen::Vector3d::Zero();
-      Eigen::Vector3d sat_ecef_vel = Eigen::Vector3d::Zero();
-      double svdt = 0.0;
-      double svddt = 0.0;
-      double tgd = 0.0;
-      const auto t_tx = gnss_comm::time_add(obs->time, -pr / kLightSpeed);
-
-      if (sys == SYS_GLO) {
-        const auto it = glo_ephem_cache.find(sat_id);
-        if (it == glo_ephem_cache.end()) {
-          continue;
-        }
-        sat_ecef_pos = gnss_comm::geph2pos(t_tx, it->second, &svdt);
-        sat_ecef_vel = gnss_comm::geph2vel(t_tx, it->second, &svddt);
-      } else {
-        const auto it = ephem_cache.find(sat_id);
-        if (it == ephem_cache.end()) {
-          continue;
-        }
-        sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
-        sat_ecef_vel = gnss_comm::eph2vel(t_tx, it->second, &svddt);
-        tgd = it->second->tgd[0];
-      }
-      if (!sat_ecef_pos.allFinite() || !sat_ecef_vel.allFinite()) {
-        continue;
-      }
-
-      double azel[2] = {0.0, M_PI / 2.0};
-      gnss_comm::sat_azel(origin_ecef, sat_ecef_pos, azel);
-      if (azel[1] < 10.0 * M_PI / 180.0) {
-        continue;
-      }
-
-      double dop_meas = 0.0;
-      double dop_sigma = 0.5;
-      if (static_cast<int>(obs->dopp.size()) > l1_idx && freq > 0.0) {
-        const double doppler_hz = obs->dopp[l1_idx];
-        if (std::isfinite(doppler_hz)) {
-          dop_meas = -doppler_hz * (kLightSpeed / freq);
-        }
-      }
-      if (static_cast<int>(obs->dopp_std.size()) > l1_idx && freq > 0.0) {
-        const double converted_sigma =
-            obs->dopp_std[l1_idx] * (kLightSpeed / freq);
-        if (converted_sigma > 0.01) {
-          dop_sigma = converted_sigma;
-        }
-      }
-
-      iap::SatObs sat;
-      sat.sat_id = static_cast<int>(sat_id);
-      sat.constellation = (sys == SYS_GLO) ? 'R'
-                          : (sys == SYS_GAL) ? 'E'
-                          : (sys == SYS_BDS) ? 'C'
-                                             : 'G';
-      sat.pr_meas = pr + svdt * kLightSpeed;
-      sat.dop_meas = dop_meas + svddt * kLightSpeed;
-      sat.pr_sigma =
-          static_cast<int>(obs->psr_std.size()) > l1_idx &&
-                  obs->psr_std[l1_idx] > 0.05
-              ? obs->psr_std[l1_idx]
-              : 5.0;
-      sat.dop_sigma = dop_sigma;
-      sat.sat_pos = sat_ecef_pos;
-      sat.sat_vel = sat_ecef_vel;
-      sat.elevation = azel[1];
-      sat.azimuth = azel[0];
-      sat.tgd = tgd;
-      sat.svddt = svddt;
-      epoch.sats.push_back(sat);
-    }
-  std::lock_guard<std::mutex> lock(epochs_mutex_);
-  if (!epochs_.empty() && epoch.stamp < epochs_.back().stamp) epochs_.clear();
-  epochs_.push_back(std::move(epoch));
-  while (epochs_.size() > 64 || (!epochs_.empty() &&
-         epochs_.back().stamp - epochs_.front().stamp > predictor_params_.freshness.max_gnss_age_s))
-    epochs_.pop_front();
 }
 
 iap::IntegritySnapshot EGOPlannerManager::capturePredictionSnapshot(const double now) const {
@@ -320,14 +182,8 @@ iap::IntegritySnapshot EGOPlannerManager::capturePredictionSnapshot(const double
   input.has_pose = input.p_wb.allFinite() && input.q_wb.coeffs().allFinite() &&
                    input.q_wb.norm() > 1e-6;
   if (input.has_pose) input.q_wb.normalize();
-  std::optional<iap::GnssEpoch> epoch;
-  {
-  std::lock_guard<std::mutex> lock(epochs_mutex_);
-  for (auto it = epochs_.rbegin(); it != epochs_.rend(); ++it) {
-    if (it->stamp <= now && iap::gnss_epoch_identity(*it, current.excluded_prns) ==
-        current.gnss_epoch_identity) { epoch = *it; break; }
-  }
-  }
+  // The optimized monitor owns the source epoch; no independent reconstruction.
+  auto epoch = pending ? iap::read_advisory_epoch(*pending) : std::nullopt;
   if (epoch) {
     const std::unordered_set<int> excluded(current.excluded_prns.begin(),
                                            current.excluded_prns.end());
