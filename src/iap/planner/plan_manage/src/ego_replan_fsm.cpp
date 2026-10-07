@@ -770,6 +770,14 @@ namespace ego_planner
     }
 
     if (!assessment.executable()) {
+      if(planner_manager_->hasPendingTrajectory()) {
+        // Withdraw at the revocation seam, before evidence export or checked
+        // brake construction. The server retains the active predecessor.
+        traj_utils::msg::Bspline withdrawal;
+        withdrawal.start_mode=traj_utils::msg::Bspline::CANCEL_PENDING;
+        withdrawal.traj_id=planner_manager_->publicationTrajectory().traj_id_;
+        bspline_pub_->publish(withdrawal);
+      }
       capture_remaining(assessment.execution_reason ==
           GridExecutionReason::TRACKING_ERROR ? "tracking_error" :
           "remaining_failure", assessment.execution_reason);
@@ -778,8 +786,8 @@ namespace ego_planner
                            "Remaining trajectory %s, lead=%.2fs",
                            gridExecutionReasonName(assessment.execution_reason), lead);
       if(planner_manager_->hasPendingTrajectory()) {
-        // Only an immediate checked recovery also cancels the server queue.
-        // Keeping a revoked continuation until its scheduled time is unsafe.
+        // Withdrawal grants no recovery curve. The existing checked braking
+        // path still supervises and replaces the active predecessor.
         flag_escape_emergency_=true;
         changeFSMExecState(EMERGENCY_STOP, "pending execution conditions revoked");
       } else if (lead > emergency_time_) {

@@ -111,7 +111,9 @@ class FullStackFeedback(unittest.TestCase):
                     PoseStamped, '/move_base_simple/goal', 10)
                 curves, commands = [], []
                 node.create_subscription(
-                    Bspline, '/drone_0_planning/bspline', curves.append, 10)
+                    Bspline, '/drone_0_planning/bspline',
+                    lambda c: curves.append(c)
+                    if c.start_mode != Bspline.CANCEL_PENDING else None, 10)
                 node.create_subscription(
                     PositionCommand, '/drone_0_planning/pos_cmd',
                     commands.append, 100)

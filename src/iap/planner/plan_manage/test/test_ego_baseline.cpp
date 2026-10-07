@@ -7,6 +7,7 @@
 #include <iap/util/run_log_manager.hpp>
 #include <filesystem>
 #include <future>
+#include <thread>
 #include <fstream>
 #include <unistd.h>
 #include <zlib.h>
@@ -90,6 +91,10 @@ struct EGOReplanFSMTestAccess {
     fsm.end_pt_ = goal;
   }
   static bool rejectsPendingReplan(EGOReplanFSM& fsm) { return !fsm.planFromCurrentTraj(); }
+  static void setPublisher(EGOReplanFSM& fsm,
+      rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr publisher) {
+    fsm.bspline_pub_=std::move(publisher);
+  }
   static bool supervise(EGOReplanFSM& fsm, double stamp) {
     fsm.applied_odom_stamp_s_=stamp;
     fsm.exec_state_=EGOReplanFSM::EXEC_TRAJ;
@@ -1072,12 +1077,28 @@ TEST(EgoBaseline, ScheduledCandidateKeepsPredecessorUntilMatchingCommand) {
   EXPECT_TRUE(manager.hasPendingTrajectory());
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,measured_position,end);
+  std::vector<traj_utils::msg::Bspline> withdrawals;
+  auto subscription=node->create_subscription<traj_utils::msg::Bspline>(
+      "pending_withdrawal_test",10,[&](traj_utils::msg::Bspline::ConstSharedPtr msg){withdrawals.push_back(*msg);});
+  auto publisher=node->create_publisher<traj_utils::msg::Bspline>("pending_withdrawal_test",10);
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::rejectsPendingReplan(fsm));
   GridMapTestAccess::changeEvidence(*manager.grid_map_,end,true,true,true);
   const auto supervision=manager.assessRemainingTrajectory(node->now().seconds());
   EXPECT_FALSE(supervision.executable());
   EXPECT_EQ(supervision.trajectory_id,pending.traj_id_);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,measured));
+  for(int i=0;i<100 && withdrawals.empty();++i) {
+    rclcpp::spin_some(node);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_EQ(withdrawals.size(),1u);
+  EXPECT_EQ(withdrawals.front().start_mode,traj_utils::msg::Bspline::CANCEL_PENDING);
+  EXPECT_EQ(withdrawals.front().traj_id,pending.traj_id_);
+  EXPECT_TRUE(withdrawals.front().pos_pts.empty());
+  EXPECT_TRUE(withdrawals.front().knots.empty());
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  EXPECT_TRUE(manager.hasPendingTrajectory()); // local evidence until command feedback/recovery
   manager.observeExecutingTrajectory(pending.traj_id_);
   EXPECT_FALSE(manager.hasPendingTrajectory());
   EXPECT_EQ(manager.local_data_.traj_id_,pending.traj_id_);

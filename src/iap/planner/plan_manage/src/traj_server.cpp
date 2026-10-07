@@ -28,13 +28,16 @@ bool receive_traj_ = false;
 vector<UniformBspline> traj_;
 double traj_duration_;
 rclcpp::Time start_time_;
-int traj_id_;
+int64_t traj_id_;
+// Accepted identities stay consumed after withdrawal. This bounded scalar
+// prevents a delayed duplicate from restoring a revoked authorization.
+int64_t highest_accepted_trajectory_id = -1;
 
 struct ScheduledTrajectory {
   vector<UniformBspline> curves;
   rclcpp::Time start;
   double duration;
-  int id;
+  int64_t id;
 };
 std::optional<ScheduledTrajectory> pending_traj;
 void activateTrajectory(const ScheduledTrajectory& candidate) {
@@ -53,12 +56,30 @@ void publishExecutedCurve();
 void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
 {
   const auto now=server_node->now();
+  if(msg->start_mode==traj_utils::msg::Bspline::CANCEL_PENDING) {
+    if(!msg->pos_pts.empty() || !msg->knots.empty() || !msg->yaw_pts.empty()) {
+      RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
+          "Pending withdrawal rejected: curve payload present"); return;
+    }
+    if(pending_traj && pending_traj->id==msg->traj_id) {
+      RCLCPP_INFO(server_node->get_logger(),"Pending trajectory %ld withdrawn; active trajectory %ld continues",msg->traj_id,traj_id_);
+      pending_traj.reset();
+    } else {
+      RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
+          "Pending withdrawal ignored: trajectory %ld is not queued",msg->traj_id);
+    }
+    return;
+  }
   if(msg->start_mode!=traj_utils::msg::Bspline::IMMEDIATE && msg->start_mode!=traj_utils::msg::Bspline::AT_TIME) {
     RCLCPP_WARN(server_node->get_logger(),"Trajectory rejected: invalid start mode"); return;
   }
   const rclcpp::Time requested(msg->start_time,now.get_clock_type());
+  if(msg->traj_id<=highest_accepted_trajectory_id) {
+    RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
+        "Trajectory %ld rejected: identity already accepted",msg->traj_id); return;
+  }
   if(msg->start_mode==traj_utils::msg::Bspline::AT_TIME &&
-      (!receive_traj_ || requested<=now || pending_traj || msg->traj_id<=traj_id_)) {
+      (!receive_traj_ || requested<=now || pending_traj)) {
     RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: late, duplicate, or missing predecessor"); return;
   }
   if(msg->order!=3 || msg->pos_pts.size()<4 || msg->knots.size()!=msg->pos_pts.size()+4) {
@@ -119,11 +140,13 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
         RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: boundary derivative %zu",derivative); return;
       }
     }
+    highest_accepted_trajectory_id=candidate.id;
     pending_traj=std::move(candidate);
-    RCLCPP_INFO(server_node->get_logger(),"Trajectory %d scheduled for %.6f",pending_traj->id,pending_traj->start.seconds());
+    RCLCPP_INFO(server_node->get_logger(),"Trajectory %ld scheduled for %.6f",pending_traj->id,pending_traj->start.seconds());
     return;
   }
   pending_traj.reset();
+  highest_accepted_trajectory_id=candidate.id;
   activateTrajectory(candidate);
 
   publishExecutedCurve();
@@ -261,7 +284,7 @@ void cmdCallback()
   if(pending_traj && clock_now>=pending_traj->start) {
     activateTrajectory(*pending_traj); pending_traj.reset();
     publishExecutedCurve();
-    RCLCPP_INFO(server_node->get_logger(),"Trajectory %d activated",traj_id_);
+    RCLCPP_INFO(server_node->get_logger(),"Trajectory %ld activated",traj_id_);
   }
   /* no publishing before receive traj_ */
   if (!receive_traj_)

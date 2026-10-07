@@ -5,6 +5,8 @@ int64 traj_id
 builtin_interfaces/Time start_time
 uint8 IMMEDIATE=0
 uint8 AT_TIME=1
+# Withdraw only the matching server queue; no curve or new authorization.
+uint8 CANCEL_PENDING=2
 uint8 start_mode
 
 float64[] knots

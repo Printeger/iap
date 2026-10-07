@@ -165,7 +165,8 @@ class EgoPipelineTest(unittest.TestCase):
             curves, commands, displayed_curves, risk_clouds, risk_statuses = {}, [], [], [], []
             risk_surfaces, risk_legends, glio_paths = [], [], []
             subscriptions = [
-                node.create_subscription(Bspline, "/planning/bspline", lambda m: curves.__setitem__(m.traj_id,m), 10),
+                node.create_subscription(Bspline, "/planning/bspline", lambda m: curves.__setitem__(m.traj_id,m)
+                                         if m.start_mode != Bspline.CANCEL_PENDING else None, 10),
                 node.create_subscription(PositionCommand, "/position_cmd", commands.append, 100),
                 node.create_subscription(Marker, "/planning/trajectory_curve", displayed_curves.append, 10),
                 node.create_subscription(PointCloud2, "/grid_map/risk_slice", risk_clouds.append, 10),

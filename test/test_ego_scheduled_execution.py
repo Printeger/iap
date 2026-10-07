@@ -111,13 +111,65 @@ class ScheduledExecution(unittest.TestCase):
                     publisher.publish(message(
                         4, future, future - start, scheduled=True))
                     spin(.05)
+                    # Authorization can be withdrawn before a checked brake
+                    # is constructed. Empty withdrawal is not a replacement
+                    # curve and must keep the active predecessor commanding.
+                    withdrawal = Bspline()
+                    withdrawal.start_mode = Bspline.CANCEL_PENDING
+                    withdrawal.traj_id = 99
+                    publisher.publish(withdrawal)
+                    spin(.03)
+                    withdrawal.traj_id = 4
+                    publisher.publish(withdrawal)
+                    spin(.5)
+                    self.assertFalse(
+                        any(c.trajectory_id == 4 for c in commands),
+                        'withdrawn pending trajectory activated before brake')
+                    self.assertEqual(commands[-1].trajectory_id, 2)
+                    for command in commands[-10:]:
+                        self.assertAlmostEqual(
+                            command.position.x, stamp(command) - start,
+                            delta=2e-5)
+                        self.assertAlmostEqual(command.velocity.x, 1.)
+                        self.assertAlmostEqual(command.acceleration.x, 0.)
+                    # A delayed copy of the withdrawn curve cannot resurrect
+                    # the consumed identity, even with a new future time.
+                    future = node.get_clock().now().nanoseconds * 1e-9 + .4
+                    publisher.publish(message(
+                        4, future, future - start, scheduled=True))
+                    spin(.5)
+                    self.assertFalse(any(c.trajectory_id == 4 for c in commands))
+                    self.assertEqual(commands[-1].trajectory_id, 2)
+                    # Unknown withdrawal did not consume 99 or cancel the
+                    # legitimate queue; a new identity can still be queued.
+                    future = node.get_clock().now().nanoseconds * 1e-9 + .4
+                    publisher.publish(message(
+                        5, future, future - start, scheduled=True))
+                    spin(.05)
+                    malformed = message(5, future, future - start)
+                    malformed.start_mode = Bspline.CANCEL_PENDING
+                    publisher.publish(malformed)
+                    withdrawal.traj_id = 4
+                    publisher.publish(withdrawal)
+                    spin(.45)
+                    self.assertEqual(commands[-1].trajectory_id, 5)
+                    withdrawal.traj_id = 5  # already active: no effect
+                    publisher.publish(withdrawal)
+                    spin(.03)
+                    self.assertEqual(commands[-1].trajectory_id, 5)
+                    self.assertAlmostEqual(commands[-1].velocity.x, 1.)
+                    # Immediate checked replacement still cancels a queue.
+                    future = node.get_clock().now().nanoseconds * 1e-9 + .4
+                    publisher.publish(message(
+                        6, future, future - start, scheduled=True))
+                    spin(.05)
                     now = node.get_clock().now().nanoseconds * 1e-9
                     publisher.publish(message(
-                        5, now, commands[-1].position.x, moving=False))
+                        7, now, commands[-1].position.x, moving=False))
                     spin(.55)
-                    self.assertEqual(commands[-1].trajectory_id, 5)
+                    self.assertEqual(commands[-1].trajectory_id, 7)
                     self.assertFalse(
-                        any(c.trajectory_id == 4 for c in commands))
+                        any(c.trajectory_id == 6 for c in commands))
                     self.assertAlmostEqual(
                         commands[-1].velocity.x, 0., delta=1e-6)
                 finally:

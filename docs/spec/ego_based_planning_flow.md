@@ -184,7 +184,7 @@ canonical配置登记实际metadata/config根，保留runtime配置及文件hash
 
 首次规划绑定 GLIO 位置/速度，当前里程计没有加速度输入，初始化加速度为零。运动中绑定执行 ID、ROS 未来时刻及旧曲线在该时刻的 p/v/a；默认提前 1.6 s，其中最多 1.5 s 计算、0.1 s 发布余量。旧曲线剩余时间不足时同时缩短提前量和计算预算，不能保留发布余量则走已有检查制动恢复。时间倒退、迟到发布、测量过期或接续不一致撤销候选。时间调整重建均匀样条并恢复起终 p/v/a，随后重查动力学和整条实际曲线。
 
-`Bspline.start_mode` 为 `IMMEDIATE=0` 或 `AT_TIME=1`；消息定义变更要求相关 ROS 包统一重编译。规划器与 traj_server 各保存一条执行曲线和至多一条待生效曲线，指定时刻前继续旧命令，迟到/重复/边界不连续消息拒绝。立即恢复取消待生效曲线。规划器通过既有 `/position_cmd.trajectory_id` 确认切换；超时没有该 ID 时进入已有恢复。发布前在原地图锁内核对旧曲线到接续时刻、新曲线、终端制动空间、当前运动质量和 GLIO 测量时刻对齐；失败候选不覆盖旧轨迹。等待期间监督两段：最新物理授权失效进入立即检查恢复以取消服务端队列；仅 advisory 警告请求下一次重规划，绝不独立急停。
+`Bspline.start_mode` 为 `IMMEDIATE=0`、`AT_TIME=1` 或 `CANCEL_PENDING=2`；消息定义变更要求相关 ROS 包统一重编译。规划器与 traj_server 各保存一条执行曲线和至多一条待生效曲线，指定时刻前继续旧命令，迟到/重复/边界不连续消息拒绝。立即恢复取消待生效曲线；物理／接续授权撤销在取证或制动构造之前发送空载荷CANCEL_PENDING及精确pending ID，server只移除该队列，继续当前命令。已接受ID单调保留，撤销后迟到副本不能恢复队列；错误ID／已激活ID不改变当前执行，非空撤销拒绝。撤销不授权新曲线，既有检查制动仍执行。规划器通过既有 `/position_cmd.trajectory_id` 确认切换；超时没有该 ID 时进入已有恢复。发布前在原地图锁内核对旧曲线到接续时刻、新曲线、终端制动空间、当前运动质量和 GLIO 测量时刻对齐；失败候选不覆盖旧轨迹。等待期间监督两段：最新物理授权失效先撤销服务端pending队列，再进入既有检查恢复；仅 advisory 警告请求下一次重规划，绝不独立急停。
 
 阶段状态：上述源码与合成/进程回归已接入；四分叉真实持续前进、至少三次连续接续、原任务目标到达、有效 PL 覆盖和耗时仍待现场证据。版本化验收契约仍为 Draft。原失败快照内容未改动，其未观测修补起点不代表完整真实接续状态，不能要求该快照重放成功；目标在树内和无合法原尾部的回归明确采用合成合法起点。
 
@@ -363,7 +363,7 @@ flowchart TD
 | `curveViolates` / `searchRecoveryGuide` / `initializeFromGuide` | 完整初值含短尾段检查；从绑定起点搜索目标集合，沿 guide 初始化、建立 rebound 和跟踪；后端违反走同一恢复入口，不拼接坏初值尾部。 |
 | `enforceBoundaryStates` / `assessTrajectory` | 三次均匀样条硬绑定两端 p/v/a；时间调整后恢复边界并复查动力学、完整实际曲线及终端制动空间；控制多边形不代替曲线检查。预算耗尽独立记录。 |
 | `commitFrozenCorridor` / `publicationStillTimely` | 原地图锁内比较相关 raw/inflate/observed、时效和运动条件，GLIO 按测量时刻对齐，曲线按未来接续时刻对齐；序列化后再次检查发布时间余量，失败不覆盖执行轨迹。 |
-| `Bspline.start_mode` / `observeExecutingTrajectory` | canonical 位置命令发布/订阅均为 `/drone_0_planning/pos_cmd`；IMMEDIATE=0；AT_TIME=1，默认提前 1.6 s，迟到拒绝；执行与待生效各一条，位置命令 ID 确认切换，立即恢复取消队列。 |
+| `Bspline.start_mode` / `observeExecutingTrajectory` | canonical 位置命令发布/订阅均为 `/drone_0_planning/pos_cmd`；IMMEDIATE=0；AT_TIME=1；空载荷CANCEL_PENDING=2精确撤销pending、保留当前命令与已接受ID，迟到副本拒绝；默认提前 1.6 s，迟到拒绝；执行与待生效各一条，位置命令 ID 确认切换，立即恢复取消队列。 |
 | `captureExecutionView` / `assessRemainingTrajectory` / `checkCollisionCallback` | 捕获后绑定时间和当前运动质量，两段共享物理 epoch；按该时刻重算剩余起点及 lead，真正 stale/future/时间倒退仍拒绝。监督旧段至切换及新段，合并 pending 的物理与 advisory 发现；待生效存在不能视为恢复成功，物理授权撤销进入检查恢复；advisory 缺失降级、有效警告请求重新规划。失败/未知尾段取证继续使用原有运行目录接口。 |
 | `guide_query_` / `addCurveClearanceConstraints` | 同图 guide 保留半分辨率余量并在精确起终附近收回；实际曲线违反点驱动球外支撑平面，通过三次样条权重约束四个控制点。CurveCorrection 每次计一动作，最终净空/动力学/边界检查保留原阈值。 |
 
@@ -836,8 +836,15 @@ Captured controls precede `guide_fit_replayed`; captured and derived target velo
 and stop-policy source are separate. Final geometric retention does not fabricate PL.
 Real attempt45/gen209 replay `20261007T144136Z_739` passes dynamics, full physical
 check (601 samples) and route retention (0.119900 m < 0.136603 m), with no extra repair.
-Earlier attempt12 replay retains its failure/missing-owned-guide identity. New field
-switch/command/movement evidence is pending; A/C are not yet qualified.
+Earlier attempt12 replay retains its failure/missing-owned-guide identity.
+The clean d2f0c7a OFF forest reference (`20261007T145306Z_103`, 300 s) produces
+39 curves and commands for 38 IDs, ten scheduled activations, and 36.096 m actual
+forward motion. Final truth distance is 0.447 m: half-metre neighbourhood only,
+not original task completion (no EXEC_TRAJ→WAIT_TARGET completion). Original
+0.3 m odometry/speed/elapsed/terminal rule is unchanged. Three pending revocations
+and first Curve31/gen295 dynamic rejection remain; last274/gen2195 fails Target.
+No unverified-hover log was seen; this does not grant full safety qualification.
+A/C remain partial, and B/D formal runs remain blocked.
 
 The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
 boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint
@@ -1043,3 +1050,31 @@ Raw仍仅单星故障；整星座与联合贡献资格、真实状态epoch对齐
 d2d0b1c干净历史run134006Z_572：551次Monitor计算中位0.812ms、p95
 0.954ms、最大1.493ms；末HPL/VPL99.982/224.361m，前进7.705m未到达。
 原冻结5/6请求成功，图文在analysis/historical_monitor_clock_live；真实资格仍未取得。
+
+### Pending authorization withdrawal
+
+The old forest trace `20261007T111334Z_929` records trajectory31 revocation at
+1791371743.516774213, activation at1743.907130743, and checked brake only at
+1744.129517301. This proves a revoked pending authorization could activate before
+the replacement was constructed; it does not prove collision at the future unknown
+point. The real server regression on d2f0c7a reproduces ID4 activation after an
+exact-ID withdrawal sent about0.35s before its start. Red source/binary/test hashes
+and verdict are in analysis-run manifest `pending_withdrawal_red_before`.
+
+CANCEL_PENDING=2 restores the missing lifecycle seam on the existing Bspline
+channel. It contains only the queued trajectory ID, with empty control/knots/yaw
+arrays; start time/order do not describe a candidate. It is sent to the local server,
+not swarm transport. The server consumes it before spline parsing, removes only
+the matching pending curve, and keeps active P/V/A commands unchanged. A bounded
+highest-accepted ID rejects replayed/reordered curves after withdrawal; invalid
+requests and unknown withdrawals consume no identity. A late cancellation of an
+already active curve has no effect and cannot replace checked braking. The FSM
+keeps captured pending identity until actual command acknowledgement/recovery;
+withdrawal alone is neither a new motion grant nor a success state.
+
+Release `traj_utils`及全部五个下游包统一构建／安装通过。四组行为CTest
+（48项baseline、生产管线、真实server定时执行、完整反馈）、43项canonical
+入口及2项Curve重放方法通过。精确撤销回归同时验证当前P/V/A命令不变、
+错误ID不清合法队列、非空载荷拒绝、迟到副本不恢复、已激活ID不受影响以及
+立即替代仍清队列。日志与版本/hash见分析run/runtime/pending_withdrawal_*；
+新干净提交森林现场尚待执行，不把自动化通过写为现场资格。
