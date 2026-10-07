@@ -1221,3 +1221,9 @@ fe939ac 的历史GPS＋北斗森林诊断已验证上述显式server ROS字段�
 历史时间推进约288秒，不计正常配对或正式校准。图文及逐ID接续证据见
 `log/20261007T091820Z_056/export/analysis/server_ros_clock_pause/report.md`。
 原FSM任务未完成；异常时间跳变、真实PL米数、9＋9和六次对照仍待取得资格。
+
+
+本轮 v7 真实验证索引：干净 d738289、历史 GPS＋北斗 OFF300秒
+`log/20261007T195232Z_628`；图文与原时间空间诊断在
+`log/20261007T091820Z_056/export/analysis/raw_constellation_v7_live/report.md`。
+原 FSM 未到达，坐标代数通过不授予物理 H/V、时刻传播或 PL 米数资格；正式9＋9与6次配对仍阻塞。
