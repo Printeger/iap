@@ -335,6 +335,50 @@ TEST(RegisteredLidarWindow,
             EvidenceVoxelState::UNKNOWN);
 }
 
+TEST(RegisteredLidarWindow, EqualTimeSourcesKeepOccupiedPrecedenceAndCanonicalIdentity) {
+  auto window = makeWindow();
+  const auto source = [](int id, bool hit_x, bool hit_y) {
+    RegisteredLidarBeamData x, y;
+    x.direction_lidar = Eigen::Vector3d::UnitX();
+    x.outcome = hit_x ? RegisteredLidarBeamOutcome::HIT
+                      : RegisteredLidarBeamOutcome::NO_RETURN;
+    x.range_m = 3.;
+    y.direction_lidar = Eigen::Vector3d::UnitY();
+    y.outcome = hit_y ? RegisteredLidarBeamOutcome::HIT
+                      : RegisteredLidarBeamOutcome::NO_RETURN;
+    y.range_m = 2.;
+    auto value = beamFrame(id, Eigen::Vector3d(.5,.5,.5), {x,y});
+    value.stamp_s = 100.; value.scan_end_stamp_s = 100.1;
+    return value;
+  };
+  ActiveLidarWindowDeltaData delta;
+  delta.complete = true; delta.generation = 1;
+  delta.frame_contract_id = "contract-a";
+  // Arrival/container order must not choose the provenance at equal times.
+  delta.added = {source(21,false,true), source(20,true,false)};
+  ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
+  ASSERT_TRUE(window.applyCurrentFrame(source(22,true,false)).accepted);
+  const auto snapshot = window.captureLocalEvidenceSnapshot(52);
+  ASSERT_NE(snapshot,nullptr);
+  const auto occupied_x = snapshot->queryVoxel(Eigen::Vector3d(3.5,.5,.5),100.2);
+  EXPECT_EQ(occupied_x.state,EvidenceVoxelState::RAW_OCCUPIED);
+  EXPECT_EQ(occupied_x.source_frame_id,22);
+  const auto occupied_y = snapshot->queryVoxel(Eigen::Vector3d(.5,2.5,.5),100.2);
+  EXPECT_EQ(occupied_y.state,EvidenceVoxelState::RAW_OCCUPIED);
+  EXPECT_EQ(occupied_y.source_frame_id,21)
+      << "newer free rays cannot erase an older occupied endpoint";
+  const auto free_x = snapshot->queryVoxel(Eigen::Vector3d(4.5,.5,.5),100.2);
+  EXPECT_EQ(free_x.state,EvidenceVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(free_x.source_frame_id,21);
+  const auto free_y = snapshot->queryVoxel(Eigen::Vector3d(.5,3.5,.5),100.2);
+  EXPECT_EQ(free_y.state,EvidenceVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(free_y.source_frame_id,22);
+  // Oracle generated with cbeed83's production snapshot constructor; the
+  // capture optimization must preserve the original identity byte-for-byte.
+  EXPECT_EQ(snapshot->identity().content_hash,"e28088d4f1267f7e");
+  EXPECT_EQ(snapshot->identity().source_set_hash,"d816f583654253b8");
+}
+
 TEST(RegisteredLidarWindow,
      ActiveObstacleSourcesPreserveFrameIdentityAndImmutableCenters) {
   auto window = makeWindow();

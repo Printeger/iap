@@ -250,3 +250,14 @@ raw singular_geometry。63/63重复／batch／wrapper一致只证明确定性。
 实际GPU残差、raw整星座与联合故障资格未完成，无可达路线覆盖资格。
 图文physical_pl_sources.png与report在analysis/clock_v6_original_diag，原正式0/9+0/9、
 D0/6继续阻塞；未调参、未推广。
+
+
+A物理时效取证：c426现场限频warning的137样本中位189.811ms／max342.743ms；
+accumulate包含mutex等待，不能直接归因为射线。单帧真实map beam几何进入生产
+snapshot构造稳定69–73ms，形成可重复性能红例；身份与每项原binary hash已登记。
+假设／测量：ASCII格式化单独改后31–37ms；按既有时间排序直写压缩数据、去掉
+66.528MB状态／时间临时数组后稳定10.5–10.9ms，首轮14–15ms。原10ms指标仍
+未满足，不授予性能整体资格或完整300ms根因。字节／来源／两个hash与原版本完全
+一致；相同时间、乱序加入、旧命中不被新free覆盖的回归含旧生产hash oracle。
+原缓存、物理时效、预算及运动门保持。23项registered、两组GridMap及六组
+planner行为与43入口通过，Release plan_env构建／安装通过，新现场待提交。

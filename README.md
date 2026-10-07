@@ -1141,3 +1141,9 @@ clock_model，v1–v5只保留历史诊断读取；禁止借重编码升级来�
 历史v6同输入物理／PL／来源图见同run的`analysis/clock_v6_original_diag`；
 仅诊断资格，正式9＋9和六次对照仍阻塞。分阶段结论见
 [实施进度](docs/dev_planner/curve_advisory_channel_progress.md)。
+
+
+物理证据快照构造测量与完整字节一致性报告在同分析run的
+`export/analysis/registered_window_latency`。本次优化只减少原构造中的重复数组和
+文本格式化，不改变观测／来源／hash，也不提高地图有效期或搜索预算；单帧约11ms
+仍未满足原10ms callback指标，完整时延需现场核对。

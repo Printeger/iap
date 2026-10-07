@@ -1149,3 +1149,20 @@ relaxation, timing budget or motion qualification is introduced.
 重复／batch／wrapper63/63一致未授予米数或双源资格；49ms状态epoch差与实际GPU
 残差／故障资格仍缺。analysis/clock_v6_original_diag保留物理／原始PL／来源图，
 不插值、不称路线可达或正式9＋9通过。
+
+
+### Physical evidence snapshot capture cost
+
+`RegisteredLidarWindow::captureLocalEvidenceSnapshot`仍在同一物理事务中形成一份
+不可变packed state及source index。活动来源按scan_end、frame ID排序；命中优先于
+后续自由射线，最新同类来源覆盖旧来源，未知仍为零，原stale与LOS查询保持。
+直接填充原压缩存储，删除重复逐体素状态／时间数组；content hash增量消费原规范
+ASCII字段，顺序、十进制记录、分隔符和FNV常量不变，无新增缓存或身份版本。
+
+捕获森林单帧726,889个观测体素的诊断：原快照构造中位约70ms，单独改hash约32ms，
+压缩直写约11ms（首轮14–15ms）；原全字节packed/source及两个hash一致。原10ms
+callback指标未满足，不能据局部测量解释完整300ms现场锁等待。66,528,000字节
+临时数组消除，不延长物理年龄／扩大在线预算。23项registered window、GridMap
+risk与occupancy epoch三组回归，以及六组生产Curve／执行回归、43入口通过。
+等时多来源回归保留cbeed83生产hash oracle，检查命中优先和来源编号。
+图文与命令／input/source/binary身份在analysis/registered_window_latency；新现场待提交。

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <charconv>
+#include <string_view>
 #include <iomanip>
 #include <limits>
 #include <optional>
@@ -88,15 +90,29 @@ bool validExplicitBeamEvidence(const RegisteredLidarFrameData& frame) {
   return true;
 }
 
-std::string fnvIdentity(const std::string& canonical) {
-  std::uint64_t hash = 1469598103934665603ULL;
-  for (const unsigned char byte : canonical) {
+void appendIdentityText(std::uint64_t& hash, const std::string_view text) {
+  for (const unsigned char byte : text) {
     hash ^= static_cast<std::uint64_t>(byte);
     hash *= 1099511628211ULL;
   }
+}
+
+void appendIdentityDecimal(std::uint64_t& hash, const std::uint64_t value) {
+  char digits[20];
+  const auto converted = std::to_chars(digits, digits + sizeof(digits), value);
+  appendIdentityText(hash, std::string_view(digits, converted.ptr - digits));
+}
+
+std::string formattedIdentity(const std::uint64_t hash) {
   std::ostringstream output;
   output << std::hex << std::setfill('0') << std::setw(16) << hash;
   return output.str();
+}
+
+std::string fnvIdentity(const std::string& canonical) {
+  std::uint64_t hash = 1469598103934665603ULL;
+  appendIdentityText(hash, canonical);
+  return formattedIdentity(hash);
 }
 
 }  // namespace
@@ -553,10 +569,18 @@ RegisteredLidarWindow::captureLocalEvidenceSnapshot(
   storage->packed_states.assign((cell_count + 3U) / 4U, 0U);
   storage->source_indices.assign(cell_count, 0U);
   storage->sources.reserve(contributions.size());
-  std::vector<EvidenceVoxelState> states(
-      cell_count, EvidenceVoxelState::UNKNOWN);
-  std::vector<double> source_stamps(
-      cell_count, -std::numeric_limits<double>::infinity());
+  const auto state_at = [&storage](const std::size_t address) {
+    return static_cast<EvidenceVoxelState>(
+        (storage->packed_states[address / 4U] >> ((address % 4U) * 2U)) & 3U);
+  };
+  const auto set_state = [&storage](const std::size_t address,
+      const EvidenceVoxelState state, const std::uint16_t source_index) {
+    const auto shift = (address % 4U) * 2U;
+    auto& packed = storage->packed_states[address / 4U];
+    packed = static_cast<std::uint8_t>((packed & ~(3U << shift)) |
+        (static_cast<std::uint8_t>(state) << shift));
+    storage->source_indices[address] = source_index;
+  };
   std::ostringstream source_identity;
   for (std::size_t source = 0; source < contributions.size(); ++source) {
     const auto& contribution = *contributions[source];
@@ -571,21 +595,14 @@ RegisteredLidarWindow::captureLocalEvidenceSnapshot(
         static_cast<std::uint16_t>(source + 1U);
     for (const int address : contribution.observed_free) {
       const auto index = static_cast<std::size_t>(address);
-      if (states[index] != EvidenceVoxelState::RAW_OCCUPIED &&
-          frame.scan_end_stamp_s >= source_stamps[index]) {
-        states[index] = EvidenceVoxelState::OBSERVED_FREE;
-        storage->source_indices[index] = source_index;
-        source_stamps[index] = frame.scan_end_stamp_s;
-      }
+      // Contributions are ordered by timestamp, then frame ID. Later free
+      // evidence replaces earlier free; occupied evidence always wins.
+      if (state_at(index) != EvidenceVoxelState::RAW_OCCUPIED)
+        set_state(index, EvidenceVoxelState::OBSERVED_FREE, source_index);
     }
     for (const int address : contribution.hits) {
       const auto index = static_cast<std::size_t>(address);
-      if (states[index] != EvidenceVoxelState::RAW_OCCUPIED ||
-          frame.scan_end_stamp_s >= source_stamps[index]) {
-        states[index] = EvidenceVoxelState::RAW_OCCUPIED;
-        storage->source_indices[index] = source_index;
-        source_stamps[index] = frame.scan_end_stamp_s;
-      }
+      set_state(index, EvidenceVoxelState::RAW_OCCUPIED, source_index);
     }
   }
   std::ostringstream content_identity;
@@ -598,18 +615,25 @@ RegisteredLidarWindow::captureLocalEvidenceSnapshot(
                    << sensor_contract.vertical_max_rad << ':'
                    << sensor_contract.min_range_m << ':'
                    << sensor_contract.max_range_m << ':';
-  for (std::size_t address = 0; address < states.size(); ++address) {
-    const auto raw = static_cast<std::uint8_t>(states[address]);
-    storage->packed_states[address / 4U] |=
-        static_cast<std::uint8_t>(raw << ((address % 4U) * 2U));
+  // Preserve the existing canonical decimal record byte-for-byte while
+  // hashing incrementally. A multi-megabyte iostream record held the map lock
+  // for tens of milliseconds on captured forest frames.
+  std::uint64_t content_hash = 1469598103934665603ULL;
+  appendIdentityText(content_hash, content_identity.str());
+  for (std::size_t address = 0; address < cell_count; ++address) {
+    const auto raw = static_cast<std::uint8_t>(state_at(address));
     if (raw != 0U) {
-      content_identity << address << '=' << static_cast<unsigned>(raw) << '@'
-                       << storage->source_indices[address] << ';';
+      appendIdentityDecimal(content_hash, address);
+      appendIdentityText(content_hash, "=");
+      appendIdentityDecimal(content_hash, raw);
+      appendIdentityText(content_hash, "@");
+      appendIdentityDecimal(content_hash, storage->source_indices[address]);
+      appendIdentityText(content_hash, ";");
     }
   }
   storage->identity.source_set_hash = fnvIdentity(source_identity.str());
-  content_identity << storage->identity.source_set_hash;
-  storage->identity.content_hash = fnvIdentity(content_identity.str());
+  appendIdentityText(content_hash, storage->identity.source_set_hash);
+  storage->identity.content_hash = formattedIdentity(content_hash);
   return std::shared_ptr<const LocalEvidenceSnapshot>(
       new LocalEvidenceSnapshot(std::move(storage)));
 }
