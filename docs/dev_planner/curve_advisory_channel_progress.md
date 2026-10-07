@@ -589,3 +589,9 @@ pending＋tracking所有权生产红例：原pending物理失败被active tracki
 缺物理epoch的scalar query明确nullopt，live推进仍查原代数；组合测试还核对原代数、
 pending本地首违时间位置。仅重建并清理本进程已登记临时test路径，外部run不认领。
 Release构建／7组规划／43入口通过，两轴审查通过，新现场验证待执行。
+
+30秒导出诊断d8598cb／210335Z_198：前置全部通过、进程完成、代数错配0；
+remaining_failure12/gen33保存原1657108814.088评价时刻、首违本地15.246秒与位置，
+INSUFFICIENT_CLEARANCE原因保持。candidate17/gen128未知拒绝也保存新首违字段。
+本轮未发生pending＋active tracking组合，明确未取得组合现场覆盖；正式任务0/6不变。
+pending_tracking_owner_live_export登记原配置/binary/log/snapshot hash。继续B原子冻结接口。
