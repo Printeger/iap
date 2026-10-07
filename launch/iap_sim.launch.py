@@ -61,6 +61,9 @@ def _setup(context):
                 primary.get("entrypoint") != "iap_sim" or primary.get("scenario") != scenario or
                 primary.get("lifecycle") != "active"):
             raise ValueError("iap_sim run_dir requires its own active resolver-allocated run")
+    lifecycle_owner = context.launch_configurations.get("run_lifecycle_owner", "launch")
+    if lifecycle_owner not in ("launch", "driver") or (lifecycle_owner == "driver" and not internal_run):
+        raise ValueError("driver lifecycle owner requires a preallocated run_dir")
     register_config_snapshot(
         output_dir, output_dir / "metadata" / "config"
     )
@@ -121,23 +124,17 @@ def _setup(context):
         ),
         "rosbag_recording_enabled": False,
         "phase2_planner_integrity_evaluator_enabled": False,
+        "lifecycle_owner": lifecycle_owner,
         "clock_contract": (
             "system_clock_for_ros_and_simulated_sensor_stamps"
         ),
     }
     write_subordinate_manifest(output_dir, "full_stack", manifest)
 
-    return [
+    actions = [
         SetEnvironmentVariable("IAP_RUN_DIR", str(output_dir)),
         SetEnvironmentVariable(
             "ROS_LOG_DIR", str(output_dir / "runtime" / "ros")
-        ),
-        RegisterEventHandler(
-            OnShutdown(
-                on_shutdown=lambda event, _context: finalize_run_from_shutdown(
-                    output_dir, event
-                )
-            )
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -170,11 +167,22 @@ def _setup(context):
             }.items(),
         ),
     ]
+    if lifecycle_owner == "launch":
+        actions.insert(2, RegisterEventHandler(
+            OnShutdown(
+                on_shutdown=lambda event, _context: finalize_run_from_shutdown(
+                    output_dir, event
+                )
+            )
+        ))
+    return actions
+
 
 
 def generate_launch_description():
     return LaunchDescription(
         [
+            DeclareLaunchArgument("run_lifecycle_owner", default_value="launch", description="Private driver owns finalization after all run captures finish"),
             DeclareLaunchArgument("run_dir", default_value="", description="Private preallocated canonical owner run; contains startup ROS logs"),
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),

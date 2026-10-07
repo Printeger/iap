@@ -1022,3 +1022,8 @@ python3 src/iap/scripts/dev_planner/run_curve_channel_live.py --duration 300 --l
 分配并打印。GPU预检、完整输入、失败请求、实际执行事件与进程健康均归入该run。
 `curve_stages`保存最多24份当次候选；实际分量峰值与授权门禁的控制点包络分列。
 没有最终检查时保持null，不代表检查通过。正式历史多星座及配对任务仍待后续阶段。
+
+The forest capture driver owns finalization after all capture jobs stop. Startup
+failures remain failed runs with registered diagnostics; direct canonical launch
+retains ordinary shutdown ownership. Curve evidence is bound to its candidate
+revision; execution supervision does not borrow backend stages.

@@ -167,3 +167,19 @@ then enable retention. A checked allowlist may temporarily describe existing
 violations, but new violations are forbidden and the allowlist must be empty at
 the end of migration. Formal or frozen evidence is never rewritten to look
 like a new run.
+
+### Curve capture and forest driver authority (2026-10-07)
+
+A candidate geometry revision invalidates its previous final assessment before any
+optimizer or retiming early return. Only `candidate` and `attempt_failure` attach
+that attempt's backend stages. Execution supervision has its own supplied assessment;
+its candidate `final_check_state` is `not_applicable`.
+
+The forest measurement driver preallocates one canonical run and passes the private
+`run_lifecycle_owner:=driver` handoff. The canonical launch retains its ordinary
+shutdown ownership for direct invocation. The driver finalizes after all owned jobs
+stop, registers subordinate manifests, and marks startup failures as failed.
+The 300-second OFF diagnostic at `log/20261007T092819Z_721` ended normally, with
+terminal attempt 432/gen 2803 rejected by physical clearance after feasible dynamics.
+Its older capture schema has the ownership limitations above; this is reference
+evidence, not A acceptance or a task completion.

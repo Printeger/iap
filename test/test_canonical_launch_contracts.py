@@ -407,6 +407,34 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "active resolver"):
                     canonical._setup(context)
 
+    def test_driver_owns_shutdown_and_finalizes_startup_failure(self):
+        canonical = self._load_launch("iap_sim.launch.py")
+        runs = self._load_launch("_includes/run_directory.py")
+        from launch.actions import RegisterEventHandler
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+            run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2")
+            context = LaunchContext()
+            context.launch_configurations.update(run_dir=str(run), run_lifecycle_owner="driver",
+                scenario="icra_dense_forest_four_fork_v2", start_rviz="false", start_grid_map_visualizer="true",
+                run_duration_s="30", planner_start_delay_s="10")
+            with mock.patch.object(canonical, "get_package_share_directory", return_value=str(REPO)):
+                actions = canonical._setup(context)
+            self.assertFalse(any(isinstance(a, RegisterEventHandler) for a in actions))
+            spec = importlib.util.spec_from_file_location("curve_live", REPO / "scripts/dev_planner/run_curve_channel_live.py")
+            driver = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(driver)
+            with mock.patch.object(driver, "source_identity", return_value={"revision": "test", "dirty": ""}), \
+                    mock.patch.object(driver, "resolve_run_directory", return_value=run), \
+                    mock.patch("ament_index_python.packages.get_package_share_directory", side_effect=RuntimeError("missing installation")), \
+                    mock.patch.object(sys, "argv", ["curve_live", "--duration", "30"]):
+                with self.assertRaisesRegex(RuntimeError, "missing installation"):
+                    driver.main()
+            primary = json.loads((run / "metadata/run_manifest.json").read_text())
+            self.assertEqual(primary["lifecycle"], "failed")
+            self.assertIn("metadata/manifests/forest_process_result.json", primary["subordinate_manifests"])
+            result = json.loads((run / "metadata/manifests/forest_process_result.json").read_text())
+            self.assertIn("missing installation", result["error"])
+
     def test_each_canonical_entrypoint_has_one_owner_and_propagates_both_run_envs(self):
         for filename in (
             "glio.launch.py",

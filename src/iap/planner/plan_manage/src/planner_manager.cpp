@@ -24,6 +24,9 @@ namespace ego_planner
   void EGOPlannerManager::recordCurveStage(const std::string& stage,
       const Eigen::MatrixXd& controls, double interval, const LocalTarget& target,
       double feasibility_ratio, const TrajectoryAssessment* assessment) {
+    // Every geometry revision invalidates the previous final assessment, even
+    // when export is disabled. An early return must never pair it with a new curve.
+    last_candidate_assessment_={};
     if (!capture_failure_map_ || controls.rows()!=3 || controls.cols()<4 ||
         !controls.allFinite() || !std::isfinite(interval) || interval<=0) return;
     UniformBspline curve(controls,3,interval);
@@ -97,8 +100,9 @@ namespace ego_planner
     const auto search_value = search ? std::optional<AStar::Result>(*search) : std::nullopt;
     const auto context_value = context ? std::optional<BsplineOptimizer::SearchFailureContext>(*context) : std::nullopt;
     const auto curve_value = trajectory ? std::optional<UniformBspline>(*trajectory) : std::nullopt;
-    const auto stages=curve_stages_;
-    const unsigned dropped_stages=dropped_curve_stages_;
+    const bool candidate_trace=kind=="attempt_failure" || kind=="attempt_failure_curve" || kind=="candidate";
+    const auto stages=candidate_trace ? curve_stages_ : std::vector<CurveStageEvidence>{};
+    const unsigned dropped_stages=candidate_trace ? dropped_curve_stages_ : 0;
     const double velocity_limit=pp_.max_vel_,acceleration_limit=pp_.max_acc_;
     const double feasibility_tolerance=pp_.feasibility_tolerance_;
     const auto assessment_value = assessment ? std::optional<TrajectoryAssessment>(*assessment) : std::nullopt;
@@ -116,9 +120,10 @@ namespace ego_planner
     for(const auto& target : planning_targets_) goal_positions.push_back(target.position);
     const double fitting_reserve_m=.5*snapshot->resolution_m;
     const auto state_json = std::exchange(failure_state_json_, std::string{});
-    const bool has_final_check=kind=="attempt_failure" &&
-        (last_candidate_assessment_.sampled_points || last_candidate_assessment_.execution_reason!=GridExecutionReason::OK);
-    const auto final_check=has_final_check ? std::optional<TrajectoryAssessment>(last_candidate_assessment_) : std::nullopt;
+    const auto* checked=candidate_trace ? (assessment ? assessment : &last_candidate_assessment_) : nullptr;
+    const bool has_final_check=checked &&
+        (checked->sampled_points || checked->execution_reason!=GridExecutionReason::OK);
+    const auto final_check=has_final_check ? std::optional<TrajectoryAssessment>(*checked) : std::nullopt;
     const auto final_snapshot=final_check && final_check->physical_epoch
         ? final_check->physical_epoch->failure_evidence : std::shared_ptr<const GridMapFailureSnapshot>{};
     const auto node = node_;
@@ -411,7 +416,7 @@ namespace ego_planner
         metadata << "]}";
       } else metadata << "null";
       metadata << ",\n  \"curve_generation_state\": " << std::quoted(curve_value ? "generated" : "not_generated")
-          << ",\n  \"final_check_state\": " << std::quoted(final_check ? "checked" : "not_checked")
+          << ",\n  \"final_check_state\": " << std::quoted(candidate_trace ? (final_check ? "checked" : "not_checked") : "not_applicable")
           << ",\n  \"curve_stages_dropped\": " << dropped_stages
           << ",\n  \"curve_stages\": [";
       for(size_t s=0;s<stages.size();++s) {
@@ -545,7 +550,7 @@ namespace ego_planner
     };
     // Intermediate rejections may be repaired in this same attempt. Only a
     // final disposition replaces terminal proof while a PlanningView is active.
-    if(!planning_view_ || kind=="attempt_failure") latest_failure_export_ = write;
+    if(!planning_view_ || kind=="attempt_failure" || kind=="attempt_failure_curve") latest_failure_export_ = write;
     if (captured_failure_kinds_.insert(kind).second)
       queueFailureExport([write, kind]() mutable { write(kind); }, false);
   }
@@ -864,7 +869,7 @@ namespace ego_planner
         const auto cell=queryPlanningViewCell(start_pt);
         const auto* assessment=last_candidate_assessment_.failure_snapshot &&
             last_candidate_assessment_.evaluated_generation==planning_view_->generation ? &last_candidate_assessment_ : nullptr;
-        captureFailureMap("attempt_failure",start_pt,target_pt,cell,search,context,
+        captureFailureMap(reason==PlanFailure::Curve ? "attempt_failure_curve" : "attempt_failure",start_pt,target_pt,cell,search,context,
             failed_candidate_curve_ ? &*failed_candidate_curve_ : nullptr,assessment);
       }
       ++continous_failures_count_; return false;

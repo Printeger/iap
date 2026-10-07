@@ -138,7 +138,11 @@ struct EGOPlannerManagerTestAccess {
   static std::shared_ptr<const GridMapFailureSnapshot> planningEvidence(const EGOPlannerManager& manager) { return manager.planning_view_ ? manager.planning_view_->snapshot : nullptr; }
   static void drain(EGOPlannerManager& manager) { manager.drainFailureExports(); }
   static void recordStage(EGOPlannerManager& manager, const Eigen::MatrixXd& control, double interval) {
+    manager.last_candidate_assessment_.execution_reason=GridExecutionReason::INSUFFICIENT_CLEARANCE;
+    manager.last_candidate_assessment_.sampled_points=7;
     manager.recordCurveStage("initial_bound",control,interval,LocalTarget{});
+    EXPECT_EQ(manager.last_candidate_assessment_.sampled_points,0u);
+    EXPECT_EQ(manager.last_candidate_assessment_.execution_reason,GridExecutionReason::OK);
   }
   static void finalEvidence(EGOPlannerManager& manager) { manager.exportLatestFailure(true); manager.drainFailureExports(); }
   static void setCapture(EGOPlannerManager& manager) {
@@ -604,6 +608,9 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   ego_planner::EGOPlannerManagerTestAccess::capture(manager, "curve_unobserved",
       assessment.first_unobserved_cell, nullptr, nullptr, &curve, &assessment);
   ASSERT_TRUE(std::filesystem::exists(root / "candidate/snapshot.json"));
+  { std::ifstream file(root / "candidate/snapshot.json");
+    const std::string text((std::istreambuf_iterator<char>(file)),{});
+    EXPECT_NE(text.find("\"final_check_state\": \"checked\""),std::string::npos); }
   std::ifstream curve_metadata(root / "curve_unobserved/snapshot.json");
   std::string curve_text((std::istreambuf_iterator<char>(curve_metadata)), {});
   EXPECT_NE(curve_text.find("\"first_unobserved_voxel_index\": ["), std::string::npos);
@@ -660,9 +667,15 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   std::ifstream stage_file(root / "backend_early_return/snapshot.json");
   const std::string stage_text((std::istreambuf_iterator<char>(stage_file)),{});
   EXPECT_NE(stage_text.find("\"curve_generation_state\": \"generated\""),std::string::npos);
-  EXPECT_NE(stage_text.find("\"stage\":\"initial_bound\""),std::string::npos);
-  EXPECT_NE(stage_text.find("\"max_velocity_time_s\":"),std::string::npos);
-  EXPECT_NE(stage_text.find("\"velocity_control_bound_mps\":"),std::string::npos);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"attempt_failure_curve",latest_cell,nullptr,nullptr,&stage_curve);
+  { std::ifstream file(root / "attempt_failure_curve/snapshot.json");
+    const std::string text((std::istreambuf_iterator<char>(file)),{});
+    EXPECT_NE(text.find("\"stage\":\"initial_bound\""),std::string::npos);
+    EXPECT_NE(text.find("\"max_velocity_time_s\":"),std::string::npos);
+    EXPECT_NE(text.find("\"final_check_state\": \"not_checked\""),std::string::npos); }
+  // A non-candidate execution/diagnostic capture cannot inherit the active attempt.
+  EXPECT_NE(stage_text.find("\"curve_stages\": []"),std::string::npos);
+  EXPECT_NE(stage_text.find("\"final_check_state\": \"not_applicable\""),std::string::npos);
 }
 
 TEST(EgoBaseline, FrozenMotionCannotAuthorizePublicationAfterCurrentQualityRevocation) {

@@ -774,3 +774,23 @@ opt-in取证现在在初始拟合、边界绑定、guide拟合、优化退出、
 进程组。生命周期成功不是森林任务通过。阶段A真实根因与接续待新现场；
 阶段B固定历史RINEX＋统一/clock／双源9+9、阶段C连续路径代价与左右终端、
 阶段D六次配对均尚未实施，不推广任何默认参数。
+
+### Curve capture and forest driver authority (2026-10-07)
+
+A candidate geometry revision invalidates its previous final assessment before any
+optimizer or retiming early return. Only `candidate` and `attempt_failure` attach
+that attempt's backend stages. Execution supervision has its own supplied assessment;
+its candidate `final_check_state` is `not_applicable`.
+
+The forest measurement driver preallocates one canonical run and passes the private
+`run_lifecycle_owner:=driver` handoff. The canonical launch retains its ordinary
+shutdown ownership for direct invocation. The driver finalizes after all owned jobs
+stop, registers subordinate manifests, and marks startup failures as failed.
+The 300-second OFF diagnostic at `log/20261007T092819Z_721` ended normally, with
+terminal attempt 432/gen 2803 rejected by physical clearance after feasible dynamics.
+Its older capture schema has the ownership limitations above; this is reference
+evidence, not A acceptance or a task completion.
+
+Curve final dispositions also use the bounded first-kind `attempt_failure_curve`
+artifact, so a later budget/search failure cannot erase the first real Curve symptom.
+The existing single recent-terminal closure, writer queue and stage cap are unchanged.
