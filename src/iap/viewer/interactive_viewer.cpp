@@ -24,7 +24,9 @@
 
 #include <gtsam_points/config.hpp>
 #include <gtsam_points/factors/integrated_matching_cost_factor.hpp>
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+// GLIM src/glim/viewer/interactive_viewer.cpp: IAP selects the parity-tested
+// native GPU factor; matching mathematics and existing consumers stay aligned.
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #include <gtsam_points/optimizers/isam2_result_ext.hpp>
 
 #include <glk/thin_lines.hpp>
@@ -657,7 +659,7 @@ void InteractiveViewer::globalmap_on_smoother_update(gtsam_points::ISAM2Ext& isa
       inserted_factors.push_back(std::make_tuple(FactorType::MATCHING_COST, factor->keys()[0], factor->keys()[1]));
     }
 #ifdef GTSAM_POINTS_USE_CUDA
-    if (dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(factor.get())) {
+    if (dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(factor.get())) {
       inserted_factors.push_back(std::make_tuple(FactorType::MATCHING_COST, factor->keys()[0], factor->keys()[1]));
     }
 #endif

@@ -1440,3 +1440,38 @@ GPU原生取证机制：Release CUDA／8组合原后端代价、Hessian、inlier
 旧样本红例8项失败保存后修复，allocation/download/sync失败明确不可用；
 同步与异步接口、128上限、零匹配和恢复覆盖。GPU构建CMake≥3.24。
 生产路径尚未接入；真实残差、噪声／相关性、联合故障及正式分母保持待验证。
+
+
+B GPU生产取证已接入原postopt quality pass；默认capture_advisory_residuals=false。
+显式true仅更改run-local取证开关，原stride／匹配／预算不变。16×128后台raw queue，
+小请求账本保留全部身份与drop，原实际CUDA e/S与归约count/cost独立保存；
+frame/target/level/原时刻／外参／GNSS owner绑定，未匹配不借旧epoch授予资格。
+核心9组、规划7组、入口43项、审计4项通过；新干净历史现场待验证；正式噪声／联合故障及B0/9＋0/9、D0/6保持阻塞。
+接口：docs/spec/gpu_match_evidence_contract.md。
+
+GPU取证评审修复：全请求ledger保留原target/voxel/keys和GNSS epoch/update身份；
+quality批次异常逐factor取消／记录后原样重抛，保持原失败行为。直接canonical启动无
+driver身份时明确unavailable，审计不允许修改原时刻或借旧包；身份红→绿4项已保存。
+
+
+当前Curve／通道轮取证与执行关系（诊断箭头不授予来源或运动资格）：
+```mermaid
+flowchart TD
+  Clock[唯一历史 clock] --> Sensors[IMU / GPU LiDAR / 历史GPS+北斗]
+  Sensors --> GLIO[同一GLIO GPU后端 / 优化状态]
+  GLIO --> Monitor[Current Monitor运动门]
+  GLIO --> Frozen[v8原子epoch+优化/线性化均值+joint covariance / 原时刻]
+  GLIO --> Native[原postopt quality pass / 有界实际GPU样本]
+  Native --> Ledger[全请求身份 / 16×128后台raw / drop与失败分母]
+  Ledger --> Offline[独立残差/坐标/相关性诊断 / 尚未资格]
+  Frozen --> Grid[唯一GridMap / 独立物理层+原始PL状态版本]
+  Monitor --> Grid
+  Grid --> Search[前左右≤16目标 / 原预算米制多终端A*]
+  Search --> Guide[唯一guide / 合法incumbent及最优证明状态]
+  Guide --> Curve[EGO初始化+同guide跟踪 / 原PVA及有界修复]
+  Curve --> Check[实际曲线 / 物理+动力学+接续+路线风险]
+  Check --> Publish[原提交窗口与发布检查]
+  Publish --> Server[server定时切换 / 命令 / 实际运动]
+  Server --> Progress[实际odom进度 / 固定终点18,0,1.5]
+  Progress --> Search
+```

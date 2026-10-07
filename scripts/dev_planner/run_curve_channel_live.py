@@ -43,6 +43,7 @@ def main():
     parser.add_argument('--duration', type=float, default=300)
     parser.add_argument('--label', default='curve_capture')
     parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
+    parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     args = parser.parse_args()
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
@@ -98,6 +99,8 @@ def main():
             input_binaries[plugin] = verified_binary('iap', installed, 'lib' + plugin + '.so')
         installed_core = Path(get_package_prefix('iap')) / 'lib/libiap.so'
         input_binaries['iap_core'] = verified_binary('iap', installed_core, 'libiap.so')
+        installed_gpu = Path(get_package_prefix('iap')) / 'lib/libiap_gpu_match_evidence.so'
+        input_binaries['gpu_match_evidence'] = verified_binary('iap',installed_gpu,'libiap_gpu_match_evidence.so')
         command = ['ros2', 'launch', 'iap', 'iap_sim.launch.py', f'run_dir:={run}',
                    'run_lifecycle_owner:=driver',
                    'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:=false',
@@ -106,6 +109,8 @@ def main():
                    f'run_duration_s:={args.duration}']
         if args.rinex_nav_file:
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
+        if args.capture_advisory_residuals:
+            command.append('capture_advisory_residuals:=true')
         manifest(run, 'forest_runtime_identity', {'schema': 'iap_forest_runtime_identity_v1',
                  **identity, 'command': command, 'preflight': gpu,
                  'runtime_binary': runtime_binary,

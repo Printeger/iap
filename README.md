@@ -1274,12 +1274,32 @@ owner/layout/coordinate均值错配0；5/6冻结及5份同原时间重放／审�
 C真实通道保留、D0/6与B0/9＋0/9仍阻塞。继续可独立执行的生产取证工作。
 
 
-The native GPU matching evidence factor is under verification. It captures
+The native GPU matching evidence factor passed installed-backend parity. It captures
 bounded per-correspondence residuals from the CUDA reduction and first compares
-cost/Hessian/inlier behavior with the installed backend. Production capture and
+cost/Hessian/inlier behavior with the installed backend. Production capture is opt-in; live and
 noise qualification remain pending; see [GPU evidence contract](docs/spec/gpu_match_evidence_contract.md).
 
 GPU原生取证机制：Release CUDA／8组合原后端代价、Hessian、inlier等价通过；
 旧样本红例8项失败保存后修复，allocation/download/sync失败明确不可用；
 同步与异步接口、128上限、零匹配和恢复覆盖。GPU构建CMake≥3.24。
 生产路径尚未接入；真实残差、噪声／相关性、联合故障及正式分母保持待验证。
+
+
+B GPU生产取证已接入原postopt quality pass；默认capture_advisory_residuals=false。
+显式true仅更改run-local取证开关，原stride／匹配／预算不变。16×128后台raw queue，
+小请求账本保留全部身份与drop，原实际CUDA e/S与归约count/cost独立保存；
+frame/target/level/原时刻／外参／GNSS owner绑定，未匹配不借旧epoch授予资格。
+核心9组、规划7组、入口43项、审计4项通过；新干净历史现场待验证；正式噪声／联合故障及B0/9＋0/9、D0/6保持阻塞。
+接口：docs/spec/gpu_match_evidence_contract.md。
+
+取证与审计（显式实验配置，不改变PL参数）：
+```bash
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 \
+  rinex_nav_file:=<absolute-historical-NAV> advisory_posterior_prior:=false \
+  advisory_guidance:=false capture_advisory_residuals:=true
+python3 scripts/dev_predictor/gpu_match_evidence_audit.py --run-dir <IAP_RUN_DIR>
+```
+
+GPU取证评审修复：全请求ledger保留原target/voxel/keys和GNSS epoch/update身份；
+quality批次异常逐factor取消／记录后原样重抛，保持原失败行为。直接canonical启动无
+driver身份时明确unavailable，审计不允许修改原时刻或借旧包；身份红→绿4项已保存。

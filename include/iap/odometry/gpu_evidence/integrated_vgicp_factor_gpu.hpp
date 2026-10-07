@@ -6,6 +6,13 @@
 
 #pragma once
 
+// The existing CUDA-disabled build retains its installed matching type. Native
+// evidence is available only when the exported IAP CUDA target is linked.
+#ifndef IAP_NATIVE_GPU_MATCH
+#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+namespace gtsam_points { using IapObservedVGICPFactorGPU=IntegratedVGICPFactorGPU; }
+#else
+
 #include <optional>
 #include <iap/odometry/gpu_evidence/match_residual.hpp>
 #include <gtsam_points/util/gtsam_migration.hpp>
@@ -72,7 +79,10 @@ public:
   virtual ~IapObservedVGICPFactorGPU() override;
 
   void request_evidence();
+  void cancel_evidence();
   iap::GpuMatchCapture take_evidence();
+  void set_evidence_owner(const iap::GpuMatchOwner& owner) { evidence_owner=owner; }
+  const iap::GpuMatchOwner& get_evidence_owner() const { return evidence_owner; }
 
   /// @brief Print the factor information.
   virtual void print(const std::string& s = "", const gtsam::KeyFormatter& keyFormatter = gtsam::DefaultKeyFormatter) const override;
@@ -143,6 +153,7 @@ public:
   virtual void sync() override;
 
 private:
+  iap::GpuMatchOwner evidence_owner;
   Eigen::Isometry3f calc_delta(const gtsam::Values& values) const;
 
 private:
@@ -162,3 +173,4 @@ private:
 };
 
 }  // namespace gtsam_points
+#endif

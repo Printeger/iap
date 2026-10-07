@@ -92,7 +92,7 @@ void IapObservedVGICPDerivatives::issue_linearize(const Eigen::Isometry3f* d_x, 
     evidence_operation(query_status,"CUB storage query");
     evidence_operation(reduction_status,"CUB derivative reduction");
   }
-  finish_evidence();
+  finish_evidence(d_output);
 }
 
 }  // namespace gtsam_points

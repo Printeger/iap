@@ -200,7 +200,8 @@ def _setup(context):
     runtime, _ = materialize_profile(
         source_config_dir=str(share / "config/profiles/full_stack_flight"),
         output_dir=str(run), contract="full_stack",
-        integrity_profile=scenario["integrity_profile"], simulation_scenario=scenario)
+        integrity_profile=scenario["integrity_profile"], simulation_scenario=scenario,
+        capture_gpu_match_evidence=context.launch_configurations.get("capture_advisory_residuals","false").lower()=="true")
     register_config_snapshot(run, Path(runtime))
     remaps = [("odom_world", "/drone_0_visual_slam/odom"),
               ("grid_map/odom", "/drone_0_visual_slam/odom"),

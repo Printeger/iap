@@ -7,7 +7,7 @@
 | 阶段 | 代码 | 自动化 | 当前现场证据 | 直接阻塞 |
 |---|---|---|---|---|
 | A Curve接续 | 取证／生产重放／精确PVA／双侧guide／重定时绑定；voxel弧长拟合及assessment导出所有权已修复 | Curve49原冻结initialize完整通过，旧粗backend红保留；pending/active组合红绿；7组规划＋43入口 | 921d340 OFF300秒：111发布／91命令ID／45激活；新30秒导出代数错配0 | Curve99真实超限起点速度正确拒绝；其他晚撤销未闭环；原FSM未到达 |
-| B Advisory空间／米数 | 历史GPS＋北斗／活动钟差／raw整星座故障；FGO世界位置协方差；原子优化状态与jointcov v8已接入 | 广播独立222074配对；核心7组／规划7组／入口43项／离线14项／校准6项通过 | v7真实冻结／坐标代数读取通过，Monitor持续UNSAFE；v8 60秒549条packet／5份原时间重放通过 | 未传播原时刻差、异常跳变、联合故障、Up/外参与生产GPU残差资格不足；正式0/9＋0/9 |
+| B Advisory空间／米数 | 历史GPS＋北斗／活动钟差／raw整星座故障；FGO世界位置协方差；原子优化状态与jointcov v8、原生GPU残差及后台取证已接入 | 广播独立222074配对；核心9组／规划7组／入口43项／离线14项／残差审计4项／校准6项通过 | v7真实冻结／坐标代数读取通过，Monitor持续UNSAFE；v8 60秒549条packet／5份原时间重放通过 | 未传播原时刻差、异常跳变、联合故障、Up/外参与生产GPU残差资格不足；正式0/9＋0/9 |
 | C 通道／后端 | ≤16前左右目标、米制连续多终端、同guide及独立实际路线检查已实施 | 米制／终端项／预算incumbent／风险与guide机制回归通过 | 同版本原始sample与guide／实际拒绝曲线图已导出；新现场末次ENVIRONMENT_UNOBSERVED拒绝 | 真实低风险选择及后端保留资格未通过，实际PL米数未验证 |
 | D 完整任务收益 | 冻结对照／诊断驱动已有；正式协议保持 | 正式前置未满足 | 配对0/6；最近完整300秒距固定目标1.512m、原FSM未完成 | A/B/C真实资格不足；默认不推广 |
 
@@ -625,3 +625,15 @@ GPU原生取证机制：Release CUDA／8组合原后端代价、Hessian、inlier
 旧样本红例8项失败保存后修复，allocation/download/sync失败明确不可用；
 同步与异步接口、128上限、零匹配和恢复覆盖。GPU构建CMake≥3.24。
 生产路径尚未接入；真实残差、噪声／相关性、联合故障及正式分母保持待验证。
+
+
+B GPU生产取证已接入原postopt quality pass；默认capture_advisory_residuals=false。
+显式true仅更改run-local取证开关，原stride／匹配／预算不变。16×128后台raw queue，
+小请求账本保留全部身份与drop，原实际CUDA e/S与归约count/cost独立保存；
+frame/target/level/原时刻／外参／GNSS owner绑定，未匹配不借旧epoch授予资格。
+核心9组、规划7组、入口43项、审计4项通过；新干净历史现场待验证；正式噪声／联合故障及B0/9＋0/9、D0/6保持阻塞。
+接口：docs/spec/gpu_match_evidence_contract.md。
+
+GPU取证评审修复：全请求ledger保留原target/voxel/keys和GNSS epoch/update身份；
+quality批次异常逐factor取消／记录后原样重抛，保持原失败行为。直接canonical启动无
+driver身份时明确unavailable，审计不允许修改原时刻或借旧包；身份红→绿4项已保存。

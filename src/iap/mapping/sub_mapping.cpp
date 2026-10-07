@@ -14,7 +14,9 @@
 #include <gtsam_points/types/gaussian_voxelmap_gpu.hpp>
 #include <gtsam_points/factors/integrated_gicp_factor.hpp>
 #include <gtsam_points/factors/integrated_vgicp_factor.hpp>
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+// GLIM src/glim/mapping/sub_mapping.cpp: IAP selects the parity-tested
+// native GPU factor; matching mathematics and existing consumers stay aligned.
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
 #include <gtsam_points/cuda/cuda_stream.hpp>
 #include <gtsam_points/cuda/stream_temp_buffer_roundrobin.hpp>
@@ -304,7 +306,7 @@ void SubMapping::insert_frame(const EstimationFrame::ConstPtr& odom_frame_) {
             continue;
           }
 
-          auto factor = gtsam::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(X(keyframe_indices[i]), X(current), voxelmap, keyframes.back()->frame, stream, buffer);
+          auto factor = gtsam::make_shared<gtsam_points::IapObservedVGICPFactorGPU>(X(keyframe_indices[i]), X(current), voxelmap, keyframes.back()->frame, stream, buffer);
           graph->add(factor);
         }
       }

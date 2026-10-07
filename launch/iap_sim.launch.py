@@ -127,6 +127,7 @@ def _setup(context):
         "advisory_calibration": calibration,
         "advisory_trial": trial_path,
         "advisory_guidance_enabled": context.launch_configurations.get("advisory_guidance", "false").lower()=="true",
+        "capture_advisory_residuals": context.launch_configurations.get("capture_advisory_residuals", "false").lower()=="true",
         "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
@@ -167,6 +168,7 @@ def _setup(context):
                 "advisory_calibration": calibration,
                 "advisory_trial": trial_path,
                 "advisory_guidance": context.launch_configurations.get("advisory_guidance", "false"),
+                "capture_advisory_residuals": context.launch_configurations.get("capture_advisory_residuals", "false"),
                 "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
@@ -217,6 +219,8 @@ def generate_launch_description():
                                  description="Include FGO posterior proxy in Advisory (legacy A/B only)"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
             DeclareLaunchArgument("capture_failure_map", default_value="false"),
+            DeclareLaunchArgument("capture_advisory_residuals", default_value="false", choices=["true","false"],
+                                  description="Opt-in actual GPU postopt quality residuals; same original quality cadence"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),
             OpaqueFunction(function=_setup),
         ]

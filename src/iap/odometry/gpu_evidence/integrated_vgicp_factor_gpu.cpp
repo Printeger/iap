@@ -84,6 +84,7 @@ IapObservedVGICPFactorGPU::IapObservedVGICPFactorGPU(
 IapObservedVGICPFactorGPU::~IapObservedVGICPFactorGPU() {}
 
 void IapObservedVGICPFactorGPU::request_evidence() { derivatives->request_evidence(); }
+void IapObservedVGICPFactorGPU::cancel_evidence() { derivatives->cancel_evidence(); }
 iap::GpuMatchCapture IapObservedVGICPFactorGPU::take_evidence() { return derivatives->take_evidence(); }
 
 void IapObservedVGICPFactorGPU::print(const std::string& s, const gtsam::KeyFormatter& keyFormatter) const {
@@ -247,7 +248,7 @@ void IapObservedVGICPFactorGPU::store_linearized(const void* lin_output_cpu) {
   linearization_result.reset(new LinearizedSystem6(*linearized));
   evaluation_result = linearized->error;
 
-  derivatives->harvest_evidence(linearized->num_inliers);
+  derivatives->harvest_evidence();
   derivatives->update_inliers(linearized->num_inliers);
 }
 

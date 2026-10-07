@@ -7,7 +7,9 @@
 
 #ifdef GTSAM_POINTS_USE_CUDA
 #include <gtsam_points/types/gaussian_voxelmap_gpu.hpp>
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+// GLIM src/glim/viewer/standard_viewer_mem.cpp: IAP selects the parity-tested
+// native GPU factor; matching mathematics and existing consumers stay aligned.
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #endif
 
 namespace glim {
@@ -155,7 +157,7 @@ FactorMemoryStats::FactorMemoryStats(const gtsam::NonlinearFactor::shared_ptr& f
   }
 
 #ifdef GTSAM_POINTS_USE_CUDA
-  auto vgicp_gpu = dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(factor.get());
+  auto vgicp_gpu = dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(factor.get());
   if (vgicp_gpu) {
     cpu_bytes = vgicp_gpu->memory_usage();
     gpu_bytes = vgicp_gpu->memory_usage_gpu();

@@ -21,7 +21,9 @@
 #include <gtsam_points/factors/linear_damping_factor.hpp>
 #include <gtsam_points/factors/integrated_gicp_factor.hpp>
 #include <gtsam_points/factors/integrated_vgicp_factor.hpp>
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+// GLIM src/glim/odometry/odometry_estimation_gpu.cpp: IAP selects the parity-tested
+// native GPU factor; matching mathematics and existing consumers stay aligned.
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gtsam_points/cuda/nonlinear_factor_set_gpu.hpp>
@@ -29,6 +31,8 @@
 #include <iap/util/config.hpp>
 #include <iap/util/run_log_manager.hpp>
 #include <iap/util/timing_csv.hpp>
+#include <iap/util/shared_state.hpp>
+#include <iap/odometry/gpu_evidence/evidence_writer.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/common/cloud_deskewing.hpp>
 #include <iap/common/cloud_covariance_estimation.hpp>
@@ -94,6 +98,7 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   gamma_lidar_max    = config.param<double>("odometry_estimation", "gamma_lidar_max",    10.0);
   icp_quality_stride = std::max(1, config.param<int>("odometry_estimation", "icp_quality_stride", 1));
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
+  enable_gpu_match_evidence = config.param<bool>("odometry_estimation", "enable_gpu_match_evidence", false);
   icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
                                                   "iap_icp.csv");
   if (const auto* run_logs = RunLogManager::get_if_initialized()) {
@@ -112,12 +117,19 @@ OdometryEstimationGPU::OdometryEstimationGPU(const OdometryEstimationGPUParams& 
 
   stream.reset(new gtsam_points::CUDAStream());
   stream_buffer_roundrobin.reset(new gtsam_points::StreamTempBufferRoundRobin());
+  if(params.enable_gpu_match_evidence) {
+    const auto* logs=RunLogManager::get_if_initialized();
+    if(!logs) throw std::runtime_error("GPU evidence requires shared run resolver initialization");
+    gpu_evidence_writer_=std::make_unique<iap::GpuMatchEvidenceWriter>(*logs);
+    logger->info("[gpu_evidence] enabled actual postopt quality samples; original stride={} limit=128",params.icp_quality_stride);
+  }
 }
 
 OdometryEstimationGPU::~OdometryEstimationGPU() {
   frames.clear();
   keyframes.clear();
   smoother.reset();
+  gpu_evidence_writer_.reset(); // Drain owned evidence before module unload.
 }
 
 void OdometryEstimationGPU::create_frame(EstimationFrame::Ptr& new_frame) {
@@ -167,7 +179,14 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   }
 
   iap::timing_csv::ScopedTimer icp_quality_timer(frames[current]->stamp, "1.2_update_frames_icp_quality");
+  const auto record_unrequested_frame=[&](const char* reason) {
+    if(!gpu_evidence_writer_) return;
+    iap::GpuMatchEvidencePacket packet;
+    packet.owner.source_frame_id=frames[current]->id;packet.owner.source_stamp=frames[current]->stamp;
+    packet.capture.failure_reason=reason;gpu_evidence_writer_->submit(std::move(packet));
+  };
   if (!frames[current]->frame->size()) {
+    record_unrequested_frame("EMPTY_SOURCE_FRAME");
     if (auto* lidar_snapshot =
             frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
                 "lidar_araim_snapshot")) {
@@ -196,6 +215,7 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   const bool should_run_icp_quality =
     params->icp_quality_stride <= 1 || !has_last_icp_quality_ || (current % params->icp_quality_stride) == 0;
   if (!should_run_icp_quality) {
+    record_unrequested_frame("SKIPPED_ORIGINAL_ICP_QUALITY_STRIDE");
     frames[current]->icp_quality = last_icp_quality_;
     apply_icp_quality_to_snapshot(frames[current]->icp_quality);
     logger->trace("icp_quality[{}]: reused latest quality gamma={:.2f} stride={}",
@@ -203,20 +223,28 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
     return;
   }
 
-  // Collect only IntegratedVGICPFactorGPU factors whose keys are all in the smoother
+  // Collect only IapObservedVGICPFactorGPU factors whose keys are all in the smoother
   gtsam::Values values = smoother->calculateEstimate();
   gtsam::NonlinearFactorGraph vgicp_factors;
   for (const auto& f : new_factors) {
-    if (!dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(f.get())) {
+    if (!dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get())) {
       continue;
     }
     const bool all_valid = std::all_of(f->keys().begin(), f->keys().end(), [&](gtsam::Key k) { return values.exists(k); });
     if (all_valid) {
       vgicp_factors.push_back(f);
+    } else if(gpu_evidence_writer_) {
+      iap::GpuMatchEvidencePacket packet;
+      packet.owner=static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get())->get_evidence_owner();
+      packet.key_count=f->keys().size();
+      std::copy(f->keys().begin(),f->keys().end(),packet.factor_keys.begin());
+      packet.capture.failure_reason="MISSING_OPTIMIZED_FACTOR_KEYS";
+      gpu_evidence_writer_->submit(std::move(packet));
     }
   }
 
   if (vgicp_factors.empty()) {
+    record_unrequested_frame("NO_OPTIMIZED_GPU_MATCHING_FACTORS");
     if (auto* lidar_snapshot =
             frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
                 "lidar_araim_snapshot")) {
@@ -224,7 +252,7 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
     }
     static bool logged_empty_vgicp = false;
     if (!logged_empty_vgicp) {
-      logger->info("[icp_csv] skip write: no IntegratedVGICPFactorGPU in new_factors (new_factors={})", new_factors.size());
+      logger->info("[icp_csv] skip write: no IapObservedVGICPFactorGPU in new_factors (new_factors={})", new_factors.size());
       logged_empty_vgicp = true;
     }
     return;
@@ -233,7 +261,52 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   // GPU linearization must precede CPU linearize to populate GPU-side correspondences
   gtsam_points::NonlinearFactorSetGPU factor_set;
   factor_set.add(vgicp_factors);
-  factor_set.linearize(values);
+  const auto state=gpu_evidence_writer_ ? iap::IapSharedState::instance().get_gnss_postopt_bundle().state : iap::GnssPostoptEvidence{};
+  const auto packet_for_factor=[&](gtsam_points::IapObservedVGICPFactorGPU& gpu) {
+    iap::GpuMatchEvidencePacket packet;packet.capture_requested=true;
+    packet.owner=gpu.get_evidence_owner();packet.key_count=gpu.keys().size();
+    std::copy(gpu.keys().begin(),gpu.keys().end(),packet.factor_keys.begin());
+    packet.T_world_source=values.at<gtsam::Pose3>(gpu.keys().back()).matrix();
+    packet.T_world_target=packet.owner.target_is_fixed ? gpu.get_fixed_target_pose().matrix().cast<double>() :
+      values.at<gtsam::Pose3>(gpu.keys().front()).matrix();
+    packet.T_lidar_imu=T_lidar_imu.matrix();
+    packet.gnss_frame_id=state.frame_id;packet.gnss_update_sequence=state.update_sequence;
+    packet.gnss_epoch_identity=state.epoch_source_identity;packet.gnss_state_stamp=state.state_stamp;
+    packet.gnss_epoch_stamp=state.gnss_stamp;packet.used_constellations=state.used_constellations;
+    packet.gnss_owner_matches=state.optimized_valid && state.frame_id==packet.owner.source_frame_id &&
+      std::abs(state.state_stamp-packet.owner.source_stamp)<1e-9;
+    return packet;
+  };
+  const auto record_failed_batch=[&](const std::string& reason) {
+    if(!gpu_evidence_writer_) return;
+    for(const auto& f:vgicp_factors) {
+      auto& gpu=*static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get());
+      gpu.cancel_evidence();
+      auto packet=packet_for_factor(gpu);
+      packet.capture.failure_reason=reason.substr(0,512);
+      gpu_evidence_writer_->submit(std::move(packet));
+    }
+  };
+  if(gpu_evidence_writer_) for(const auto& f:vgicp_factors)
+    static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get())->request_evidence();
+  try {
+    factor_set.linearize(values);
+  } catch(const std::exception& e) {
+    record_failed_batch(std::string("GPU_QUALITY_LINEARIZATION_EXCEPTION: ")+e.what());
+    throw; // Preserve original matching exception behavior, no retry/fallback.
+  } catch(...) {
+    record_failed_batch("GPU_QUALITY_LINEARIZATION_UNKNOWN_EXCEPTION");
+    throw;
+  }
+  if(gpu_evidence_writer_) {
+    // GNSS finish precedes this original quality pass. Join only its actual
+    // owner and original time; mismatches remain visible, never borrowed.
+    for(const auto& f:vgicp_factors) {
+      auto& gpu=*static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get());
+      auto packet=packet_for_factor(gpu);packet.capture=gpu.take_evidence();
+      gpu_evidence_writer_->submit(std::move(packet));
+    }
+  }
 
   // CPU-side Hessian extraction
   auto gfg = vgicp_factors.linearize(values);
@@ -256,7 +329,7 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   int    inlier_count    = 0;
   double inlier_fraction = 0.0;
   for (const auto& f : vgicp_factors) {
-    if (auto* vgicp = dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(f.get())) {
+    if (auto* vgicp = dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get())) {
       inlier_fraction += vgicp->inlier_fraction();
       inlier_count    += vgicp->num_inliers();
     }
@@ -334,7 +407,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
   }
 
   struct PendingLidarBlock {
-    gtsam_points::IntegratedVGICPFactorGPU::shared_ptr factor;
+    gtsam_points::IapObservedVGICPFactorGPU::shared_ptr factor;
     iap::LidarAraimBlock block;
   };
 
@@ -352,7 +425,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
 
   const auto append_block_metadata =
       [this, current, &pending_blocks](
-          const gtsam_points::IntegratedVGICPFactorGPU::shared_ptr& factor,
+          const gtsam_points::IapObservedVGICPFactorGPU::shared_ptr& factor,
           const glim::EstimationFrame::ConstPtr& target,
           const bool target_is_fixed,
           const int level_id,
@@ -374,6 +447,8 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
             : 1e9;
 
         pending_blocks.push_back({factor, std::move(block)});
+        factor->set_evidence_owner({frames[current]->id,target ? target->id : -1,
+          frames[current]->stamp,target ? target->stamp : 0.,voxel_resolution,level_id,target_is_fixed});
       };
 
   const auto create_binary_factor = [this, &append_block_metadata](
@@ -389,7 +464,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
     for (int level_id = 0; level_id < static_cast<int>(target->voxelmaps.size());
          ++level_id) {
       const auto& voxelmap = target->voxelmaps[static_cast<std::size_t>(level_id)];
-      auto factor = gtsam::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(target_key, source_key, voxelmap, source->frame, stream, buffer);
+      auto factor = gtsam::make_shared<gtsam_points::IapObservedVGICPFactorGPU>(target_key, source_key, voxelmap, source->frame, stream, buffer);
       factor->set_enable_surface_validation(true);
       factors.add(factor);
       append_block_metadata(
@@ -410,7 +485,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
     for (int level_id = 0; level_id < static_cast<int>(target->voxelmaps.size());
          ++level_id) {
       const auto& voxelmap = target->voxelmaps[static_cast<std::size_t>(level_id)];
-      auto factor = gtsam::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(fixed_target_pose, source_key, voxelmap, source->frame, stream, buffer);
+      auto factor = gtsam::make_shared<gtsam_points::IapObservedVGICPFactorGPU>(fixed_target_pose, source_key, voxelmap, source->frame, stream, buffer);
       factor->set_enable_surface_validation(true);
       factors.add(factor);
       append_block_metadata(

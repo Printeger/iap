@@ -3,6 +3,7 @@
 #include <string>
 
 #include <iap/odometry/odometry_estimation_imu.hpp>
+namespace iap { class GpuMatchEvidenceWriter; }
 
 namespace gtsam_points {
 class VoxelizedFrame;
@@ -49,6 +50,7 @@ public:
   double gamma_lidar_max;     ///< Maximum noise inflation factor for degenerate LiDAR (default 10.0)
   int         icp_quality_stride = 1;             ///< Compute ICP quality every N frames; skipped frames reuse latest quality
   bool        enable_icp_csv  = false;           ///< Write per-frame ICP quality CSV
+  bool        enable_gpu_match_evidence = false; ///< Opt-in actual CUDA residuals; no extra quality passes
   std::string icp_csv_path    = "iap_icp.csv";
   // -----------------------------------------------------------------------
 };
@@ -65,6 +67,7 @@ public:
   virtual ~OdometryEstimationGPU() override;
 
 private:
+  std::unique_ptr<iap::GpuMatchEvidenceWriter> gpu_evidence_writer_;
   virtual void create_frame(EstimationFrame::Ptr& frame) override;
   virtual gtsam::NonlinearFactorGraph create_factors(const int current, const gtsam_points::shared_ptr<gtsam::ImuFactor>& imu_factor, gtsam::Values& new_values) override;
   virtual void update_frames(const int current, const gtsam::NonlinearFactorGraph& new_factors) override;

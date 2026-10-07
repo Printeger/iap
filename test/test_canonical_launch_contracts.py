@@ -302,6 +302,14 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(ros["acc_scale"], 1.0)
             odometry = json.loads((run / "metadata/config/iap/config_odometry.json").read_text())
             self.assertEqual(odometry["odometry_estimation"]["initialization_mode"], "NAIVE")
+            self.assertFalse(odometry["odometry_estimation"]["enable_gpu_match_evidence"])
+            context.launch_configurations["capture_advisory_residuals"]="true"
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
+                runtime._setup(context)
+            captured=json.loads((run/"metadata/config/iap/config_odometry.json").read_text())
+            self.assertTrue(captured["odometry_estimation"].pop("enable_gpu_match_evidence"))
+            odometry["odometry_estimation"].pop("enable_gpu_match_evidence")
+            self.assertEqual(captured,odometry) # Capture changes no quality cadence or dynamics.
             self.assertFalse(ros["sim"]["align_planner_odom_to_truth"])
             self.assertEqual(ros["sim"]["static_planner_translation_m"],local["static_planner_translation_m"])
             self.assertIn("libplanner_local_map_extension.so",ros["extension_modules"])

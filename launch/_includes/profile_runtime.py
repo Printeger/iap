@@ -109,6 +109,7 @@ def materialize_profile(
     integrity_profile: str = "fused",
     forbid_sim_extensions: bool = False,
     simulation_scenario: dict[str, Any] | None = None,
+    capture_gpu_match_evidence: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Create a run-local config and validate its module contract.
 
@@ -117,6 +118,8 @@ def materialize_profile(
     """
 
     source = Path(source_config_dir).expanduser().resolve()
+    if capture_gpu_match_evidence and (simulation_scenario is None or contract != "full_stack"):
+        raise RuntimeError("GPU residual capture requires the canonical simulation full_stack contract")
     run_root = Path(output_dir).expanduser()
     if not run_root.is_absolute():
         raise RuntimeError("output_dir must be an absolute path")
@@ -298,6 +301,8 @@ def materialize_profile(
         )
         if simulation_scenario is not None and key == "config_odometry":
             secondary["odometry_estimation"]["initialization_mode"] = "NAIVE"
+        if key == "config_odometry":
+            secondary["odometry_estimation"]["enable_gpu_match_evidence"] = capture_gpu_match_evidence
         secondary_name = f"{key}.json"
         _write_json(runtime_dir / secondary_name, secondary)
         global_config[key] = secondary_name
@@ -316,6 +321,7 @@ def materialize_profile(
         "output_dir": str(run_root),
         "extension_modules": modules,
         "integrity_profile": integrity_profile,
+        "capture_gpu_match_evidence": capture_gpu_match_evidence,
         "imu_topic": glim_ros.get("imu_topic", ""),
         "points_topic": glim_ros.get("points_topic", ""),
         "materialized_secondary_configs": materialized_secondary_configs,

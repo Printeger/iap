@@ -12,7 +12,9 @@
 #include <gtsam_points/optimizers/levenberg_marquardt_optimization_status.hpp>
 
 #ifdef GTSAM_POINTS_USE_CUDA
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+// GLIM src/glim/viewer/standard_viewer_callbacks.cpp: IAP selects the parity-tested
+// native GPU factor; matching mathematics and existing consumers stay aligned.
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #endif
 
 #include <iap/odometry/callbacks.hpp>
@@ -265,7 +267,7 @@ void StandardViewer::set_callbacks() {
         }
 
 #ifdef GTSAM_POINTS_USE_CUDA
-        const auto gpu_factor = dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(factor.get());
+        const auto gpu_factor = dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(factor.get());
         if (gpu_factor) {
           const auto l = [this, idx0](const gtsam::NonlinearFactor* factor) -> std::optional<FactorLine> {
             const auto found0 = odometry_poses.find(idx0);
@@ -273,7 +275,7 @@ void StandardViewer::set_callbacks() {
               return std::nullopt;
             }
 
-            const Eigen::Vector3f pt1 = static_cast<const gtsam_points::IntegratedVGICPFactorGPU*>(factor)->get_fixed_target_pose().translation();
+            const Eigen::Vector3f pt1 = static_cast<const gtsam_points::IapObservedVGICPFactorGPU*>(factor)->get_fixed_target_pose().translation();
             return std::make_tuple(found0->second.translation(), pt1, Eigen::Vector4f(0.0f, 1.0f, 0.0f, factors_alpha), Eigen::Vector4f(1.0f, 0.0f, 0.0f, factors_alpha));
           };
 

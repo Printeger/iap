@@ -45,8 +45,9 @@ public:
   void touch_points();
 
   void request_evidence();
+  void cancel_evidence();
   iap::GpuMatchCapture take_evidence();
-  void harvest_evidence(int inliers);
+  void harvest_evidence();
 
   // synchronized interface
   LinearizedSystem6 linearize(const Eigen::Isometry3f& x);
@@ -62,15 +63,14 @@ public:
 
 private:
   void begin_evidence(const Eigen::Isometry3f* linearization_point);
-  void finish_evidence();
+  void finish_evidence(const LinearizedSystem6* output);
   bool evidence_operation(int result, const char* operation);
   bool evidence_requested=false, evidence_pending=false;
   bool evidence_sync_ok=false;
   int evidence_slots=0, evidence_stride=0;
   std::uint64_t evidence_sequence=0;
   iap::GpuMatchResidual* evidence_gpu=nullptr;
-  iap::GpuMatchResidual* evidence_cpu=nullptr;
-  Eigen::Matrix4f evidence_transform=Eigen::Matrix4f::Identity();
+  iap::GpuMatchTransfer* evidence_cpu=nullptr;
   iap::GpuMatchCapture last_evidence;
   bool enable_offloading;
 

@@ -21,8 +21,8 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam_points/factors/integrated_vgicp_factor.hpp>
-#if __has_include(<gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>)
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+#if __has_include(<iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>)
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #define IAP_DEMO8_HAS_VGICP_GPU 1
 #endif
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
@@ -585,7 +585,7 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
           dynamic_cast<const gtsam_points::IntegratedVGICPFactor*>(factor.get());
 #ifdef IAP_DEMO8_HAS_VGICP_GPU
       const auto* gpu_factor =
-          dynamic_cast<const gtsam_points::IntegratedVGICPFactorGPU*>(factor.get());
+          dynamic_cast<const gtsam_points::IapObservedVGICPFactorGPU*>(factor.get());
 #else
       const void* gpu_factor = nullptr;
 #endif

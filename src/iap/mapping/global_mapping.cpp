@@ -23,7 +23,9 @@
 #include <gtsam_points/factors/rotate_vector3_factor.hpp>
 #include <gtsam_points/factors/integrated_gicp_factor.hpp>
 #include <gtsam_points/factors/integrated_vgicp_factor.hpp>
-#include <gtsam_points/factors/integrated_vgicp_factor_gpu.hpp>
+// GLIM src/glim/mapping/global_mapping.cpp: IAP selects the parity-tested
+// native GPU factor; matching mathematics and existing consumers stay aligned.
+#include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
 #include <gtsam_points/optimizers/isam2_ext.hpp>
 #include <gtsam_points/optimizers/isam2_ext_dummy.hpp>
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
@@ -345,7 +347,7 @@ void GlobalMapping::find_overlapping_submaps(double min_overlap) {
         const auto& stream = stream_buffer.first;
         const auto& buffer = stream_buffer.second;
         for (const auto& voxelmap : submaps[i]->voxelmaps) {
-          new_factors->emplace_shared<gtsam_points::IntegratedVGICPFactorGPU>(X(i), X(j), voxelmap, subsampled_submaps[j], stream, buffer);
+          new_factors->emplace_shared<gtsam_points::IapObservedVGICPFactorGPU>(X(i), X(j), voxelmap, subsampled_submaps[j], stream, buffer);
         }
       }
 #endif
@@ -481,7 +483,7 @@ std::shared_ptr<gtsam::NonlinearFactorGraph> GlobalMapping::create_matching_cost
       const auto& stream = stream_buffer.first;
       const auto& buffer = stream_buffer.second;
       for (const auto& voxelmap : submaps[i]->voxelmaps) {
-        factors->emplace_shared<gtsam_points::IntegratedVGICPFactorGPU>(X(i), X(current), voxelmap, subsampled_submaps[current], stream, buffer);
+        factors->emplace_shared<gtsam_points::IapObservedVGICPFactorGPU>(X(i), X(current), voxelmap, subsampled_submaps[current], stream, buffer);
       }
     }
 #endif
@@ -572,7 +574,7 @@ void GlobalMapping::save(const std::string& path) {
   for (const auto& factor : isam2->getFactorsUnsafe()) {
     bool serializable = !dynamic_cast<gtsam_points::IntegratedMatchingCostFactor*>(factor.get())
 #ifdef GTSAM_POINTS_USE_CUDA
-                        && !dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(factor.get())
+                        && !dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(factor.get())
 #endif
       ;
 
@@ -605,7 +607,7 @@ void GlobalMapping::save(const std::string& path) {
       type = "vgicp";
     }
 #ifdef GTSAM_POINTS_USE_CUDA
-    else if (dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(factor.second.get())) {
+    else if (dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(factor.second.get())) {
       type = "vgicp_gpu";
     }
 #endif
@@ -879,7 +881,7 @@ bool GlobalMapping::load(const std::string& path) {
         const auto& buffer = stream_buffer.second;
 
         for (const auto& voxelmap : submaps[first]->voxelmaps) {
-          graph.emplace_shared<gtsam_points::IntegratedVGICPFactorGPU>(X(first), X(second), voxelmap, subsampled_submaps[second], stream, buffer);
+          graph.emplace_shared<gtsam_points::IapObservedVGICPFactorGPU>(X(first), X(second), voxelmap, subsampled_submaps[second], stream, buffer);
         }
 #else
         logger->warn("GPU is enabled but gtsam_points was built without CUDA!!");

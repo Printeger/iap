@@ -65,8 +65,7 @@ if(BUILD_WITH_CUDA)
 endif()
 
 # Narrow native adoption of the installed matching kernel for actual residual
-# evidence; the original production backend remains selected until parity and
-# the opt-in exporter are integrated. No external gtsam_points source changes.
+# evidence, with parity to the installed backend. No external source changes.
 if(BUILD_WITH_CUDA)
   # CUDA_ARCHITECTURES=native is supported starting with CMake 3.24.
   if(CMAKE_VERSION VERSION_LESS 3.24)
@@ -90,6 +89,7 @@ if(BUILD_WITH_CUDA)
   target_compile_options(iap_gpu_match_evidence PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
   target_link_libraries(iap_gpu_match_evidence PUBLIC gtsam_points::gtsam_points CUDA::cudart)
+  target_compile_definitions(iap_gpu_match_evidence PUBLIC IAP_NATIVE_GPU_MATCH)
   list(APPEND iap_LIBRARIES iap_gpu_match_evidence)
 endif()
 
@@ -140,6 +140,7 @@ add_library(iap SHARED
   src/iap/util/logging.cpp
   src/iap/util/run_log_manager.cpp
   src/iap/util/export_factors.cpp
+  src/iap/odometry/gpu_evidence/evidence_writer.cpp
   src/iap/util/time_keeper.cpp
   src/iap/util/trajectory_manager.cpp
   src/iap/util/extension_module.cpp
@@ -235,6 +236,7 @@ target_link_libraries(iap
   spdlog::spdlog
   $<TARGET_NAME_IF_EXISTS:Iridescence::Iridescence>
   ${OpenCV_LIBRARIES}
+  $<TARGET_NAME_IF_EXISTS:iap_gpu_match_evidence>
 )
 if(BUILD_WITH_OPENCV)
   target_compile_definitions(iap PUBLIC GLIM_USE_OPENCV)
@@ -650,6 +652,8 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(Python3 REQUIRED COMPONENTS Interpreter)
       find_package(ament_cmake_gtest REQUIRED)
       # Step 10: tests declare narrow deps via interface targets (impl still in iap)
+      ament_add_gtest(test_gpu_match_evidence_writer test/test_gpu_match_evidence_writer.cpp)
+      target_link_libraries(test_gpu_match_evidence_writer iap)
       if(BUILD_WITH_CUDA)
         ament_add_gtest(test_gpu_match_evidence test/test_gpu_match_evidence.cpp)
         target_link_libraries(test_gpu_match_evidence iap_gpu_match_evidence CUDA::cudart ${CMAKE_DL_LIBS})

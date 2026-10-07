@@ -32,7 +32,7 @@ extern "C" cudaError_t cudaMemcpyAsync(void* dst, const void* src, size_t bytes,
 extern "C" cudaError_t cudaHostAlloc(void** ptr, size_t bytes, unsigned int flags) {
   using Allocate=cudaError_t (*)(void**,size_t,unsigned int);
   static auto allocate=reinterpret_cast<Allocate>(dlsym(RTLD_NEXT,"cudaHostAlloc"));
-  if(fail_evidence_host_allocation && bytes==iap::kGpuMatchEvidenceLimit*sizeof(iap::GpuMatchResidual)) {
+  if(fail_evidence_host_allocation && bytes==sizeof(iap::GpuMatchTransfer)) {
     fail_evidence_host_allocation=false;return cudaErrorMemoryAllocation;
   }
   return allocate ? allocate(ptr,bytes,flags) : cudaErrorUnknown;
@@ -93,6 +93,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     EXPECT_TRUE(old_h.augmentedInformation().isApprox(new_h.augmentedInformation(),1e-6));
     const double original_error=original->error(values),observed_error=observed->error(values);
     EXPECT_NEAR(original_error,observed_error,1e-6*std::max(1.,std::abs(original_error)));
+    EXPECT_NEAR(capture.original_cost,original_error,1e-6*std::max(1.,std::abs(original_error)));
     double sample_cost=0.;std::set<int> identifiers;bool multi_point_voxel=false;
     for(const auto& record:capture.samples) {
       ASSERT_TRUE(record.valid);ASSERT_GE(record.source_index,0);ASSERT_GE(record.target_index,0);
@@ -141,6 +142,8 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     EXPECT_FALSE(fail_evidence_sync);
     const auto sync_failure=observed->take_evidence();EXPECT_FALSE(sync_failure.available);
     EXPECT_TRUE(sync_failure.samples.empty());EXPECT_NE(sync_failure.failure_reason.find("cudaStreamSynchronize"),std::string::npos);
+    observed->request_evidence();observed->cancel_evidence();factor_set.linearize(values);
+    EXPECT_FALSE(observed->take_evidence().available);
   }
   }
 }
