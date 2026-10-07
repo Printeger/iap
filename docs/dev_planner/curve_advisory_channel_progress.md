@@ -436,3 +436,22 @@ TOC/TOE/TTR/AODE及健康metadata全部一致，最大ECEF差2.766e-7m、
 analysis/rinex_full_window绑定命令、NAV/独立源码/实际binary/输入hash；初次分析
 仅小数offset字符串不同拒绝，改按原数值配对，原CSV不改写，不算模型红例。
 正式B0/9+0/9、D0/6、默认不推广。
+
+
+B／A协方差版历史现场：干净3634d4e、GPU三项／安装Release／配置通过，
+GPS＋北斗RINEX、12:00UTC、300秒run190444Z_824。2992wire历元都含两信号；
+GPS23936／BDS59840观测；GLIO真实PR残差样本23560／58900、RMS9.158／7.835m。
+2944 Monitor均两星座、GNSS/LiDAR valid但UNSAFE，末HPL107.637／VPL229.277m。
+C-G联合钟差差值协方差59/59有效，G自身差值不请求；原state/epoch差42–59ms未传播。
+冻结28/30、两失败保留；原131风险样本25raw+LiDAR／32info-only+LiDAR／74LiDAR-only，
+联合故障／来源资格／生产GPU残差／米数仍不足。原/clock无负跳，完整暂停仍未取得资格。
+74曲线／67命令ID／37定时激活，真实前进36.053m、距固定目标0.165853m但原FSM未完成。
+命令P/V/A及定时边界独立核对见execution.json；七个server撤销无命令，两个ignored
+ID4/15不计成功。server日志为墙钟，历史接收余量不可判定；初次跨域相减字段已撤回。
+无unverified hover，一次checked brake拒绝无替换；健康300条中288条完整，启动／退出缺项见JSON。
+首个Curve4/gen62重定时后ratio1.100470仍拒绝；末次290/gen2294 Budget，末动力学
+ratio105.239，final_check未检查，候选与原图留存。图文analysis/world_covariance_rinex_live；
+world_covariance_rinex_live_final绑定完整命令、身份／NAV／配置／binary／input hash。
+Curve49/gen595生产重放190538Z_435复现纠正后动态1.311→1.501→3.004及refine异常；
+私有成本梯度诊断190805Z_870不是生产绿证据，条件数／约束可实现性仍待定位。
+B正式0/9+0/9、D0/6、不推广；更靠近目标不写成任务通过或严格配对收益。

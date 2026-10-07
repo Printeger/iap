@@ -1202,3 +1202,9 @@ FGO导出的3×3位置协方差现在属于优化位姿的世界坐标轴；原6
 历史GPS＋北斗10Hz／300秒广播传播独立对照及B1I官方规范审计见
 `log/20261007T091820Z_056/export/analysis/rinex_full_window/report.md`与
 `export/analysis/bds_icd_audit/report.md`（同一campaign下）。此证据不授予真实PL米数或正式9＋9资格。
+
+3634d4e历史GPS＋北斗300秒诊断已完成，逐层统计和图文见
+`log/20261007T091820Z_056/export/analysis/world_covariance_rinex_live/report.md`。
+实际双星座使用已有证据，42–59ms状态／epoch差、GPU残差及联合故障资格仍待验证。
+末距固定目标0.166m但原规则未完成；历史server墙钟日志不能计算ROS生效前余量。
+正式9＋9和六次对照尚未计数。
