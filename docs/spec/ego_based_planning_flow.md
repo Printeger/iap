@@ -497,7 +497,7 @@ GNSS epoch／逐测距残差，planner 删除自己的测距／星历缓存重�
 停车证据另按当次物理观测、净空及预算日志分析；工作树已干净，不是停车原因。
 
 第二轮 `log/20261007T035010Z_435` 坐标方向实测通过、完整 epoch 已运输；
-GNSS 仍因监测最坏整 GPS 星座故障退化而拒绝，时间配对仍不足 0.05 s。
+GNSS 当前监测仍拒绝，时间配对仍不足 0.05 s；历史 worst_hyp 行格式错误，假设身份未取得按列证据。
 当次后段 A* 请求起点 execution=OK，但取整格点 START_BLOCKED。先修复已证实的
 取整错误：floor(x+0.5) 替代 cast<int> 对中心负侧朝零截断；原算法可能偏移
 超过最近格点的额外一步。分辨率、池大小、预算、guide 起点及所有实际曲线／
@@ -505,17 +505,22 @@ GNSS 仍因监测最坏整 GPS 星座故障退化而拒绝，时间配对仍不�
 授权未经检查的连接；此修正需新的 canonical 现场回归。
 
 本轮正式汇总：
-[图文报告](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/report.md)、
-[原始请求／误差配对](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/error_pair_requests.csv)、
-[弱方向与正则化](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/weak_directions.csv)。
+[图文报告](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final_audited/report.md)、
+[原始请求／误差配对](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final_audited/error_pair_requests.csv)、
+[弱方向与正则化](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final_audited/weak_directions.csv)。
 三次干净版本探索实测（非配对 seed 校准）：76 请求、74 完整录制、73 重放；
 两个超时和一个未重放请求保留。三轮前进 9.777、4.661、4.640 m，均未到分叉。
 取整修正通过回归但未恢复完整森林执行，起点—格点连接仍失败，固定路线待测。
 ENU 方向闭合误差约 1e-16；优化后 Up 对齐漂移最大 6.529°，参考—位姿差
 0.124–0.273 s，不满足 0.05 s；同参考时刻误差合格配对为 0。
-GNSS 原始观测已运输，但整 GPS 星座故障不可监测导致当前来源拒绝；融合
+GNSS 原始观测已运输，但当前监测拒绝该来源；仅 GPS 星座及整星座故障配置已记录。融合
 有效结果均由 LiDAR 提供、prior_used=false，不能证明实际双源互补。
 真实已观测范围出现 PL 差异，9 份单层抽查各 100 唯一体素；分叉覆盖、趋势／
 95%经验覆盖、9 校准＋9 独立验证、6 引导对照仍 INCONCLUSIVE／待测，默认不推广。
 新报告工具校验历史 replay 产物 hash、拒绝重复独立 run；旧 manifest 未登记
-receiver sibling CSV，其米数仅列诊断，不追认校准资格。报告相关 7 项检查通过。
+receiver sibling CSV，其米数仅列诊断，不追认校准资格。报告相关 9 项检查通过。
+
+最终日志核验发现历史 ARAIM `worst_hyp` 行为 62 列，表头及 epoch 行为 60 列。
+报告将这些假设行标为格式无效、身份统计为空，保留原日志及旧报告快照；不重新
+排列列值追认假设身份。epoch 行和冻结输入支持当前 GNSS 监测拒绝的观察，
+整星座退化的精确假设身份仍需修复生产导出后核验。现场停车归因与此独立。

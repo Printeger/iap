@@ -39,6 +39,28 @@ def information_diagnostics(value):
     return {'lambda_min':value['eigenvalues'][0],'lambda_max':value['eigenvalues'][-1],
             **dict(zip(('weak_x','weak_y','weak_z'),value['weak_direction']))}
 
+def araim_rows(path):
+    """Count only rows matching the recorded header; never shift old columns."""
+    result={'epoch_rows':0,'worst_hyp_sat_id_minus_one':0,'one_constellation_epochs':0,
+            'gnss_rejected_epochs':0,'invalid_rows_by_type':{}}
+    invalid=Counter()
+    with path.open() as f:
+        reader=csv.reader(f);header=next(reader)
+        for fields in reader:
+            kind=fields[0] if fields else 'empty'
+            if len(fields)!=len(header):
+                invalid[kind]+=1;continue
+            row=dict(zip(header,fields))
+            if kind=='epoch':
+                result['epoch_rows']+=1
+                result['one_constellation_epochs']+=row['n_const']=='1'
+                result['gnss_rejected_epochs']+=row['gnss_valid']=='0'
+            if kind=='worst_hyp' and row['sat_id']=='-1':
+                result['worst_hyp_sat_id_minus_one']+=1
+    result['invalid_rows_by_type']=dict(invalid)
+    if invalid['worst_hyp']:result['worst_hyp_sat_id_minus_one']=None
+    return result
+
 def unique_trials(paths):
     resolved=[p.resolve() for p in paths]
     if len(resolved)!=len(set(resolved)):raise ValueError('duplicate independent trial')
@@ -168,12 +190,10 @@ def analyze(run,audit):
     source_cfg=read(run/'metadata/config/config_gnss.json')['integrity']
     araim=run/'export/current_integrity/iap_araim.csv'
     source={'config':str(run/'metadata/config/config_gnss.json'),'araim_csv':str(araim),
+            'araim_csv_sha256':digest(araim),
             'constellation_faults_enabled':source_cfg.get('enable_gnss_constellation_faults'),
             'degrade_on_degenerate_hypothesis':source_cfg.get('gnss_degrade_on_degenerate_hypothesis'),
-            'epoch_rows':0,'worst_hyp_sat_id_minus_one':0,'one_constellation_epochs':0}
-    for r in csv.DictReader(araim.open()):
-        if r['row_type']=='epoch':source['epoch_rows']+=1;source['one_constellation_epochs']+=r['n_const']=='1'
-        if r['row_type']=='worst_hyp' and r['sat_id']=='-1':source['worst_hyp_sat_id_minus_one']+=1
+            **araim_rows(araim)}
     reasons=Counter();astar=Counter();events=[]
     for p in (run/'runtime/ros').glob('ego_planner_node_*.log'):
         for line in p.open():
@@ -306,6 +326,7 @@ def main(args):
       'LiDAR 逐观测残差尚未导出；ICP RMSE 不可替代。GNSS 后验逐测距残差已在新输入与因子 CSV 保存。',
       '冻结空间预测与到达时误差关系、95%联合经验覆盖、趋势块分析尚无合格试验，不发布数值保证。','',
       '旧重放 manifest 未登记 sibling receiver CSV；其 PL 仅列为未配对诊断。空间 CSV、矩阵和输入均校验原 manifest hash；不追认接收点 PL 为校准证据。','',
+      '历史 ARAIM CSV 的 worst_hyp 行有额外列，假设身份统计置空；不移动列或用错误的零计数下结论。正确格式的 epoch 行及冻结输入仍表明 GNSS 当前监测拒绝。原日志保留，生产导出格式修复待完成。','',
       '[全部原始请求及时间/配对原因](error_pair_requests.csv) · [当次规划拒绝日志索引](planning_rejections.csv) · [summary.json](summary.json)','',
       '[弱方向原始数表](weak_directions.csv)','',
       '![真实输入、时间及方向](availability_time_coordinates.png)','',
@@ -323,6 +344,7 @@ def main(args):
           f'运动质量计数 {b["current_motion_quality_counts"]}；GNSS 监测可用性 {b["gnss_monitor_valid_counts"]}。',
           f'当次 A* 起终点拒绝 {t["astar_endpoint_failure_counts"]}。',
           f'[版本／配置／生命周期]({rel(t["run_manifest"])}) · [GNSS最坏假设]({rel(t["source_audit"]["araim_csv"])})。',
+          f'ARAIM 有效 epoch {t["source_audit"]["epoch_rows"]}，GNSS 拒绝 {t["source_audit"]["gnss_rejected_epochs"]}；格式无效行 {t["source_audit"]["invalid_rows_by_type"]}。',
           '所保存 failure map 常仅覆盖该种失败的首次发生；最后停车若无同代数地图，根因保持未知，不使用早期地图替代。','']
         for s in (s for s in selected if s['run_id']==t['run_id']):
             text += [f'{s["tag"]}：有效 {s["valid"]}/{s["requested"]}，没有覆盖实际分叉时不得改名为分叉扫描。',

@@ -17,15 +17,15 @@ GNSS epoch 重建未关联，参考—位姿约 0.2 s 不满足 0.05 s 校准门
 恢复问题按当次日志定位；先修正负坐标取整偏差，现场验证与报告另行登记。
 
 本轮正式结果（2026-10-07）：
-[图文 report.md](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/report.md)、
-[summary.json](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final/summary.json)。
+[图文 report.md](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final_audited/report.md)、
+[summary.json](../../log/20261007T032125Z_369/export/analysis/advisory_validation/final_audited/summary.json)。
 已完成三次 canonical、干净工作树、GPU 预检通过的独立探索运行；74/76 完整
 录制，73 份真实重放。起点／运动段或停滞／末次停滞附近分别扫描 100 唯一
 体素；未到实际分叉，未将停滞输入替换或改名为分叉输入。
 空间差异已观测（有效结果 LiDAR-only），不能据此验收双源、误差尺度或全图。
 方向转换数值闭合通过；优化后的 map Up/ENU Up 漂移最大 6.529°，物理竖直
 对齐和旋转不确定性尚未验证。参考—位姿 0.124–0.273 s，全部超出 0.05 s
-校准门限。GNSS 整星座故障退化被监测拒绝，未放宽准入。
+校准门限。GNSS 当前监测拒绝，单 GPS 星座及整星座故障配置保持原样，未放宽准入。
 三次分别前进 9.777／4.661／4.640 m，未到终点；原始停车原因与失败地图按
 当次 run 区分，晚期缺同身份地图的根因保持未知。坐标／来源、真实全场景敏感性、
 95%经验误差符合性、固定路线接续与完整任务均仍缺关键证据。
@@ -329,3 +329,8 @@ LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE。未启动三份真实冻结扫描、1
 Current Monitor 与真实曲线执行闸门不变。旧格式保留历史读取，缺证据不授予
 本轮校准资格。本轮开发与测试 run 为 `log/20261007T032125Z_369`；现场输入、
 固定路线、9＋9 误差与6次任务按顺序待测，不能以坐标单测替代实测。
+
+最终日志核验发现历史 ARAIM `worst_hyp` 行为 62 列，表头及 epoch 行为 60 列。
+报告将这些假设行标为格式无效、身份统计为空，保留原日志及旧报告快照；不重新
+排列列值追认假设身份。epoch 行和冻结输入支持当前 GNSS 监测拒绝的观察，
+整星座退化的精确假设身份仍需修复生产导出后核验。现场停车归因与此独立。

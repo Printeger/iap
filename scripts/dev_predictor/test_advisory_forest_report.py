@@ -3,10 +3,26 @@ from pathlib import Path
 import tempfile
 import unittest
 import numpy as np
-from advisory_forest_report import truth_at, csv_write, analyze, information_diagnostics, unique_trials, validated_replays, digest
+from advisory_forest_report import truth_at, csv_write, analyze, information_diagnostics, unique_trials, validated_replays, digest, araim_rows
 
 
 class ForestReportContract(unittest.TestCase):
+    def test_misaligned_hypothesis_rows_are_not_zero_or_valid_counts(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'araim.csv'
+            path.write_text('row_type,n_const,gnss_valid,sat_id\nepoch,1,0,\nworst_hyp,,,-1,,\n')
+            value=araim_rows(path)
+            self.assertEqual(value['epoch_rows'],1)
+            self.assertEqual(value['gnss_rejected_epochs'],1)
+            self.assertEqual(value['invalid_rows_by_type'],{'worst_hyp':1})
+            self.assertIsNone(value['worst_hyp_sat_id_minus_one'])
+
+    def test_valid_hypothesis_identity_uses_recorded_header(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'araim.csv'
+            path.write_text('row_type,n_const,gnss_valid,sat_id\nepoch,1,0,\nworst_hyp,,,-1\n')
+            self.assertEqual(araim_rows(path)['worst_hyp_sat_id_minus_one'],1)
+
     def test_repeated_trial_does_not_inflate_independent_count(self):
         with tempfile.TemporaryDirectory() as root:
             p=Path(root)
