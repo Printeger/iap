@@ -84,7 +84,8 @@ namespace ego_planner
     const double budget_elapsed = planning_budget_ ? planning_budget_->elapsed() : 0.;
     const unsigned repairs = planning_budget_ ? planning_budget_->used() : 0;
     const unsigned failure_phase = static_cast<unsigned>(last_plan_failure_);
-    const auto guide = bspline_optimizer_ ? bspline_optimizer_->recoveryGuide() : std::vector<Eigen::Vector3d>{};
+    const auto guide = bspline_optimizer_ && bspline_optimizer_->a_star_->lastResult().occupancy_generation==snapshot->generation
+        ? bspline_optimizer_->recoveryGuide() : std::vector<Eigen::Vector3d>{};
     std::vector<Eigen::Vector3d> goal_positions;
     for(const auto& target : planning_targets_) goal_positions.push_back(target.position);
     const double fitting_reserve_m=.5*snapshot->resolution_m;
@@ -743,6 +744,18 @@ namespace ego_planner
     last_plan_failure_=planning_budget_ && planning_budget_->expired() ? PlanFailure::Budget : PlanFailure::Connection;
   }
 
+  void EGOPlannerManager::recordTargetSelectionFailure(const Eigen::Vector3d& start,
+      const Eigen::Vector3d& velocity, const Eigen::Vector3d& acceleration,
+      const Eigen::Vector3d& requested_target) {
+    last_plan_failure_=planning_budget_ && (planning_budget_->expired() || planning_budget_->denied())
+        ? PlanFailure::Budget : PlanFailure::Target;
+    failure_start_p_=start;failure_start_v_=velocity;failure_start_a_=acceleration;
+    if(capture_failure_map_ && planning_view_ && planning_view_->snapshot) {
+      const auto cell=queryPlanningViewCell(requested_target);
+      captureFailureMap("attempt_failure",requested_target,start,cell);
+    }
+  }
+
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
       Eigen::Vector3d start_acc, Eigen::Vector3d target_pt, Eigen::Vector3d target_vel,
       bool polynomial_init, bool /* random_polynomial */) {
@@ -960,7 +973,8 @@ namespace ego_planner
           RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
               assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
           optimizer.setControlPoints(control);
-        } else if(advisory_violation && optimizer.addCurveGuideConstraints(control,interval)) {
+        } else if((advisory_violation || assessment.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+            assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) && optimizer.addCurveGuideConstraints(control,interval)) {
           optimizer.setControlPoints(control);
         } else {
           optimizer.strengthenGuideTracking();

@@ -544,3 +544,16 @@ TEST(AdvisoryAStar, StartRecoveryCannotCrossUnknownConnector) {
   EXPECT_FALSE(search.AstarSearch(.1,start,Eigen::Vector3d(1,0,1),1.,Eigen::Vector3d(0,0,1)));
   EXPECT_EQ(search.lastResult().failure,AStar::Failure::START_BLOCKED);
 }
+
+TEST(AdvisoryAStar, MultiGoalEvidenceUsesSelectedEndpointLattice) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,60,10));
+  search.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=GridAdvisoryClass::UNKNOWN;cell.advisory.cost_multiplier=1.;return cell;
+  });
+  const std::vector<Eigen::Vector3d> goals={Eigen::Vector3d(-.5,0,1),Eigen::Vector3d(1,0,1)};
+  ASSERT_TRUE(search.AstarSearchGoals(.1,Eigen::Vector3d(-1,0,1),goals,1.,Eigen::Vector3d(0,0,1)));
+  ASSERT_EQ(search.lastResult().selected_goal,0u);
+  EXPECT_TRUE(search.lastResult().end_lattice.isApprox(search.getPath().back(),1e-12));
+}

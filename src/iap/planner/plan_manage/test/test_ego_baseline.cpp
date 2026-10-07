@@ -1663,3 +1663,33 @@ TEST(EgoBaseline, CorridorKeepsExactMotionThresholdAcrossSameNeighbourhoodUpdate
   EXPECT_NEAR(context.required_clearance_m,.35+.1+.0502+std::sqrt(3.)*.2/2.,1e-12);
   EXPECT_EQ(context.environment_reason,GridExecutionReason::OK);
 }
+
+TEST(EgoBaseline, ActualUnknownCurveUsesObservedGuideSampleConstraints) {
+  auto node=makeNode(false,1.,false,false);auto map=std::make_shared<GridMap>();map->initMap(node);
+  const Eigen::Vector3d start(-2,0,1);GridMapTestAccess::input(*map,{},10.,start);GridMapTestAccess::markObserved(*map);
+  for(double x=-.4;x<.5;x+=.1) for(double y=-.2;y<.3;y+=.1) for(double z=.6;z<1.5;z+=.1)
+    GridMapTestAccess::clearObserved(*map,Eigen::Vector3d(x,y,z));
+  GridMotionContext motion;motion.quality=1;motion.stamp_s=10.;motion.error_proxy_m=.05;
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  const auto context=map->preparePlanningQuery(10.1,motion,map->captureFrozenOccupancyEpoch());
+  const auto query=[&](const Eigen::Vector3d& p) { return map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&context); };
+  optimizer.setPlanningQuery(query);
+  Eigen::MatrixXd q(3,12);for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);optimizer.setDroneId(0);
+  optimizer.a_star_=std::make_shared<AStar>();optimizer.a_star_->initGridMap(map,Eigen::Vector3i(60,60,30));
+  optimizer.setPlanningQuery(query);
+  optimizer.setPlanningBudget(std::make_shared<PlanningBudget>());
+  optimizer.setPlanningEndpoints(start,Eigen::Vector3d(2,0,1));
+  optimizer.initControlPoints(q,true);ASSERT_FALSE(optimizer.initializationFailed());
+  ASSERT_GE(optimizer.recoveryGuide().size(),2u);
+  for(const auto& p:optimizer.recoveryGuide()) ASSERT_TRUE(query(p).executable());
+  optimizer.initializeFromGuide(q);
+  EXPECT_TRUE(optimizer.curveViolates(q,.4));
+  // Guidance is OFF. Unknown physical samples need a geometric correction;
+  // absence of an advisory AVOID label must not remove their gradient.
+  for(int correction=0;correction<2 && optimizer.curveViolates(q,.4);++correction) {
+    ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,.4));
+    ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,.4));
+  }
+  EXPECT_FALSE(optimizer.curveViolates(q,.4)) << q;
+}

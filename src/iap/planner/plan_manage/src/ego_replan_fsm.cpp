@@ -914,6 +914,7 @@ namespace ego_planner
          planner_manager_->lastSearchFailure() == AStar::Failure::TIME_BUDGET) break;
     }
     if (!target_selected && !plan_and_refine_success) {
+      planner_manager_->recordTargetSelectionFailure(start_pt_,start_vel_,start_acc_,local_target_pt_);
       last_failed_plan_time_s_ = now;
       if(!budget->expired() && !budget->denied()) wait_for_evidence();
       return false;

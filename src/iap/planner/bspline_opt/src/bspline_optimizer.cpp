@@ -156,7 +156,7 @@ namespace ego_planner
   }
 
   bool BsplineOptimizer::addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval) {
-    if(!planning_query_ || planning_advisory_fallback_ || guide_pts_.size()<2 || points.cols()<7 || !(interval>0)) return false;
+    if(!planning_query_ || guide_pts_.size()<2 || points.cols()<7 || !(interval>0)) return false;
     UniformBspline curve(points,3,interval);
     const size_t previous=curve_clearance_constraints_.size();
     const double reserve=.5*grid_map_->getResolution();
@@ -164,8 +164,12 @@ namespace ego_planner
       if(budget_ && budget_->expired()) return false;
       const Eigen::Vector3d position=curve.evaluateDeBoorT(time);
       const auto cell=planning_query_(position);
-      if(cell.advisory.classification!=GridAdvisoryClass::AVOID &&
-          cell.advisory.classification!=GridAdvisoryClass::PREDICTED_DEGRADED) continue;
+      const bool physical_boundary=cell.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+          cell.execution_reason==GridExecutionReason::OUT_OF_MAP;
+      const bool preference=!planning_advisory_fallback_ &&
+          (cell.advisory.classification==GridAdvisoryClass::AVOID ||
+           cell.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED);
+      if(!physical_boundary && !preference) continue;
       Eigen::Vector3d nearest=position; double best=std::numeric_limits<double>::infinity();
       for(size_t j=1;j<guide_pts_.size();++j) {
         const Eigen::Vector3d segment=guide_pts_[j]-guide_pts_[j-1];
@@ -191,9 +195,9 @@ namespace ego_planner
       double movable=0;
       for(int j=0;j<4;++j) if(first+j>=order_ && first+j<points.cols()-order_) movable+=weights[j];
       if(movable<1e-8) continue;
-      // Reuse the actual-sample plane objective and its existing weight. Unlike
-      // a control-polygon anchor this corrects the precise point that cut the
-      // route. No PL threshold, GridMap risk cost or execution rule changes.
+      // Reuse the actual-sample plane objective for unknown/map boundaries and
+      // advisory preferences. Each supporting guide point is independently
+      // checked; this gradient grants no observation or execution authority.
       curve_clearance_constraints_.push_back({first,weights,position,direction,
           std::sqrt(best)+(room?reserve:0.)});
     }

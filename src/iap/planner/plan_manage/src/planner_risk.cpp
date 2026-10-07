@@ -507,7 +507,8 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
   planning_view_.reset();
   planning_targets_.clear();
   connection_time_.reset(); connection_predecessor_=-1;
-  last_plan_failure_=PlanFailure::None; last_candidate_assessment_={};
+  last_plan_failure_=PlanFailure::Target; last_candidate_assessment_={};
+  bspline_optimizer_->a_star_->clearLastResult();
   planning_budget_ = std::make_shared<PlanningBudget>(std::min(1.5,std::max(0.0,budget_seconds)));
   planning_calls_at_start_=predictor_calls_->load();
   planning_timings_.freeze_s=planning_timings_.prediction_preparation_s=0;

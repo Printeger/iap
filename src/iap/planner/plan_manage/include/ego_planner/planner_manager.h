@@ -143,6 +143,8 @@ namespace ego_planner
     void discardUnpublishedTrajectory(const LocalTrajData& predecessor);
     enum class PlanFailure { None, Budget, Target, Search, Curve, Release, Connection };
     PlanFailure lastPlanFailure() const { return last_plan_failure_; }
+    void recordTargetSelectionFailure(const Eigen::Vector3d& start, const Eigen::Vector3d& velocity,
+        const Eigen::Vector3d& acceleration, const Eigen::Vector3d& requested_target);
     void setLocalTargets(std::vector<LocalTarget> targets) { planning_targets_ = std::move(targets); }
     double terminalSpeedLimit(const Eigen::Vector3d& position,
                               const Eigen::Vector3d& reference_velocity) const;

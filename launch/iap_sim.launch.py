@@ -62,7 +62,7 @@ def _setup(context):
                 primary.get("lifecycle") != "active"):
             raise ValueError("iap_sim run_dir requires its own active resolver-allocated run")
     register_config_snapshot(
-        output_dir, output_dir / "metadata" / "config" / "full_stack"
+        output_dir, output_dir / "metadata" / "config"
     )
 
     calibration=context.launch_configurations.get("advisory_calibration", "")

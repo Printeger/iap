@@ -631,6 +631,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         {
             result_.selected_goal = reached->original;
             result_.requested_end = goals[reached->original];
+            result_.end_lattice = Index2Coord(reached->index);
             result_.end_cell = reached->cell;
             // ros::Time time_2 = ros::Time::now();
             // printf("\033[34mA star iter:%d, time:%.3f\033[0m\n",num_iter, (time_2 - time_1).toSec()*1000);

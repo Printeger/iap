@@ -121,6 +121,29 @@ null，不能借用当前执行ID。重复曲线失败仍保留同代epoch指针
 首个timeout gen60原起点合法，延长离线后穷尽250402节点，未找到已观测池内
 到该目标集合的路；不能提高在线预算或将未知判成可通行。
 
+### 同身份未知曲线拒绝与单 guide 几何修正
+
+`c80ccc2` 第三轮 `20261007T054246Z_172` attempt730/gen1575 与最后CSV
+行一致；末实际GLIO约[-13.545,.054,1.454]。A*成功guide，真实候选首次
+拒绝[-13.430,-.407,1.300]为ENVIRONMENT_UNOBSERVED，原三次配额中两次
+CurveCorrection后repair_denied。full地图/原stamp/curve/guide/final_check均
+已保存，不能写成无guide、无物理路径或Advisory致停。
+
+实际样本到已检查guide的支撑平面原仅响应Advisory AVOID。现在同一现有
+`addCurveGuideConstraints`还处理物理未知/越界；每个投影支撑点和额外半格
+余量仍查询同一冻结guide物理层，最后完整曲线/动力学/发布检查不变。复用
+同一EGO目标、guide与原修正动作，未增加恢复状态、地图、预算或减少检查。
+关闭引导仍能对未知曲线建立几何修正，不把Unknown改成free。原query未接
+到A*的诊断夹具及其失败保留；修正夹具验证guide全点执行可用后，原方法
+无物理边界约束，新方法优化后整条曲线物理可用（unknown_curve_green5.log）。
+该回归不等于森林固定路线通过，继续干净提交的canonical实跑。
+
+性能默认Target直到真正调用rebound，再分别记录最终结果；未选到目标
+显式记录同代attempt_failure，不能用None行当成功。新冻结入口清空旧
+A* Result，未执行搜索不借用旧selected_goal或旧guide。多目标成功的
+end_lattice改为实际选中的格点；红例原记录最后枚举goal而非selected_goal。
+canonical配置登记实际metadata/config根，保留runtime配置及文件hash。
+
 ## 运行时检查时序与实际曲线修正（当前修正）
 
 本轮基线 `2d63cb8`，诊断依据 `20261006T110434Z_515`。保存的 remaining_stop 地图时间比检查参考时间新 0.100629 s；候选实际曲线距原始障碍中心 0.550945 m，原要求为 0.551355 m，欠缺 0.000411 m。原始快照保持不变。CSV 中 130 轮、114 次 repair_denied、0 次截止时间过期，advisory avoid / 回退均为零；本轮不把这些失败归因于 PL 或此前已修复的反馈/beam 接线。

@@ -965,3 +965,8 @@ GNSS 已有 debug CSV 开启时，`export/glio/advisory_coordinate_dynamics.csv`
 活动尝试中最终可修复的candidate不替换terminal失败。`final_check`保留最终
 检查代数/原时间；发布地图与规划地图不同则独立保存 `final_check_cells.bin`；
 无法捕获epoch明确写 `map_available=false`。候选未获ID时为null。
+
+`plan_failure=0` 只说明已调用rebound的最终成功；旧CSV可能在尚未选择目标
+时使用None，报告须结合真实发布/命令ID。新版本未选到目标记Target/Budget，
+同代final证据保留。guide OFF下实际未知/越界采样点可复用单guide平面目标
+修正，Unknown执行拒绝及原修正配额不变。
