@@ -1160,3 +1160,9 @@ clock_model，v1–v5只保留历史诊断读取；禁止借重编码升级来�
 表示旧全局缓存旁证，不能当成本次查询。CSV追加来源 flags 和 GNSS raw geometry
 状态；raw geometry 有效不代表双源或米数验证通过。接口见
 [Advisory 契约](docs/spec/advisory_prediction_contract.md#frozen-planning-risk-evidence)。
+
+
+49de7c4的300秒森林参考run163937Z_338已核对冻结原始样本导出：819次查询、
+106唯一格点，版本／物理上下文匹配。三维图文、server撤销与独立命令核对在
+`log/20261007T091820Z_056/export/analysis/frozen_risk_export_live`。本轮LiDAR贡献，
+任务未完成（距目标7.002m）；不授予双源／米数或正式任务收益资格。

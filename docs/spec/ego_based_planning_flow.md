@@ -1192,3 +1192,16 @@ JSON显式区分冻结query与旧全局cache旁证；CSV保留raw H/V、status/v
 最终Release构建／安装、三组地图与七组planner行为检查、43项canonical通过；
 首次编译失败保留。命令、source/binary/log hash登记于frozen_risk_export_implementation。
 冻结查询取证修复的现场仍待干净提交，不替代B／D资格。
+
+
+C冻结原始导出现场：干净49de7c4、GPU三项及安装Release身份通过，唯一入口OFF／
+prior OFF300秒run163937Z_338。attempt1/gen16的819次实际风险查询导出106唯一
+原始格点、risk18且context匹配，原红例checker通过。106项flags1433全部LiDAR
+贡献、GNSS raw未计算；非双源资格。三维同版本物理／H/V／来源／guide／被拒绝
+曲线见analysis/frozen_risk_export_live/raw_physical_risk_curve.png，无插值／重新查询。
+37曲线／33命令ID、15次定时激活；撤销6/13/16/22均未激活／命令，余量
+1.091／0.967／0.251／0.325s，无unchecked hover。本轮无制动拒绝，不扩展拒绝证明。
+实际前进29.148m、末[11.147866,-1.414617,1.766779]、距目标7.002m，原规则未完成。
+首个Curve55/gen409与末次Budget563/gen2548保持；全部299次进程健康采样、
+命令／binary／配置／输入hash见frozen_risk_export_live_final。取证接口现场通过，
+A路线／物理拒绝及B正式0/9+0/9、D0/6继续阻塞，无参数推广。
