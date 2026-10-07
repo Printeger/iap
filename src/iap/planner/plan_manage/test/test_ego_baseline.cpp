@@ -149,6 +149,60 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static EGOPlannerManager::TrajectoryAssessment expiredRelease(EGOPlannerManager& manager) {
+    manager.last_candidate_assessment_.sampled_points=11;
+    manager.last_candidate_assessment_.execution_reason=GridExecutionReason::TRACKING_ERROR;
+    manager.planning_budget_=std::make_shared<PlanningBudget>(0.);
+    return manager.assessReleaseCorridor({{Eigen::Vector3d(-2,0,1),"actual_curve",0.}},
+        manager.node_->now().seconds());
+  }
+  static void recordUnavailableRelease(EGOPlannerManager& manager,const Eigen::MatrixXd& control,double interval) {
+    EGOPlannerManager::TrajectoryAssessment unavailable;
+    // Actual first release-curve capture can fail before obtaining an epoch.
+    unavailable.execution_reason=GridExecutionReason::ENVIRONMENT_STALE;
+    manager.recordCurveStage("release_curve_checked",control,interval,LocalTarget{},NAN,
+        &unavailable,false,std::nullopt,false);
+    manager.last_release_assessment_=unavailable;
+    ASSERT_FALSE(manager.curve_stages_.empty());
+    EXPECT_FALSE(manager.curve_stages_.back().physical_checked);
+  }
+  static void recordReleaseRetainsRoute(EGOPlannerManager& manager) {
+    manager.last_candidate_assessment_.sampled_points=13;
+    manager.last_candidate_assessment_.advisory_unknown_samples=4;
+    manager.last_candidate_assessment_.guide_retention.checked=true;
+    manager.last_candidate_assessment_.guide_retention.risk_version=99;
+    manager.last_candidate_assessment_.guide_retention.curve_risk_cost_m=1.7;
+    EGOPlannerManager::TrajectoryAssessment release;
+    release.physical_check_scope="publication_corridor";
+    release.sampled_points=101;
+    manager.recordCurveStage("release_corridor_checked",Eigen::Vector3d(-2,0,1).replicate(1,7),
+        .3,LocalTarget{},NAN,&release,false,std::nullopt,false);
+    manager.last_release_assessment_=release;
+    EXPECT_EQ(manager.last_candidate_assessment_.sampled_points,13u);
+    EXPECT_EQ(manager.last_candidate_assessment_.advisory_unknown_samples,4u);
+    EXPECT_TRUE(manager.last_candidate_assessment_.guide_retention.checked);
+    EXPECT_EQ(manager.last_candidate_assessment_.guide_retention.risk_version,99u);
+    EXPECT_DOUBLE_EQ(manager.last_candidate_assessment_.guide_retention.curve_risk_cost_m,1.7);
+    manager.recordCurveStage("retimed_bound",Eigen::Vector3d(-2,0,1).replicate(1,7),.4,LocalTarget{});
+    EXPECT_FALSE(manager.last_release_assessment_);
+    EXPECT_FALSE(manager.last_candidate_assessment_.guide_retention.checked);
+  }
+  static EGOPlannerManager::TrajectoryAssessment releaseStoppingSpace(EGOPlannerManager& manager,
+      const Eigen::Vector3d& endpoint,const Eigen::Vector3d& stopping) {
+    manager.last_candidate_assessment_=manager.assessTrajectory(
+        UniformBspline(endpoint.replicate(1,7),3,.3),0,manager.node_->now().seconds(),false,0,
+        std::numeric_limits<double>::infinity(),nullptr,false);
+    const auto old_generation=manager.last_candidate_assessment_.evaluated_generation;
+    EXPECT_TRUE(manager.last_candidate_assessment_.executable());
+    // The actual curve remains legal. A later scan changes only its braking space.
+    GridMapTestAccess::input(*manager.grid_map_,{stopping+Eigen::Vector3d(.45,0,0)},
+        manager.node_->now().seconds(),endpoint);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    auto result=manager.assessReleaseCorridor(
+        {{endpoint,"actual_curve",0.9},{stopping,"terminal_stopping_space",.2}},manager.node_->now().seconds());
+    EXPECT_GT(manager.grid_map_->occupancyGeneration(),old_generation);
+    return result;
+  }
   static bool fitGuide(EGOPlannerManager& manager,const std::vector<Eigen::Vector3d>& guide,
       const Eigen::Vector3d& velocity,const Eigen::Vector3d& acceleration,bool stop,
       LocalTarget& target,double nominal_interval,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
@@ -741,12 +795,21 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   std::ifstream stage_file(root / "backend_early_return/snapshot.json");
   const std::string stage_text((std::istreambuf_iterator<char>(stage_file)),{});
   EXPECT_NE(stage_text.find("\"curve_generation_state\": \"generated\""),std::string::npos);
+  ego_planner::EGOPlannerManagerTestAccess::recordUnavailableRelease(manager,stage_controls,.3);
   ego_planner::EGOPlannerManagerTestAccess::capture(manager,"attempt_failure_curve",latest_cell,nullptr,nullptr,&stage_curve);
   { std::ifstream file(root / "attempt_failure_curve/snapshot.json");
     const std::string text((std::istreambuf_iterator<char>(file)),{});
     EXPECT_NE(text.find("\"stage\":\"initial_bound\""),std::string::npos);
     EXPECT_NE(text.find("\"max_velocity_time_s\":"),std::string::npos);
-    EXPECT_NE(text.find("\"final_check_state\": \"not_checked\""),std::string::npos); }
+    EXPECT_NE(text.find("\"final_check_state\": \"not_checked\""),std::string::npos);
+    boost::property_tree::ptree metadata;
+    std::istringstream stream(text);boost::property_tree::read_json(stream,metadata);
+    EXPECT_EQ(metadata.get<std::string>("final_check_precondition_reason"),"ENVIRONMENT_STALE");
+    EXPECT_EQ(metadata.get<std::string>("final_check"),"null");
+    const auto& release=metadata.get_child("curve_stages").back().second;
+    EXPECT_EQ(release.get<std::string>("stage"),"release_curve_checked");
+    EXPECT_EQ(release.get<std::string>("physical_check_reason"),"null");
+    EXPECT_EQ(release.get<std::string>("physical_precondition_reason"),"ENVIRONMENT_STALE"); }
   // Production FSM can override a successful physical check with tracking
   // rejection after live occupancy advances. Export still owns the old epoch.
   const Eigen::Vector3d proof_position(-2,2,1);
@@ -783,6 +846,57 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   // A non-candidate execution/diagnostic capture cannot inherit the active attempt.
   EXPECT_NE(stage_text.find("\"curve_stages\": []"),std::string::npos);
   EXPECT_NE(stage_text.find("\"final_check_state\": \"not_applicable\""),std::string::npos);
+}
+
+TEST(EgoBaseline, ReleaseBudgetFailureCannotBorrowPriorCurveCheck) {
+  auto node=makeNode();
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const auto result=ego_planner::EGOPlannerManagerTestAccess::expiredRelease(manager);
+  EXPECT_TRUE(result.budget_exhausted);
+  EXPECT_FALSE(result.executable());
+  EXPECT_FALSE(result.physical_epoch);
+  EXPECT_FALSE(result.failure_snapshot);
+  EXPECT_EQ(result.evaluated_generation,0u);
+  EXPECT_EQ(result.sampled_points,0u);
+  EXPECT_TRUE(result.first_execution_section.empty());
+  EXPECT_EQ(result.physical_check_scope,"publication_corridor");
+  EXPECT_TRUE(std::isnan(result.first_execution_time_s));
+}
+
+TEST(EgoBaseline, ReleaseChecksPreserveRouteMetricsUntilGeometryChanges) {
+  auto node=makeNode();
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  ego_planner::EGOPlannerManagerTestAccess::recordReleaseRetainsRoute(manager);
+}
+
+TEST(EgoBaseline, ReleaseStoppingRejectionOwnsLatestEpochAndFirstViolation) {
+  auto node=makeNode();
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d endpoint(-2,0,1),stopping(-1.8,0,1);
+  const auto now=node->now().seconds();
+  GridMapTestAccess::input(*manager.grid_map_,{},now,endpoint);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);
+  manager.grid_map_->setFailureEvidenceCapture(true);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,endpoint);
+  const auto result=ego_planner::EGOPlannerManagerTestAccess::releaseStoppingSpace(manager,endpoint,stopping);
+  EXPECT_EQ(result.execution_reason,GridExecutionReason::INSUFFICIENT_CLEARANCE);
+  ASSERT_TRUE(result.physical_epoch);
+  EXPECT_EQ(result.evaluated_generation,result.physical_epoch->generation);
+  EXPECT_EQ(result.evaluated_generation,manager.grid_map_->occupancyGeneration());
+  ASSERT_TRUE(result.failure_snapshot);
+  EXPECT_EQ(result.failure_snapshot->generation,result.evaluated_generation);
+  EXPECT_EQ(result.first_execution_cell.occupancy_generation,result.evaluated_generation);
+  EXPECT_EQ(result.first_execution_cell.execution_reason,result.execution_reason);
+  EXPECT_TRUE(std::isfinite(result.first_execution_cell.required_clearance_m));
+  EXPECT_TRUE(result.first_execution_position.isApprox(stopping,1e-12));
+  EXPECT_EQ(result.physical_check_scope,"publication_corridor");
+  EXPECT_EQ(result.first_execution_section,"terminal_stopping_space");
+  EXPECT_DOUBLE_EQ(result.first_execution_stopping_distance_m,.2);
+  EXPECT_TRUE(std::isnan(result.first_execution_time_s));
 }
 
 TEST(EgoBaseline, FrozenMotionCannotAuthorizePublicationAfterCurrentQualityRevocation) {

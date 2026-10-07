@@ -315,6 +315,49 @@ EGOPlannerManager::ExecutionView EGOPlannerManager::captureExecutionView(
   return failed();
 }
 
+EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessReleaseCorridor(
+    const std::vector<ReleasePathSample>& samples, double earliest_time_s) {
+  std::vector<Eigen::Vector3d> positions;
+  positions.reserve(samples.size());
+  for(const auto& sample:samples) positions.push_back(sample.position);
+  const auto view=captureExecutionView(positions,earliest_time_s,false,planning_budget_);
+  // This check owns a newer, combined corridor. Never borrow the prior curve's
+  // generation, first cell, sampling times or guide/risk assessment.
+  TrajectoryAssessment assessment;
+  assessment.physical_check_scope="publication_corridor";
+  assessment.checked_from_time_s=assessment.checked_to_time_s=assessment.sample_step_s=NAN;
+  assessment.evaluation_time_s=view.time_s;
+  assessment.evaluated_motion=view.motion;
+  assessment.evaluated_motion_quality=view.motion.quality;
+  assessment.evaluated_motion_error_proxy_m=view.motion.error_proxy_m;
+  assessment.budget_exhausted=planning_budget_ && planning_budget_->expired();
+  if(!view.physical.epoch) {
+    assessment.execution_reason=view.physical.motion_reason!=GridExecutionReason::OK
+        ? view.physical.motion_reason : GridExecutionReason::ENVIRONMENT_STALE;
+    return assessment;
+  }
+  assessment.physical_epoch=view.physical.epoch;
+  assessment.evaluated_generation=view.physical.generation;
+  for(const auto& sample:samples) {
+    if(planning_budget_ && planning_budget_->expired()) { assessment.budget_exhausted=true; return assessment; }
+    const auto cell=grid_map_->queryPlanningCell(sample.position,0,view.time_s,
+        planning_risk_policy_,view.motion,false,&view.physical);
+    ++assessment.sampled_points;
+    if(!cell.executable()) {
+      assessment.execution_reason=cell.execution_reason;
+      assessment.first_execution_position=sample.position;
+      assessment.first_execution_cell=cell;
+      assessment.first_execution_section=sample.section;
+      if(sample.section=="terminal_stopping_space")
+        assessment.first_execution_stopping_distance_m=sample.coordinate;
+      else assessment.first_execution_time_s=sample.coordinate;
+      assessment.failure_snapshot=view.physical.epoch->failure_evidence;
+      return assessment;
+    }
+  }
+  return assessment;
+}
+
 EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     const UniformBspline& trajectory, const uint64_t risk_version,
     double now_s, const bool allow_bridged, const double from_time_s,
@@ -509,7 +552,7 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
   planning_view_.reset();
   planning_targets_.clear(); planning_target_center_.reset();
   connection_time_.reset(); connection_predecessor_=-1;
-  last_plan_failure_=PlanFailure::Target; last_candidate_assessment_={};
+  last_plan_failure_=PlanFailure::Target; last_candidate_assessment_={}; last_release_assessment_.reset();
   bspline_optimizer_->a_star_->clearLastResult();
   planning_budget_ = std::make_shared<PlanningBudget>(std::min(1.5,std::max(0.0,budget_seconds)));
   planning_calls_at_start_=predictor_calls_->load();

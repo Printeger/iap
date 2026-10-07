@@ -1491,3 +1491,30 @@ assessment reason/position，未绑定新release epoch/time/cell，取证owner�
 B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广。
 图文与原hash索引：log/20261007T091820Z_056/export/analysis/gpu_match_live/report_v2.md，
 原相对图链接报告及manifest均保留，correction manifest只修正新报告链接。
+
+
+### A 发布前组合物理检查的取证所有权
+
+原冻结 candidate assessment 继续拥有实际曲线的 guide/Advisory 指标，最新 release
+assessment 单独拥有发布物理证明；两者不是同一时间或地图的授权。新几何或新 attempt
+清除两者；只记录检查结果的 release stage 不清除已完成的路线指标。
+
+发布前仍按原顺序／空间步长检查前驱接续区间、实际曲线、末端可检查制动空间，
+不增预算、修复或放宽净空。每次组合检查从同一 captureExecutionView 绑定完整
+physical_epoch、generation、原评价 time、motion、首违 cell/position。curve／predecessor
+首违 coordinate 是各自局部秒；terminal_stopping_space 是末端起算的米数，不能写成
+曲线本地时间。该否定检查不更换执行轨迹。
+
+failure snapshot 的 base/search/guide/input time 仍为原 planning view；独立 final_check
+保存实际 release scope、原 generation/time/motion 和首违 section/time/stopping_distance。
+新地图使用已有 final_check_cells.bin；不把最新原时刻赋予早期 backend 输入。每个检查
+stage 保存 physical_generation/evaluation_time/scope 与首违 section。缺 epoch 的 curve 或
+publication 检查均为 not_checked，保留 final_check_precondition_reason；阶段输出
+physical_precondition_reason，不能借旧实际曲线检查写 checked。未检查的 guide/risk
+不能当作零成本；CSV仍消费同候选的原冻结 route/Advisory owner。
+
+同输入 backend 重放只证明原曲线检查，不涵盖最新前驱／制动空间与提交／server授权。
+旧数据缺实际 release epoch 时保持该重放限制，不能从所存前一代物理图追认发布。
+现场7634cb49 attempt31 的 phase5暴露该问题；生产 seam红例1→2代数错配与原binary/log
+在 campaign release_corridor_owner_red 保留。完整Release／7组规划及43入口通过，三项机制与缺epoch真实导出回归通过，
+两轴只读审查无剩余阻塞；安装已同步，新干净现场待完成；正式B0/9＋0/9、D0/6、默认不推广。

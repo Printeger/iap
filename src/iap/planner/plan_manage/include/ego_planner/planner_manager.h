@@ -85,6 +85,9 @@ namespace ego_planner
 
     struct TrajectoryAssessment {
       int trajectory_id = -1; // Owning curve for two-segment failure evidence.
+      std::string physical_check_scope = "actual_curve";
+      std::string first_execution_section;
+      double first_execution_stopping_distance_m = std::numeric_limits<double>::quiet_NaN();
       bool budget_exhausted = false;
       GridExecutionReason execution_reason = GridExecutionReason::OK;
       double first_execution_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -242,6 +245,11 @@ namespace ego_planner
       GridExecutionReason physical_reason = GridExecutionReason::OK;
       Eigen::Vector3d first_physical_position = Eigen::Vector3d::Constant(NAN);
       double first_physical_time_s = std::numeric_limits<double>::quiet_NaN();
+      uint64_t physical_generation = 0;
+      double physical_evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
+      std::string physical_check_scope = "not_checked";
+      std::string first_physical_section;
+      double first_stopping_distance_m = std::numeric_limits<double>::quiet_NaN();
       std::vector<Eigen::Vector3d> guide; // Geometry owned by this candidate revision.
       BsplineOptimizer::GuideRetention guide_retention;
       std::optional<bool> terminal_stop; // Explicit fixed-task policy; null if unavailable.
@@ -259,7 +267,7 @@ namespace ego_planner
                           double interval, const LocalTarget& target,
                           double feasibility_ratio = std::numeric_limits<double>::quiet_NaN(),
                           const TrajectoryAssessment* assessment = nullptr, bool optimization_exit = false,
-                          std::optional<double> nominal_interval = std::nullopt);
+                          std::optional<double> nominal_interval = std::nullopt, bool geometry_revision = true);
     void queueFailureExport(std::function<void()> job, bool terminal);
     void exportLatestFailure(bool final = false);
     void drainFailureExports();
@@ -294,10 +302,18 @@ namespace ego_planner
       GridMotionContext motion;
       GridPlanningContext physical;
     };
+    struct ReleasePathSample {
+      Eigen::Vector3d position;
+      std::string section; // actual_curve / predecessor_curve / terminal_stopping_space
+      double coordinate; // local curve seconds, or stopping distance in metres
+    };
+    TrajectoryAssessment assessReleaseCorridor(const std::vector<ReleasePathSample>& samples,
+                                               double earliest_time_s);
     ExecutionView captureExecutionView(
         const std::vector<Eigen::Vector3d>& positions, double earliest_time_s,
         bool allow_bridged, PlanningBudget::Ptr budget = {});
-    TrajectoryAssessment last_candidate_assessment_;
+    TrajectoryAssessment last_candidate_assessment_; // Original frozen route/Advisory metrics.
+    std::optional<TrajectoryAssessment> last_release_assessment_; // Latest physical publication proof.
     std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>
         latest_odom_provider_;
     void captureFailureMap(const std::string& kind, const Eigen::Vector3d& point,

@@ -1319,3 +1319,11 @@ assessment reason/position，未绑定新release epoch/time/cell，取证owner�
 B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广。
 图文与原hash索引：log/20261007T091820Z_056/export/analysis/gpu_match_live/report_v2.md，
 原相对图链接报告及manifest均保留，correction manifest只修正新报告链接。
+
+
+发布前物理诊断将 `final_check.physical_check_scope` 与原 guide/Advisory 指标分开。
+`publication_corridor` 包含原前驱接续、本次实际曲线与末端制动空间；首违
+`terminal_stopping_space` 记录米数，其曲线局部秒为 null。`final_check_cells.bin`
+与独立原 generation/time/motion 保存最新证明；base snapshot 和 backend 原输入保持。
+缺 epoch 显示 `not_checked` 和前置原因；同输入 backend 通过不能追认为发布授权。
+接口与回归见 [Safety Planner 契约](docs/spec/safety_planner_contract.md#a-发布前组合物理检查的取证所有权)。

@@ -24,10 +24,10 @@ namespace ego_planner
   void EGOPlannerManager::recordCurveStage(const std::string& stage,
       const Eigen::MatrixXd& controls, double interval, const LocalTarget& target,
       double feasibility_ratio, const TrajectoryAssessment* assessment, bool optimization_exit,
-      std::optional<double> nominal_interval) {
+      std::optional<double> nominal_interval, bool geometry_revision) {
     // Every geometry revision invalidates the previous final assessment, even
     // when export is disabled. An early return must never pair it with a new curve.
-    last_candidate_assessment_={};
+    if(geometry_revision) { last_candidate_assessment_={}; last_release_assessment_.reset(); }
     if (!capture_failure_map_ || controls.rows()!=3 || controls.cols()<4 ||
         !controls.allFinite() || !std::isfinite(interval) || interval<=0) return;
     UniformBspline curve(controls,3,interval);
@@ -47,9 +47,15 @@ namespace ego_planner
       evidence.terminal_stop=(target.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6;
     if(assessment) {
       evidence.guide_retention=assessment->guide_retention;
-      evidence.physical_checked=true; evidence.physical_reason=assessment->execution_reason;
+      evidence.physical_checked=assessment->physical_epoch && assessment->sampled_points>0;
+      evidence.physical_reason=assessment->execution_reason;
       evidence.first_physical_position=assessment->first_execution_position;
       evidence.first_physical_time_s=assessment->first_execution_time_s;
+      evidence.physical_generation=assessment->evaluated_generation;
+      evidence.physical_evaluation_time_s=assessment->evaluation_time_s;
+      evidence.physical_check_scope=assessment->physical_check_scope;
+      evidence.first_physical_section=assessment->first_execution_section;
+      evidence.first_stopping_distance_m=assessment->first_execution_stopping_distance_m;
     }
     if (curve_stages_.size()<24) curve_stages_.push_back(std::move(evidence));
     else { curve_stages_.back()=std::move(evidence); ++dropped_curve_stages_; }
@@ -133,9 +139,13 @@ namespace ego_planner
     for(const auto& target : planning_targets_) goal_positions.push_back(target.position);
     const double fitting_reserve_m=.5*snapshot->resolution_m;
     const auto state_json = std::exchange(failure_state_json_, std::string{});
-    const auto* checked=candidate_trace ? (assessment ? assessment : &last_candidate_assessment_) : nullptr;
+    const auto* checked=candidate_trace ? (assessment ? assessment : last_release_assessment_
+        ? &*last_release_assessment_ : &last_candidate_assessment_) : nullptr;
     const bool has_final_check=checked &&
-        (checked->sampled_points || checked->execution_reason!=GridExecutionReason::OK);
+        (checked->sampled_points || checked->execution_reason!=GridExecutionReason::OK) &&
+        checked->physical_epoch;
+    const std::string final_precondition_reason=checked && !has_final_check &&
+        checked->execution_reason!=GridExecutionReason::OK ? gridExecutionReasonName(checked->execution_reason) : "";
     const auto final_check=has_final_check ? std::optional<TrajectoryAssessment>(*checked) : std::nullopt;
     const auto final_snapshot=final_check && final_check->physical_epoch
         ? final_check->physical_epoch->failure_evidence : std::shared_ptr<const GridMapFailureSnapshot>{};
@@ -473,6 +483,8 @@ namespace ego_planner
       } else metadata << "null";
       metadata << ",\n  \"curve_generation_state\": " << std::quoted(curve_value ? "generated" : "not_generated")
           << ",\n  \"final_check_state\": " << std::quoted(candidate_trace ? (final_check ? "checked" : "not_checked") : "not_applicable")
+          << ",\n  \"final_check_precondition_reason\": "
+          << (final_precondition_reason.empty() ? "null" : std::string("\"")+final_precondition_reason+"\"")
           << ",\n  \"curve_stages_dropped\": " << dropped_stages
           << ",\n  \"curve_stages\": [";
       for(size_t s=0;s<stages.size();++s) {
@@ -505,8 +517,15 @@ namespace ego_planner
             << ",\"solver_reason\":" << std::quoted(evidence.solver_reason)
             << ",\"feasibility_ratio\":" << number(evidence.feasibility_ratio)
             << ",\"physical_check_reason\":" << (evidence.physical_checked ? std::string("\"")+gridExecutionReasonName(evidence.physical_reason)+"\"" : "null")
+            << ",\"physical_precondition_reason\":" << (!evidence.physical_checked && evidence.physical_reason!=GridExecutionReason::OK
+                ? std::string("\"")+gridExecutionReasonName(evidence.physical_reason)+"\"" : "null")
             << ",\"first_physical_position_m\":" << vector(evidence.first_physical_position)
             << ",\"first_physical_time_s\":" << number(evidence.first_physical_time_s)
+            << ",\"physical_generation\":" << evidence.physical_generation
+            << ",\"physical_evaluation_time_s\":" << number(evidence.physical_evaluation_time_s)
+            << ",\"physical_check_scope\":" << std::quoted(evidence.physical_check_scope)
+            << ",\"first_physical_section\":" << std::quoted(evidence.first_physical_section)
+            << ",\"first_stopping_distance_m\":" << number(evidence.first_stopping_distance_m)
             << ",\"target_p_m\":" << vector(evidence.target.position)
             << ",\"target_v_mps\":" << vector(evidence.target.velocity)
             << ",\"target_a_mps2\":" << vector(evidence.target.acceleration)
@@ -534,6 +553,16 @@ namespace ego_planner
           << ",\"first_position_m\":" << vector(final_check->first_execution_position)
           << ",\"required_clearance_m\":" << number(final_check->first_execution_cell.required_clearance_m)
           << ",\"map_available\":" << (final_snapshot ? "true" : "false");
+        metadata << ",\"physical_check_scope\":" << std::quoted(final_check->physical_check_scope)
+          << ",\"first_execution_section\":" << std::quoted(final_check->first_execution_section)
+          << ",\"first_execution_time_s\":" << number(final_check->first_execution_time_s)
+          << ",\"first_execution_stopping_distance_m\":" << number(final_check->first_execution_stopping_distance_m)
+          << ",\"first_cell_generation\":" << final_check->first_execution_cell.occupancy_generation
+          << ",\"sampled_points\":" << final_check->sampled_points
+          << ",\"budget_exhausted\":" << (final_check->budget_exhausted ? "true" : "false")
+          << ",\"nearest_raw_center_distance_m\":" << number(final_check->first_execution_cell.raw_center_clearance_m)
+          << ",\"motion_stamp_s\":" << number(final_check->evaluated_motion.stamp_s)
+          << ",\"motion_error_proxy_m\":" << number(final_check->evaluated_motion.error_proxy_m);
         if(final_snapshot) metadata << ",\"cloud_stamp_s\":" << number(final_snapshot->cloud_stamp_s)
           << ",\"origin_m\":" << vector(final_snapshot->origin)
           << ",\"dimensions\":[" << final_snapshot->dimensions.x() << ',' << final_snapshot->dimensions.y() << ',' << final_snapshot->dimensions.z() << ']'
@@ -947,7 +976,7 @@ namespace ego_planner
           "Planner rebound rejected: phase=%s execution=%s budget_expired=%d repair_denied=%d",
           last_plan_failure_==PlanFailure::Budget ? "budget" : last_plan_failure_==PlanFailure::Target ? "target" :
           last_plan_failure_==PlanFailure::Search ? "search" : last_plan_failure_==PlanFailure::Curve ? "curve" :
-          last_plan_failure_==PlanFailure::Release ? "release" : "connection", gridExecutionReasonName(last_candidate_assessment_.execution_reason),
+          last_plan_failure_==PlanFailure::Release ? "release" : "connection", gridExecutionReasonName(last_release_assessment_ ? last_release_assessment_->execution_reason : last_candidate_assessment_.execution_reason),
           planning_budget_->expired(), planning_budget_->denied());
       if(capture_failure_map_ && planning_view_ && planning_view_->snapshot) {
         // Final disposition of this attempt, including backend/budget failures
@@ -962,8 +991,11 @@ namespace ego_planner
             search->requested_start.isApprox(failed_search_result_->requested_start,0.) &&
             search->requested_end.isApprox(failed_search_result_->requested_end,0.);
         const auto* context=matches && failed_search_context_ ? &*failed_search_context_ : nullptr;
+        // Base input/search/guide evidence retains the original planning epoch.
+        // The independent release assessment below owns final_check and, when
+        // needed, final_check_cells.bin; its time/motion never replaces inputs.
         const auto cell=queryPlanningViewCell(start_pt);
-        const auto* assessment=last_candidate_assessment_.failure_snapshot &&
+        const auto* assessment=!last_release_assessment_ && last_candidate_assessment_.failure_snapshot &&
             last_candidate_assessment_.evaluated_generation==planning_view_->generation ? &last_candidate_assessment_ : nullptr;
         captureFailureMap(reason==PlanFailure::Curve ? "attempt_failure_curve" : "attempt_failure",start_pt,target_pt,cell,search,context,
             failed_candidate_curve_ ? &*failed_candidate_curve_ : nullptr,assessment);
@@ -1168,14 +1200,16 @@ namespace ego_planner
       if(connection_time_ && (connection_time_->seconds()-now<.1 || local_data_.traj_id_!=connection_predecessor_))
         return fail(PlanFailure::Connection);
       auto release=assessTrajectory(curve,0,now);
+      recordCurveStage("release_curve_checked",control,interval,selected,NAN,&release,false,std::nullopt,false);
+      last_release_assessment_=release;
       if(!release.executable() || !release.physical_epoch) {
-        last_candidate_assessment_=release; return fail(PlanFailure::Release);
+        return fail(PlanFailure::Release);
       }
       if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6) return fail(PlanFailure::Target);
       {
         // One latest corridor owns all evidence needed through the switch and
         // terminal stopping space. Ordinary map updates outside it are allowed.
-        std::vector<Eigen::Vector3d> positions;
+        std::vector<ReleasePathSample> samples;
         const double spacing=std::min(.01,grid_map_->getResolution()/(4*std::max(.1,pp_.max_vel_)));
         if(connection_time_) {
           const double from=std::max(0.0,now-local_data_.start_time_.seconds());
@@ -1183,41 +1217,25 @@ namespace ego_planner
           auto old=local_data_.position_traj_;
           for(double t=from;t<=to+spacing;t+=spacing) {
             if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-            positions.push_back(old.evaluateDeBoorT(std::min(t,to)));
+            samples.push_back({old.evaluateDeBoorT(std::min(t,to)),"predecessor_curve",std::min(t,to)});
           }
         }
         const double duration=curve.getTimeSum();
         for(double t=0;t<=duration+spacing;t+=spacing) {
           if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-          positions.push_back(curve.evaluateDeBoorT(std::min(t,duration)));
+          samples.push_back({curve.evaluateDeBoorT(std::min(t,duration)),"actual_curve",std::min(t,duration)});
         }
         if(selected.velocity.norm()>1e-9) {
           const double stopping=selected.velocity.squaredNorm()/(2*std::max(.1,pp_.max_acc_))+2*grid_map_->getResolution();
           for(double d=0;d<=stopping+grid_map_->getResolution()*.5;d+=grid_map_->getResolution()*.5) {
             if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-            positions.push_back(selected.position+selected.velocity.normalized()*std::min(d,stopping));
+            samples.push_back({selected.position+selected.velocity.normalized()*std::min(d,stopping),"terminal_stopping_space",std::min(d,stopping)});
           }
         }
-        const auto view=captureExecutionView(positions,now,false,planning_budget_);
-        if(!view.physical.epoch) {
-          last_candidate_assessment_.execution_reason=view.physical.motion_reason!=GridExecutionReason::OK
-              ? view.physical.motion_reason : GridExecutionReason::ENVIRONMENT_STALE;
-          return fail(PlanFailure::Release);
-        }
-        release.physical_epoch=view.physical.epoch;
-        release.evaluation_time_s=view.time_s;
-        release.evaluated_motion=view.motion;
-        release.evaluated_motion_quality=view.motion.quality;
-        release.evaluated_motion_error_proxy_m=view.motion.error_proxy_m;
-        for(const auto& point:positions) {
-          if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-          const auto cell=grid_map_->queryPlanningCell(point,0,view.time_s,planning_risk_policy_,view.motion,false,&view.physical);
-          if(!cell.executable()) {
-            last_candidate_assessment_.execution_reason=cell.execution_reason;
-            last_candidate_assessment_.first_execution_position=point;
-            return fail(PlanFailure::Release);
-          }
-        }
+        release=assessReleaseCorridor(samples,now);
+        recordCurveStage("release_corridor_checked",control,interval,selected,NAN,&release,false,std::nullopt,false);
+        last_release_assessment_=release;
+        if(!release.executable() || !release.physical_epoch) return fail(PlanFailure::Release);
       }
       const auto gate=grid_map_->commitFrozenCorridor(*release.physical_epoch,node_->now().seconds(),
           release.evaluated_motion.max_environment_age_s,[&]() {
