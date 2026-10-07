@@ -998,3 +998,11 @@ python3 src/iap/scripts/dev_planner/analyze_failure_map.py \
 `--budget-s` 在归因模式下是每个离线分量的搜索时限；扩大冻结地图范围和目标分量各有独立结果。只有 `exhausted=true` 的范围才可作无路结论。`observed_cut.csv` 登记真实可达分量指向分量外的拒绝边；节点文件保存父节点，可重放前方通路。`report.json`、`unknown_boundary_evidence.json`、两个 PNG 和 `replay_input.txt` 绑定原始 SHA-256。目标分量 `-2` 表示原终点连接不合法，`-1` 表示未判定，不能混作另一个已证实分量。仅保留已记录障碍的几何图，以及仅补未稀疏支持的反事实图，均明确不授予执行权限；历史 observation-loss producer 不证明当前射线覆盖。
 
 A* 接口修改后须按依赖顺序重建 `path_searching`、`bspline_opt`、`ego_planner`，避免静态后端仍使用旧头文件布局。生产 FSM 将原有 1.0/0.65/0.35 前进距离放入同一组最多 16 个目标，随后执行同一次搜索；保留各目标的前进、合法性、终端速度及所有曲线/发布检查，在线预算不变。
+
+最终归因与干净提交38bc9dfe的GPU森林复跑见
+[同图归因图文报告](log/20261007T065143Z_342/export/analysis/forest_followup/report.md)。
+原目标在冻结地图内仍不可达；已记录障碍不足以单独解释、未知授权
+屏障参与断路，当前支持丢失不足以单独解释。原池另有前方连接见证，
+不替代完整FSM目标资格。生产目标修复实跑前进4.441m仍未到终点，末次
+attempt480/gen2762搜索成功、Curve失败且候选未保存；固定路线和预测
+资格仍未通过，9+9与6均未启动。证据run已登记hash清单并protected。
