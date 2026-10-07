@@ -104,6 +104,7 @@ struct EGOPlannerManagerTestAccess {
   static iap::IntegritySnapshot snapshot(const EGOPlannerManager& manager, double now) {
     return manager.capturePredictionSnapshot(now);
   }
+  static size_t advisoryQueries(const EGOPlannerManager& manager) { return manager.planning_view_->advisory_stats.queries; }
   static void injectAdvisory(EGOPlannerManager& manager) {
     manager.planning_view_->advisory_query=[](const Eigen::Vector3d& p) {
       GridPlanningRisk r; r.query_status=GridRiskStatus::VALID;
@@ -129,6 +130,7 @@ struct EGOPlannerManagerTestAccess {
       return std::atomic_load(&manager.risk_odom_);
     };
   }
+  static std::shared_ptr<const GridMapFailureSnapshot> planningEvidence(const EGOPlannerManager& manager) { return manager.planning_view_ ? manager.planning_view_->snapshot : nullptr; }
   static void drain(EGOPlannerManager& manager) { manager.drainFailureExports(); }
   static void finalEvidence(EGOPlannerManager& manager) { manager.exportLatestFailure(true); manager.drainFailureExports(); }
   static void setCapture(EGOPlannerManager& manager) {
@@ -1555,14 +1557,18 @@ TEST(EgoBaseline, GuidanceSwitchRetainsPredictionAndPhysicalAuthorization) {
     const auto preference=manager.queryGuidanceCell(Eigen::Vector3d(0,0,1));
     EXPECT_EQ(raw.advisory.classification,GridAdvisoryClass::AVOID);
     EXPECT_DOUBLE_EQ(raw.advisory.hpl,2.);
-    EXPECT_EQ(preference.advisory.query_status,raw.advisory.query_status);
+    if(enabled) EXPECT_EQ(preference.advisory.query_status,raw.advisory.query_status);
     EXPECT_EQ(preference.execution_reason,raw.execution_reason);
     EXPECT_EQ(preference.advisory.classification,enabled?GridAdvisoryClass::AVOID:GridAdvisoryClass::UNKNOWN);
     ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::searchGuidance(manager,start,goal));
     const auto search=ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager);
-    EXPECT_GT(search.advisory_refresh_calls,0u);
-    if(!enabled) EXPECT_EQ(search.rejected_advisory,0u);
-    else EXPECT_GT(search.rejected_advisory,0u);
+    if(!enabled) {
+      EXPECT_EQ(search.advisory_refresh_calls,0u);
+      EXPECT_EQ(search.rejected_advisory,0u);
+    } else {
+      EXPECT_GT(search.advisory_refresh_calls,0u);
+      EXPECT_GT(search.rejected_advisory,0u);
+    }
     ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
     ASSERT_TRUE(manager.publicationStillTimely());
     double detour=0;
@@ -1579,4 +1585,50 @@ TEST(EgoBaseline, GuidanceSwitchRetainsPredictionAndPhysicalAuthorization) {
     EXPECT_FALSE(node->set_parameter(rclcpp::Parameter("planning/advisory_guidance_enabled",!enabled)).successful);
     manager.endPlanningView();
   }
+}
+
+TEST(EgoBaseline, FullPlanningFreezeRetainsEvidenceAcrossPredictionTimeMapUpdate) {
+  auto node=makeNode();
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),10100000000LL),RCL_RET_OK);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1), obstacle(2,2,1);
+  GridMapTestAccess::input(*manager.grid_map_,{obstacle},10.,start);
+  const auto cached=manager.grid_map_->captureFrozenOccupancyEpoch(); ASSERT_TRUE(cached);
+  manager.grid_map_->setFailureEvidenceCapture(true);
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,10.,1,start);
+  ego_planner::EGOPlannerManagerTestAccess::interceptOdom(manager,[&]() {
+    GridMapTestAccess::input(*manager.grid_map_,{Eigen::Vector3d(3,3,1)},10.05,start);
+  });
+  ASSERT_TRUE(manager.beginPlanningView());
+  const auto evidence=ego_planner::EGOPlannerManagerTestAccess::planningEvidence(manager);
+  ASSERT_TRUE(evidence);
+  EXPECT_EQ(evidence->generation,cached->generation);
+  EXPECT_NE(evidence->generation,manager.grid_map_->occupancyGeneration());
+  EXPECT_DOUBLE_EQ(evidence->cloud_stamp_s,10.);
+  Eigen::Vector3i index; manager.grid_map_->posToIndex(obstacle,index);
+  EXPECT_EQ(evidence->cell_flags[manager.grid_map_->toAddress(index)]&1,1);
+  manager.endPlanningView();
+}
+
+TEST(EgoBaseline, DisabledGuidanceDoesNotRefreshUnusedPreferenceDuringPhysicalSearch) {
+  auto node=makeNode(false,1.,false,false);
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),10100000000LL),RCL_RET_OK);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1),goal(-1,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{Eigen::Vector3d(4,4,1)},10.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,10.,1,start);
+  ASSERT_TRUE(manager.beginPlanningView());
+  ego_planner::EGOPlannerManagerTestAccess::injectAdvisory(manager);
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::searchGuidance(manager,start,goal));
+  EXPECT_EQ(ego_planner::EGOPlannerManagerTestAccess::advisoryQueries(manager),0u);
+  // The independent raw prediction interface remains available when OFF.
+  EXPECT_TRUE(manager.queryPlanningViewCell(start).executable());
+  EXPECT_GT(ego_planner::EGOPlannerManagerTestAccess::advisoryQueries(manager),0u);
+  manager.endPlanningView();
 }

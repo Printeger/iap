@@ -112,7 +112,8 @@ def inspect(directory, budget_s=120.0, backend=None, benchmark_repeats=None, ben
                   online_failure=meta["search_failure"],
                   search_stage=meta.get("search_stage"),
                   required_clearance_m=meta.get("required_clearance_m"),
-                  scope="original A* pool; observed physical map and saved motion",
+                  scope="original A* pool; observed physical map and saved motion; "
+                        "minimum physical clearance only, guide fitting reserve and goal set are not replayed",
                   advisory="saved queried PL samples are diagnostic only")
     return report
 

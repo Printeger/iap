@@ -930,7 +930,18 @@ python3 scripts/dev_predictor/advisory_forest_report.py \
 末次森林失败取证使用统一入口与 opt-in 参数：
 
 ```bash
-ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 start_rviz:=false start_grid_map_visualizer:=true advisory_posterior_prior:=false advisory_guidance:=false capture_failure_map:=true run_duration_s:=180
+# 在工作区根目录；先使用同一 resolver 预分配 canonical owner，包含 launch 启动日志。
+export IAP_RUN_DIR="$(python3 - <<'PYRUN'
+import sys
+sys.path.insert(0, 'src/iap/launch/_includes')
+from run_directory import resolve_run_directory
+print(resolve_run_directory(entrypoint='iap_sim', scenario='icra_dense_forest_four_fork_v2'))
+PYRUN
+)"
+export ROS_LOG_DIR="$IAP_RUN_DIR/runtime/ros"
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/install/iap/share/iap/config/sim_ego/fastdds_udp_only.xml"
+ros2 launch iap iap_sim.launch.py run_dir:="$IAP_RUN_DIR" scenario:=icra_dense_forest_four_fork_v2 start_rviz:=false start_grid_map_visualizer:=true advisory_posterior_prior:=false advisory_guidance:=false capture_failure_map:=true run_duration_s:=180
 ```
 
 以启动打印的 `IAP_RUN_DIR` 为准。`export/planner/failure_map/<reason>` 保留首次，
@@ -938,3 +949,14 @@ ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 start
 队列丢失会记录原因。按 `planning_attempt_id`、generation、原时间及 run manifest
 核对身份，不能用首次图解释后来停车。`terminal_final` 需要正常进程退出。
 当前四阶段实测状态见 [实施进度](docs/dev_planner/forest_four_stage_progress.md)。
+
+`run_dir` 只接受同一场景、entrypoint=`iap_sim`、lifecycle=`active` 的 resolver
+主运行；完成的旧运行拒绝复用。guide OFF 搜索跳过未使用的偏好刷新，独立预测
+和曲线诊断仍保留。失败证据随完整物理 epoch 在同一锁内捕获，不能事后重捕
+地图。离线 reachability 目前仅重放基础物理净空，尚不重放 guide 拟合余量/
+多目标选择；报告 scope 明确该限制。
+
+GNSS 已有 debug CSV 开启时，`export/glio/advisory_coordinate_dynamics.csv` 记录
+同次优化 pose 原时间、接收 UTC、世界→ECEF/ENU、机体旋转、R(0) tangent
+边缘协方差、速度和 IMU bias。无协方差时标记 invalid 并留空，记录不能替代
+旋转传播、合格时间配对或 PL 授权；性能单列 `1.3_coordinate_evidence`。

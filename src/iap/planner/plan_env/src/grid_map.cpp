@@ -2317,6 +2317,7 @@ void GridMap::setFailureEvidenceCapture(const bool enabled)
 {
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   failure_evidence_capture_ = enabled;
+  cached_physical_epoch_.reset();
   observation_loss_producer_.clear();
   if (enabled)
     observation_loss_producer_.resize(md_.observed_buffer_.size(), 0);
@@ -3004,6 +3005,7 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::optional<RegisteredLidarFrameMetadata> current_registered_frame;
     std::shared_ptr<const LocalEvidenceSnapshot> local_evidence_snapshot;
     std::vector<RegisteredLidarFrameMetadata> support_history;
+    std::shared_ptr<const GridMapFailureSnapshot> failure_evidence;
   };
 
   auto buffers = std::make_shared<FrozenBuffers>();
@@ -3111,6 +3113,12 @@ GridMap::captureFrozenOccupancyEpoch() const
     buffers->inflated = md_.occupancy_buffer_inflate_;
     buffers->raw_cloud = md_.occupancy_buffer_raw_cloud_;
     buffers->observed = md_.observed_buffer_;
+    if (failure_evidence_capture_) {
+      // The failure proof is part of this occupancy transaction, just as for
+      // captureFrozenCorridor. Later risk preparation must not recapture live.
+      const auto evidence=captureFailureSnapshotUnlocked(true);
+      if(evidence) buffers->failure_evidence=std::make_shared<const GridMapFailureSnapshot>(std::move(*evidence));
+    }
   }
 
   auto centers = buffers->raw_centers
@@ -3225,6 +3233,7 @@ GridMap::captureFrozenOccupancyEpoch() const
              << std::setfill('0') << hash;
     epoch->current_frame_content_hash = identity.str();
   }
+  epoch->failure_evidence = frozen_buffers->failure_evidence;
   epoch->frame_contract_id = frozen_buffers->frame_contract_id;
   if (trusted_local_map_support_enabled_ &&
       frozen_buffers->current_registered_frame)

@@ -24,6 +24,7 @@ _INCLUDES = Path(__file__).resolve().parent / "_includes"
 if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
 from run_directory import (  # noqa: E402
+    adopt_run_directory,
     finalize_run_from_shutdown,
     register_config_snapshot,
     register_validation_trial,
@@ -51,7 +52,15 @@ def _setup(context):
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario}'; valid: {valid}")
 
 
-    output_dir = resolve_run_directory(entrypoint="iap_sim", scenario=scenario)
+    internal_run = str(context.launch_configurations.get("run_dir", "")).strip()
+    output_dir = (adopt_run_directory(internal_run) if internal_run else
+                  resolve_run_directory(entrypoint="iap_sim", scenario=scenario))
+    if internal_run:
+        primary = json.loads((output_dir / "metadata/run_manifest.json").read_text())
+        if (primary.get("schema_version") != "iap_run_artifact_v1" or
+                primary.get("entrypoint") != "iap_sim" or primary.get("scenario") != scenario or
+                primary.get("lifecycle") != "active"):
+            raise ValueError("iap_sim run_dir requires its own active resolver-allocated run")
     register_config_snapshot(
         output_dir, output_dir / "metadata" / "config" / "full_stack"
     )
@@ -166,6 +175,7 @@ def _setup(context):
 def generate_launch_description():
     return LaunchDescription(
         [
+            DeclareLaunchArgument("run_dir", default_value="", description="Private preallocated canonical owner run; contains startup ROS logs"),
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("start_grid_map_visualizer", default_value="true"),

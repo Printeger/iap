@@ -29,6 +29,7 @@
 #include <gtsam/nonlinear/NonlinearFactor.h>
 #include <gtsam/nonlinear/PriorFactor.h>
 #include <gtsam/geometry/Rot3.h>
+#include <gtsam/navigation/ImuBias.h>
 
 #include <gnss_comm/gnss_ros.hpp>
 #include <gnss_comm/gnss_utility.hpp>
@@ -51,6 +52,7 @@
 #include <iap/util/timing_csv.hpp>
 
 #include <algorithm>
+#include <Eigen/Eigenvalues>
 #include <iomanip>
 #include <filesystem>
 #include <limits>
@@ -222,6 +224,26 @@ GnssExtensionModule::GnssExtensionModule()
     if (csv_file_path.has_parent_path()) {
       std::error_code ec;
       std::filesystem::create_directories(csv_file_path.parent_path(), ec);
+    }
+    if (const auto* artifacts = glim::RunLogManager::get_if_initialized()) {
+      const auto path=artifacts->export_path("glio/advisory_coordinate_dynamics.csv");
+      if (std::filesystem::exists(path)) throw std::runtime_error("coordinate evidence artifact already exists");
+      coordinate_evidence_csv_.open(path);
+      if (!coordinate_evidence_csv_) throw std::runtime_error("coordinate evidence artifact open failed");
+      coordinate_evidence_csv_ << "pose_stamp_s,frame_id,epoch_source_identity,receive_utc_s,rotation_cov_valid";
+      for (const auto prefix : {"R_ecef_world", "R_ecef_enu", "rotation_tangent_cov_rad2", "R_world_imu"})
+        for (int row=0; row<3; ++row) for (int col=0; col<3; ++col)
+          coordinate_evidence_csv_ << ',' << prefix << '_' << row << col;
+      for (const auto prefix : {"p_world_imu", "v_world_imu", "accel_bias", "gyro_bias"})
+        for (const auto axis : {"x", "y", "z"}) coordinate_evidence_csv_ << ',' << prefix << '_' << axis;
+      coordinate_evidence_csv_ << '\n';
+      std::ofstream manifest(artifacts->metadata_path("manifests/gnss_coordinate_dynamics.json"));
+      manifest << "{\"schema_version\":\"iap_gnss_coordinate_dynamics_v1\","
+          "\"csv\":\"export/glio/advisory_coordinate_dynamics.csv\","
+          "\"rotation_uncertainty\":\"post-optimization marginal covariance of R(0), local Rot3 tangent, rad^2\","
+          "\"time\":\"original state acquisition stamp and separate diagnostic receipt UTC\","
+          "\"authority\":\"evidence only; no propagation, truth alignment or PL authorization\"}\n";
+      if (!manifest) throw std::runtime_error("coordinate evidence manifest write failed");
     }
     debug_csv_file_.open(csv_path, std::ios::out | std::ios::trunc);
     if (debug_csv_file_.is_open()) {
@@ -830,7 +852,45 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     coordinates.lever_arm_imu=advisory_lever_arm_;
     coordinates.valid=true;
     IapSharedState::instance().set_gnss_coordinates(coordinates);
-
+    if (coordinate_evidence_csv_.is_open()) {
+      try {
+      const auto began=std::chrono::steady_clock::now();
+      Eigen::Matrix3d covariance=Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN());
+      bool covariance_valid=false;
+      try {
+        covariance=smoother.marginalCovariance(R(0));
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(covariance);
+        covariance_valid=covariance.allFinite() && (covariance-covariance.transpose()).norm()<1e-9 &&
+            eigen.info()==Eigen::Success && eigen.eigenvalues().minCoeff()>=-1e-12;
+      } catch (const std::exception& error) {
+        if(coordinate_evidence_rows_%100==0) logger_->warn("[gnss_ext] rotation uncertainty unavailable: {}",error.what());
+      }
+      const auto velocity_key=gtsam::Symbol('v',coordinates.frame_id), bias_key=gtsam::Symbol('b',coordinates.frame_id);
+      Eigen::Vector3d velocity=Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+      Eigen::Matrix<double,6,1> bias=Eigen::Matrix<double,6,1>::Constant(std::numeric_limits<double>::quiet_NaN());
+      if(all_vals.exists(velocity_key)) velocity=all_vals.at<gtsam::Vector3>(velocity_key);
+      if(all_vals.exists(bias_key)) bias=all_vals.at<gtsam::imuBias::ConstantBias>(bias_key).vector();
+      const double received=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+      coordinate_evidence_csv_ << std::setprecision(17) << coordinates.stamp << ',' << coordinates.frame_id
+          << ',' << coordinates.epoch_source_identity << ',' << received << ',' << covariance_valid;
+      const auto value=[&](double v) { coordinate_evidence_csv_ << ','; if(std::isfinite(v)) coordinate_evidence_csv_ << v; };
+      for(const Eigen::Matrix3d& matrix : {coordinates.R_ecef_world,coordinates.R_ecef_enu,
+          covariance_valid ? covariance : Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN()).eval(),
+          coordinates.T_world_imu.topLeftCorner<3,3>().eval()})
+        for(int row=0;row<3;++row) for(int col=0;col<3;++col) value(matrix(row,col));
+      for(int i=0;i<3;++i) value(coordinates.T_world_imu(i,3));
+      for(int i=0;i<3;++i) value(velocity[i]);
+      for(int i=0;i<6;++i) value(bias[i]);
+      coordinate_evidence_csv_ << '\n';
+      if(++coordinate_evidence_rows_%100==0) coordinate_evidence_csv_.flush();
+      timing_csv::append(coordinates.stamp,"1.3_coordinate_evidence",std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
+      } catch (const std::exception& error) {
+        // Diagnostics do not revoke or authorize the independently exported source.
+        static std::atomic<std::uint64_t> diagnostic_failures{0};
+        const auto count=++diagnostic_failures;
+        if(count==1 || count%100==0) logger_->warn("[gnss_ext] coordinate evidence unavailable: {} (count={})",error.what(),count);
+      }
+    }
 
   } catch(const std::exception& error) {
     AdvisoryCoordinateContract missing;missing.failure_reason=error.what();

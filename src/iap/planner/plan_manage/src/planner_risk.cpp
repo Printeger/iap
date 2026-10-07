@@ -524,11 +524,7 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
     PlanningView view;
     view.physical = epoch;
     view.generation = epoch->generation;
-    if (capture_failure_map_) {
-      const auto evidence = grid_map_->captureFailureSnapshot(true);
-      if (evidence && evidence->generation == epoch->generation)
-        view.snapshot = std::make_shared<const GridMapFailureSnapshot>(*evidence);
-    }
+    if (capture_failure_map_) view.snapshot = epoch->failure_evidence;
     view.time_s = time_s;
     view.motion = motion;
     const auto odom = latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
@@ -572,7 +568,7 @@ void EGOPlannerManager::endPlanningView() {
 }
 
 GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
-    const Eigen::Vector3d& position, double clearance_reserve_m) const {
+    const Eigen::Vector3d& position, double clearance_reserve_m, bool include_advisory) const {
   if (!planning_view_) return queryLocalTargetCell(position, node_->now().seconds());
   const auto& view = *planning_view_;
   auto physical=view.physical_context;
@@ -580,13 +576,13 @@ GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
   auto cell = grid_map_->queryPlanningCell(position, 0, view.time_s,
       planning_risk_policy_, view.motion, false, &physical,
       search_performance_diagnostics_);
-  if (cell.executable()) cell.advisory = queryPlanningViewAdvisory(position);
+  if (cell.executable() && include_advisory) cell.advisory = queryPlanningViewAdvisory(position);
   return cell;
 }
 
 GridPlanningCell EGOPlannerManager::queryGuidanceCell(const Eigen::Vector3d& position,
     double clearance_reserve_m) const {
-  auto cell=queryPlanningViewCell(position,clearance_reserve_m);
+  auto cell=queryPlanningViewCell(position,clearance_reserve_m,advisory_guidance_enabled_);
   cell.advisory=guidancePreference(cell.advisory);
   return cell;
 }

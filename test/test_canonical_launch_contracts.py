@@ -388,6 +388,25 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 'executable="phase2_planner_integrity_evaluator"', source
             )
 
+    def test_canonical_sim_adopts_active_owner_without_allocating_second_run(self):
+        canonical = self._load_launch("iap_sim.launch.py")
+        runs = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+            run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2")
+            context = LaunchContext()
+            context.launch_configurations.update(run_dir=str(run), scenario="icra_dense_forest_four_fork_v2",
+                start_rviz="false", start_grid_map_visualizer="true", run_duration_s="180", planner_start_delay_s="10")
+            with mock.patch.object(canonical, "get_package_share_directory", return_value=str(REPO)):
+                canonical._setup(context)
+            self.assertEqual(len(list(Path(temporary).glob("20*"))), 1)
+            primary_path = run / "metadata/run_manifest.json"
+            primary = json.loads(primary_path.read_text())
+            primary["lifecycle"] = "completed"
+            primary_path.write_text(json.dumps(primary))
+            with mock.patch.object(canonical, "get_package_share_directory", return_value=str(REPO)):
+                with self.assertRaisesRegex(ValueError, "active resolver"):
+                    canonical._setup(context)
+
     def test_each_canonical_entrypoint_has_one_owner_and_propagates_both_run_envs(self):
         for filename in (
             "glio.launch.py",

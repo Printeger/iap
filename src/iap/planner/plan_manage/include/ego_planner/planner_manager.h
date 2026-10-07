@@ -156,7 +156,7 @@ namespace ego_planner
     }
     GridPlanningRisk queryPlanningViewAdvisory(const Eigen::Vector3d& position) const;
     GridPlanningCell queryPlanningViewCell(const Eigen::Vector3d& position,
-                                         double clearance_reserve_m = 0.0) const;
+                                         double clearance_reserve_m = 0.0, bool include_advisory = true) const;
     std::optional<uint64_t> planningEvidenceFingerprint(
         const Eigen::Vector3d& start, const Eigen::Vector3d& target) const;
     void capturePlanningStall(const Eigen::Vector3d& start,

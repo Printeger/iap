@@ -62,6 +62,37 @@ ARAIM worst_hyp 生产 CSV 的 absent epoch 字段修正为表头对应的 24 �
 阶段一尚未完成固定路线/任务到达，二尚缺物理竖直/传播/真实双源实测，
 三、四前置条件未满足。保留显式 EGO 基线，不推广参数或声明森林 PASS。
 
+### 第一轮现场后的必要修复与范围
+
+干净提交 `0a8ff61` 的 180 s canonical 探索 `20261007T051237Z_248` 未到达。
+135 轮规划，最后性能 gen1648 与 terminal_final gen1623 不同，不能将该快照
+追认为最后失败。最早违反在完整冻结入口：物理 epoch 先捕获，预测准备期间
+地图更新，再捕证据导致混代。现将 opt-in evidence 在 `captureFrozenOccupancyEpoch`
+同一事务中绑定；开关开启会失效旧无证据缓存。PlanningView 直接持有 epoch
+证据，与已存在走廊冻结一致。红/绿 `freeze_red.log` / `freeze_green.log`
+覆盖预测 provider 在准备期间更新地图，不借用后来的 occupancy。
+
+OFF 时高频物理搜索仍刷新中性偏好，红例 trivial search 产生847次不需要的
+Advisory查询。现 OFF 不安装 A* advisory hook，guide 查询不准备偏好；raw
+独立预测/显示/实际曲线诊断仍查询，ON仍保留偏好避让。未降低检查或增加预算。
+最终失败读取最新 A* Result；早期失败段 context 仅精确匹配时保留，成功 guide
+不继承旧失败 context。快照追加完整局部目标集合、拟合余量/收回距离。
+现有离线工具只说明基础物理净空可达，未复现 guide 余量/多目标；不能写成
+在线同规则成功，也不能将离线延长预算推广在线。
+
+canonical 支持同一 resolver 预分配且 active/同场景的 `run_dir`，使 ROS_LOG_DIR
+能在 launch 日志初始化前设置，仍唯一入口/唯一主清单，旧完成运行拒绝。
+首次探索因 FastDDS profile 路径误填使用 DDS 默认值，外部启动日志位置明确
+登记；保留这次失败，不计正式校准。后续使用已安装 sim_ego 正确profile。
+
+生产 CSV 修复需重编真正 writer `integrity_extension`，不能只用 header 测试
+代替安装库。已重建。新 opt-in coordinate CSV 保存同帧 R(0) 边缘切空间
+协方差及优化后速度/bias；异常不改变原来源权限，缺协方差不伪造数值。
+当前 PL 仍以该旋转为条件，协方差记录尚不等于传播模型验证。
+首次实测GNSS valid=0；canonical synthetic只生成GPS，整星座故障完整性
+无法判定，不能强制来源有效。pose接收延迟约0.123–0.145s，现有0.05s
+配对规则未满足；尚无状态传播或双源授权。
+
 ## 运行时检查时序与实际曲线修正（当前修正）
 
 本轮基线 `2d63cb8`，诊断依据 `20261006T110434Z_515`。保存的 remaining_stop 地图时间比检查参考时间新 0.100629 s；候选实际曲线距原始障碍中心 0.550945 m，原要求为 0.551355 m，欠缺 0.000411 m。原始快照保持不变。CSV 中 130 轮、114 次 repair_denied、0 次截止时间过期，advisory avoid / 回退均为零；本轮不把这些失败归因于 PL 或此前已修复的反馈/beam 接线。

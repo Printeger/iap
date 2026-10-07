@@ -85,6 +85,9 @@ namespace ego_planner
     const unsigned repairs = planning_budget_ ? planning_budget_->used() : 0;
     const unsigned failure_phase = static_cast<unsigned>(last_plan_failure_);
     const auto guide = bspline_optimizer_ ? bspline_optimizer_->recoveryGuide() : std::vector<Eigen::Vector3d>{};
+    std::vector<Eigen::Vector3d> goal_positions;
+    for(const auto& target : planning_targets_) goal_positions.push_back(target.position);
+    const double fitting_reserve_m=.5*snapshot->resolution_m;
     const auto state_json = std::exchange(failure_state_json_, std::string{});
     const auto node = node_;
     auto write = [=](const std::string& label) mutable {
@@ -209,6 +212,9 @@ namespace ego_planner
           << "  \"plan_failure_phase\": " << failure_phase << ",\n"
           << "  \"guide_m\": [";
       for(size_t i=0;i<guide.size();++i) metadata << (i ? "," : "") << vector(guide[i]);
+      metadata << "],\n  \"guide_fitting_reserve_m\": " << number(fitting_reserve_m)
+          << ",\n  \"guide_reserve_taper_distance_m\": 0.5,\n  \"planning_goals_m\": [";
+      for(size_t i=0;i<goal_positions.size();++i) metadata << (i ? "," : "") << vector(goal_positions[i]);
       metadata << "],\n"
           << "  \"frame_id\": " << std::quoted(snapshot->frame_id) << ",\n"
           << "  \"generation\": " << snapshot->generation << ",\n"
@@ -613,7 +619,7 @@ namespace ego_planner
     planning_timings_.searcher_initialization_s = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - searcher_started).count();
     bspline_optimizer_->a_star_->setPerformanceDiagnostics(search_performance_diagnostics_);
-    bspline_optimizer_->a_star_->setAdvisoryQuery(
+    if (advisory_guidance_enabled_) bspline_optimizer_->a_star_->setAdvisoryQuery(
         [this](const Eigen::Vector3d& position) {
           return guidancePreference(queryPlanningViewAdvisory(position));
         }, [this]() {
@@ -728,9 +734,16 @@ namespace ego_planner
       if(capture_failure_map_ && planning_view_ && planning_view_->snapshot) {
         // Final disposition of this attempt, including backend/budget failures
         // that happen after an earlier search rejection. Do not read a later map.
-        const auto* search=failed_search_result_ && failed_search_result_->occupancy_generation==planning_view_->generation
-            ? &*failed_search_result_ : nullptr;
-        const auto* context=search && failed_search_context_ ? &*failed_search_context_ : nullptr;
+        const auto& latest=bspline_optimizer_->a_star_->lastResult();
+        const auto* search=latest.occupancy_generation==planning_view_->generation ? &latest : nullptr;
+        // A failed-search observer context belongs only to that exact search.
+        // A later successful guide must not inherit an earlier repair segment.
+        const bool matches=search && failed_search_result_ &&
+            search->failure==failed_search_result_->failure &&
+            search->duration_s==failed_search_result_->duration_s &&
+            search->requested_start.isApprox(failed_search_result_->requested_start,0.) &&
+            search->requested_end.isApprox(failed_search_result_->requested_end,0.);
+        const auto* context=matches && failed_search_context_ ? &*failed_search_context_ : nullptr;
         const auto cell=queryPlanningViewCell(start_pt);
         const auto* assessment=last_candidate_assessment_.failure_snapshot &&
             last_candidate_assessment_.evaluated_generation==planning_view_->generation ? &last_candidate_assessment_ : nullptr;
