@@ -1057,8 +1057,9 @@ qualification. The original attempt45/gen209 first loses the route at `guide_fit
 then deviates further after boundary binding and optimization.
 
 `--mode initialize` starts from the captured `guide_fit` and calls the same
-production fitting interface. Position samples and terminal tangent now use
-one arc sampling; endpoint P/V/A is exact in the fit, so subsequent binding is
+production fitting interface. The nominal arc sampling owns terminal approach
+and duration; initialization subdivides it to the existing voxel diagonal while
+preserving that endpoint P/V/A and duration. Subsequent boundary binding is
 idempotent. Braking, dynamics, physical, route and release checks remain mandatory.
 The replay requires a stage-owned guide and captured stop policy; an older
 nonzero terminal velocity proves continuation, while ambiguous historical zero
@@ -1227,3 +1228,12 @@ fe939ac 的历史GPS＋北斗森林诊断已验证上述显式server ROS字段�
 `log/20261007T195232Z_628`；图文与原时间空间诊断在
 `log/20261007T091820Z_056/export/analysis/raw_constellation_v7_live/report.md`。
 原 FSM 未到达，坐标代数通过不授予物理 H/V、时刻传播或 PL 米数资格；正式9＋9与6次配对仍阻塞。
+
+Curve49 initialization repair: original frozen forest/time/P/V/A/remaining-budget
+replay `203359Z_935` passes complete dynamics, physical and route checks
+(max deviation 0.097226 m within 0.136603 m). Old coarse backend replay remains
+failed; Curve50 keeps its `ENVIRONMENT_UNOBSERVED` rejection. Seven planner
+test groups and 43 canonical entry contracts pass. New captures freeze the
+nominal interval and sampling model for reproducible initialization. Live
+publication/server/motion verification is pending; formal B/D remain blocked.
+Evidence: [Curve initialization report](log/20261007T091820Z_056/export/analysis/voxel_sampling_production/report.md).

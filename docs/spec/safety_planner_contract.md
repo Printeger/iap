@@ -130,6 +130,13 @@ facts even though both are measured in metres.
 ### 3.5 Guide, candidate, and active trajectory
 
 - A **guide** is geometric route information. It has no execution authority.
+  Its nominal arc sampling determines terminal approach and initial total
+  duration. EGO subdivides the guide arc sampling for initialization to spacing
+  no larger than the existing map voxel diagonal without changing that boundary P/V/A or nominal duration. The nominal
+  interval is an explicit input; the finer output interval is never reused
+  as that input after target replacement or repeated fitting.
+  The denser mesh spends the original shared deadline and repair quota. All
+  actual-curve, dynamics, physical, route and publication gates remain mandatory.
 - A **candidate trajectory** is an actual time-parameterized EGO trajectory
   proposed for publication.
 - An **active trajectory** is the trajectory currently owned by the execution
@@ -478,3 +485,9 @@ This contract may become `Active` only after:
 2. implementation conformance gaps are recorded or removed;
 3. interface and authority tests cover the normative invariants; and
 4. the versioned acceptance contract is active and has a retained passing run.
+
+Curve 初始化采样模型 `guide_arc_voxel_diagonal_v1` 的 `guide_fit` 权威阶段同时冻结
+`nominal_interval_s`（本轮名义输入）与 `interval_s`（细化后的实际输出）。
+初始化重放使用明确的名义输入，缺失名义值或未知模型时拒绝；旧无模型字段的粗采样
+捕获仅按 `LEGACY_COARSE_STAGE_INTERVAL` 历史规则读取。输出分别登记捕获／应用模型，
+不更新冻结时刻或授予执行资格。TargetShortening 重拟合仍使用本轮原名义输入。

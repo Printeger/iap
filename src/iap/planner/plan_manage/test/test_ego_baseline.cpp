@@ -149,8 +149,18 @@ struct EGOReplanFSMTestAccess {
 struct EGOPlannerManagerTestAccess {
   static bool fitGuide(EGOPlannerManager& manager,const std::vector<Eigen::Vector3d>& guide,
       const Eigen::Vector3d& velocity,const Eigen::Vector3d& acceleration,bool stop,
-      LocalTarget& target,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
-    return manager.fitGuideCurve(guide,velocity,acceleration,stop,target,interval,points,control);
+      LocalTarget& target,double nominal_interval,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
+    return manager.fitGuideCurve(guide,velocity,acceleration,stop,target,nominal_interval,interval,points,control);
+  }
+  static EGOPlannerManager::TrajectoryAssessment assessFrozenCandidate(EGOPlannerManager& manager,
+      const UniformBspline& curve) {
+    return manager.assessTrajectory(curve,0,manager.planning_view_->time_s,false,0,
+        std::numeric_limits<double>::infinity(),&manager.planning_view_->physical_context);
+  }
+  static EGOPlannerManager::PlanFailure prepareActualCorrection(EGOPlannerManager& manager,
+      Eigen::MatrixXd& control,double interval,const EGOPlannerManager::TrajectoryAssessment& assessment) {
+    manager.bspline_optimizer_->initializeFromGuide(control);
+    return manager.correctCurveCandidate(*manager.bspline_optimizer_,control,interval,assessment);
   }
   static BsplineOptimizer::GuideRetention fittedRetention(EGOPlannerManager& manager,
       const Eigen::MatrixXd& control,double interval,const std::vector<Eigen::Vector3d>& guide) {
@@ -1631,9 +1641,9 @@ TEST(EgoBaseline, RemainingCheckBindsTimeAfterConcurrentMapAndMotionUpdate) {
             GridExecutionReason::ENVIRONMENT_STALE);
 }
 
-TEST(EgoBaseline, GuideCurveCorrectionClearsActualObstacleWithOriginalMargin) {
-  // Strong smoothing still cuts inside a guide with fitting reserve. This
-  // exercises actual-sample correction instead of only initial route padding.
+TEST(EgoBaseline, GuideCurvePlanningAndBoundedActualCorrectionKeepOriginalMargin) {
+  // A finer fit may clear this obstacle before any repair. Test the legal
+  // plan and a deliberately violating actual candidate against the same map.
   auto node=makeNode(false,10.); ego_planner::EGOPlannerManager manager;
   manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
   manager.deliverTrajToOptimizer(); manager.setDroneIdtoOpt();
@@ -1647,12 +1657,25 @@ TEST(EgoBaseline, GuideCurveCorrectionClearsActualObstacleWithOriginalMargin) {
   ASSERT_TRUE(manager.beginPlanningView());
   ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
   EXPECT_GT(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager).expanded,0u);
-  EXPECT_GT(manager.planningBudget()->count(PlanningBudget::Repair::CurveCorrection),0u);
   EXPECT_LE(manager.planningBudget()->used(),3u);
   const auto assessment=manager.assessTrajectory(manager.local_data_.position_traj_,0,node->now().seconds());
   EXPECT_TRUE(assessment.executable()) << gridExecutionReasonName(assessment.execution_reason);
   EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(start,1e-8));
   EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(manager.local_data_.duration_).isApprox(goal,1e-8));
+  const auto executing_controls=manager.local_data_.position_traj_.getControlPoint();
+  Eigen::MatrixXd bad(3,12);
+  for(int i=0;i<bad.cols();++i) bad.col(i)=start+(goal-start)*(double(i)/(bad.cols()-1));
+  ego_planner::UniformBspline::enforceBoundaryStates(bad,.4,start,zero,zero,goal,zero,zero);
+  const auto violation=ego_planner::EGOPlannerManagerTestAccess::assessFrozenCandidate(
+      manager,ego_planner::UniformBspline(bad,3,.4));
+  ASSERT_FALSE(violation.executable());
+  ASSERT_FALSE(violation.curve_clearance_violations.empty());
+  const auto repairs=manager.planningBudget()->count(PlanningBudget::Repair::CurveCorrection);
+  ASSERT_EQ(ego_planner::EGOPlannerManagerTestAccess::prepareActualCorrection(manager,bad,.4,violation),
+      ego_planner::EGOPlannerManager::PlanFailure::None);
+  EXPECT_EQ(manager.planningBudget()->count(PlanningBudget::Repair::CurveCorrection),repairs+1);
+  EXPECT_LE(manager.planningBudget()->used(),3u);
+  EXPECT_EQ((manager.local_data_.position_traj_.getControlPoint()-executing_controls).norm(),0.);
   manager.endPlanningView();
 }
 
@@ -2265,9 +2288,11 @@ TEST(EgoBaseline, RealGuideFitUsesItsSampledTerminalApproachAndExactPva) {
   ego_planner::LocalTarget target{guide.back(),Eigen::Vector3d::UnitX()*.5,Eigen::Vector3d::Zero(),0};
   Eigen::MatrixXd q;std::vector<Eigen::Vector3d> samples;double interval=1.2;
   ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,false,
-      target,interval,samples,q));
-  ASSERT_EQ(q.cols(),13);ASSERT_EQ(samples.size(),11u);
-  const Eigen::Vector3d terminal=(samples.back()-samples[samples.size()-2]).normalized();
+      target,1.2,interval,samples,q));
+  ASSERT_EQ(q.cols(),samples.size()+2);
+  // Saved corrected production initialization, original frozen replay 20261007T144136Z_739.
+  const Eigen::Vector3d nominal_terminal(.3006475512865261,.3294719681943509,.22596298829577421);
+  const Eigen::Vector3d terminal=nominal_terminal.normalized();
   EXPECT_GT(target.velocity.norm(),0.);
   EXPECT_NEAR(target.velocity.normalized().dot(terminal),1.,1e-12);
   ego_planner::UniformBspline curve(q,3,interval);
@@ -2286,10 +2311,71 @@ TEST(EgoBaseline, RealGuideFitUsesItsSampledTerminalApproachAndExactPva) {
   ASSERT_TRUE(retention.checked);EXPECT_FALSE(retention.route_lost);
   EXPECT_LT(retention.max_deviation_m,.1);
   ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,true,
-      target,interval,samples,q));
+      target,1.2,interval,samples,q));
   EXPECT_EQ(target.velocity.norm(),0.);
   curve=ego_planner::UniformBspline(q,3,interval);
   EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-9);
+}
+
+TEST(EgoBaseline, RealOpposingStartVelocityGuideFitKeepsRouteAndCapturedPva) {
+  boost::property_tree::ptree captured;
+  boost::property_tree::read_json((std::filesystem::path(IAP_FAILURE_REGRESSION_FIXTURE_DIR).parent_path()/
+      "curve_attempt49_gen595_geometry.json").string(),captured);
+  const auto point=[](const boost::property_tree::ptree& value) {
+    Eigen::Vector3d result;size_t i=0;for(const auto& child:value) result[i++]=child.second.get_value<double>();return result;
+  };
+  const Eigen::Vector3d offset(6,0,0); // Mechanism geometry in an observed free map, no forest qualification.
+  std::vector<Eigen::Vector3d> guide;
+  for(const auto& child:captured.get_child("guide_m")) guide.push_back(point(child.second)+offset);
+  const auto velocity=point(captured.get_child("real_start_v_mps"));
+  const auto acceleration=point(captured.get_child("real_start_a_mps2"));
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),guide.front());
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,guide.front());
+  ego_planner::LocalTarget target{guide.back(),Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),0};
+  Eigen::MatrixXd q;std::vector<Eigen::Vector3d> samples;double interval=captured.get<double>("interval_s");
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,false,
+      target,captured.get<double>("interval_s"),interval,samples,q));
+  const auto retention=ego_planner::EGOPlannerManagerTestAccess::fittedRetention(manager,q,interval,guide);
+  ASSERT_TRUE(retention.checked);
+  EXPECT_FALSE(retention.route_lost) << "captured opposing start velocity escaped its legal guide during initialization";
+  EXPECT_LE(retention.max_deviation_m,retention.corridor_m);
+  EXPECT_LT((target.velocity-point(captured.get_child("target_v_mps"))).norm(),1e-12);
+  ego_planner::UniformBspline curve(q,3,interval);
+  EXPECT_NEAR(curve.getTimeSum(),captured.get<double>("nominal_duration_s"),1e-12);
+  auto derivative=curve.getDerivative(),second=derivative.getDerivative();
+  for(const auto& boundary:std::vector<std::tuple<double,Eigen::Vector3d,Eigen::Vector3d,Eigen::Vector3d>>{
+      {0.,guide.front(),velocity,acceleration},{curve.getTimeSum(),target.position,target.velocity,target.acceleration}}) {
+    EXPECT_LT((curve.evaluateDeBoorT(std::get<0>(boundary))-std::get<1>(boundary)).norm(),1e-9);
+    EXPECT_LT((derivative.evaluateDeBoorT(std::get<0>(boundary))-std::get<2>(boundary)).norm(),1e-9);
+    EXPECT_LT((second.evaluateDeBoorT(std::get<0>(boundary))-std::get<3>(boundary)).norm(),1e-9);
+  }
+}
+
+TEST(EgoBaseline, RepeatedShortGuideFitPreservesNominalTimeAndBoundary) {
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,start);
+  const std::vector<Eigen::Vector3d> guide{start,start+Eigen::Vector3d(.4,0,0)};
+  ego_planner::LocalTarget target{guide.back(),zero,zero,0};
+  Eigen::MatrixXd q;std::vector<Eigen::Vector3d> samples;double interval=1.2;
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,zero,zero,true,
+      target,1.2,interval,samples,q));
+  const double duration=ego_planner::UniformBspline(q,3,interval).getTimeSum();
+  const auto first=q;
+  // The same variable is reused by target replacement and final-stop fitting.
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,zero,zero,true,
+      target,1.2,interval,samples,q));
+  EXPECT_NEAR(ego_planner::UniformBspline(q,3,interval).getTimeSum(),duration,1e-12);
+  EXPECT_LT((q-first).norm(),1e-12);
+  EXPECT_EQ(target.velocity.norm(),0.);
 }
 
 TEST(EgoBaseline, SplineFitKeepsExactNonzeroPvaAndRejectsInvalidInputs) {

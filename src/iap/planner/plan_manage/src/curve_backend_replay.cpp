@@ -16,14 +16,14 @@ struct CurveBackendReplayAccess {
   static bool fit(EGOPlannerManager& manager,const std::vector<Eigen::Vector3d>& guide,
       const Eigen::Vector3d& velocity,const Eigen::Vector3d& acceleration,
       Eigen::Vector3d& end_velocity,const Eigen::Vector3d& end_acceleration,
-      bool terminal_stop,double max_velocity,double max_acceleration,double& interval,Eigen::MatrixXd& control) {
+      bool terminal_stop,double max_velocity,double max_acceleration,double nominal_interval,double& interval,Eigen::MatrixXd& control) {
     manager.pp_.max_vel_=max_velocity;manager.pp_.max_acc_=max_acceleration;
     manager.pp_.ctrl_pt_dist=manager.node_->declare_parameter("manager/control_points_distance",std::numeric_limits<double>::quiet_NaN());
     if(!std::isfinite(manager.pp_.ctrl_pt_dist) || manager.pp_.ctrl_pt_dist<=0)
       throw std::invalid_argument("initialize requires captured manager/control_points_distance");
     LocalTarget target{guide.back(),end_velocity,end_acceleration,0};std::vector<Eigen::Vector3d> points;
     const bool success=manager.fitGuideCurve(guide,velocity,acceleration,terminal_stop,
-        target,interval,points,control);
+        target,nominal_interval,interval,points,control);
     end_velocity=target.velocity;return success;
   }
   static const GridPlanningContext& bind(EGOPlannerManager& manager,rclcpp::Node::SharedPtr node,
@@ -193,7 +193,23 @@ int main(int argc,char**argv) {
   const auto& assessment_context=ego_planner::CurveBackendReplayAccess::bind(manager,node,map,context,motion,time,budget);
   save("captured_initial",q,dt);
   bool terminal_stop=false;std::string stop_policy_source="NOT_REPLAYED";
+  double nominal_interval=dt;
+  std::string captured_sampling_model="NOT_REPLAYED";
+  std::string nominal_interval_source="NOT_REPLAYED";
   if(mode=="initialize") {
+    const auto model=stage.get_optional<std::string>("guide_sampling_model");
+    const auto nominal=stage.get_optional<double>("nominal_interval_s");
+    if(model || nominal) {
+      if(!model || *model!=ego_planner::kGuideInitializationSamplingModel || !nominal ||
+          !std::isfinite(*nominal) || *nominal<=0)
+        throw std::invalid_argument("initialize requires supported sampling model and positive captured nominal interval");
+      captured_sampling_model=*model;nominal_interval=*nominal;
+      nominal_interval_source="EXPLICIT_STAGE_NOMINAL_INTERVAL";
+    } else {
+      // Historical coarse guide_fit interval owned the nominal time scale.
+      captured_sampling_model="LEGACY_COARSE_GUIDE_FIT";
+      nominal_interval_source="LEGACY_COARSE_STAGE_INTERVAL";
+    }
     if((guide.front()-start).norm()>1e-6) throw std::invalid_argument("guide does not own captured start");
     const auto captured_stop=stage.get_optional<bool>("terminal_stop");
     if(captured_stop) {terminal_stop=*captured_stop;stop_policy_source="EXPLICIT_CAPTURED_POLICY";}
@@ -201,7 +217,7 @@ int main(int argc,char**argv) {
     else throw std::invalid_argument("historical zero terminal velocity lacks captured stop policy");
     if(terminal_stop && captured_ev.norm()>1e-9)
       throw std::invalid_argument("captured terminal stop policy conflicts with nonzero velocity");
-    if(!ego_planner::CurveBackendReplayAccess::fit(manager,guide,sv,sa,ev,ea,terminal_stop,v,a,dt,q))
+    if(!ego_planner::CurveBackendReplayAccess::fit(manager,guide,sv,sa,ev,ea,terminal_stop,v,a,nominal_interval,dt,q))
       throw std::runtime_error("guide initialization rejected");
     save("guide_fit_replayed",q,dt);
     optimizer.initializeFromGuide(q);
@@ -300,6 +316,12 @@ int main(int argc,char**argv) {
       <<",\"replayed_target_velocity_mps\":["<<ev.x()<<','<<ev.y()<<','<<ev.z()<<']'
       <<",\"terminal_stop\":"<<(mode=="initialize" ? (terminal_stop ? "true" : "false") : "null")
       <<",\"terminal_stop_policy_source\":"<<std::quoted(stop_policy_source)
+      <<",\"captured_guide_sampling_model\":"<<std::quoted(captured_sampling_model)
+      <<",\"applied_guide_sampling_model\":"<<std::quoted(mode=="initialize" ? ego_planner::kGuideInitializationSamplingModel : "NOT_REPLAYED")
+      <<",\"nominal_interval_source\":"<<std::quoted(nominal_interval_source)
+      <<",\"nominal_interval_s\":"<<(mode=="initialize" ? "" : "null");
+  if(mode=="initialize") result<<nominal_interval;
+  result
       <<",\"final_check_sampled_points\":"<<final.sampled_points
       <<",\"final_check_requested_from_time_s\":"<<final.checked_from_time_s<<",\"final_check_requested_to_time_s\":"<<final.checked_to_time_s
       <<",\"final_check_sampled_to_time_s\":"<<(final.sampled_points ? std::to_string(std::min(final.checked_to_time_s, final.checked_from_time_s+(final.sampled_points-1)*final.sample_step_s)) : "null")

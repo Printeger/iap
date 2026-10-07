@@ -23,7 +23,8 @@ namespace ego_planner
 
   void EGOPlannerManager::recordCurveStage(const std::string& stage,
       const Eigen::MatrixXd& controls, double interval, const LocalTarget& target,
-      double feasibility_ratio, const TrajectoryAssessment* assessment, bool optimization_exit) {
+      double feasibility_ratio, const TrajectoryAssessment* assessment, bool optimization_exit,
+      std::optional<double> nominal_interval) {
     // Every geometry revision invalidates the previous final assessment, even
     // when export is disabled. An early return must never pair it with a new curve.
     last_candidate_assessment_={};
@@ -38,6 +39,10 @@ namespace ego_planner
         optimization_exit ? bspline_optimizer_->lastOptimizationReason() : std::string{},
         feasibility_ratio};
     evidence.guide=bspline_optimizer_->recoveryGuide();
+    if(nominal_interval) {
+      evidence.nominal_interval_s=nominal_interval;
+      evidence.guide_sampling_model=kGuideInitializationSamplingModel;
+    }
     if(!global_data_.global_traj_.getTimes().empty())
       evidence.terminal_stop=(target.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6;
     if(assessment) {
@@ -485,6 +490,8 @@ namespace ego_planner
         }
         metadata << (s ? "," : "") << "{\"stage\":" << std::quoted(evidence.stage)
             << ",\"degree\":3,\"interval_s\":" << number(curve.getInterval())
+            << ",\"nominal_interval_s\":" << (evidence.nominal_interval_s ? number(*evidence.nominal_interval_s) : "null")
+            << ",\"guide_sampling_model\":" << (evidence.guide_sampling_model.empty() ? "null" : std::string("\"")+evidence.guide_sampling_model+"\"")
             << ",\"elapsed_s\":" << number(evidence.elapsed_s) << ",\"repairs\":" << evidence.repairs
             << ",\"solver_result\":" << (evidence.solver_result ? std::to_string(*evidence.solver_result) : "null")
             << ",\"solver_reason\":" << std::quoted(evidence.solver_reason)
@@ -989,6 +996,7 @@ namespace ego_planner
         global_data_.getPosition(global_data_.global_duration_));
     LocalTarget selected{target_pt,target_vel,Eigen::Vector3d::Zero(),0};
     double interval=std::max(.05,pp_.ctrl_pt_dist/std::max(.1,pp_.max_vel_)*1.5);
+    const double nominal_guide_interval=interval; // Fresh-guide time owner, independent of fit/retime outputs.
     std::vector<Eigen::Vector3d> points;
     if((target_pt-start_pt).norm()<.2) return fail(PlanFailure::Target);
     Eigen::MatrixXd control;
@@ -1013,8 +1021,8 @@ namespace ego_planner
       const bool terminal_stop=!global_data_.global_traj_.getTimes().empty() ?
           (selected.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6 :
           selected.velocity.norm()<1e-9;
-      if(!fitGuideCurve(guide,start_vel,start_acc,terminal_stop,selected,interval,points,control)) return false;
-      recordCurveStage("guide_fit",control,interval,selected);
+      if(!fitGuideCurve(guide,start_vel,start_acc,terminal_stop,selected,nominal_guide_interval,interval,points,control)) return false;
+      recordCurveStage("guide_fit",control,interval,selected,NAN,nullptr,false,nominal_guide_interval);
       bind_boundaries(); recordCurveStage("guide_bound",control,interval,selected);
       optimizer.initializeFromGuide(control); return true;
     };
@@ -1239,26 +1247,31 @@ namespace ego_planner
 
   bool EGOPlannerManager::fitGuideCurve(const std::vector<Eigen::Vector3d>& guide,
       const Eigen::Vector3d& start_vel,const Eigen::Vector3d& start_acc,bool terminal_stop,
-      LocalTarget& selected,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
-    if(guide.size()<2 || !std::isfinite(pp_.ctrl_pt_dist) || pp_.ctrl_pt_dist<=0 ||
+      LocalTarget& selected,double nominal_interval,double& interval,
+      std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
+    if(!std::isfinite(nominal_interval) || nominal_interval<=0 || guide.size()<2 || !std::isfinite(pp_.ctrl_pt_dist) || pp_.ctrl_pt_dist<=0 ||
         !std::all_of(guide.begin(),guide.end(),[](const Eigen::Vector3d& p){return p.allFinite();}) ||
         !guide.back().isApprox(selected.position,1e-9)) return false;
     std::vector<double> arc(guide.size(),0);
     for(size_t i=1;i<guide.size();++i) arc[i]=arc[i-1]+(guide[i]-guide[i-1]).norm();
     if(arc.back()<1e-6) return false;
     const size_t count=std::max<size_t>(7,std::ceil(arc.back()/pp_.ctrl_pt_dist)+1);
-    points.clear();size_t segment=1;
-    for(size_t i=0;i<count;++i) {
-      if(planning_budget_ && planning_budget_->expired()) return false;
-      const double d=arc.back()*i/(count-1);
-      while(segment+1<arc.size() && arc[segment]<d) ++segment;
-      const double length=arc[segment]-arc[segment-1];
-      const double alpha=length>1e-9 ? (d-arc[segment-1])/length : 0;
-      points.push_back(guide[segment-1]*(1-alpha)+guide[segment]*alpha);
-    }
+    const auto sample_guide=[&](size_t sample_count) {
+      points.clear();size_t segment=1;
+      for(size_t i=0;i<sample_count;++i) {
+        if(planning_budget_ && planning_budget_->expired()) return false;
+        const double d=arc.back()*i/(sample_count-1);
+        while(segment+1<arc.size() && arc[segment]<d) ++segment;
+        const double length=arc[segment]-arc[segment-1];
+        const double alpha=length>1e-9 ? (d-arc[segment-1])/length : 0;
+        points.push_back(guide[segment-1]*(1-alpha)+guide[segment]*alpha);
+      }
+      return true;
+    };
+    if(!sample_guide(count)) return false;
     selected.velocity.setZero();
     if(!terminal_stop) {
-      // The terminal derivative belongs to the same guide sampling as the fit.
+      // The nominal guide sampling owns the terminal approach window.
       // A tiny lattice-to-target connector can point backwards or vertically;
       // treating that connector as a full-speed approach contradicts the
       // resampled curve and forces a loop when the P/V/A triplets are bound.
@@ -1268,7 +1281,19 @@ namespace ego_planner
         selected.velocity=direction*terminalSpeedLimit(selected.position,direction*pp_.max_vel_);
       }
     }
-    interval=std::max(interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
+    interval=std::max(nominal_interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
+    // The nominal sampling still owns terminal approach and total duration.
+    // Refine the initialization mesh to the physical guide's voxel scale:
+    // coarse samples can erase an early turn needed by the exact start P/V/A.
+    // Additional controls spend the same shared deadline, never extra repairs.
+    if(!grid_map_) return false;
+    const double voxel_diagonal=std::sqrt(3.)*grid_map_->getResolution();
+    if(!std::isfinite(voxel_diagonal) || voxel_diagonal<=0) return false;
+    const size_t subdivisions=std::max<size_t>(1,std::ceil(pp_.ctrl_pt_dist/voxel_diagonal));
+    if(subdivisions>1) {
+      if(!sample_guide(subdivisions*(count-1)+1)) return false;
+      interval/=subdivisions;
+    }
     UniformBspline::parameterizeToBspline(interval,points,
         {start_vel,selected.velocity,start_acc,selected.acceleration},control);
     return true;

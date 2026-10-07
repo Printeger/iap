@@ -162,11 +162,21 @@ class CurveReplayTest(unittest.TestCase):
                 self.assertLess(stages[0]["max_deviation_m"], stages[1]["max_deviation_m"])
                 self.assertLess(stages[1]["max_deviation_m"], stages[3]["max_deviation_m"])
             base_parameters=parameters.read_text()
-            for scenario in ("same_input", "zero_without_policy", "unowned", "explicit_stop", "guidance_without_predictor"):
+            fine_capture = None
+            for scenario in ("same_input", "voxel_sampling", "voxel_sampling_missing_nominal",
+                             "unsupported_sampling_model", "zero_without_policy", "unowned",
+                             "explicit_stop", "guidance_without_predictor"):
                 parameters.write_text(base_parameters + ("\n    planning/advisory_guidance_enabled: true\n"
                     if scenario=="guidance_without_predictor" else ""))
                 current = json.loads(json.dumps(data))
                 first = current["curve_stages"][0]
+                if scenario.startswith("voxel_sampling") or scenario == "unsupported_sampling_model":
+                    self.assertIsNotNone(fine_capture)
+                    first.update(interval_s=fine_capture['interval_s'],control_points_m=fine_capture['control_points_m'],
+                                 target_v_mps=fine_capture['target_v_mps'],nominal_interval_s=1.2000000000000002,
+                                 guide_sampling_model='guide_arc_voxel_diagonal_v1')
+                    if scenario == 'voxel_sampling_missing_nominal':del first['nominal_interval_s']
+                    if scenario == 'unsupported_sampling_model':first['guide_sampling_model']='unsupported'
                 if scenario in ("zero_without_policy", "explicit_stop"):
                     first["target_v_mps"] = [0., 0., 0.]
                 if scenario == "explicit_stop":
@@ -181,7 +191,7 @@ class CurveReplayTest(unittest.TestCase):
                                          env={**os.environ, "IAP_RUN_ROOT": temporary},
                                          capture_output=True, text=True, timeout=15)
                 run, = set(root.iterdir()) - existing
-                rejected = scenario in ("zero_without_policy", "unowned", "guidance_without_predictor")
+                rejected = scenario in ("zero_without_policy", "unowned", "guidance_without_predictor", "voxel_sampling_missing_nominal", "unsupported_sampling_model")
                 self.assertEqual(process.returncode, 1 if rejected else 0, process.stderr + process.stdout)
                 output = run / "export/planner/curve_replay/result.json"
                 if rejected:
@@ -198,6 +208,14 @@ class CurveReplayTest(unittest.TestCase):
                 self.assertEqual(result["curve_stages"][0]["stage"], "captured_initial")
                 self.assertEqual(result["curve_stages"][0]["control_points_m"], first["control_points_m"])
                 self.assertEqual(result["curve_stages"][1]["stage"], "guide_fit_replayed")
+                if scenario == 'same_input':
+                    fine_capture={**result['curve_stages'][1],'target_v_mps':result['replayed_target_velocity_mps']}
+                if scenario == 'voxel_sampling':
+                    self.assertEqual(result['nominal_interval_source'],'EXPLICIT_STAGE_NOMINAL_INTERVAL')
+                    self.assertEqual(result['nominal_interval_s'],first['nominal_interval_s'])
+                    self.assertEqual(result['captured_guide_sampling_model'],first['guide_sampling_model'])
+                    self.assertEqual(result['curve_stages'][1]['interval_s'],first['interval_s'])
+                    self.assertEqual(result['curve_stages'][1]['control_points_m'],first['control_points_m'])
                 self.assertEqual(result["terminal_stop"], scenario == "explicit_stop")
                 self.assertEqual(result["added_repairs"], 0)
             del data["curve_stages"][1]["guide_m"]

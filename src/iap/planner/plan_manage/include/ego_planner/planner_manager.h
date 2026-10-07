@@ -33,6 +33,7 @@
 
 namespace ego_planner
 {
+  inline constexpr const char* kGuideInitializationSamplingModel = "guide_arc_voxel_diagonal_v1";
 
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called
@@ -240,17 +241,21 @@ namespace ego_planner
       std::vector<Eigen::Vector3d> guide; // Geometry owned by this candidate revision.
       BsplineOptimizer::GuideRetention guide_retention;
       std::optional<bool> terminal_stop; // Explicit fixed-task policy; null if unavailable.
+      std::optional<double> nominal_interval_s;
+      std::string guide_sampling_model;
     };
     // Opt-in evidence; exported by the existing bounded writer.
     std::vector<CurveStageEvidence> curve_stages_;
     unsigned dropped_curve_stages_ = 0;
     bool fitGuideCurve(const std::vector<Eigen::Vector3d>& guide,
         const Eigen::Vector3d& start_vel,const Eigen::Vector3d& start_acc,bool terminal_stop,
-        LocalTarget& selected,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control);
+        LocalTarget& selected,double nominal_interval,double& interval,
+        std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control);
     void recordCurveStage(const std::string& stage, const Eigen::MatrixXd& controls,
                           double interval, const LocalTarget& target,
                           double feasibility_ratio = std::numeric_limits<double>::quiet_NaN(),
-                          const TrajectoryAssessment* assessment = nullptr, bool optimization_exit = false);
+                          const TrajectoryAssessment* assessment = nullptr, bool optimization_exit = false,
+                          std::optional<double> nominal_interval = std::nullopt);
     void queueFailureExport(std::function<void()> job, bool terminal);
     void exportLatestFailure(bool final = false);
     void drainFailureExports();
