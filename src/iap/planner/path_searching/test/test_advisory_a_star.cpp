@@ -191,6 +191,19 @@ TEST(AdvisoryAStar, RoundedEndpointNeedsAnExecutableConnector) {
   EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_BLOCKED);
 }
 
+TEST(AdvisoryAStar, NegativePoolCoordinatesUseNearestLattice) {
+  auto map=std::make_shared<GridMap>(); GridMapTestAccess::configure(*map);
+  AStar search; search.initGridMap(map,Eigen::Vector3i(100,100,40));
+  search.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell; cell.execution_reason=GridExecutionReason::OK; return cell;
+  });
+  const Eigen::Vector3d start(-1.06,-1.06,1.06);
+  ASSERT_TRUE(search.AstarSearch(0.1,start,Eigen::Vector3d(1,1,1),1.0,Eigen::Vector3d(0,0,1)));
+  const auto path=search.getPath(); ASSERT_GE(path.size(),3u);
+  EXPECT_TRUE(path.front().isApprox(start));
+  EXPECT_TRUE(path[1].isApprox(Eigen::Vector3d(-1.1,-1.1,1.1),1e-9));
+}
+
 TEST(AdvisoryAStar, MidpointRejectionBendsOtherwiseFreeEdge) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);
