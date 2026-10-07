@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/koide3/gtsam_points",
+  "revision": "85d0f4c43098b1f071bbb07710692e3829347c6c",
+  "files_sha256": {
+    "include/gtsam_points/factors/integrated_vgicp_factor_gpu.hpp": "c61435ed98cba2051185e16b1bd56b08eacb5737780119347ce75c31dbb97c32",
+    "include/gtsam_points/factors/integrated_vgicp_derivatives.cuh": "de7fa120cbf7337dc8c06dee35d91177a586baef66d079f26cd7a9105fdf2f01",
+    "src/gtsam_points/factors/integrated_vgicp_derivatives_compute.cu": "d3dbcd4aac7673c8dde26b41a371e657b5669e5257f32254447b9b9481160cd4",
+    "src/gtsam_points/factors/integrated_vgicp_derivatives_linearize.cu": "f08a16685d3940d354eca0ed30443db6337ac12aec0d3d816cbd7299cc3e63dc",
+    "src/gtsam_points/factors/integrated_vgicp_derivatives.cu": "bb0ce097164e31171f3d53f8f38acbacbd470c0d36e6204633489b1801150b81",
+    "src/gtsam_points/factors/integrated_vgicp_derivatives_inliers.cu": "758ea55d3625800401b5fef30e037d2feebc0920d1f5e21f3ef1e36158efae30",
+    "src/gtsam_points/factors/integrated_vgicp_factor_gpu.cpp": "aaa48c92a85956110a2ad9e032c00a184a37f0c438ec9c12117e5092abd03e93"
+  },
+  "license": "MIT",
+  "scope": "narrow matching factor/derivative adoption; no external source modified"
+}

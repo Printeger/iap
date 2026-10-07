@@ -615,3 +615,13 @@ owner/layout/coordinate均值错配0；5/6冻结及5份同原时间重放／审�
 `log/20261007T091820Z_056/export/analysis/optimized_bundle/report.md`。
 该短运行不是正式300秒任务；原FSM未到达，B空间／米数、真实GPU残差／联合故障、
 C真实通道保留、D0/6与B0/9＋0/9仍阻塞。继续可独立执行的生产取证工作。
+
+
+B GPU取证：安装API无per-match residual/covariance，不能用原汇总值或CPU重建取代。
+已找到同头hash的85d0f4c上游本地源；IAP窄原生适配正在CUDA构建，原生产路径保持。
+代价／Hessian／inlier等价、后台导出／现场和噪声／相关性均待完成，正式分母不变。
+
+GPU原生取证机制：Release CUDA／8组合原后端代价、Hessian、inlier等价通过；
+旧样本红例8项失败保存后修复，allocation/download/sync失败明确不可用；
+同步与异步接口、128上限、零匹配和恢复覆盖。GPU构建CMake≥3.24。
+生产路径尚未接入；真实残差、噪声／相关性、联合故障及正式分母保持待验证。

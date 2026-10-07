@@ -64,6 +64,35 @@ if(BUILD_WITH_CUDA)
   endif()
 endif()
 
+# Narrow native adoption of the installed matching kernel for actual residual
+# evidence; the original production backend remains selected until parity and
+# the opt-in exporter are integrated. No external gtsam_points source changes.
+if(BUILD_WITH_CUDA)
+  # CUDA_ARCHITECTURES=native is supported starting with CMake 3.24.
+  if(CMAKE_VERSION VERSION_LESS 3.24)
+    message(FATAL_ERROR "IAP native CUDA matching requires CMake >= 3.24")
+  endif()
+  find_package(CUDAToolkit REQUIRED)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES native)
+  endif()
+  enable_language(CUDA)
+  add_library(iap_gpu_match_evidence SHARED
+    src/iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.cpp
+    src/iap/odometry/gpu_evidence/integrated_vgicp_derivatives.cu
+    src/iap/odometry/gpu_evidence/integrated_vgicp_derivatives_compute.cu
+    src/iap/odometry/gpu_evidence/integrated_vgicp_derivatives_inliers.cu
+    src/iap/odometry/gpu_evidence/integrated_vgicp_derivatives_linearize.cu)
+  target_include_directories(iap_gpu_match_evidence PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/iap>)
+  set_target_properties(iap_gpu_match_evidence PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+  target_compile_options(iap_gpu_match_evidence PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
+  target_link_libraries(iap_gpu_match_evidence PUBLIC gtsam_points::gtsam_points CUDA::cudart)
+  list(APPEND iap_LIBRARIES iap_gpu_match_evidence)
+endif()
+
 # ===========================================================================
 # Step 10: Narrow integrity interface targets (for test linking & documentation)
 # ===========================================================================
@@ -621,6 +650,10 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(Python3 REQUIRED COMPONENTS Interpreter)
       find_package(ament_cmake_gtest REQUIRED)
       # Step 10: tests declare narrow deps via interface targets (impl still in iap)
+      if(BUILD_WITH_CUDA)
+        ament_add_gtest(test_gpu_match_evidence test/test_gpu_match_evidence.cpp)
+        target_link_libraries(test_gpu_match_evidence iap_gpu_match_evidence CUDA::cudart ${CMAKE_DL_LIBS})
+      endif()
       ament_add_gtest(test_araim test/test_araim.cpp)
       target_link_libraries(test_araim iap iap_current_integrity)
       if(TARGET gnss_extension)
