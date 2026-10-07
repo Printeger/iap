@@ -38,6 +38,8 @@ namespace ego_planner
         optimization_exit ? bspline_optimizer_->lastOptimizationReason() : std::string{},
         feasibility_ratio};
     evidence.guide=bspline_optimizer_->recoveryGuide();
+    if(!global_data_.global_traj_.getTimes().empty())
+      evidence.terminal_stop=(target.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6;
     if(assessment) {
       evidence.guide_retention=assessment->guide_retention;
       evidence.physical_checked=true; evidence.physical_reason=assessment->execution_reason;
@@ -484,6 +486,7 @@ namespace ego_planner
             << ",\"target_p_m\":" << vector(evidence.target.position)
             << ",\"target_v_mps\":" << vector(evidence.target.velocity)
             << ",\"target_a_mps2\":" << vector(evidence.target.acceleration)
+            << ",\"terminal_stop\":" << (evidence.terminal_stop ? (*evidence.terminal_stop ? "true" : "false") : "null")
             << ",\"max_component_velocity_mps\":" << number(vmax) << ",\"max_velocity_time_s\":" << number(vt)
             << ",\"max_component_acceleration_mps2\":" << number(amax) << ",\"max_acceleration_time_s\":" << number(at)
             << ",\"velocity_control_bound_mps\":" << number(velocity.getControlPoint().cwiseAbs().maxCoeff())
@@ -957,7 +960,6 @@ namespace ego_planner
     optimizer.a_star_->setTaskGoal(global_data_.global_traj_.getTimes().empty() ? target_pt :
         global_data_.getPosition(global_data_.global_duration_));
     LocalTarget selected{target_pt,target_vel,Eigen::Vector3d::Zero(),0};
-    std::vector<Eigen::Vector3d> derivatives{start_vel,selected.velocity,start_acc,selected.acceleration};
     double interval=std::max(.05,pp_.ctrl_pt_dist/std::max(.1,pp_.max_vel_)*1.5);
     std::vector<Eigen::Vector3d> points;
     if((target_pt-start_pt).norm()<.2) return fail(PlanFailure::Target);
@@ -980,36 +982,10 @@ namespace ego_planner
       selected.position=guide.back();
       optimizer.setPlanningEndpoints(start_pt,selected.position);
       optimizer.setPlanningGoals(goals,target_region_center);
-      if(!global_data_.global_traj_.getTimes().empty() ?
+      const bool terminal_stop=!global_data_.global_traj_.getTimes().empty() ?
           (selected.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6 :
-          selected.velocity.norm()<1e-9)
-        selected.velocity.setZero();
-      else {
-        Eigen::Vector3d tangent=Eigen::Vector3d::Zero();
-        for(size_t i=guide.size()-1;i>0;--i) {
-          tangent=guide.back()-guide[i-1];
-          if(tangent.norm()>1e-9) break;
-        }
-        if(tangent.norm()>1e-9) {
-          tangent.normalize();const auto desired=tangent*pp_.max_vel_;
-          selected.velocity=tangent*terminalSpeedLimit(selected.position,desired);
-        } else selected.velocity.setZero();
-      }
-      derivatives={start_vel,selected.velocity,start_acc,selected.acceleration};
-      std::vector<double> arc(guide.size(),0);
-      for(size_t i=1;i<guide.size();++i) arc[i]=arc[i-1]+(guide[i]-guide[i-1]).norm();
-      const size_t count=std::max<size_t>(7,std::ceil(arc.back()/pp_.ctrl_pt_dist)+1);
-      points.clear(); size_t segment=1;
-      for(size_t i=0;i<count;++i) {
-        if(planning_budget_->expired()) return false;
-        const double d=arc.back()*i/(count-1);
-        while(segment+1<arc.size() && arc[segment]<d) ++segment;
-        const double length=arc[segment]-arc[segment-1];
-        const double alpha=length>1e-9 ? (d-arc[segment-1])/length : 0;
-        points.push_back(guide[segment-1]*(1-alpha)+guide[segment]*alpha);
-      }
-      interval=std::max(interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
-      UniformBspline::parameterizeToBspline(interval,points,derivatives,control);
+          selected.velocity.norm()<1e-9;
+      if(!fitGuideCurve(guide,start_vel,start_acc,terminal_stop,selected,interval,points,control)) return false;
       recordCurveStage("guide_fit",control,interval,selected);
       bind_boundaries(); recordCurveStage("guide_bound",control,interval,selected);
       optimizer.initializeFromGuide(control); return true;
@@ -1241,6 +1217,43 @@ namespace ego_planner
     if(!committed) return fail(PlanFailure::Release);
     continous_failures_count_=0;
     visualization_->displayInitPathList(points,.2,0);
+    return true;
+  }
+
+  bool EGOPlannerManager::fitGuideCurve(const std::vector<Eigen::Vector3d>& guide,
+      const Eigen::Vector3d& start_vel,const Eigen::Vector3d& start_acc,bool terminal_stop,
+      LocalTarget& selected,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
+    if(guide.size()<2 || !std::isfinite(pp_.ctrl_pt_dist) || pp_.ctrl_pt_dist<=0 ||
+        !std::all_of(guide.begin(),guide.end(),[](const Eigen::Vector3d& p){return p.allFinite();}) ||
+        !guide.back().isApprox(selected.position,1e-9)) return false;
+    std::vector<double> arc(guide.size(),0);
+    for(size_t i=1;i<guide.size();++i) arc[i]=arc[i-1]+(guide[i]-guide[i-1]).norm();
+    if(arc.back()<1e-6) return false;
+    const size_t count=std::max<size_t>(7,std::ceil(arc.back()/pp_.ctrl_pt_dist)+1);
+    points.clear();size_t segment=1;
+    for(size_t i=0;i<count;++i) {
+      if(planning_budget_ && planning_budget_->expired()) return false;
+      const double d=arc.back()*i/(count-1);
+      while(segment+1<arc.size() && arc[segment]<d) ++segment;
+      const double length=arc[segment]-arc[segment-1];
+      const double alpha=length>1e-9 ? (d-arc[segment-1])/length : 0;
+      points.push_back(guide[segment-1]*(1-alpha)+guide[segment]*alpha);
+    }
+    selected.velocity.setZero();
+    if(!terminal_stop) {
+      // The terminal derivative belongs to the same guide sampling as the fit.
+      // A tiny lattice-to-target connector can point backwards or vertically;
+      // treating that connector as a full-speed approach contradicts the
+      // resampled curve and forces a loop when the P/V/A triplets are bound.
+      const Eigen::Vector3d tangent=points.back()-points[points.size()-2];
+      if(tangent.norm()>1e-9) {
+        const Eigen::Vector3d direction=tangent.normalized();
+        selected.velocity=direction*terminalSpeedLimit(selected.position,direction*pp_.max_vel_);
+      }
+    }
+    interval=std::max(interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
+    UniformBspline::parameterizeToBspline(interval,points,
+        {start_vel,selected.velocity,start_acc,selected.acceleration},control);
     return true;
   }
 

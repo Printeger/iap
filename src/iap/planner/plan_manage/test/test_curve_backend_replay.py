@@ -21,7 +21,19 @@ class CurveReplayTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             parameters = root / "parameters.yaml"
-            parameters.write_text("/**:\n  ros__parameters:\n    optimization/order: 3\n")
+            parameters.write_text("""/**:
+  ros__parameters:
+    optimization/order: 3
+    optimization/lambda_smooth: 1.0
+    optimization/lambda_collision: 0.5
+    optimization/lambda_feasibility: 0.1
+    optimization/lambda_fitness: 1.0
+    optimization/dist0: 0.5
+    optimization/swarm_clearance: 0.5
+    optimization/max_vel: 0.5
+    optimization/max_acc: 2.0
+    manager/control_points_distance: 0.4
+""")
             for offset in (0., 12.):
                 data = json.loads(json.dumps(fixture))
                 data.update(kind="attempt_failure_curve", origin_m=[-20.+offset, -6., 0.],
@@ -72,6 +84,40 @@ class CurveReplayTest(unittest.TestCase):
                     self.assertAlmostEqual(stage["max_deviation_m"], expected, delta=.0001)
                 self.assertLess(stages[0]["max_deviation_m"], stages[1]["max_deviation_m"])
                 self.assertLess(stages[1]["max_deviation_m"], stages[3]["max_deviation_m"])
+            for scenario in ("same_input", "zero_without_policy", "unowned", "explicit_stop"):
+                current = json.loads(json.dumps(data))
+                first = current["curve_stages"][0]
+                if scenario in ("zero_without_policy", "explicit_stop"):
+                    first["target_v_mps"] = [0., 0., 0.]
+                if scenario == "explicit_stop":
+                    first["terminal_stop"] = True
+                elif scenario == "unowned":
+                    del first["guide_m"]
+                snapshot.write_text(json.dumps(current))
+                existing = set(root.iterdir())
+                process = subprocess.run([sys.executable, str(REPO / "scripts/dev_planner/replay_curve_backend.py"),
+                                          str(snapshot), "--mode", "initialize", "--parameters", str(parameters),
+                                          "--binary", os.environ["IAP_CURVE_REPLAY_BIN"]],
+                                         env={**os.environ, "IAP_RUN_ROOT": temporary},
+                                         capture_output=True, text=True, timeout=15)
+                run, = set(root.iterdir()) - existing
+                rejected = scenario in ("zero_without_policy", "unowned")
+                self.assertEqual(process.returncode, 1 if rejected else 0, process.stderr + process.stdout)
+                output = run / "export/planner/curve_replay/result.json"
+                if rejected:
+                    self.assertFalse(output.exists())
+                    continue
+                result = json.loads(output.read_text())
+                self.assertTrue(result["physical_executable"])
+                self.assertTrue(result["dynamics_feasible"])
+                self.assertTrue(result["guide_route_preserved"])
+                self.assertEqual(result["original_time_s"], fixture["planning_time_s"])
+                self.assertEqual(result["captured_target_velocity_mps"], first["target_v_mps"])
+                self.assertEqual(result["curve_stages"][0]["stage"], "captured_initial")
+                self.assertEqual(result["curve_stages"][0]["control_points_m"], first["control_points_m"])
+                self.assertEqual(result["curve_stages"][1]["stage"], "guide_fit_replayed")
+                self.assertEqual(result["terminal_stop"], scenario == "explicit_stop")
+                self.assertEqual(result["added_repairs"], 0)
             del data["curve_stages"][1]["guide_m"]
             snapshot.write_text(json.dumps(data))
             existing = set(root.iterdir())

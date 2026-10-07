@@ -55,10 +55,9 @@ namespace ego_planner
     inline Eigen::VectorXd evaluateDeBoorT(const double &t) { return evaluateDeBoor(t + u_(p_)); } // use t \in [0, duration]
     UniformBspline getDerivative();
 
-    // 3D B-spline interpolation of points in point_set, with boundary vel&acc
-    // constraints
-    // input : (K+2) points with boundary vel/acc; ts
-    // output: (K+6) control_pts
+    // Least squares positions at K uniform knots, with exact endpoint P/V/A.
+    // At least five samples and four derivatives [start V, end V, start A, end A]
+    // produce K+2 controls. Invalid/nonfinite inputs are rejected.
     static void parameterizeToBspline(const double &ts, const vector<Eigen::Vector3d> &point_set,
                                       const vector<Eigen::Vector3d> &start_end_derivative,
                                       Eigen::MatrixXd &ctrl_pts);

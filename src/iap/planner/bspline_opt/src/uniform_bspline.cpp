@@ -256,72 +256,25 @@ namespace ego_planner
                                              const vector<Eigen::Vector3d> &start_end_derivative,
                                              Eigen::MatrixXd &ctrl_pts)
   {
-    if (ts <= 0)
-    {
-      cout << "[B-spline]:time step error." << endl;
-      return;
+    if(!std::isfinite(ts) || ts<=0 || point_set.size()<5 || start_end_derivative.size()!=4 ||
+        !std::all_of(point_set.begin(),point_set.end(),[](const Eigen::Vector3d& p){return p.allFinite();}) ||
+        !std::all_of(start_end_derivative.begin(),start_end_derivative.end(),[](const Eigen::Vector3d& p){return p.allFinite();}))
+      throw std::invalid_argument("cubic fitting needs five finite samples, four derivatives and positive interval");
+    const int count=point_set.size();
+    // P/V/A is an equality constraint. Mixing derivative rows into a least
+    // squares fit and overwriting its endpoint triplets afterwards changes the
+    // fitted shape. Eliminate those fixed triplets before solving the interior.
+    ctrl_pts=Eigen::MatrixXd::Zero(3,count+2);
+    enforceBoundaryStates(ctrl_pts,ts,point_set.front(),start_end_derivative[0],start_end_derivative[2],
+        point_set.back(),start_end_derivative[1],start_end_derivative[3]);
+    Eigen::MatrixXd basis=Eigen::MatrixXd::Zero(count,count+2),samples(count,3);
+    for(int i=0;i<count;++i) {
+      basis.block<1,3>(i,i)<<1./6,4./6,1./6;
+      samples.row(i)=point_set[i].transpose();
     }
-
-    if (point_set.size() <= 3)
-    {
-      cout << "[B-spline]:point set have only " << point_set.size() << " points." << endl;
-      return;
-    }
-
-    if (start_end_derivative.size() != 4)
-    {
-      cout << "[B-spline]:derivatives error." << endl;
-    }
-
-    int K = point_set.size();
-
-    // write A
-    Eigen::Vector3d prow(3), vrow(3), arow(3);
-    prow << 1, 4, 1;
-    vrow << -1, 0, 1;
-    arow << 1, -2, 1;
-
-    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(K + 4, K + 2);
-
-    for (int i = 0; i < K; ++i)
-      A.block(i, i, 1, 3) = (1 / 6.0) * prow.transpose();
-
-    A.block(K, 0, 1, 3) = (1 / 2.0 / ts) * vrow.transpose();
-    A.block(K + 1, K - 1, 1, 3) = (1 / 2.0 / ts) * vrow.transpose();
-
-    A.block(K + 2, 0, 1, 3) = (1 / ts / ts) * arow.transpose();
-    A.block(K + 3, K - 1, 1, 3) = (1 / ts / ts) * arow.transpose();
-
-    //cout << "A" << endl << A << endl << endl;
-
-    // write b
-    Eigen::VectorXd bx(K + 4), by(K + 4), bz(K + 4);
-    for (int i = 0; i < K; ++i)
-    {
-      bx(i) = point_set[i](0);
-      by(i) = point_set[i](1);
-      bz(i) = point_set[i](2);
-    }
-
-    for (int i = 0; i < 4; ++i)
-    {
-      bx(K + i) = start_end_derivative[i](0);
-      by(K + i) = start_end_derivative[i](1);
-      bz(K + i) = start_end_derivative[i](2);
-    }
-
-    // solve Ax = b
-    Eigen::VectorXd px = A.colPivHouseholderQr().solve(bx);
-    Eigen::VectorXd py = A.colPivHouseholderQr().solve(by);
-    Eigen::VectorXd pz = A.colPivHouseholderQr().solve(bz);
-
-    // convert to control pts
-    ctrl_pts.resize(3, K + 2);
-    ctrl_pts.row(0) = px.transpose();
-    ctrl_pts.row(1) = py.transpose();
-    ctrl_pts.row(2) = pz.transpose();
-
-    // cout << "[B-spline]: parameterization ok." << endl;
+    const Eigen::MatrixXd residual=samples-basis.leftCols(3)*ctrl_pts.leftCols(3).transpose()-
+        basis.rightCols(3)*ctrl_pts.rightCols(3).transpose();
+    ctrl_pts.middleCols(3,count-4)=basis.middleCols(3,count-4).colPivHouseholderQr().solve(residual).transpose();
   }
 
   double UniformBspline::getTimeSum()

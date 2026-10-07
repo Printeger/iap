@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--parameters", type=Path, required=True,
                         help="explicit frozen ROS parameters YAML; no current-default substitution")
     parser.add_argument("--binary", type=Path, required=True)
-    parser.add_argument("--mode", choices=("retime", "refine", "backend", "audit"), default="backend")
+    parser.add_argument("--mode", choices=("retime", "refine", "backend", "initialize", "audit"), default="backend")
     parser.add_argument("--isolated-budget", action="store_true", help="separate mechanism experiment; does not reproduce captured remaining resources")
     args = parser.parse_args()
     if args.mode == "audit" and args.isolated_budget:

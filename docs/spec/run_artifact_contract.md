@@ -204,6 +204,17 @@ Exit zero requires all stages checked and route preserved; rejection is a
 completed diagnostic, not a failed artifact capture. The wrapper registers
 command, source, parameter, binary and frozen input hashes before execution.
 
+`initialize` starts at the captured `guide_fit` and invokes production fitting.
+It requires a stage-owned guide and preserves original start P/V/A, target and
+physical/time inputs. Stage `terminal_stop` records the fixed-task stop policy
+when known. Historical nonzero terminal V proves continuation; historical zero
+without an explicit policy, or a policy conflicting with nonzero V, is rejected.
+Captured controls precede refitted controls; target velocities and policy source
+are named separately. Captured remaining resources are retained even though the
+fit is repeated. Full physical, dynamic and geometric-retention verdicts are
+independent; absent PL stays `NOT_AVAILABLE`. This replay does not publish,
+exercise all subsequent manager repair rounds or authorize a server switch.
+
 The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
 boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint
 P/V/A without updating adjacent interior controls reproduces that dynamic failure.

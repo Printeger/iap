@@ -12,6 +12,7 @@
 #include <zlib.h>
 #include <sstream>
 #include <rcl/time.h>
+#include <boost/property_tree/json_parser.hpp>
 
 struct GridMapTestAccess {
   static uint64_t riskVersion(const GridMap& map) { return map.risk_version_; }
@@ -101,6 +102,16 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static bool fitGuide(EGOPlannerManager& manager,const std::vector<Eigen::Vector3d>& guide,
+      const Eigen::Vector3d& velocity,const Eigen::Vector3d& acceleration,bool stop,
+      LocalTarget& target,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
+    return manager.fitGuideCurve(guide,velocity,acceleration,stop,target,interval,points,control);
+  }
+  static BsplineOptimizer::GuideRetention fittedRetention(EGOPlannerManager& manager,
+      const Eigen::MatrixXd& control,double interval,const std::vector<Eigen::Vector3d>& guide) {
+    auto& optimizer=*manager.bspline_optimizer_;optimizer.setControlPoints(control);optimizer.setGuidePath(guide);
+    return optimizer.assessGuideRetention(control,interval,[](const Eigen::Vector3d&){return GridPlanningRisk{};});
+  }
   static std::vector<Eigen::Vector3d> targetPositions(const EGOPlannerManager& manager) {
     std::vector<Eigen::Vector3d> points;
     for (const auto& target : manager.planning_targets_) points.push_back(target.position);
@@ -210,25 +221,26 @@ struct EGOPlannerManagerTestAccess {
 }
 namespace {
 rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double smooth_weight = 1.0,
-                               bool posterior_prior = false, bool advisory_guidance = true) {
+                               bool posterior_prior = false, bool advisory_guidance = true,
+                               double resolution = .2, double max_vel = 1.) {
   if (!rclcpp::ok()) rclcpp::init(0,nullptr);
   rclcpp::NodeOptions opts;
   opts.parameter_overrides({
     {"planning/search_performance_diagnostics", performance_diagnostics},
     {"planning/advisory_guidance_enabled",advisory_guidance},
-    {"grid_map/resolution",0.2}, {"grid_map/map_size_x",12.0},
+    {"grid_map/resolution",resolution}, {"grid_map/map_size_x",12.0},
     {"grid_map/map_size_y",12.0}, {"grid_map/map_size_z",5.0},
     {"grid_map/local_update_range_x",10.0}, {"grid_map/local_update_range_y",10.0},
     {"grid_map/local_update_range_z",5.0}, {"grid_map/obstacles_inflation",0.2},
     {"grid_map/ground_height",0.0}, {"grid_map/virtual_ceil_height",-1.0},
     {"grid_map/frame_id",std::string("map")}, {"risk/source",std::string("lidar")},
-    {"manager/max_vel",1.0}, {"manager/max_acc",2.0}, {"manager/max_jerk",4.0},
+    {"manager/max_vel",max_vel}, {"manager/max_acc",2.0}, {"manager/max_jerk",4.0},
     {"manager/control_points_distance",0.4}, {"manager/planning_horizon",5.0},
     {"manager/drone_id",0}, {"manager/feasibility_tolerance",0.05},
     {"optimization/lambda_smooth",smooth_weight}, {"optimization/lambda_collision",0.5},
     {"optimization/lambda_feasibility",0.1}, {"optimization/lambda_fitness",1.0},
     {"optimization/dist0",0.5}, {"optimization/swarm_clearance",0.5},
-    {"optimization/max_vel",1.0}, {"optimization/max_acc",2.0}
+    {"optimization/max_vel",max_vel}, {"optimization/max_acc",2.0}
   });
   if (posterior_prior) opts.append_parameter_override("risk/use_posterior_prior",true);
   return std::make_shared<rclcpp::Node>("ego_baseline_test",opts);
@@ -1968,4 +1980,83 @@ TEST(EgoBaseline, RouteAssessmentStopsAtOriginalSharedDeadline) {
   const auto result=optimizer.assessGuideRetention(q,.4,[](const auto&) {return GridPlanningRisk{};});
   EXPECT_TRUE(result.budget_exhausted);EXPECT_FALSE(result.checked);EXPECT_FALSE(result.comparable_valid_risk);
   EXPECT_LE(result.samples,4u);
+}
+
+TEST(EgoBaseline, RealGuideFitUsesItsSampledTerminalApproachAndExactPva) {
+  boost::property_tree::ptree captured;
+  boost::property_tree::read_json((std::filesystem::path(IAP_FAILURE_REGRESSION_FIXTURE_DIR).parent_path()/
+      "curve_attempt45_gen209_geometry.json").string(),captured);
+  const auto point=[](const boost::property_tree::ptree& value) {
+    Eigen::Vector3d result;size_t i=0;for(const auto& child:value) result[i++]=child.second.get_value<double>();return result;
+  };
+  std::vector<Eigen::Vector3d> guide;
+  const Eigen::Vector3d offset(12,0,0); // Free-map mechanism only; same captured relative geometry.
+  for(const auto& child:captured.get_child("guide_m")) guide.push_back(point(child.second)+offset);
+  const auto velocity=point(captured.get_child("real_start_v_mps"));
+  const auto acceleration=point(captured.get_child("real_start_a_mps2"));
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),guide.front());
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,guide.front());
+  ego_planner::LocalTarget target{guide.back(),Eigen::Vector3d::UnitX()*.5,Eigen::Vector3d::Zero(),0};
+  Eigen::MatrixXd q;std::vector<Eigen::Vector3d> samples;double interval=1.2;
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,false,
+      target,interval,samples,q));
+  ASSERT_EQ(q.cols(),13);ASSERT_EQ(samples.size(),11u);
+  const Eigen::Vector3d terminal=(samples.back()-samples[samples.size()-2]).normalized();
+  EXPECT_GT(target.velocity.norm(),0.);
+  EXPECT_NEAR(target.velocity.normalized().dot(terminal),1.,1e-12);
+  ego_planner::UniformBspline curve(q,3,interval);
+  auto derivative=curve.getDerivative(),second=derivative.getDerivative();
+  for(const auto& boundary:std::vector<std::tuple<double,Eigen::Vector3d,Eigen::Vector3d,Eigen::Vector3d>>{
+      {0.,guide.front(),velocity,acceleration},{curve.getTimeSum(),target.position,target.velocity,target.acceleration}}) {
+    EXPECT_LT((curve.evaluateDeBoorT(std::get<0>(boundary))-std::get<1>(boundary)).norm(),1e-9);
+    EXPECT_LT((derivative.evaluateDeBoorT(std::get<0>(boundary))-std::get<2>(boundary)).norm(),1e-9);
+    EXPECT_LT((second.evaluateDeBoorT(std::get<0>(boundary))-std::get<3>(boundary)).norm(),1e-9);
+  }
+  const auto bound=q;
+  ego_planner::UniformBspline::enforceBoundaryStates(q,interval,guide.front(),velocity,acceleration,
+      target.position,target.velocity,target.acceleration);
+  EXPECT_LT((q-bound).norm(),1e-9);
+  const auto retention=ego_planner::EGOPlannerManagerTestAccess::fittedRetention(manager,q,interval,guide);
+  ASSERT_TRUE(retention.checked);EXPECT_FALSE(retention.route_lost);
+  EXPECT_LT(retention.max_deviation_m,.1);
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,true,
+      target,interval,samples,q));
+  EXPECT_EQ(target.velocity.norm(),0.);
+  curve=ego_planner::UniformBspline(q,3,interval);
+  EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-9);
+}
+
+TEST(EgoBaseline, SplineFitKeepsExactNonzeroPvaAndRejectsInvalidInputs) {
+  for(int count:{5,11}) {
+    std::vector<Eigen::Vector3d> samples;
+    for(int i=0;i<count;++i) samples.emplace_back(.15*i,.1*std::sin(i),1.+.03*i);
+    const std::vector<Eigen::Vector3d> derivatives{{.2,.03,.04},{.35,0,.1},{.1,.02,-.1},{-.1,.08,0}};
+    Eigen::MatrixXd controls;
+    ego_planner::UniformBspline::parameterizeToBspline(.4,samples,derivatives,controls);
+    ASSERT_EQ(controls.cols(),count+2);ASSERT_TRUE(controls.allFinite());
+    ego_planner::UniformBspline curve(controls,3,.4);
+    auto velocity=curve.getDerivative(),acceleration=velocity.getDerivative();
+    for(int end=0;end<2;++end) {
+      const double time=end ? curve.getTimeSum() : 0;
+      EXPECT_LT((curve.evaluateDeBoorT(time)-(end ? samples.back() : samples.front())).norm(),1e-9);
+      EXPECT_LT((velocity.evaluateDeBoorT(time)-derivatives[end]).norm(),1e-9);
+      EXPECT_LT((acceleration.evaluateDeBoorT(time)-derivatives[end+2]).norm(),1e-9);
+    }
+    const auto original=controls;
+    const Eigen::Vector3d offset(120.,-40.,.5);
+    for(auto& p:samples) p+=offset;
+    ego_planner::UniformBspline::parameterizeToBspline(.4,samples,derivatives,controls);
+    EXPECT_LT((controls.colwise()-offset-original).norm(),1e-9);
+    samples[2].x()=std::numeric_limits<double>::quiet_NaN();
+    EXPECT_THROW(ego_planner::UniformBspline::parameterizeToBspline(.4,samples,derivatives,controls),std::invalid_argument);
+    EXPECT_THROW(ego_planner::UniformBspline::parameterizeToBspline(0.,samples,derivatives,controls),std::invalid_argument);
+  }
+  Eigen::MatrixXd controls;
+  EXPECT_THROW(ego_planner::UniformBspline::parameterizeToBspline(.4,
+      std::vector<Eigen::Vector3d>(4,Eigen::Vector3d::Zero()),
+      std::vector<Eigen::Vector3d>(4,Eigen::Vector3d::Zero()),controls),std::invalid_argument);
 }

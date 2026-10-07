@@ -238,10 +238,14 @@ namespace ego_planner
       double first_physical_time_s = std::numeric_limits<double>::quiet_NaN();
       std::vector<Eigen::Vector3d> guide; // Geometry owned by this candidate revision.
       BsplineOptimizer::GuideRetention guide_retention;
+      std::optional<bool> terminal_stop; // Explicit fixed-task policy; null if unavailable.
     };
     // Opt-in evidence; exported by the existing bounded writer.
     std::vector<CurveStageEvidence> curve_stages_;
     unsigned dropped_curve_stages_ = 0;
+    bool fitGuideCurve(const std::vector<Eigen::Vector3d>& guide,
+        const Eigen::Vector3d& start_vel,const Eigen::Vector3d& start_acc,bool terminal_stop,
+        LocalTarget& selected,double& interval,std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control);
     void recordCurveStage(const std::string& stage, const Eigen::MatrixXd& controls,
                           double interval, const LocalTarget& target,
                           double feasibility_ratio = std::numeric_limits<double>::quiet_NaN(),

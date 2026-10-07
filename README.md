@@ -1046,7 +1046,7 @@ Replay preserves the captured remaining time/repair allowance. Use
 stages own their guide; mismatched historical stage/guide pairs are rejected.
 Budget-interrupted checks report `incomplete` with checked extent. Pre-guide
 initialization, prior-server connection and missed commit windows require live
-evidence. The real forest replay still fails; phase A remains unqualified.
+evidence. The earlier attempt12 forest replay still fails; phase A remains unqualified.
 
 Use `--mode audit` to run the production geometric guide-retention check on
 every captured Curve stage. It retains original times and candidate/guide
@@ -1055,6 +1055,19 @@ zero only when every stage is checked and preserves the route. Missing frozen
 PL remains `NOT_AVAILABLE`; this diagnostic grants no physical, risk or execution
 qualification. The original attempt45/gen209 first loses the route at `guide_fit`,
 then deviates further after boundary binding and optimization.
+
+`--mode initialize` starts from the captured `guide_fit` and calls the same
+production fitting interface. Position samples and terminal tangent now use
+one arc sampling; endpoint P/V/A is exact in the fit, so subsequent binding is
+idempotent. Braking, dynamics, physical, route and release checks remain mandatory.
+The replay requires a stage-owned guide and captured stop policy; an older
+nonzero terminal velocity proves continuation, while ambiguous historical zero
+velocity is rejected. It saves original and refitted controls and both terminal
+velocities, with final geometric retention separate from unavailable PL.
+Attempt45/gen209 now passes its original frozen physical, dynamic and route checks
+without another repair (`20261007T144136Z_739`); new field/server connection evidence
+is still required. `parameterizeToBspline` requires five finite samples, four finite
+boundary derivatives and a finite positive interval; invalid inputs throw.
 
 Local goals now span forward/left/right within the original pool (at most 16),
 with an eligible final task endpoint first. Every local round performs the same

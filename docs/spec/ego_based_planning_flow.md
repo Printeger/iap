@@ -815,8 +815,29 @@ authorized. The original attempt45/gen209 red diagnostic
 0.346292 m and first `optimized` 0.590059 m against the unchanged 0.136603 m
 corridor. The earliest observed route violation is fitting; boundary binding and
 optimization worsen it. The capture regression preserves that symptom under a
-coordinate translation. Initialization, exact boundary constraints and solver
-convergence remain hypotheses to resolve; A/C field qualification remains blocked.
+coordinate translation. The production regression then captured inconsistent
+terminal direction and non-exact endpoint P/V/A; an exact-boundary-only probe
+still lost the route at 0.324051 m, isolating the terminal approach mismatch.
+
+Current fitting uses the same arc samples for position initialization and terminal
+tangent, keeping the original count, interval policy and physical braking limit.
+`parameterizeToBspline` eliminates the fixed endpoint triplets before solving the
+interior least squares positions. Endpoint P/V/A is exact and subsequent binding
+is idempotent. At least five finite samples/four finite derivatives and a finite
+positive interval are required; invalid inputs throw. Rebound/refine and independent
+dynamics/physical/route/publication gates retain their existing authority.
+
+`--mode initialize` calls this production fit from the captured `guide_fit`, with
+original start P/V/A, stage-owned guide, target, physical map/time and remaining
+allowance. Each new captured stage appends `terminal_stop` from the fixed-task
+policy, or null if unavailable. Replay does not infer stopping from zero speed:
+legacy nonzero velocity proves continuation, but a zero without policy is rejected.
+Captured controls precede `guide_fit_replayed`; captured and derived target velocities
+and stop-policy source are separate. Final geometric retention does not fabricate PL.
+Real attempt45/gen209 replay `20261007T144136Z_739` passes dynamics, full physical
+check (601 samples) and route retention (0.119900 m < 0.136603 m), with no extra repair.
+Earlier attempt12 replay retains its failure/missing-owned-guide identity. New field
+switch/command/movement evidence is pending; A/C are not yet qualified.
 
 The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
 boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint

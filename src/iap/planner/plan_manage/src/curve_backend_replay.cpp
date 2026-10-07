@@ -13,6 +13,19 @@ using boost::property_tree::ptree;
 using ego_planner::UniformBspline;
 namespace ego_planner {
 struct CurveBackendReplayAccess {
+  static bool fit(EGOPlannerManager& manager,const std::vector<Eigen::Vector3d>& guide,
+      const Eigen::Vector3d& velocity,const Eigen::Vector3d& acceleration,
+      Eigen::Vector3d& end_velocity,const Eigen::Vector3d& end_acceleration,
+      bool terminal_stop,double max_velocity,double max_acceleration,double& interval,Eigen::MatrixXd& control) {
+    manager.pp_.max_vel_=max_velocity;manager.pp_.max_acc_=max_acceleration;
+    manager.pp_.ctrl_pt_dist=manager.node_->declare_parameter("manager/control_points_distance",std::numeric_limits<double>::quiet_NaN());
+    if(!std::isfinite(manager.pp_.ctrl_pt_dist) || manager.pp_.ctrl_pt_dist<=0)
+      throw std::invalid_argument("initialize requires captured manager/control_points_distance");
+    LocalTarget target{guide.back(),end_velocity,end_acceleration,0};std::vector<Eigen::Vector3d> points;
+    const bool success=manager.fitGuideCurve(guide,velocity,acceleration,terminal_stop,
+        target,interval,points,control);
+    end_velocity=target.velocity;return success;
+  }
   static const GridPlanningContext& bind(EGOPlannerManager& manager,rclcpp::Node::SharedPtr node,
       GridMap::Ptr map,const GridPlanningContext& context,const GridMotionContext& motion,
       double time,PlanningBudget::Ptr budget) {
@@ -39,7 +52,7 @@ int main(int argc,char**argv) {
  try {
   rclcpp::init(argc,argv);
   const auto args=rclcpp::remove_ros_arguments(argc,argv);
-  if(args.size()!=3 && !(args.size()==4 && args[3]=="isolated-budget")) throw std::invalid_argument("usage: curve_backend_replay snapshot.json retime|refine|backend|audit [isolated-budget] [--ros-args --params-file frozen.yaml]");
+  if(args.size()!=3 && !(args.size()==4 && args[3]=="isolated-budget")) throw std::invalid_argument("usage: curve_backend_replay snapshot.json retime|refine|backend|initialize|audit [isolated-budget] [--ros-args --params-file frozen.yaml]");
   if(!std::getenv("IAP_RUN_DIR")) throw std::invalid_argument("replay requires resolver-owned IAP_RUN_DIR");
   glim::RunLogManager::initialize("curve_backend_replay");
   auto* artifacts=glim::RunLogManager::get_if_initialized();
@@ -54,7 +67,7 @@ int main(int argc,char**argv) {
     trace<<"],\"knots_s\":[";for(int i=0;i<knots.size();++i) trace<<(i ? "," : "")<<knots[i];trace<<"]}";first_stage=false;
   };
   ptree input;boost::property_tree::read_json(args[1],input);
-  const auto mode=args[2]; if(mode!="retime" && mode!="refine" && mode!="backend" && mode!="audit") throw std::invalid_argument("invalid mode");
+  const auto mode=args[2]; if(mode!="retime" && mode!="refine" && mode!="backend" && mode!="initialize" && mode!="audit") throw std::invalid_argument("invalid mode");
   GridMapFailureSnapshot snapshot;
   snapshot.origin=point(input.get_child("origin_m")); snapshot.max_boundary=point(input.get_child("max_boundary_m"));
   snapshot.dimensions=point(input.get_child("dimensions")).cast<int>(); snapshot.resolution_m=input.get<double>("resolution_m");
@@ -95,14 +108,16 @@ int main(int argc,char**argv) {
   ptree stage; bool found=false;
   for(const auto& child:input.get_child("curve_stages")) {
     const std::string name=child.second.get<std::string>("stage");
-    if(((mode=="backend" || mode=="audit") && name=="guide_bound") ||
+    if((mode=="initialize" && name=="guide_fit") ||
+        ((mode=="backend" || mode=="audit") && name=="guide_bound") ||
         ((mode=="retime" || mode=="refine") && name=="optimized_bound")) {stage=child.second;found=true;break;}
   }
   if(!found) throw std::invalid_argument("required authoritative stage absent");
   auto q=controls(stage.get_child("control_points_m")); double dt=stage.get<double>("interval_s");
   const double v=stage.get<double>("velocity_limit_mps"),a=stage.get<double>("acceleration_limit_mps2"),tol=stage.get<double>("feasibility_tolerance");
   const Eigen::Vector3d start=point(input.get_child("real_start_p_m")),sv=point(input.get_child("real_start_v_mps")),sa=point(input.get_child("real_start_a_mps2"));
-  const Eigen::Vector3d end=point(stage.get_child("target_p_m")),ev=point(stage.get_child("target_v_mps")),ea=point(stage.get_child("target_a_mps2"));
+  const Eigen::Vector3d end=point(stage.get_child("target_p_m")),ea=point(stage.get_child("target_a_mps2"));
+  Eigen::Vector3d ev=point(stage.get_child("target_v_mps"));const Eigen::Vector3d captured_ev=ev;
   ego_planner::BsplineOptimizer optimizer; optimizer.setParam(node);optimizer.setEnvironment(map);optimizer.setDroneId(0);
   ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);
   optimizer.a_star_=std::make_shared<AStar>();optimizer.a_star_->initGridMap(map,Eigen::Vector3i(100,100,100));
@@ -115,6 +130,7 @@ int main(int argc,char**argv) {
   optimizer.setCurvePhysicalBounds(snapshot.origin+Eigen::Vector3d::Constant(.0001),snapshot.max_boundary-Eigen::Vector3d::Constant(.0001));
   std::vector<Eigen::Vector3d> guide;
   const auto stage_guide=stage.get_child_optional("guide_m");
+  if(mode=="initialize" && !stage_guide) throw std::invalid_argument("initialize requires stage-owned guide");
   for(const auto& p:stage_guide ? *stage_guide : input.get_child("guide_m")) guide.push_back(point(p.second));
   if(guide.size()<2 || (guide.back()-end).norm()>1e-6)
     throw std::invalid_argument("captured stage target/guide mismatch; stage-owned guide required");
@@ -166,10 +182,24 @@ int main(int argc,char**argv) {
   }
   ego_planner::EGOPlannerManager manager;
   const auto& assessment_context=ego_planner::CurveBackendReplayAccess::bind(manager,node,map,context,motion,time,budget);
+  save("captured_initial",q,dt);
+  bool terminal_stop=false;std::string stop_policy_source="NOT_REPLAYED";
+  if(mode=="initialize") {
+    if((guide.front()-start).norm()>1e-6) throw std::invalid_argument("guide does not own captured start");
+    const auto captured_stop=stage.get_optional<bool>("terminal_stop");
+    if(captured_stop) {terminal_stop=*captured_stop;stop_policy_source="EXPLICIT_CAPTURED_POLICY";}
+    else if(captured_ev.norm()>1e-9) {stop_policy_source="NONZERO_CAPTURED_VELOCITY_PROVES_CONTINUE";}
+    else throw std::invalid_argument("historical zero terminal velocity lacks captured stop policy");
+    if(terminal_stop && captured_ev.norm()>1e-9)
+      throw std::invalid_argument("captured terminal stop policy conflicts with nonzero velocity");
+    if(!ego_planner::CurveBackendReplayAccess::fit(manager,guide,sv,sa,ev,ea,terminal_stop,v,a,dt,q))
+      throw std::runtime_error("guide initialization rejected");
+    save("guide_fit_replayed",q,dt);
+    optimizer.initializeFromGuide(q);
+  }
   const auto assess=[&](Eigen::MatrixXd p,double interval) {return manager.assessTrajectory(UniformBspline(p,3,interval),0,time,false,0,std::numeric_limits<double>::infinity(),&assessment_context,false,&motion);};
   bool backend_ok=true;std::string termination="dynamics_rejected";size_t constraint_samples=0;
-  save("captured_initial",q,dt);
-  if(mode=="backend") {
+  if(mode=="backend" || mode=="initialize") {
     const auto initial=assess(q,dt);constraint_samples+=initial.curve_clearance_violations.size();
     optimizer.addCurveClearanceConstraints(q,dt,initial.curve_clearance_violations);
     backend_ok=!initial.budget_exhausted && optimizer.BsplineOptimizeTrajRebound(q,dt);
@@ -203,6 +233,8 @@ int main(int argc,char**argv) {
     }
   }
   const auto final=feasible ? assess(q,dt) : ego_planner::EGOPlannerManager::TrajectoryAssessment{};
+  const auto retention=feasible ? optimizer.assessGuideRetention(q,dt,
+      [](const Eigen::Vector3d&) {return GridPlanningRisk{};}) : ego_planner::BsplineOptimizer::GuideRetention{};
   std::cout<<"final_check="<<(feasible ? gridExecutionReasonName(final.execution_reason) : "not_checked")<<" elapsed="<<budget->elapsed()<<'\n';
   std::ofstream result(output);
   result<<std::setprecision(17)<<"{\"schema\":\"iap_curve_backend_replay_v1\",\"identity\":\"OFFLINE_MECHANISM_REPLAY\",\"mode\":"<<std::quoted(mode)
@@ -211,6 +243,14 @@ int main(int argc,char**argv) {
       <<",\"dynamics_feasible\":"<<(feasible ? "true" : "false")<<",\"final_check_state\":"<<std::quoted(!feasible ? "not_checked" : final.budget_exhausted ? "incomplete" : "checked")
       <<",\"physical_executable\":"<<(feasible && final.executable() ? "true" : "false")<<",\"final_check_reason\":"<<std::quoted(!feasible ? "not_checked" : final.budget_exhausted ? "budget_exhausted" : gridExecutionReasonName(final.execution_reason))
       <<",\"final_check_budget_exhausted\":"<<(final.budget_exhausted ? "true" : "false")
+      <<",\"guide_retention_checked\":"<<(retention.checked ? "true" : "false")
+      <<",\"guide_retention_budget_exhausted\":"<<(retention.budget_exhausted ? "true" : "false")
+      <<",\"guide_route_preserved\":"<<(retention.checked && !retention.route_lost ? "true" : "false")
+      <<",\"guide_max_deviation_m\":"<<retention.max_deviation_m<<",\"guide_corridor_m\":"<<retention.corridor_m
+      <<",\"risk_evidence\":\"NOT_AVAILABLE\",\"captured_target_velocity_mps\":["<<captured_ev.x()<<','<<captured_ev.y()<<','<<captured_ev.z()<<']'
+      <<",\"replayed_target_velocity_mps\":["<<ev.x()<<','<<ev.y()<<','<<ev.z()<<']'
+      <<",\"terminal_stop\":"<<(mode=="initialize" ? (terminal_stop ? "true" : "false") : "null")
+      <<",\"terminal_stop_policy_source\":"<<std::quoted(stop_policy_source)
       <<",\"final_check_sampled_points\":"<<final.sampled_points
       <<",\"final_check_requested_from_time_s\":"<<final.checked_from_time_s<<",\"final_check_requested_to_time_s\":"<<final.checked_to_time_s
       <<",\"final_check_sampled_to_time_s\":"<<(final.sampled_points ? std::to_string(std::min(final.checked_to_time_s, final.checked_from_time_s+(final.sampled_points-1)*final.sample_step_s)) : "null")
