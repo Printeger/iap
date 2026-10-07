@@ -577,7 +577,7 @@ LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立
 观测 seed 注入或退化时序实测。校准／独立验证保持 INCONCLUSIVE，默认参数不推广。
 
 
-规划引导开关 `planning/advisory_guidance_enabled` 默认开启，canonical 参数为
+规划引导开关的唯一入口当前默认OFF（内部机制参数可显式ON），canonical 参数为
 `advisory_guidance:=false`；关闭仍计算／录制／显示预测，A* 新查询与缓存刷新
 复用同一偏好转换。无障碍合成退化带的 CPU 开关对照验证真实曲线绕行及发布，
 guide 跟踪使用实际 N-3 样条跨度，并在原修复预算／权重内以实际越线点约束
@@ -929,3 +929,27 @@ C3 a301cb1 OFF300秒现场：5发布／5命令，前进10.724m，仍距终点25.
 无本轮pending撤销／unverified hover，完整任务未到达。guide保留检查
 揭示物理合法但路线偏离的候选，原修复耗尽，A/C仍未取得现场资格。
 新证据在本轮分析run/export/analysis/channel_retention_live；旧证据原身份不变。
+
+
+### 当前 B 历史统一时间接口
+
+显式`rinex_nav_file` → 本run冻结NAV/hash → 严格GPS+BDS → 固定UTC历史clock。
+
+```mermaid
+flowchart LR
+    S[唯一SO3仿真器 steady节拍] --> K[历史 /clock 与同刻真值/IMU]
+    K --> L[ROS时间 LiDAR/ GNSS定时器]
+    L --> O[GLIO 原观测时刻]
+    O --> M[Current Monitor]
+    M --> G[GridMap / planner / server / 显示]
+    K --> R[录制 ROS接收时间]
+    F[必要输入退出 / clock竞争] --> X[保存首个与逐模块故障 / 全图停止]
+    X --> E[唯一结束归属 failed]
+```
+
+暂停停止clock/physics/传感器生产，恢复后继续；生产者不能消费自身clock。
+原共享steady搜索／Curve预算、实际run生命周期及固定终点保持。
+自动化：43canonical契约、真实CPU进程时钟/odom/IMU/GNSS/first-hit LiDAR暂停、
+非法日期／self-clock／竞争clock、strict缺文件退出、两种归属失败优先；
+原planner时间回跳拒绝回归通过。真实完整图尚待干净提交后验证。
+分星座前端钟差、活动列FIM/故障、真实残差及联合资格仍未实施，正式B/D阻塞。

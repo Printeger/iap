@@ -289,9 +289,8 @@ Keplerian observations before propagation, using the original reception epoch.
 Existing BDS B1I frequency / CODE_L2I semantics remain in force.
 
 This is a propagation/input repair, not formal Advisory qualification. The
-current canonical graph still uses synthetic regression data until the
-historical `/clock` contract and explicit strict GPS+BDS configuration are
-implemented. GAL/GLO retain configuration support but were not used in this
+canonical graph now accepts an explicit historical NAV path with unique history
+clock and strict GPS+BDS; an empty path retains synthetic mechanism data. GAL/GLO retain configuration support but were not used in this
 numerical qualification; GLO's legacy missing-TTR-to-TOE substitution cannot
 prove broadcast availability. Separate receiver clock states, active-clock
 FIM/fault subsets, frozen time/extrinsic identity, actual residual calibration
@@ -303,3 +302,10 @@ appendix A14 and time-system sections. Numerical differential authority:
 The BDS ICD download was unavailable during this audit; no ICD formula audit
 is claimed. The independently decoded six-epoch GPS+BDS comparison is under
 `log/20261007T091820Z_056/export/analysis/rinex_production_fixed`.
+
+
+Historical-mode static/range timers consume the node ROS clock, so pausing
+`/clock` does not regenerate random measurements at a repeated epoch. A failed
+strict selection terminates the GNSS process with exit code 2 and stops the
+canonical graph; the owner records failed. This remains separate from visibility,
+GLIO factor usage, Monitor integrity and Advisory contribution qualification.

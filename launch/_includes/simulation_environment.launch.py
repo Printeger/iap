@@ -12,10 +12,25 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, TimerAction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, TimerAction, RegisterEventHandler, EmitEvent
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import ComposableNodeContainer, Node
+from launch_ros.actions import ComposableNodeContainer, Node, SetParameter
 from launch_ros.descriptions import ComposableNode
+
+
+def _historical_process_exit(event, context, run, module):
+    if context.is_shutdown:
+        return []
+    from run_directory import write_subordinate_manifest
+    evidence = {
+        "module": module, "exit_code": event.returncode,
+        "reason": "required historical input process exited before run shutdown"}
+    write_subordinate_manifest(run, "historical_input_failure_" + module, evidence)
+    if not (run / "metadata/manifests/historical_input_failure.json").exists():
+        write_subordinate_manifest(run, "historical_input_failure", evidence)
+    return [EmitEvent(event=Shutdown(reason="historical_input_failure"))]
 
 
 def _catalog(iap_share: Path) -> dict:
@@ -212,11 +227,14 @@ def _setup(context):
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario_name}'; valid: {valid}")
     scenario = catalog[scenario_name]
     trial_path=context.launch_configurations.get("advisory_trial", "")
-    from full_stack_runtime import load_advisory_trial
+    from full_stack_runtime import load_advisory_trial, historical_gnss_parameters
     trial=load_advisory_trial(trial_path,scenario)
     observation=trial["degradation_schedule"]["conditions"][trial["condition"]] if trial else {}
     lidar_range=observation.get("lidar_max_range_m",10.)
     gnss_params=_gnss_parameters(iap_share,str(scenario["gnss_profile"]))
+    nav_path = context.launch_configurations.get("rinex_nav_file", "")
+    historical = bool(nav_path)
+    gnss_params.update(historical_gnss_parameters(nav_path))
     if trial:
         gnss_params.update(random_seed=trial["seed"],pseudorange_noise_std_m=observation["gnss_pseudorange_sigma_m"])
     initial = [float(value) for value in scenario["initial"]]
@@ -253,7 +271,38 @@ def _setup(context):
     so3_cmd = "/iap_sim/so3_cmd"
     map_size = [float(value) for value in scenario["map_size"]]
 
+    clock_owner = Node(
+        package="so3_quadrotor_simulator",
+        executable="so3_quadrotor_simulator",
+        name="drone_0_quadrotor_simulator_so3",
+        output="screen",
+        remappings=[
+            ("odom", truth_odom),
+            ("imu", sim_imu),
+            ("cmd", so3_cmd),
+            ("force_disturbance", "/iap_sim/force_disturbance"),
+            ("moment_disturbance", "/iap_sim/moment_disturbance"),
+        ],
+        parameters=[
+            {"quadrotor_name": "drone_0"},
+            {"rate/simulation": 1000.0},
+            {"rate/odom": 100.0},
+            {"simulator/init_state_x": initial[0]},
+            {"simulator/init_state_y": initial[1]},
+            {"simulator/init_state_z": initial[2]},
+            {"simulator/hold_until_cmd": True},
+            # The producer paces itself with steady time; it must not
+            # consume the clock it owns. All other nodes consume it.
+            {"use_sim_time": False},
+            {"sim_time/enable": historical},
+            {"sim_time/start_utc": "2022-07-06T12:00:00Z" if historical else ""},
+            {"iap_imu/enable": True},
+            {"iap_imu/topic": iap_imu},
+        ],
+    )
+
     actions = [
+        SetParameter(name="use_sim_time", value=historical),
         LogInfo(msg=f"[iap_sim/environment] scenario={scenario_name} output={output_dir}"),
         Node(
             package="iap",
@@ -308,34 +357,7 @@ def _setup(context):
                 {"max_odom_lookup_dt": 0.05},
             ],
         ),
-        Node(
-            package="so3_quadrotor_simulator",
-            executable="so3_quadrotor_simulator",
-            name="drone_0_quadrotor_simulator_so3",
-            output="screen",
-            remappings=[
-                ("odom", truth_odom),
-                ("imu", sim_imu),
-                ("cmd", so3_cmd),
-                ("force_disturbance", "/iap_sim/force_disturbance"),
-                ("moment_disturbance", "/iap_sim/moment_disturbance"),
-            ],
-            parameters=[
-                {"quadrotor_name": "drone_0"},
-                {"rate/simulation": 1000.0},
-                {"rate/odom": 100.0},
-                {"simulator/init_state_x": initial[0]},
-                {"simulator/init_state_y": initial[1]},
-                {"simulator/init_state_z": initial[2]},
-                {"simulator/hold_until_cmd": True},
-                # No /clock publisher is part of this environment. Keep ROS
-                # nodes and simulated message stamps on the system clock.
-                {"sim_time/enable": False},
-                {"sim_time/start_utc": ""},
-                {"iap_imu/enable": True},
-                {"iap_imu/topic": iap_imu},
-            ],
-        ),
+        clock_owner,
         ComposableNodeContainer(
             package="rclcpp_components",
             executable="component_container",
@@ -348,6 +370,7 @@ def _setup(context):
                     plugin="SO3ControlComponent",
                     name="iap_sim_so3_control",
                     parameters=[
+                        {"use_sim_time": historical},
                         {"quadrotor_name": "drone_0"},
                         {"so3_control/init_state_x": initial[0]},
                         {"so3_control/init_state_y": initial[1]},
@@ -373,16 +396,23 @@ def _setup(context):
             ],
         ),
     ]
+    if historical:
+        actions.append(RegisterEventHandler(OnProcessExit(
+            target_action=clock_owner, on_exit=lambda event, context:
+                _historical_process_exit(event, context, output_dir, "historical_clock_owner"))))
     if scenario["gnss_profile"] != "disabled":
-        actions.append(
-            Node(
+        gnss = Node(
                 package="gnss_sim",
                 executable="gnss_sim_node",
                 name="iap_sim_gnss",
                 output="screen",
                 parameters=[gnss_params],
             )
-        )
+        if historical:
+            actions.append(RegisterEventHandler(OnProcessExit(
+                target_action=gnss, on_exit=lambda event, context:
+                    _historical_process_exit(event, context, output_dir, "gnss_sim"))))
+        actions.append(gnss)
     return actions
 
 

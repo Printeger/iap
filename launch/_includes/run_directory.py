@@ -9,6 +9,7 @@ import json
 import shutil
 import socket
 import subprocess
+import time
 import uuid
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -374,7 +375,7 @@ def finalize_run(
     *,
     lifecycle: str,
     safety_outcome: str | None = None,
-) -> None:
+) -> str:
     """Atomically record the run owner's terminal lifecycle decision."""
 
     if lifecycle not in _TERMINAL_LIFECYCLES:
@@ -391,6 +392,10 @@ def finalize_run(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("run_id") != run_dir.name or manifest.get("run_dir") != str(run_dir):
         raise RuntimeError(f"run manifest identity does not match {run_dir}")
+    # A successful launch exit or later user interrupt cannot erase the
+    # recorded loss of a required historical source. Only the owner finalizes.
+    if (run_dir / "metadata/manifests/historical_input_failure.json").exists():
+        lifecycle = "failed"
     manifest["lifecycle"] = lifecycle
     manifest["ended_at_utc"] = datetime.now(timezone.utc).isoformat().replace(
         "+00:00", "Z"
@@ -404,6 +409,7 @@ def finalize_run(
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         finally:
             lock.close()
+    return lifecycle
 
 
 def finalize_run_from_shutdown(run_dir: Path, event: object) -> None:
@@ -412,7 +418,7 @@ def finalize_run_from_shutdown(run_dir: Path, event: object) -> None:
     reason = str(getattr(event, "reason", ""))
     if bool(getattr(event, "due_to_sigint", False)):
         lifecycle = "interrupted"
-    elif reason.startswith("Caught exception in launch"):
+    elif reason.startswith("Caught exception in launch") or reason == "historical_input_failure":
         lifecycle = "failed"
     else:
         lifecycle = "completed"
@@ -452,6 +458,22 @@ def register_config_snapshot(run_dir: Path, path: Path) -> None:
         references.append(relative)
         references.sort()
         _atomic_write_json(manifest_path, manifest)
+
+
+def canonical_run_uses_sim_time(run_dir: Path, timeout_s: float = 10.0) -> bool:
+    """Recorders consume the owner's time contract, including during startup."""
+    deadline = time.monotonic() + timeout_s
+    path = run_dir / "metadata/manifests/full_stack.json"
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(.05)
+    if not path.exists():
+        raise RuntimeError("canonical full_stack clock identity unavailable")
+    value = json.loads(path.read_text()).get("clock_contract")
+    if value == "historical_clock_2022-07-06T12:00:00Z":
+        return True
+    if value == "system_clock_for_ros_and_simulated_sensor_stamps":
+        return False
+    raise ValueError("unsupported canonical clock contract")
 
 
 def register_validation_trial(run_dir: Path, trial: dict) -> None:

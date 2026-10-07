@@ -256,3 +256,22 @@ through the existing bounded writer and shared resolver.
 `guide_retention.risk_version` is the first frozen model sample's version, including
 all-UNKNOWN input. Search and audit use `gridAdvisoryCostMultiplier` for the same
 warning/degraded fallback multiplier 3; raw PL/classification remain intact.
+
+
+### Historical simulation input failures
+
+The canonical `rinex_nav_file` input is copied to `metadata/config/historical_nav.rnx`;
+its hash, fixed UTC epoch, requested GPS+BDS and unqualified Advisory status are
+recorded in `metadata/manifests/full_stack.json`. Sensor/consumer ROS time uses
+that unique historical `/clock`; run IDs and lifecycle timestamps remain actual UTC.
+Record/capture tools wait for this owner clock identity and reject missing/unknown
+contracts. Point-cloud clock evidence is explicitly `POINTCLOUD_HEADER_ONLY`;
+it cannot substitute for the complete frozen input recorder.
+
+An unexpected historical clock-owner or GNSS exit writes a per-module
+`historical_input_failure_<module>.json` and the immutable first
+`historical_input_failure.json` through the shared resolver. Normal launch
+shutdown does not create this failure. The shared `finalize_run` returns the
+chosen lifecycle and gives saved input failure priority over apparent successful
+launch exits or later interrupts; both launch and driver remain single-owner
+finalizers. Individual child failures and source hashes remain reviewable.

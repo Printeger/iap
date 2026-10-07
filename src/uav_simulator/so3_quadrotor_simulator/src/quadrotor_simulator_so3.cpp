@@ -4,7 +4,9 @@
 #include <cmath>
 #include <ctime>
 #include <iomanip>
+#include <limits>
 #include <nav_msgs/msg/odometry.hpp>
+#include <rosgraph_msgs/msg/clock.hpp>
 #include <quadrotor_msgs/msg/so3_command.hpp>
 #include <quadrotor_msgs/msg/position_command.hpp>
 #include <so3_quadrotor_simulator/Quadrotor.h>
@@ -67,22 +69,29 @@ bool parseUtcToUnixSeconds(const std::string &text, int64_t &unix_seconds)
         return false;
     }
 
+    ss >> std::ws;
+    if (!ss.eof()) return false;
+    const std::tm requested = tm;
+
     tm.tm_isdst = 0;
     const std::time_t parsed = timegm(&tm);
     if (parsed == static_cast<std::time_t>(-1)) {
         return false;
     }
+    // timegm normalizes e.g. February 31. Such input cannot acquire a new
+    // date silently; compare the normalized calendar with the requested one.
+    if (tm.tm_year != requested.tm_year || tm.tm_mon != requested.tm_mon ||
+        tm.tm_mday != requested.tm_mday || tm.tm_hour != requested.tm_hour ||
+        tm.tm_min != requested.tm_min || tm.tm_sec != requested.tm_sec ||
+        parsed < 0 || parsed > std::numeric_limits<int32_t>::max()) return false;
     unix_seconds = static_cast<int64_t>(parsed);
     return true;
 }
 
 builtin_interfaces::msg::Time makeSimStamp(
-    const rclcpp::Time &wall_now,
-    const rclcpp::Time &wall_start,
+    const int64_t elapsed_ns,
     const int64_t sim_epoch_unix_seconds)
 {
-    const int64_t elapsed_ns =
-        std::max<int64_t>((wall_now - wall_start).nanoseconds(), 0);
     int64_t sec = sim_epoch_unix_seconds + elapsed_ns / 1000000000LL;
     int64_t nsec = elapsed_ns % 1000000000LL;
 
@@ -408,13 +417,27 @@ int main(int argc, char **argv)
                 sim_start_utc.c_str(),
                 static_cast<long>(sim_epoch_unix_seconds));
         } else {
-            sim_time_enabled = false;
-            RCLCPP_WARN(
+            RCLCPP_ERROR(
                 node->get_logger(),
-                "invalid sim_time/start_utc='%s'; falling back to wall-clock message stamps",
+                "invalid sim_time/start_utc='%s'; historical simulation refused",
                 sim_start_utc.c_str());
+            rclcpp::shutdown();
+            return 2;
         }
     }
+    if (sim_time_enabled && node->get_parameter("use_sim_time").as_bool()) {
+        RCLCPP_ERROR(node->get_logger(), "historical /clock producer must use_sim_time=false");
+        rclcpp::shutdown();
+        return 2;
+    }
+    auto clock_pub = sim_time_enabled
+        ? node->create_publisher<rosgraph_msgs::msg::Clock>("/clock", rclcpp::ClockQoS())
+        : nullptr;
+    bool paused = false;
+    auto pause_sub = sim_time_enabled ? node->create_subscription<std_msgs::msg::Bool>(
+        "/sim/pause", 10, [&paused](std_msgs::msg::Bool::ConstSharedPtr msg) {
+            paused = msg->data;
+        }) : nullptr;
     auto iap_imu_pub_ = publish_iap_imu
         ? node->create_publisher<sensor_msgs::msg::Imu>(iap_imu_topic, 10)
         : nullptr;
@@ -427,7 +450,7 @@ int main(int argc, char **argv)
 
     QuadrotorSimulator::Quadrotor::State state = quad.getState();
 
-    rclcpp::Rate r(simulation_rate);
+    rclcpp::WallRate r(simulation_rate);
     const double dt = 1.0 / simulation_rate;
 
     Control control;
@@ -442,12 +465,29 @@ int main(int argc, char **argv)
     iap_imu.header.frame_id = "imu";
 
     const rclcpp::Time wall_start_time = node->now();
-    rclcpp::Time next_odom_pub_time = wall_start_time;
+    const rclcpp::Time epoch_time(sim_epoch_unix_seconds * 1000000000LL, RCL_SYSTEM_TIME);
+    rclcpp::Time next_odom_pub_time = sim_time_enabled ? epoch_time : wall_start_time;
+    uint64_t simulation_ticks = 1;
+    if (clock_pub) {
+        rosgraph_msgs::msg::Clock initial;
+        initial.clock = makeSimStamp(0, sim_epoch_unix_seconds);
+        clock_pub->publish(initial);
+    }
     rclcpp::executors::SingleThreadedExecutor executor;
     executor.add_node(node);
+    auto next_clock_check = std::chrono::steady_clock::now();
     while (rclcpp::ok() && !stop_requested)
     {
         executor.spin_some();
+        if (clock_pub && std::chrono::steady_clock::now() >= next_clock_check) {
+            next_clock_check = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            if (node->count_publishers("/clock") > 1) {
+                RCLCPP_ERROR(node->get_logger(), "historical /clock has another producer; simulation refused");
+                rclcpp::shutdown();
+                return 2;
+            }
+        }
+        if (paused) { r.sleep(); continue; }
 
         auto last = control;
         control = getControl(quad, command);
@@ -468,14 +508,25 @@ int main(int argc, char **argv)
             quad.step(dt);
         }
 
-        rclcpp::Time tnow = node->now();
+        // The simulation state and historical clock advance together. Holding
+        // the initial vehicle before a command still permits sensor epochs.
+        // Steady pacing and launch/run lifecycles remain independent of /clock.
+        const int64_t elapsed_ns = static_cast<int64_t>(std::llround(
+            static_cast<long double>(simulation_ticks++) * 1.0e9L / simulation_rate));
+        rclcpp::Time tnow = sim_time_enabled
+            ? epoch_time + rclcpp::Duration::from_nanoseconds(elapsed_ns) : node->now();
+        if (clock_pub) {
+            rosgraph_msgs::msg::Clock message;
+            message.clock = makeSimStamp(elapsed_ns, sim_epoch_unix_seconds);
+            clock_pub->publish(message);
+        }
 
         if (tnow >= next_odom_pub_time)
         {
             next_odom_pub_time += odom_pub_duration;
             builtin_interfaces::msg::Time stamp;
             if (sim_time_enabled) {
-                stamp = makeSimStamp(tnow, wall_start_time, sim_epoch_unix_seconds);
+                stamp = makeSimStamp(elapsed_ns, sim_epoch_unix_seconds);
             } else {
                 stamp = tnow;
             }

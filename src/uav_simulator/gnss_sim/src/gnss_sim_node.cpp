@@ -33,6 +33,7 @@
 #include <gnss_comm/msg/gnss_meas_msg.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/create_timer.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/nav_sat_status.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -1420,14 +1421,17 @@ private:
   void create_timers()
   {
     const double static_rate_hz = std::max(ephem_rate_hz_, navsat_rate_hz_);
-    static_timer_ = create_wall_timer(
-      period_from_rate(static_rate_hz),
-      std::bind(&GnssSimNode::publish_static_slow_topics, this));
+    const bool simulated = get_parameter("use_sim_time").as_bool();
+    const auto static_period = period_from_rate(static_rate_hz);
+    const auto static_callback = std::bind(&GnssSimNode::publish_static_slow_topics, this);
+    static_timer_ = simulated ? rclcpp::create_timer(this, get_clock(),
+      rclcpp::Duration(static_period), static_callback) : create_wall_timer(static_period, static_callback);
 
     if (time_source_ == "odom_stamp" || time_source_ == "clock") {
-      range_timer_ = create_wall_timer(
-        period_from_rate(measurement_rate_hz_),
-        std::bind(&GnssSimNode::publish_range_epoch_from_timer, this));
+      const auto period = period_from_rate(measurement_rate_hz_);
+      const auto callback = std::bind(&GnssSimNode::publish_range_epoch_from_timer, this);
+      range_timer_ = simulated ? rclcpp::create_timer(this, get_clock(),
+        rclcpp::Duration(period), callback) : create_wall_timer(period, callback);
     }
   }
 
@@ -1493,6 +1497,8 @@ private:
     const gnss_comm::gtime_t utc_time = stamp_to_utc_time(state.stamp);
     const gnss_comm::gtime_t gpst_time = gnss_comm::utc2gpst(utc_time);
     if (!constellation_.ensure_ephemerides(gpst_time, get_logger())) {
+      if (ephemeris_source_ == "rinex" && !fallback_to_synthetic_on_rinex_error_)
+        throw std::runtime_error("strict historical GNSS input rejected: " + constellation_.rinex_error_message());
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "No GNSS ephemerides available; skip startup ephemeris publication");
@@ -1591,6 +1597,8 @@ private:
       publish_diagnostics(
         {}, {}, "no_ephemerides_available", scenario_time_s, false,
         stamp_to_sec(state.stamp));
+      if (ephemeris_source_ == "rinex" && !fallback_to_synthetic_on_rinex_error_)
+        throw std::runtime_error("strict historical GNSS input rejected: " + constellation_.rinex_error_message());
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "Skip GNSS epoch at %.6f: no ephemerides available",
@@ -2482,7 +2490,13 @@ private:
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<GnssSimNode>());
+  try {
+    rclcpp::spin(std::make_shared<GnssSimNode>());
+  } catch (const std::exception& error) {
+    RCLCPP_ERROR(rclcpp::get_logger("gnss_sim"), "GNSS source stopped: %s", error.what());
+    rclcpp::shutdown();
+    return 2;
+  }
   rclcpp::shutdown();
   return 0;
 }

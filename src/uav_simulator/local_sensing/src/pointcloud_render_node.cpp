@@ -7,6 +7,7 @@
 #include <pcl/search/kdtree.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/create_timer.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <iap/msg/lidar_beam_evidence.hpp>
 #include <local_sensing/first_hit_lidar_renderer.hpp>
@@ -404,8 +405,10 @@ int main(int argc, char** argv) {
 
   // 定时器：控制渲染频率
   double sensing_duration = 1.0 / sensing_rate;
-  local_sensing_timer = node->create_wall_timer(
-      std::chrono::duration<double>(sensing_duration), std::bind(&renderSensedPoints));
+  local_sensing_timer = node->get_parameter("use_sim_time").as_bool()
+      ? rclcpp::create_timer(node, node->get_clock(),
+          rclcpp::Duration::from_seconds(sensing_duration), std::bind(&renderSensedPoints))
+      : node->create_wall_timer(std::chrono::duration<double>(sensing_duration), std::bind(&renderSensedPoints));
 
   _inv_resolution = 1.0 / _resolution;
 

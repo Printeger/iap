@@ -877,7 +877,7 @@ noise 阶段另需 GNSS/LiDAR 测量 residual_m 与 nominal_sigma_m 字段。
 
 ```bash
 ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 advisory_posterior_prior:=false advisory_guidance:=false
-# 开启组：advisory_guidance:=true（默认）
+# 开启组：advisory_guidance:=true（显式实验；当前默认OFF）
 ```
 
 正式固定路线试验增加 `advisory_trial:=<绝对 trial.json>`，并在校准/独立验证时
@@ -1071,3 +1071,21 @@ Actual-curve continuous risk retention and forest qualification remain in progre
 8 项生产接口回归：`ctest --test-dir ../../build/gnss_sim -R test_broadcast_ephemeris --output-on-failure`。
 字段、失效条件及 GAL/GLO 资格限制见 [GNSS 接口](docs/GNSS_SIM_NODE_INTERFACE.md)。
 这尚未取得历史统一时钟或真实联合 Advisory 资格，不能启动正式9＋9替代既有阻塞。
+
+
+历史 GPS＋北斗统一时钟机制入口（真实 Advisory 尚未取得资格）：
+
+```bash
+ros2 launch iap iap_sim.launch.py rinex_nav_file:=<绝对历史混合NAV路径> advisory_guidance:=false advisory_posterior_prior:=false
+```
+
+路径非空时固定起点2022-07-06T12:00:00Z，NAV复制/hash登记在本次run，
+严格GPS＋北斗，无synthetic回退。动力学仿真器独占`/clock`；其余节点、
+组件、录制及显示使用`use_sim_time=true`，生产者使用steady节拍且不消费自身clock。
+`/sim/pause`（std_msgs/Bool）暂停／恢复时钟、物理状态与传感器生产；
+历史GNSS/LiDAR定时器跟随ROS时间，暂停不重复生成随机观测。
+时钟源竞争或任一必要历史输入进程意外退出会停止全图并保存输入故障，
+最终归属把运行记为failed，即使顶层launch返回0。run ID、生命周期及计算预算保持实际／steady时间。
+唯一入口guidance目前默认OFF，ON须显式选择实验配置；尚未推广真实参数。
+生产CPU时钟/传感器进程回归：`ctest --test-dir ../../build/so3_quadrotor_simulator -R test_historical_clock --output-on-failure`。
+该测试使用小型合成传感器夹具，不替代GPU森林或正式9＋9。

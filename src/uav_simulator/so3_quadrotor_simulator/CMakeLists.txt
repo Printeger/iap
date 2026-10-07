@@ -9,6 +9,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(quadrotor_msgs REQUIRED)
 find_package(Armadillo REQUIRED)
@@ -44,12 +46,22 @@ add_executable(so3_quadrotor_simulator src/quadrotor_simulator_so3.cpp)
 ament_target_dependencies(so3_quadrotor_simulator
   rclcpp
   nav_msgs
+  rosgraph_msgs
+  std_msgs
   sensor_msgs
   Eigen3
   quadrotor_msgs
   uav_utils
 )
 target_link_libraries(so3_quadrotor_simulator quadrotor_dynamics)
+
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME test_historical_clock
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_historical_clock.py
+      $<TARGET_FILE:so3_quadrotor_simulator>)
+  set_tests_properties(test_historical_clock PROPERTIES TIMEOUT 30)
+endif()
 
 # 安装可执行文件
 install(TARGETS so3_quadrotor_simulator

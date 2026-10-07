@@ -63,6 +63,91 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         )
         return run
 
+    def test_historical_input_freezes_nav_and_owns_one_clock_policy(self):
+        canonical = self._load_launch("iap_sim.launch.py")
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        environment = self._load_launch("_includes/simulation_environment.launch.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            nav = root/"mixed.rnx"
+            nav.write_bytes(b"unit NAV identity; decoder qualification is independently tested")
+            self.assertEqual(runtime.historical_gnss_parameters("") , {})
+            with self.assertRaisesRegex(ValueError, "absolute NAV"):
+                runtime.historical_gnss_parameters("relative.rnx")
+            with self.assertRaisesRegex(ValueError, "absolute NAV"):
+                runtime.historical_gnss_parameters(str(root/"missing.rnx"))
+            context = LaunchContext()
+            context.launch_configurations.update(scenario="icra_dense_forest_four_fork_v2",
+                rinex_nav_file=str(nav), start_rviz="false", start_grid_map_visualizer="false",
+                planner_start_delay_s="0", run_duration_s="0")
+            with mock.patch.dict(os.environ, {"IAP_RUN_ROOT": str(root/"runs")}), mock.patch.object(
+                    canonical, "get_package_share_directory", return_value=str(REPO)):
+                canonical._setup(context)
+            run = next((root/"runs").glob("20*"))
+            info = json.loads((run/"metadata/manifests/full_stack.json").read_text())
+            frozen = Path(info["gnss_input"]["nav_file"])
+            self.assertTrue(frozen.is_relative_to(run))
+            self.assertEqual(frozen.read_bytes(), nav.read_bytes())
+            self.assertEqual(info["clock_contract"], "historical_clock_2022-07-06T12:00:00Z")
+            self.assertEqual(info["gnss_input"]["constellations"], ["GPS", "BDS"])
+            self.assertFalse(info["gnss_input"]["formal_advisory_qualified"])
+            context.launch_configurations.update(output_dir=str(run), rinex_nav_file=str(frozen))
+            nodes = []
+            original = environment.Node
+            def capture(**kwargs):
+                nodes.append(kwargs)
+                return original(**kwargs)
+            with mock.patch.object(environment, "get_package_share_directory", return_value=str(REPO)), \
+                    mock.patch.object(environment, "Node", side_effect=capture):
+                actions = environment._setup(context)
+            actions[0].execute(context)
+            self.assertIn(("use_sim_time", True), context.launch_configurations["global_params"])
+            producer = next(n for n in nodes if n.get("executable")=="so3_quadrotor_simulator")
+            params = {k:v for item in producer["parameters"] for k,v in item.items()}
+            self.assertFalse(params["use_sim_time"])
+            self.assertTrue(params["sim_time/enable"])
+            self.assertEqual(params["sim_time/start_utc"], "2022-07-06T12:00:00Z")
+            gnss = next(n for n in nodes if n.get("executable")=="gnss_sim_node")["parameters"][0]
+            self.assertEqual(gnss["ephemeris_source"], "rinex")
+            self.assertEqual(gnss["enabled_constellations_csv"], "GPS,BDS")
+            self.assertFalse(gnss["fallback_to_synthetic_on_rinex_error"])
+
+    def test_historical_input_loss_fails_both_owners_and_preserves_first_failure(self):
+        environment = self._load_launch("_includes/simulation_environment.launch.py")
+        runs = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+            for owner in ["launch", "driver"]:
+                run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2")
+                environment._historical_process_exit(SimpleNamespace(returncode=2),
+                    SimpleNamespace(is_shutdown=False), run, "gnss_sim")
+                first = (run/"metadata/manifests/historical_input_failure.json").read_bytes()
+                environment._historical_process_exit(SimpleNamespace(returncode=0),
+                    SimpleNamespace(is_shutdown=False), run, "historical_clock_owner")
+                self.assertEqual((run/"metadata/manifests/historical_input_failure.json").read_bytes(), first)
+                if owner == "launch":
+                    runs.finalize_run_from_shutdown(run, SimpleNamespace(reason="historical_input_failure", due_to_sigint=False))
+                else:
+                    self.assertEqual(runs.finalize_run(run, lifecycle="completed"), "failed")
+                self.assertEqual(json.loads((run/"metadata/run_manifest.json").read_text())["lifecycle"], "failed")
+                self.assertEqual(environment._historical_process_exit(SimpleNamespace(returncode=-2),
+                    SimpleNamespace(is_shutdown=True), run, "gnss_sim"), [])
+
+    def test_recorder_clock_policy_comes_from_run_owner(self):
+        runs = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            directory = run/"metadata/manifests"
+            directory.mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "clock identity unavailable"):
+                runs.canonical_run_uses_sim_time(run, 0)
+            for contract, expected in [("system_clock_for_ros_and_simulated_sensor_stamps", False),
+                                       ("historical_clock_2022-07-06T12:00:00Z", True)]:
+                (directory/"full_stack.json").write_text(json.dumps({"clock_contract": contract}))
+                self.assertIs(runs.canonical_run_uses_sim_time(run), expected)
+            (directory/"full_stack.json").write_text(json.dumps({"clock_contract": "unknown"}))
+            with self.assertRaisesRegex(ValueError, "unsupported canonical clock"):
+                runs.canonical_run_uses_sim_time(run)
+
     def test_stage1_parameters_have_one_map_and_no_retired_planner_controls(self):
         runtime = self._load_launch("_includes/full_stack_runtime.py")
         catalog = json.loads((REPO / "config/scenarios/catalog.json").read_text())
@@ -202,10 +287,11 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                     "start_grid_map_visualizer": "true",
                     "planner_start_delay_s": "0", "run_duration_s": "0", "p0.enable_risk_grid": "true"})
                 actions = runtime._setup(context)
-            self.assertEqual(len(actions), 5)
+            from launch_ros.actions import SetParameter
+            self.assertEqual(len([a for a in actions if not isinstance(a, SetParameter)]), 5)
             context.launch_configurations["start_grid_map_visualizer"] = "false"
             with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
-                self.assertEqual(len(runtime._setup(context)), 4)
+                self.assertEqual(len([a for a in runtime._setup(context) if not isinstance(a, SetParameter)]), 4)
             ros = json.loads((run / "metadata/config/iap/config_ros.json").read_text())["glim_ros"]
             local = ros["planner_local_map"]
             params = runtime.planner_parameters(catalog["icra_dense_forest_four_fork_v2"])

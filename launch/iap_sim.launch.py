@@ -69,6 +69,16 @@ def _setup(context):
     )
 
     calibration=context.launch_configurations.get("advisory_calibration", "")
+    nav_path = context.launch_configurations.get("rinex_nav_file", "").strip()
+    if nav_path:
+        from full_stack_runtime import historical_gnss_parameters
+        historical_gnss_parameters(nav_path)
+        if catalog[scenario]["gnss_profile"] == "disabled":
+            raise ValueError("historical GPS+BDS requires an enabled GNSS scenario")
+        frozen_nav = output_dir / "metadata/config/historical_nav.rnx"
+        frozen_nav.write_bytes(Path(nav_path).read_bytes())
+        register_config_snapshot(output_dir, frozen_nav)
+        nav_path = str(frozen_nav)
     if calibration:
         from full_stack_runtime import load_advisory_calibration
         load_advisory_calibration(calibration)
@@ -92,7 +102,7 @@ def _setup(context):
         trial_path=str(frozen)
         params=planner_parameters(catalog[scenario],False,
             context.launch_configurations.get("advisory_posterior_prior","false")=="true",calibration,
-            context.launch_configurations.get("advisory_guidance","true")=="true",trial_path)
+            context.launch_configurations.get("advisory_guidance","false")=="true",trial_path)
         import hashlib
         trial["parameter_sha256"]=json.loads(Path(calibration).read_text())["sha256"] if calibration else hashlib.sha256(
             json.dumps(params,sort_keys=True,allow_nan=False).encode()).hexdigest()
@@ -116,7 +126,7 @@ def _setup(context):
         "grid_map_visualizer_enabled": context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true",
         "advisory_calibration": calibration,
         "advisory_trial": trial_path,
-        "advisory_guidance_enabled": context.launch_configurations.get("advisory_guidance", "true").lower()=="true",
+        "advisory_guidance_enabled": context.launch_configurations.get("advisory_guidance", "false").lower()=="true",
         "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
@@ -126,8 +136,14 @@ def _setup(context):
         "phase2_planner_integrity_evaluator_enabled": False,
         "lifecycle_owner": lifecycle_owner,
         "clock_contract": (
+            "historical_clock_2022-07-06T12:00:00Z" if nav_path else
             "system_clock_for_ros_and_simulated_sensor_stamps"
         ),
+        "gnss_input": {"source": "rinex" if nav_path else "synthetic",
+                       "nav_file": nav_path,
+                       "nav_sha256": __import__("hashlib").sha256(Path(nav_path).read_bytes()).hexdigest() if nav_path else None,
+                       "constellations": ["GPS", "BDS"] if nav_path else ["GPS", "BDS", "GAL", "GLO"],
+                       "formal_advisory_qualified": False},
     }
     write_subordinate_manifest(output_dir, "full_stack", manifest)
 
@@ -147,9 +163,10 @@ def _setup(context):
             ),
             launch_arguments={
                 "scenario": scenario,
+                "rinex_nav_file": nav_path,
                 "advisory_calibration": calibration,
                 "advisory_trial": trial_path,
-                "advisory_guidance": context.launch_configurations.get("advisory_guidance", "true"),
+                "advisory_guidance": context.launch_configurations.get("advisory_guidance", "false"),
                 "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
@@ -185,9 +202,11 @@ def generate_launch_description():
             DeclareLaunchArgument("run_lifecycle_owner", default_value="launch", description="Private driver owns finalization after all run captures finish"),
             DeclareLaunchArgument("run_dir", default_value="", description="Private preallocated canonical owner run; contains startup ROS logs"),
             DeclareLaunchArgument("scenario", default_value="icra_dense_forest_four_fork_v2"),
+            DeclareLaunchArgument("rinex_nav_file", default_value="",
+                                 description="Absolute historical NAV: strict GPS+BDS and unique 2022-07-06T12:00:00Z clock; empty selects synthetic mechanism input"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("start_grid_map_visualizer", default_value="true"),
-            DeclareLaunchArgument("advisory_guidance", default_value="true",choices=["true","false"],
+            DeclareLaunchArgument("advisory_guidance", default_value="false",choices=["true","false"],
                                  description="Planning preference only; prediction/recording/display stay active"),
             DeclareLaunchArgument("advisory_calibration", default_value="",
                                  description="Absolute frozen empirical Advisory JSON; empty preserves uncalibrated defaults"),

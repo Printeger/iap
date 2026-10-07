@@ -11,12 +11,19 @@
 
   <depend>rclcpp</depend>
   <depend>nav_msgs</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>Eigen3</depend>
   <depend>quadrotor_msgs</depend>
   <depend>uav_utils</depend>
 
   <test_depend>ament_lint_auto</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>gnss_sim</test_depend>
+  <test_depend>local_sensing</test_depend>
+  <test_depend>gnss_comm</test_depend>
+  <test_depend>sensor_msgs_py</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
   <export>

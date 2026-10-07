@@ -11,6 +11,8 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosidl_runtime_py.convert import message_to_ordereddict
 from rosidl_runtime_py.utilities import get_message
 from advisory_validation import adopt_run_directory, artifact, json_write, manifest, sha, safe_label
+from run_directory import canonical_run_uses_sim_time
+from rclpy.parameter import Parameter
 
 
 def plain(value):
@@ -29,12 +31,22 @@ def main():
         raise ValueError('canonical live run required')
     target=artifact(run,'export/planner/advisory_validation/'+args.label+'_events.jsonl')
     subscriptions={};counts=Counter();started=time.monotonic()
-    rclpy.init();node=rclpy.create_node('advisory_live_capture')
+    rclpy.init();node=rclpy.create_node('advisory_live_capture', parameter_overrides=[
+        Parameter('use_sim_time', value=canonical_run_uses_sim_time(run))])
     qos=QoSProfile(depth=100,reliability=ReliabilityPolicy.BEST_EFFORT)
     try:
         with target.open('x',buffering=1) as out:
             def receive(topic,msg):
-                payload=plain(message_to_ordereddict(msg))
+                if msg.__class__.__name__=='PointCloud2':
+                    # Time/source evidence only. Full frozen predictor inputs
+                    # remain owned by the existing input recorder.
+                    payload={'identity':'POINTCLOUD_HEADER_ONLY',
+                             'header':plain(message_to_ordereddict(msg.header)),
+                             'height':msg.height,'width':msg.width,
+                             'point_step':msg.point_step,'row_step':msg.row_step,
+                             'data_bytes':len(msg.data)}
+                else:
+                    payload=plain(message_to_ordereddict(msg))
                 if msg.__class__.__name__=='String':
                     try:payload=json.loads(msg.data)
                     except json.JSONDecodeError:pass
@@ -46,7 +58,9 @@ def main():
                 if time.monotonic()>next_discovery:
                     for topic,types in node.get_topic_names_and_types():
                         if topic in subscriptions or len(types)!=1:continue
-                        selected=(topic=='/iap/integrity' or topic in ('/drone_0_visual_slam/odom','/sim/drone_0/truth_odom',
+                        selected=(topic=='/iap/integrity' or topic in ('/clock','/drone_0_visual_slam/odom','/sim/drone_0/truth_odom',
+                                  '/ublox_driver/range_meas','/ublox_driver/ephem','/ublox_driver/glo_ephem',
+                                  '/sim/drone_0/lidar_body',
                                   '/drone_0_planning/bspline','/drone_0_planning/pos_cmd',
                                   '/sim/drone_0/imu_iap') or types[0]=='quadrotor_msgs/msg/SO3Command' or
                                   ('planning' in topic and types[0]=='std_msgs/msg/String'))

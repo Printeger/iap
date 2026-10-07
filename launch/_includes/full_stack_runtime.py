@@ -16,12 +16,24 @@ from launch.actions import (EmitEvent, IncludeLaunchDescription, OpaqueFunction,
                             TimerAction, SetEnvironmentVariable)
 from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetParameter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_runtime import materialize_profile
 from run_directory import register_config_snapshot
 from advisory_coordinates import checked_coordinates
+
+
+def historical_gnss_parameters(nav_path):
+    """Explicit historical mechanism input; not an Advisory qualification."""
+    if not nav_path:
+        return {}
+    path = Path(nav_path)
+    if not path.is_absolute() or not path.is_file():
+        raise ValueError("historical RINEX requires an existing absolute NAV path")
+    return {"ephemeris_source": "rinex", "rinex_nav_file": str(path),
+            "enabled_constellations_csv": "GPS,BDS", "rinex_gps_only": False,
+            "fallback_to_synthetic_on_rinex_error": False}
 
 
 def load_advisory_calibration(path):
@@ -206,7 +218,7 @@ def _setup(context):
                        context.launch_configurations.get(
                            "advisory_posterior_prior", "false").lower() == "true",
                        context.launch_configurations.get("advisory_calibration", ""),
-                       context.launch_configurations.get("advisory_guidance", "true").lower()=="true",
+                       context.launch_configurations.get("advisory_guidance", "false").lower()=="true",
                        context.launch_configurations.get("advisory_trial", ""))
     parameters_path=run / "metadata/config/planner_parameters.json"
     parameters_path.write_text(json.dumps(frozen_planner_parameters,sort_keys=True,allow_nan=False,indent=2)+"\n")
@@ -215,10 +227,13 @@ def _setup(context):
                    name="drone_0_ego_planner_node", output="screen",
                    parameters=[frozen_planner_parameters],
                    remappings=remaps)
+    historical = bool(context.launch_configurations.get("rinex_nav_file", ""))
     actions = [
+        SetParameter(name="use_sim_time", value=historical),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(
             str(share / "launch/_includes/simulation_environment.launch.py")),
             launch_arguments={"scenario": name, "output_dir": str(run),
+                              "rinex_nav_file":context.launch_configurations.get("rinex_nav_file", ""),
                               "advisory_trial":context.launch_configurations.get("advisory_trial", "")}.items()),
         Node(package="iap", executable="iap_rosnode", name="glio_integrity", output="screen",
              parameters=[{"config_path": runtime, "imu_topic": "/sim/drone_0/imu_iap",

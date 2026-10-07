@@ -14,7 +14,7 @@ import time
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "launch/_includes"))
 from run_directory import (adopt_run_directory, resolve_run_directory, finalize_run,
-                           write_subordinate_manifest)
+                           write_subordinate_manifest, canonical_run_uses_sim_time)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
 CODEC = "iap_prediction_input_v5/boost_binary/zlib_length_u64le"
@@ -34,6 +34,7 @@ SOURCES += ["include/iap/gnss/gnss_types.hpp", "include/iap/gnss/gnss_epoch_wire
             "src/iap/gnss/gnss_extension.cpp", "src/iap/integrity/integrity_extension.cpp"]
 SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predictor/compare_advisory_error.py",
             "scripts/dev_predictor/advisory_coordinate_evidence.py", "scripts/dev_predictor/advisory_live_capture.py"]
+SOURCES += ["include/iap/gnss/broadcast_ephemeris.hpp"]
 
 
 def git(*args):
@@ -181,7 +182,9 @@ def record(run, args):
     from iap.srv import GetGridMapPredictionInput
     from nav_msgs.msg import Odometry
     rclpy.init(args=[])
-    node = rclpy.create_node("advisory_validation_recorder")
+    from rclpy.parameter import Parameter
+    node = rclpy.create_node("advisory_validation_recorder", parameter_overrides=[
+        Parameter("use_sim_time", value=canonical_run_uses_sim_time(run))])
     client = node.create_client(GetGridMapPredictionInput, args.service)
     requests = artifact(run, "export/advisory/validation/recordings/" + args.label + "_requests.csv")
     odometry = artifact(run, "export/advisory/validation/recordings/" + args.label + "_odometry.csv")

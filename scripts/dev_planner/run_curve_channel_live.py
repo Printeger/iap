@@ -42,6 +42,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--duration', type=float, default=300)
     parser.add_argument('--label', default='curve_capture')
+    parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
     args = parser.parse_args()
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
@@ -68,15 +69,28 @@ def main():
         if gpu.get('gpu_status') != 'READY':
             raise RuntimeError('GPU_NOT_READY: ' + json.dumps(gpu))
         executable = Path(get_package_prefix('ego_planner')) / 'lib/ego_planner/ego_planner_node'
+        input_binaries = {}
+        for package, binary in [('gnss_sim', 'gnss_sim_node'),
+                                ('so3_quadrotor_simulator', 'so3_quadrotor_simulator'),
+                                ('local_sensing', 'pcl_render_node'), ('iap', 'iap_rosnode')]:
+            installed = Path(get_package_prefix(package)) / 'lib' / package / binary
+            input_binaries[package] = binary_identity(installed.resolve())
+        for plugin in ['gnss_extension', 'integrity_extension',
+                       'planner_local_map_extension', 'odometry_estimation_gpu', 'sim_extension']:
+            installed = Path(get_package_prefix('iap')) / 'lib' / ('lib' + plugin + '.so')
+            input_binaries[plugin] = binary_identity(installed.resolve())
         command = ['ros2', 'launch', 'iap', 'iap_sim.launch.py', f'run_dir:={run}',
                    'run_lifecycle_owner:=driver',
                    'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:=false',
                    'start_grid_map_visualizer:=true', 'advisory_posterior_prior:=false',
                    'advisory_guidance:=false', 'capture_failure_map:=true',
                    f'run_duration_s:={args.duration}']
+        if args.rinex_nav_file:
+            command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
         manifest(run, 'forest_runtime_identity', {'schema': 'iap_forest_runtime_identity_v1',
                  **identity, 'command': command, 'preflight': gpu,
                  'runtime_binary': binary_identity(executable.resolve()),
+                 'input_binaries': input_binaries,
                  'environment': {k: os.environ[k] for k in ('IAP_RUN_DIR', 'ROS_LOG_DIR',
                                  'RMW_IMPLEMENTATION', 'FASTRTPS_DEFAULT_PROFILES_FILE')}}, owner=True)
         print('IAP_RUN_DIR=' + str(run), flush=True)
@@ -134,12 +148,13 @@ def main():
                  'logs_sha256': {str(p.relative_to(run)): sha(p)
                                 for p in run.joinpath('runtime').glob('*.log')},
                  'mission_pass': False, 'error': error,
+                 'required_input_failure': (run / 'metadata/manifests/historical_input_failure.json').exists(),
                  'note': 'process lifecycle is not mission acceptance'}, owner=True)
         # The driver is the only finalization owner. Children write subordinate
         # evidence; register every completed manifest after they have stopped.
         for path in sorted((run / 'metadata/manifests').glob('*.json')):
             register_subordinate_manifest(run, path)
-        finalize_run(run, lifecycle=status)
+        status = finalize_run(run, lifecycle=status)
     print(json.dumps({'run': str(run), 'lifecycle': status}), flush=True)
     return 0 if status == 'completed' else 1
 

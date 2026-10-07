@@ -104,3 +104,16 @@ C3现场事实：干净a301cb1、run20261007T115721Z_898、300秒OFF，
 末次仍为Budget，路线偏离后重定时/refine耗尽3次修复。不是通过放宽路线门解决。
 B仍未取得有效PL覆盖；来源贡献not_available，不能把UNKNOWN模型比较称为真实风险验证。
 图文/JSON在本轮分析run/export/analysis/channel_retention_live；原现场不删失。
+
+
+B2代码：唯一入口显式rinex_nav_file固定历史UTC12、冻结原文件/hash、
+GPS+BDS且禁止synthetic回退；唯一SO3clock按物理模拟tick推进，消费者统一ROS时间。
+steady节拍／预算、run真实UTC身份与原300秒任务window未改，sim elapsed另报。
+暂停／恢复冻结clock/physics/传感器；历史GNSS与实际first-hit LiDAR使用ROS timer。
+必要clock/GNSS退出及clock源竞争停止全图，首个及逐模块输入故障留存，
+唯一finalize权威优先failed，driver使用其返回值。默认guidance OFF，ON仅显式实验。
+B2自动化：43canonical；两个CPU过程回归覆盖clock/odom/IMU/GNSS/LiDAR暂停恢复、
+非法日期/self-clock/竞争源、strict缺文件退出；8广播接口、原planner回跳拒绝通过。
+这使用合成小型传感器输入，不计正式现场或真实预测资格；生产全图现场待登记。
+B2阻塞：BDS状态/cov/ISB、活动列FIM及故障、冻结时间/外参、实际残差与经验校准尚未完成。
+正式B0/9+0/9，D0/6；A/C真实修复与路线保留仍受最新Curve/Budget证据阻塞。
