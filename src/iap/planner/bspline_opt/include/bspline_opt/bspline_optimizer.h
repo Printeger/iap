@@ -140,9 +140,10 @@ namespace ego_planner
     }
     void setPlanningEndpoints(const Eigen::Vector3d& start, const Eigen::Vector3d& end) {
       planning_endpoints_ = std::make_pair(start, end);
-      planning_goals_ = {end};
+      planning_goals_ = {end}; planning_goal_center_.reset();
     }
-    void setPlanningGoals(const std::vector<Eigen::Vector3d>& goals) { planning_goals_ = goals; }
+    void setPlanningGoals(const std::vector<Eigen::Vector3d>& goals,
+        std::optional<Eigen::Vector3d> center = std::nullopt) { planning_goals_ = goals; planning_goal_center_ = center; }
     // Frozen physical volume; actual cubic extrema are constrained in both solvers.
     void setCurvePhysicalBounds(const Eigen::Vector3d& lower, const Eigen::Vector3d& upper) {
       curve_bounds_ = std::make_pair(lower, upper);
@@ -236,6 +237,7 @@ namespace ego_planner
     std::function<GridPlanningCell(const Eigen::Vector3d&)> guide_query_;
     bool planning_advisory_fallback_ = false;
     bool initialization_failed_ = false;
+    std::optional<Eigen::Vector3d> planning_goal_center_;
     bool guide_tracking_ = false;
     bool planningOccupied(const Eigen::Vector3d& position) const {
       if (!planning_query_) return grid_map_->getInflateOccupancy(position) != 0;

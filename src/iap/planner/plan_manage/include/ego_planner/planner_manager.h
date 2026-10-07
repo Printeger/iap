@@ -146,7 +146,9 @@ namespace ego_planner
     PlanFailure lastPlanFailure() const { return last_plan_failure_; }
     void recordTargetSelectionFailure(const Eigen::Vector3d& start, const Eigen::Vector3d& velocity,
         const Eigen::Vector3d& acceleration, const Eigen::Vector3d& requested_target);
-    void setLocalTargets(std::vector<LocalTarget> targets) { planning_targets_ = std::move(targets); }
+    void setLocalTargets(std::vector<LocalTarget> targets, const Eigen::Vector3d& center) {
+      planning_targets_ = std::move(targets); planning_target_center_=center;
+    }
     double terminalSpeedLimit(const Eigen::Vector3d& position,
                               const Eigen::Vector3d& reference_velocity) const;
     void endPlanningView();
@@ -264,6 +266,7 @@ namespace ego_planner
     std::optional<PlanningView> planning_view_;
     PlanningBudget::Ptr planning_budget_;
     std::vector<LocalTarget> planning_targets_;
+    std::optional<Eigen::Vector3d> planning_target_center_;
     std::optional<LocalTrajData> pending_trajectory_;
     std::optional<rclcpp::Time> connection_time_;
     int connection_predecessor_ = -1;

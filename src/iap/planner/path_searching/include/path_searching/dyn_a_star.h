@@ -73,9 +73,11 @@ public:
 		size_t query_calls = 0;
 		size_t cache_hits = 0;
 		size_t queue_pushes = 0, queue_pops = 0, advisory_refresh_calls = 0;
-		size_t advisory_query_calls = 0;
+		size_t advisory_query_calls = 0, risk_integration_calls = 0;
 		std::array<size_t, 3> sample_hits{}, sample_misses{}, cache_entries{}, cache_bytes{};
-		double path_cost = 0.0;
+		double path_cost = 0.0; // Complete objective in metres.
+        double path_length_m=0., risk_cost_m=0., terminal_cost_m=0.;
+        bool optimality_proven=false, search_budget_exhausted=false, advisory_changed=false;
 		double query_management_s = 0.0, edge_s = 0.0;
 		double duration_s = 0.0;
 		double occupancy_query_s = 0.0;
@@ -102,6 +104,7 @@ private:
 	ComponentDiagnostic* component_diagnostic_ = nullptr;
 	GridMap::Ptr grid_map_;
     PlanningBudget::Ptr budget_;
+    std::optional<Eigen::Vector3d> task_goal_;
     bool active_search_=false;
     PlanningBudget::Clock::time_point search_started_;
     PlanningBudget::Clock::time_point search_deadline_ = PlanningBudget::Clock::time_point::max();
@@ -132,7 +135,10 @@ private:
 	void finishFailure(Failure failure, const rclcpp::Time& started);
 	void recordMapAtFinish();
 	void recordCacheStats();
-	std::optional<double> edgeMultiplier(const Eigen::Vector3d& from,
+	std::optional<double> segmentCost(const Eigen::Vector3d& from,
+	                                  const Eigen::Vector3d& to, bool check_physical,
+	                                  const std::array<GridSearchCell,3>* checked_samples = nullptr);
+	std::optional<double> edgeCost(const Eigen::Vector3d& from,
 	                                     const Eigen::Vector3d& to,
 	                                     const Eigen::Vector3i& from_index,
 	                                     const Eigen::Vector3i& to_index);
@@ -167,7 +173,7 @@ private:
 	double step_size_, inv_step_size_;
 	Eigen::Vector3d center_;
 	Eigen::Vector3i CENTER_IDX_, POOL_SIZE_ = Eigen::Vector3i::Zero();
-	const double tie_breaker_ = 1.0 + 1.0 / 10000;
+
 
 	std::vector<GridNodePtr> gridPath_;
 
@@ -224,6 +230,7 @@ public:
 	}
 	static const char* failureName(Failure failure);
 
+	void setTaskGoal(std::optional<Eigen::Vector3d> goal) { task_goal_=std::move(goal); }
 	void setPlanningBudget(PlanningBudget::Ptr budget) { budget_ = std::move(budget); }
 	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt,
 	                 Eigen::Vector3d end_pt, double max_duration_s = -1.0,
@@ -238,7 +245,7 @@ public:
 
 inline double AStar::getHeu(GridNodePtr node1, GridNodePtr node2)
 {
-	return tie_breaker_ * getDiagHeu(node1, node2);
+	return step_size_ * getDiagHeu(node1, node2);
 }
 
 inline Eigen::Vector3d AStar::Index2Coord(const Eigen::Vector3i &index) const

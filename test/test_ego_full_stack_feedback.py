@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.util
+import json
 import os
 import signal
 import subprocess
@@ -61,7 +62,8 @@ def launch_fixture():
         'max_velocity_mps': 1., 'integrity_profile': 'lidar_only',
         'manual_goal': True})
     parameters.update({'grid_map/registered_lidar_window_enabled': False,
-                       'grid_map/resolution': .2, 'risk/source': 'gnss'})
+                       'grid_map/resolution': .2, 'risk/source': 'gnss',
+                       'planning/capture_failure_map': os.environ.get('IAP_FEEDBACK_CAPTURE') == '1'})
     nodes = []
     original_node = runtime.Node
 
@@ -116,6 +118,15 @@ class FullStackFeedback(unittest.TestCase):
                 position, velocity = [-2., 0., 1.], [0., 0., 0.]
                 last_cloud, switched_at = 0., None
                 confirmed_id, sent_goal = None, False
+                # Explicit sensor-to-return rays in a static room support every
+                # direction the terminal region may choose. No voxel is granted
+                # observation by the test or inherited from an earlier frame.
+                xy = np.arange(-4., 3.41, .1)
+                ys = np.arange(-4., 4.01, .1)
+                zs = np.arange(.1, 3.11, .1)
+                room_returns = ([(x, y, z) for x in (-4., 3.4) for y in ys for z in zs]
+                    + [(x, y, z) for y in (-4., 4.) for x in xy for z in zs]
+                    + [(x, y, z) for z in (.1, 3.1) for x in xy for y in ys])
                 started = time.monotonic()
                 try:
                     while time.monotonic() - started < 15:
@@ -148,10 +159,7 @@ class FullStackFeedback(unittest.TestCase):
                         report_pub.publish(report)
                         if time.monotonic() - last_cloud > .1:
                             cloud = point_cloud2.create_cloud_xyz32(
-                                odom.header,
-                                [(3.4, y, z)
-                                 for y in np.arange(-1.5, 1.51, .1)
-                                 for z in np.arange(.3, 1.91, .1)])
+                                odom.header, room_returns)
                             cloud_pub.publish(cloud)
                             last_cloud = time.monotonic()
                         if (not sent_goal and time.monotonic() - started > 1.
@@ -176,6 +184,24 @@ class FullStackFeedback(unittest.TestCase):
                     log.flush()
                     log.seek(0)
                     output = log.read()
+                    if confirmed_id is None:
+                        ends = []
+                        for c in curves:
+                            q = np.array([[p.x, p.y, p.z] for p in c.pos_pts])
+                            ends.append({'id': c.traj_id, 'mode': c.start_mode,
+                                         'start': ((q[0] + 4*q[1] + q[2])/6).tolist(),
+                                         'end': ((q[-3] + 4*q[-2] + q[-1])/6).tolist()})
+                        evidence = []
+                        for path in sorted(root.rglob('*.json')):
+                            if path.name != 'snapshot.json': continue
+                            data = json.loads(path.read_text())
+                            evidence.append({key: data.get(key) for key in
+                                ('kind', 'planning_attempt_id', 'generation',
+                                 'search_requested_end_m', 'first_unobserved_position_m',
+                                 'curve_execution_reason', 'search_path_cost_m',
+                                 'search_terminal_cost_m')})
+                        output += '\n' + json.dumps({'published_endpoints': ends,
+                            'last_position': position, 'failures': evidence[-5:]})
                     self.assertIsNotNone(confirmed_id, output)
                     self.assertIn(
                         f'Trajectory {confirmed_id} executing at its '

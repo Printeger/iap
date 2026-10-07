@@ -1047,3 +1047,12 @@ stages own their guide; mismatched historical stage/guide pairs are rejected.
 Budget-interrupted checks report `incomplete` with checked extent. Pre-guide
 initialization, prior-server connection and missed commit windows require live
 evidence. The real forest replay still fails; phase A remains unqualified.
+
+Local goals now span forward/left/right within the original pool (at most 16),
+with an eligible final task endpoint first. Every local round performs the same
+guide search with guidance OFF/ON. The guide determines endpoint/tangent and
+initialization; original physics, braking, dynamics and release checks still apply.
+Below-warning costs use `1+0.5r`; unknown uses 1.5. A* now reports metre-based
+length/risk/remaining-distance costs, includes both connectors and distinguishes
+proven optimum from an incumbent returned when the original budget expires.
+Actual-curve continuous risk retention and forest qualification remain in progress.

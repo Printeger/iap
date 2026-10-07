@@ -2,6 +2,8 @@
 
 ## 状态与依据
 
+本轮当前状态与独立 A/B/C/D 结论见 [Curve／真实Advisory／通道实施进度](../dev_planner/curve_advisory_channel_progress.md)；下方旧阶段结果保留其历史版本身份。
+
 历史 Advisory 工具验证见 [方案与实施结果](../dev_predictor/advisory_spatial_validation_plan.md)、[冻结验证工具契约](advisory_validation_contract.md) 和 [21f692e 正式报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/committed/report.md)。本段描述该历史版本；后续准入／数值修复及本轮待测状态见下方分阶段契约。完整录制、原 codec/生产 PredictorModule 重放、来源拆分、S1–S5 合成机制对照与报告已实施；生产包装器增加拒绝原因并共享相同冻结准备/状态映射，来源准入、物理地图、执行授权和阈值不变。缺 GNSS 阻断有效 LiDAR 的准入差异及强先验主导已在合成输入复现；未擅自修正模型。真实 start/middle/stop 扫描和三次 GLIO 误差重复仍为 INCONCLUSIVE，现场受无关 RViz 修改阻止，不声明风险地图已验证正确。
 
 结构基线：`../ego-planner-swarm`，提交 `23a8d5a191711dd65633df689bd00f55d4dea8f9`。原版目录只读。
@@ -836,3 +838,46 @@ snapshots additionally retain `virtual_ceiling_height_m` and `inflation_radius_m
 old snapshots require explicit historical parameter supplementation and remain
 historical evidence. The captured-boundary regression uses a translated free map
 only to verify dynamics and exact endpoint P/V/A; it is not forest acceptance.
+
+### Local terminal region and mandatory guide (C implementation in progress)
+
+Global-reference projection advances from actual vehicle position only. It supplies
+task direction; candidate eligibility no longer requires the 1 m reference ball or
+positive projected progress. Within the original search pool, deterministic 0.5 m
+coarse coverage spans forward/left/right at the current height and ±0.5 m. Physical
+queries remain authoritative, and goals are spatially separated. At most 16 goals
+share one search; the fixed final task endpoint has priority when eligible.
+Endpoint eligibility and complete path connectivity remain separate conclusions.
+
+Every local round starts the existing whole-route search under the same original
+Search repair accounting, regardless of guidance OFF/ON or warning/collision.
+There is one resulting guide at a time. The stable pool center is bound with the
+goal set. That guide owns spline initialization, local endpoint and final nonzero
+segment tangent; the original dynamic/braking-space rule caps terminal velocity.
+Final task arrival still uses zero terminal velocity. No unvalidated guide reuse
+or new search/repair budget is introduced. Below the warning line, GridMap derives `r=max((HPL+R_H)/B_H,(VPL+R_V)/B_V)`
+and `m=1+0.5r` from stored raw PL/status/version. Unknown uses 1.5; invalid,
+sentinel ≥1e9, stale, warning, degraded and bounded fallback retain distinct meaning.
+OFF neutralizes this preference while keeping the same goals, search and physics.
+Budgets/reserves remain the configured task limits, never a map/color-scale maximum.
+
+The complete search objective is metric path length + spatially integrated risk
+cost + local endpoint's Euclidean distance to the fixed task goal, once. Edge and
+start/terminal connector costs share half-voxel trapezoidal sampling. Full voxel
+physical checks remain in addition to this cost quadrature. The heuristic is the
+minimum lattice metric distance + terminal connector lower bound + endpoint
+remaining distance; its old amplification is removed. A* retains the best complete
+incumbent and waits for a lower-bound proof. Budget expiry returns an existing
+complete route as unproven; no complete route yields TIME_BUDGET. Changed advisory
+costs suppress an optimality claim. A stale physical geometry still rejects.
+Every actual candidate and release independently passes the original checks.
+Continuous risk retention by the actual curve remains C3 work, so C is unqualified.
+
+Focused evidence: 31 A* cases, GridMap continuous/sentinel checks and planner
+six planner/feedback and 40 canonical-launch checks in
+`log/20261007T091820Z_056/runtime/channel_*`. The switch fixture uses explicit
+static-room return rays; old narrow-cone observation withdrawals remain recorded
+as correct physical rejections, not a server-switch defect. The two original
+meter-unit defects have retained red outputs in `channel_metric_red.log`.
+Legacy all-package CMake/style lint failures are recorded separately; CMake was
+not changed for this implementation.

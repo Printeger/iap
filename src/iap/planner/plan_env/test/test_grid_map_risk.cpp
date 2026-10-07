@@ -250,7 +250,7 @@ TEST_F(GridRiskTest, FreshnessFrameAndMissingInputs) {
   EXPECT_TRUE(std::isnan(map.queryRisk(point,version,10).hpl));
 }
 TEST_F(GridRiskTest, NonFiniteNegativeAndThrowingPredictorNeverBecomeValid) {
-  for (double hpl : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -1.0}) {
+  for (double hpl : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -1.0, 1e9, 2e9}) {
     auto ctx=context(); ctx.predict=[hpl](const Eigen::Vector3d&) {
       GridRiskVoxel v; v.hpl=hpl; v.vpl=1; v.status=GridRiskStatus::VALID; return v;
     };
@@ -404,4 +404,26 @@ TEST(GridClearanceBounds, SameVoxelOffsetsDoNotShareAnExactClearanceDecision) {
   EXPECT_GT(stats.bounds_hits, 0u);
   EXPECT_GT(stats.fast_pass, 0u);
   EXPECT_GT(stats.exact_decisions, 0u);
+}
+
+TEST_F(GridRiskTest, BelowWarningCostUsesRawProtectionLevelsContinuously) {
+  GridPlanningRiskPolicy policy;
+  for (double hpl : {0.10, 0.20, 0.40}) {
+    auto ctx = context();
+    ctx.predict = [hpl](const Eigen::Vector3d&) {
+      GridRiskVoxel value;
+      value.status = GridRiskStatus::VALID;
+      value.hpl = hpl; value.vpl = 0.10;
+      return value;
+    };
+    const auto version = map.bindRiskContext(ctx);
+    const auto risk = map.queryPlanningRisk(point, version, 10., policy);
+    ASSERT_EQ(risk.classification, GridAdvisoryClass::VALID);
+    EXPECT_DOUBLE_EQ(risk.hpl, hpl);
+    EXPECT_DOUBLE_EQ(risk.vpl, .10);
+    EXPECT_NEAR(risk.cost_multiplier, 1. + .5 * std::max(
+        (hpl + policy.reserve_h_m) / policy.hpl_budget_m,
+        (.10 + policy.reserve_v_m) / policy.vpl_budget_m), 1e-12);
+    EXPECT_EQ(risk.version, version);
+  }
 }

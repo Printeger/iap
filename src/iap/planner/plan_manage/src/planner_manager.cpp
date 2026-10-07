@@ -382,6 +382,13 @@ namespace ego_planner
                << number(search ? search->advisory_query_s : 0.0) << ",\n"
                << "  \"search_duration_s\": "
                << number(search ? search->duration_s : 0.0) << ",\n";
+      metadata << "  \"search_path_cost_m\": " << number(search ? search->path_cost : NAN)
+          << ",\n  \"search_path_length_m\": " << number(search ? search->path_length_m : NAN)
+          << ",\n  \"search_risk_cost_m\": " << number(search ? search->risk_cost_m : NAN)
+          << ",\n  \"search_terminal_cost_m\": " << number(search ? search->terminal_cost_m : NAN)
+          << ",\n  \"search_optimality_proven\": " << (search && search->optimality_proven ? "true" : "false")
+          << ",\n  \"search_budget_exhausted\": " << (search && search->search_budget_exhausted ? "true" : "false")
+          << ",\n  \"search_advisory_changed\": " << (search && search->advisory_changed ? "true" : "false") << ",\n";
       metadata << "  \"first_unobserved_time_s\": "
           << number(assessment ? assessment->first_unobserved_time_s : NAN) << ",\n"
           << "  \"first_unobserved_position_m\": "
@@ -843,7 +850,7 @@ namespace ego_planner
 
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
       Eigen::Vector3d start_acc, Eigen::Vector3d target_pt, Eigen::Vector3d target_vel,
-      bool polynomial_init, bool /* random_polynomial */) {
+      bool /* polynomial_init */, bool /* random_polynomial */) {
     const bool own_view=!planning_view_;
     if(own_view && !beginPlanningView()) return false;
     struct EndView { EGOPlannerManager* manager; bool own;
@@ -922,36 +929,15 @@ namespace ego_planner
     for(size_t i=0;i<planning_targets_.size();++i) {
       goals.push_back(planning_targets_[i].position); target_indices.push_back(i);
     }
-    optimizer.setPlanningGoals(goals);
+    const Eigen::Vector3d target_region_center=planning_target_center_.value_or((start_pt+target_pt)/2);
+    optimizer.setPlanningGoals(goals,target_region_center);
+    optimizer.a_star_->setTaskGoal(global_data_.global_traj_.getTimes().empty() ? target_pt :
+        global_data_.getPosition(global_data_.global_duration_));
     LocalTarget selected{target_pt,target_vel,Eigen::Vector3d::Zero(),0};
     std::vector<Eigen::Vector3d> derivatives{start_vel,selected.velocity,start_acc,selected.acceleration};
     double interval=std::max(.05,pp_.ctrl_pt_dist/std::max(.1,pp_.max_vel_)*1.5);
     std::vector<Eigen::Vector3d> points;
-    const double distance=(target_pt-start_pt).norm();
-    if(distance<.2) return fail(PlanFailure::Target);
-    // Reuse starts at the bound connection time, never at a fresh now().
-    if(!polynomial_init && local_data_.duration_>0 && connection_time_) {
-      auto curve=local_data_.position_traj_;
-      const double from=connection_time_->seconds()-local_data_.start_time_.seconds();
-      for(double t=from;t<local_data_.duration_;t+=interval) {
-        if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-        points.push_back(curve.evaluateDeBoorT(t));
-      }
-    }
-    if(points.size()<7) {
-      points.clear();
-      const double duration=std::max(1.0,2*distance/std::max(.1,pp_.max_vel_));
-      auto polynomial=PolynomialTraj::one_segment_traj_gen(start_pt,start_vel,start_acc,
-          selected.position,selected.velocity,selected.acceleration,duration);
-      const size_t count=std::max<size_t>(7,std::ceil(duration/interval)+1);
-      interval=duration/(count-1);
-      for(size_t i=0;i<count;++i) {
-        if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-        points.push_back(polynomial.evaluate(i*interval));
-      }
-    } else {
-      points.push_back(target_pt);
-    }
+    if((target_pt-start_pt).norm()<.2) return fail(PlanFailure::Target);
     Eigen::MatrixXd control;
     const auto bind_boundaries=[&]() {
       UniformBspline::enforceBoundaryStates(control,interval,start_pt,start_vel,start_acc,
@@ -959,17 +945,33 @@ namespace ego_planner
       optimizer.setLocalTargetPt(selected.position);
       optimizer.setBsplineInterval(interval);
     };
-    UniformBspline::parameterizeToBspline(interval,points,derivatives,control);
-    recordCurveStage("initial_fit",control,interval,selected);
-    bind_boundaries();
-    recordCurveStage("initial_bound",control,interval,selected);
-    optimizer.initControlPoints(control,true);
-    if(optimizer.initializationFailed()) return fail(PlanFailure::Search);
+    // OFF and ON share one whole-route search on every local planning round.
+    // Establish a valid control owner for failure evidence before the search.
+    optimizer.initializeFromGuide(Eigen::MatrixXd::Zero(3,7));
+    if(!optimizer.searchRecoveryGuide()) return fail(PlanFailure::Search);
     const auto initialize_guide=[&]() {
       const auto& guide=optimizer.recoveryGuide();
       if(guide.size()<2) return false;
       const auto index=optimizer.a_star_->lastResult().selected_goal;
       if(index<target_indices.size()) selected=planning_targets_[target_indices[index]];
+      selected.position=guide.back();
+      optimizer.setPlanningEndpoints(start_pt,selected.position);
+      optimizer.setPlanningGoals(goals,target_region_center);
+      if(!global_data_.global_traj_.getTimes().empty() ?
+          (selected.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6 :
+          selected.velocity.norm()<1e-9)
+        selected.velocity.setZero();
+      else {
+        Eigen::Vector3d tangent=Eigen::Vector3d::Zero();
+        for(size_t i=guide.size()-1;i>0;--i) {
+          tangent=guide.back()-guide[i-1];
+          if(tangent.norm()>1e-9) break;
+        }
+        if(tangent.norm()>1e-9) {
+          tangent.normalize();const auto desired=tangent*pp_.max_vel_;
+          selected.velocity=tangent*terminalSpeedLimit(selected.position,desired);
+        } else selected.velocity.setZero();
+      }
       derivatives={start_vel,selected.velocity,start_acc,selected.acceleration};
       std::vector<double> arc(guide.size(),0);
       for(size_t i=1;i<guide.size();++i) arc[i]=arc[i-1]+(guide[i]-guide[i-1]).norm();
@@ -998,7 +1000,7 @@ namespace ego_planner
       if(failed==target_indices.end()) return false;
       target_indices.erase(failed); goals.clear();
       for(size_t i:target_indices) goals.push_back(planning_targets_[i].position);
-      optimizer.setPlanningGoals(goals);
+      optimizer.setPlanningGoals(goals,target_region_center);
       // Existing ordered forward targets, one guide at a time, shared budget.
       return optimizer.searchRecoveryGuide() && initialize_guide();
     };

@@ -106,6 +106,7 @@ struct EGOPlannerManagerTestAccess {
     for (const auto& target : manager.planning_targets_) points.push_back(target.position);
     return points;
   }
+  static Eigen::Vector3d targetCenter(const EGOPlannerManager& manager) { return *manager.planning_target_center_; }
   static iap::IntegritySnapshot snapshot(const EGOPlannerManager& manager, double now) {
     return manager.capturePredictionSnapshot(now);
   }
@@ -1754,4 +1755,57 @@ TEST(EgoBaseline, ActualUnknownCurveUsesObservedGuideSampleConstraints) {
     ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,.4));
   }
   EXPECT_FALSE(optimizer.curveViolates(q,.4)) << q;
+}
+
+TEST(EgoBaseline, TerminalRegionIncludesBothSidesBeyondReferenceBall) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1),goal(4,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  auto targets=ego_planner::EGOPlannerManagerTestAccess::targetPositions(*manager);
+  ASSERT_LE(targets.size(),16u);ASSERT_GE(targets.size(),3u);
+  EXPECT_TRUE(targets.front().isApprox(goal,1e-9));
+  EXPECT_TRUE(std::any_of(targets.begin(),targets.end(),[](auto p){return p.y()>1.;}));
+  EXPECT_TRUE(std::any_of(targets.begin(),targets.end(),[](auto p){return p.y()<-1.;}));
+  EXPECT_LT(manager->global_data_.last_progress_time_,.1);
+  const auto center=ego_planner::EGOPlannerManagerTestAccess::targetCenter(*manager);
+  EXPECT_GT((center-(start+goal)/2).norm(),.1); // final priority must not recenter.
+  manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
+  manager->reboundReplan(start,zero,zero,targets.front(),zero,true,false);
+  EXPECT_TRUE(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(*manager).pool_center.isApprox(center,1e-9));
+}
+
+TEST(EgoBaseline, SidewaysEndpointDoesNotRequireReferenceProgress) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1),goal(4,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  // Only endpoints at or behind the current projection are observed. A legal
+  // sideways start is still offered; search owns whether its connector exists.
+  for(double x=-1.7;x<5.9;x+=.1)for(double y=-5.9;y<5.9;y+=.1)
+    for(double z=.1;z<3.;z+=.1)GridMapTestAccess::clearObserved(*manager->grid_map_,Eigen::Vector3d(x,y,z));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  auto targets=ego_planner::EGOPlannerManagerTestAccess::targetPositions(*manager);
+  EXPECT_TRUE(std::any_of(targets.begin(),targets.end(),[&](auto p){return p.x()<=start.x()+.1 && std::abs(p.y())>1.;}));
+  EXPECT_LT(manager->global_data_.last_progress_time_,.1);
+  const auto center=ego_planner::EGOPlannerManagerTestAccess::targetCenter(*manager);
+  EXPECT_GT((center-(start+targets.front())/2).norm(),.1);
+  manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
+  manager->reboundReplan(start,zero,zero,targets.front(),zero,true,false);
+  EXPECT_TRUE(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(*manager).pool_center.isApprox(center,1e-9));
 }

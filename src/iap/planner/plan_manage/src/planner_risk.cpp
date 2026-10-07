@@ -506,7 +506,7 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
   failed_search_result_.reset(); failed_search_context_.reset(); failed_candidate_curve_.reset();
   curve_stages_.clear(); dropped_curve_stages_=0;
   planning_view_.reset();
-  planning_targets_.clear();
+  planning_targets_.clear(); planning_target_center_.reset();
   connection_time_.reset(); connection_predecessor_=-1;
   last_plan_failure_=PlanFailure::Target; last_candidate_assessment_={};
   bspline_optimizer_->a_star_->clearLastResult();
@@ -563,7 +563,14 @@ void EGOPlannerManager::endPlanningView() {
       <<bspline_optimizer_->a_star_->lastResult().selected_goal<<','<<connection_predecessor_<<','
       <<(connection_time_ ? connection_time_->seconds() : 0)<<','<<publicationTrajectory().traj_id_<<','
       <<static_cast<unsigned>(last_plan_failure_)<<','<<b.count(PlanningBudget::Repair::CurveCorrection)<<','
-      <<.5*grid_map_->getResolution()<<','<<planning_attempt_id_<<'\n'; planning_metrics_.flush();
+      <<.5*grid_map_->getResolution()<<','<<planning_attempt_id_<<','
+      <<bspline_optimizer_->a_star_->lastResult().path_cost<<','
+      <<bspline_optimizer_->a_star_->lastResult().path_length_m<<','
+      <<bspline_optimizer_->a_star_->lastResult().risk_cost_m<<','
+      <<bspline_optimizer_->a_star_->lastResult().terminal_cost_m<<','
+      <<bspline_optimizer_->a_star_->lastResult().optimality_proven<<','
+      <<bspline_optimizer_->a_star_->lastResult().search_budget_exhausted<<','
+      <<bspline_optimizer_->a_star_->lastResult().advisory_changed<<'\n'; planning_metrics_.flush();
   }
   planning_view_.reset();
 }
@@ -746,7 +753,7 @@ void EGOPlannerManager::initPredictionExport() {
   if (const auto log=glim::RunLogManager::get_if_initialized(); log && std::filesystem::exists(log->run_dir())) {
     const auto name="planner_flow_"+std::to_string(getpid());
     planning_metrics_.open(log->profiling_path(name+".csv"));
-    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id\n";
+    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id,search_path_cost_m,search_path_length_m,search_risk_cost_m,search_terminal_cost_m,search_optimality_proven,search_budget_exhausted,search_advisory_changed\n";
     export_metrics_.open(log->profiling_path(name+"_export.csv"));
     export_metrics_<<"reference_time,generation,total_s,payload_bytes,predictor_queries_before,predictor_queries_after\n";
     std::ofstream manifest(log->metadata_path("manifests/"+name+".json"));

@@ -19,7 +19,11 @@ GridPlanningRisk classifyCurrentRisk(const GridRiskVoxel& live, const GridPlanni
         : (live.hpl >= policy.hpl_budget_m - policy.reserve_h_m ||
            live.vpl >= policy.vpl_budget_m - policy.reserve_v_m
             ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID);
-    planning.cost_multiplier = 1.0;
+    if(planning.classification==GridAdvisoryClass::VALID && policy.hpl_budget_m>0 && policy.vpl_budget_m>0) {
+      const double r=std::max((live.hpl+policy.reserve_h_m)/policy.hpl_budget_m,
+          (live.vpl+policy.reserve_v_m)/policy.vpl_budget_m);
+      planning.cost_multiplier=1.+.5*r;
+    } else planning.cost_multiplier=1.;
     return planning;
   }
   if (live.status == GridRiskStatus::PREDICTED_DEGRADED) {
@@ -108,7 +112,7 @@ GridRiskVoxel GridMap::queryRisk(const Eigen::Vector3d& position,
   result.version = version;
   if (result.status == GridRiskStatus::VALID &&
       (!std::isfinite(result.hpl) || !std::isfinite(result.vpl) ||
-       result.hpl < 0.0 || result.vpl < 0.0))
+       result.hpl < 0.0 || result.vpl < 0.0 || result.hpl>=1e9 || result.vpl>=1e9))
     result.status = GridRiskStatus::INVALID;
   if (result.status != GridRiskStatus::VALID) {
     result.hpl = result.vpl = std::numeric_limits<double>::quiet_NaN();
@@ -204,7 +208,7 @@ std::function<GridPlanningRisk(const Eigen::Vector3d&)> GridMap::capturePlanning
       try { value=context.predict(origin+(index.cast<double>()+Eigen::Vector3d::Constant(.5))*resolution); }
       catch(const std::exception&) { value.status=GridRiskStatus::INVALID; }
       value.version=version;
-      if(value.status==GridRiskStatus::VALID && (!std::isfinite(value.hpl) || !std::isfinite(value.vpl) || value.hpl<0 || value.vpl<0)) value.status=GridRiskStatus::INVALID;
+      if(value.status==GridRiskStatus::VALID && (!std::isfinite(value.hpl) || !std::isfinite(value.vpl) || value.hpl<0 || value.vpl<0 || value.hpl>=1e9 || value.vpl>=1e9)) value.status=GridRiskStatus::INVALID;
     }
     const auto found=history.find(address);
     auto risk=classifyPlanningRisk(value,policy,context,

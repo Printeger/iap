@@ -239,6 +239,11 @@ void benchmark(const Input& in, int repeats, bool diagnostics, bool differential
       << ",\"expanded\":" << r.expanded << ",\"queries\":" << r.query_calls
       << ",\"queue_pushes\":" << r.queue_pushes << ",\"queue_pops\":" << r.queue_pops
       << ",\"path_cost\":" << r.path_cost
+      << ",\"path_length_m\":" << r.path_length_m
+      << ",\"risk_cost_m\":" << r.risk_cost_m
+      << ",\"terminal_cost_m\":" << r.terminal_cost_m
+      << ",\"optimality_proven\":" << (r.optimality_proven ? "true" : "false")
+      << ",\"search_budget_exhausted\":" << (r.search_budget_exhausted ? "true" : "false")
       << ",\"occupancy_s\":" << r.occupancy_query_s
       << ",\"clearance_s\":" << r.clearance_query_s
       << ",\"advisory_s\":" << r.advisory_query_s

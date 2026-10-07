@@ -1130,108 +1130,75 @@ namespace ego_planner
     }
     const Eigen::Vector3d nominal = reference.getPosition(target_t);
     local_targets_.clear();
-    const double allowance = std::max(0.2, start_vel_.squaredNorm() /
-        (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) + 2.0 * resolution);
-    struct ReferenceSample { Eigen::Vector3d position; double time, arc; };
-    std::vector<ReferenceSample> samples;
-    Eigen::Vector3d previous = reference.getPosition(projection);
-    double arc = 0;
-    for (double t=projection; t<=target_t+step; t+=step) {
-      if (expired()) return false;
-      const double effective=std::min(t,target_t);
-      const auto point=reference.getPosition(effective);
-      arc+=(point-previous).norm(); previous=point;
-      samples.push_back({point,effective,arc});
-      if (effective==target_t) break;
-    }
+    // The reference supplies direction and measured progress only. Endpoint
+    // eligibility is independent of reachability, proven by the one search.
+    const Eigen::Vector3d center=(start_pt_+nominal)/2;
+    Eigen::Vector3d direction=end_pt_-start_pt_;
+    if(direction.norm()<1e-9) return false;
+    direction.normalize();
+    Eigen::Vector3d left=Eigen::Vector3d::UnitZ().cross(direction);
+    if(left.norm()<1e-9) left=Eigen::Vector3d::UnitY();
+    else left.normalize();
     const auto add_target = [&](const Eigen::Vector3d& point, bool final) {
-      if (expired()) return;
-      for (const auto& target:local_targets_) if((target.position-point).norm()<1e-9) return;
+      if(expired() || local_targets_.size()>=16 || !point.allFinite()) return;
+      if(!((point-center).array().abs()<4.8).all()) return;
+      if((point-start_pt_).norm()<.4 && !final) return;
+      for(const auto& target:local_targets_)
+        if((target.position-point).norm()<(final ? 1e-9 : .75)) return;
       const auto cell=planner_manager_->queryLocalTargetCell(point,node_->now().seconds());
-      if (!cell.executable()) {
-        if (final) RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-            "Task endpoint unavailable: %s", gridExecutionReasonName(cell.execution_reason));
+      if(!cell.executable()) {
         wait_for_map_reason_=cell.execution_reason;
+        if(final) RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+            "Task endpoint unavailable: %s",gridExecutionReasonName(cell.execution_reason));
         return;
       }
-      // Same bounded pool that will be used by the one multi-goal search.
-      const Eigen::Vector3d center=(start_pt_+nominal)/2;
-      if (!((point-center).array().abs() < 4.8).all()) return;
-      size_t nearest=0; double best=std::numeric_limits<double>::infinity();
-      for (size_t i=0; i<samples.size(); ++i) {
-        const double distance=(point-samples[i].position).squaredNorm();
-        if (distance<best-1e-12) { best=distance; nearest=i; }
-      }
-      if (!final && samples[nearest].arc < allowance) return;
       LocalTarget candidate; candidate.position=point;
-      candidate.progress_m=samples[nearest].arc;
-      if (!final) {
-        const auto reference_velocity=reference.getVelocity(samples[nearest].time);
-        const double speed=planner_manager_->terminalSpeedLimit(point,reference_velocity);
-        if (reference_velocity.norm()>1e-9) candidate.velocity=reference_velocity.normalized()*speed;
-      }
+      // Diagnostic projection; choosing a target never advances task progress.
+      candidate.progress_m=(point-position).dot(direction);
+      if(!final) candidate.velocity=direction*planner_manager_->pp_.max_vel_;
       local_targets_.push_back(candidate);
     };
-    const bool final_range=target_t>=reference.global_duration_-1e-9;
-    if (final_range) {
-      add_target(end_pt_,true);
-    }
-    // The existing execution ranges share one bounded goal set and search.
-    // A far disconnected island must not consume the budget before a legal
-    // intermediate target is even offered. Task progress still comes only
-    // from the vehicle projection above, and every target keeps its checks.
-    std::array<std::vector<std::pair<Eigen::Vector3d,double>>,3> nearby;
-    const std::array<double,3> fractions{{1.,.65,.35}};
-    const int radius=static_cast<int>(std::ceil(1.0/resolution))+1;
-    for(size_t range=0;range<fractions.size();++range) {
-      Eigen::Vector3d anchor=nominal;
-      if(range>0) for(const auto& sample:samples) {
-        if((sample.position-start_pt_).norm()>=distance*fractions[range]) {
-          anchor=sample.position; break;
+    add_target(end_pt_,true); // Priority slot when the fixed endpoint fits the pool.
+    std::array<std::vector<Eigen::Vector3d>,3> regions;
+    const double spacing=std::max(resolution,.5);
+    // Deterministic coarse coverage of the original pool, including lateral
+    // movement with no increase in reference projection. Physical query still
+    // rejects unknown, stale, occupied and insufficient-clearance endpoints.
+    for(double x=-4.5;x<=4.5+1e-9;x+=spacing)
+      for(double y=-4.5;y<=4.5+1e-9;y+=spacing)
+        for(double dz: {0.,-.5,.5}) {
+          if(expired()) return false;
+          Eigen::Vector3d point(center.x()+x,center.y()+y,start_pt_.z()+dz);
+          Eigen::Vector3i index; planner_manager_->grid_map_->posToIndex(point,index);
+          planner_manager_->grid_map_->indexToPos(index,point);
+          const Eigen::Vector3d delta=point-start_pt_;
+          const double side=delta.dot(left),forward=delta.dot(direction);
+          const size_t region=std::abs(side)<=.5*std::max(.5,std::abs(forward)) ? 0 : side>0 ? 1 : 2;
+          regions[region].push_back(point);
         }
-      }
-      Eigen::Vector3i anchor_index; planner_manager_->grid_map_->posToIndex(anchor,anchor_index);
-      for(int x=-radius;x<=radius;++x) for(int y=-radius;y<=radius;++y) for(int z=-radius;z<=radius;++z) {
-        if (expired()) return false;
-        Eigen::Vector3d point; planner_manager_->grid_map_->indexToPos(anchor_index+Eigen::Vector3i(x,y,z),point);
-        if ((point-anchor).norm()<=1.0+1e-9 && (!final_range || (point-end_pt_).norm()>1e-3)) {
-          double best=std::numeric_limits<double>::infinity(), progress=0;
-          for(const auto& sample:samples) {
-            const double separation=(point-sample.position).squaredNorm();
-            if(separation<best) {best=separation; progress=sample.arc;}
-          }
-          nearby[range].emplace_back(point,progress);
-        }
-      }
-      std::sort(nearby[range].begin(),nearby[range].end(),[&](const auto& a,const auto& b) {
-        const auto da=std::llround((a.first-anchor).squaredNorm()*1e9);
-        const auto db=std::llround((b.first-anchor).squaredNorm()*1e9);
+    const std::array<Eigen::Vector3d,3> anchors{{nominal,
+        start_pt_+direction*distance*.35+left*distance*.65,
+        start_pt_+direction*distance*.35-left*distance*.65}};
+    for(size_t region=0;region<regions.size();++region) {
+      auto& candidates=regions[region];
+      std::sort(candidates.begin(),candidates.end(),[&](const auto& a,const auto& b) {
+        const auto da=std::llround((a-anchors[region]).squaredNorm()*1e9);
+        const auto db=std::llround((b-anchors[region]).squaredNorm()*1e9);
         if(da!=db) return da<db;
-        if(a.second!=b.second) return a.second>b.second;
-        for(int axis=0;axis<3;++axis) if(a.first[axis]!=b.first[axis]) return a.first[axis]<b.first[axis];
+        for(int axis=0;axis<3;++axis) if(a[axis]!=b[axis]) return a[axis]<b[axis];
         return false;
       });
-    }
-    std::array<size_t,3> next{};
-    // Keep the existing total cap; reserve some slots for each existing range.
-    for(size_t range=0;range<nearby.size();++range) {
-      const size_t quota=range==0?6:5;
-      const size_t before=local_targets_.size();
-      while(next[range]<nearby[range].size() && local_targets_.size()-before<quota && local_targets_.size()<16) {
-        add_target(nearby[range][next[range]++].first,false);
-        if(expired()) return false;
-      }
-    }
-    for(size_t range=0;range<nearby.size() && local_targets_.size()<16;++range) {
-      while(next[range]<nearby[range].size() && local_targets_.size()<16) {
-        add_target(nearby[range][next[range]++].first,false);
+      const size_t before=local_targets_.size(),quota=region==0 ? 6 : 5;
+      for(const auto& point:candidates) {
+        if(local_targets_.size()-before>=quota || local_targets_.size()>=16) break;
+        add_target(point,false);
         if(expired()) return false;
       }
     }
     if (local_targets_.empty()) { local_target_pt_=nominal; return false; }
     local_target_pt_=local_targets_.front().position;
     local_target_vel_=local_targets_.front().velocity;
-    planner_manager_->setLocalTargets(local_targets_);
+    planner_manager_->setLocalTargets(local_targets_,center);
     return true;
   }
 

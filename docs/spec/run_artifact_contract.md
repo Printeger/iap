@@ -225,3 +225,15 @@ snapshots additionally retain `virtual_ceiling_height_m` and `inflation_radius_m
 old snapshots require explicit historical parameter supplementation and remain
 historical evidence. The captured-boundary regression uses a translated free map
 only to verify dynamics and exact endpoint P/V/A; it is not forest acceptance.
+
+### Channel selection costs and proof evidence
+
+Planning behavior is authoritative in [EGO flow](ego_based_planning_flow.md#local-terminal-region-and-mandatory-guide-c-implementation-in-progress).
+Failure JSON and per-attempt planning CSV append `search_path_cost_m`,
+`search_path_length_m`, `search_risk_cost_m`, `search_terminal_cost_m`,
+`search_optimality_proven`, `search_budget_exhausted` and `search_advisory_changed`.
+The objective includes both real connectors and the endpoint-to-fixed-task distance
+exactly once. Unknown/sentinel values retain their status; raw HPL/VPL and versions
+are unchanged. Cost fields without a search are JSON null. A successful guide can
+be explicitly unproven; this field is not execution authorization. Historical cost
+fields before this contract used lattice-step units and must not be compared as metres.

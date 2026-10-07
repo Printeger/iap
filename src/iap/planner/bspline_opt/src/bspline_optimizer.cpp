@@ -73,7 +73,7 @@ namespace ego_planner
     if (!planning_endpoints_ || planning_goals_.empty()) return false;
     if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::Search)) return false;
     const auto start=planning_endpoints_->first;
-    const Eigen::Vector3d center=(start+planning_goals_.front())/2;
+    const Eigen::Vector3d center=planning_goal_center_.value_or((start+planning_goals_.front())/2);
     bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,-1,center);
     const auto result=a_star_->lastResult();
     if(!found && result.exhausted && result.rejected_advisory && !planning_advisory_fallback_) {
