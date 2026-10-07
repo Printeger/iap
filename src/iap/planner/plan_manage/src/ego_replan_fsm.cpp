@@ -487,12 +487,17 @@ namespace ego_planner
     cout << "[FSM]: state: " + state_str[int(exec_state_)] << endl;
   }
 
-  void EGOReplanFSM::execFSMCallback()
+  void EGOReplanFSM::applyLatestCommandFeedback()
   {
-    applyLatestOdometry();
     const auto command=std::atomic_load(&pending_command_);
     if(command) planner_manager_->observeExecutingTrajectory(command->trajectory_id,
         rclcpp::Time(command->header.stamp).seconds());
+  }
+
+  void EGOReplanFSM::execFSMCallback()
+  {
+    applyLatestCommandFeedback();
+    applyLatestOdometry();
     if(planner_manager_->hasPendingTrajectory() && node_->now().seconds()>
         planner_manager_->publicationTrajectory().start_time_.seconds()+.1)
       changeFSMExecState(EMERGENCY_STOP,"connection command missing");
@@ -710,6 +715,10 @@ namespace ego_planner
 
   void EGOReplanFSM::checkCollisionCallback()
   {
+    // The safety timer may run before execFSMCallback after server activation.
+    // Consume the same actual command authority before choosing active/pending
+    // geometry; elapsed scheduled time alone never confirms activation.
+    applyLatestCommandFeedback();
     applyLatestOdometry();
     auto& info = planner_manager_->local_data_;
     // A failed rolling replan must not silence supervision of the trajectory

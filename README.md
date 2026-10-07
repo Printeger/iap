@@ -1336,3 +1336,7 @@ B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广�
 共享resolver另存输出，原日志／报告保持不变。历史195232亦到达，203631未到达。
 两次已激活后迟到撤销仍阻塞全接续资格；到达不计正式D，不推广默认。
 [图文报告与证据索引](log/20261007T091820Z_056/export/analysis/release_owner_live/report.md)。
+
+安全监督与执行FSM均先消费真实command ID，再选择active/pending曲线。该机制避免
+已到反馈仍被安全入口当作pending撤销；不按scheduled时间自行激活，不放宽物理门。
+接口见[安全监督契约](docs/spec/safety_planner_contract.md#安全监督消费真实执行反馈)。

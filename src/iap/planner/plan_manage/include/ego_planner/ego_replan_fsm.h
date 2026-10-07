@@ -151,6 +151,7 @@ namespace ego_planner
     void triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg);
     void applyLatestOdometry();
+    void applyLatestCommandFeedback();
     void swarmTrajsCallback(const std::shared_ptr<const traj_utils::msg::MultiBsplines> &msg);
     void BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg);
 
