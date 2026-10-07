@@ -24,7 +24,7 @@
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_msgs/msg/key_value.hpp>
 #include <gnss_comm/gnss_constant.hpp>
-#include <gnss_comm/rinex_helper.hpp>
+#include <iap/gnss/broadcast_ephemeris.hpp>
 #include <gnss_comm/gnss_ros.hpp>
 #include <gnss_comm/gnss_utility.hpp>
 #include <gnss_comm/msg/gnss_ephem_msg.hpp>
@@ -468,14 +468,14 @@ public:
     if (ephemeris_source_ == "rinex") {
       if (ensure_rinex_loaded(logger)) {
         select_rinex_ephemerides(gpst_time);
-        if (!ephems_.empty() || !glo_ephems_.empty()) {
+        if (selected_constellations_complete()) {
           rinex_fallback_active_ = false;
           return true;
         }
-        rinex_error_message_ = "no RINEX ephemerides valid near current GNSS time";
-        RCLCPP_WARN(
+        rinex_error_message_ = "missing healthy, already-broadcast RINEX data for a requested constellation";
+        RCLCPP_WARN_ONCE(
           logger,
-          "RINEX NAV loaded but no healthy enabled ephemeris is within %.1f s of current epoch; "
+          "RINEX NAV loaded but a requested constellation has no healthy already-broadcast ephemeris within %.1f s of current epoch; "
           "check that demo7 sim_start_utc matches the RINEX NAV date",
           rinex_ephem_max_age_s_);
       }
@@ -519,7 +519,7 @@ public:
       return true;
     }
     return rinex_loaded_ && !rinex_fallback_active_ &&
-      (rinex_selected_ephem_count_ + rinex_selected_glo_ephem_count_ > 0) &&
+      selected_constellations_complete() &&
       std::isfinite(rinex_selected_max_age_s_) &&
       rinex_selected_max_age_s_ <= rinex_ephem_max_age_s_;
   }
@@ -613,56 +613,6 @@ private:
     }
   }
 
-  bool validate_rinex_nav_header(std::string& reason) const
-  {
-    if (rinex_nav_file_.empty()) {
-      reason = "rinex_nav_file is empty";
-      return false;
-    }
-
-    std::ifstream file(rinex_nav_file_);
-    if (!file.is_open()) {
-      reason = "failed to open RINEX NAV file";
-      return false;
-    }
-
-    bool saw_version = false;
-    bool saw_304 = false;
-    bool saw_nav = false;
-    bool saw_leap_seconds = false;
-    bool saw_end_header = false;
-    std::string line;
-    while (std::getline(file, line)) {
-      if (line.find("RINEX VERSION / TYPE") != std::string::npos) {
-        saw_version = true;
-        saw_304 = line.find("3.04") != std::string::npos;
-        saw_nav = line.find("NAV") != std::string::npos || line.find("N:") != std::string::npos;
-      }
-      if (line.find("LEAP SECONDS") != std::string::npos && line.find("BDS") == std::string::npos) {
-        saw_leap_seconds = true;
-      }
-      if (line.find("END OF HEADER") != std::string::npos) {
-        saw_end_header = true;
-        break;
-      }
-    }
-
-    if (!saw_version) {
-      reason = "missing RINEX VERSION / TYPE header";
-    } else if (!saw_304) {
-      reason = "only RINEX 3.04 NAV files are supported by gnss_comm::rinex2ephems";
-    } else if (!saw_nav) {
-      reason = "RINEX file is not marked as NAV data";
-    } else if (!saw_leap_seconds) {
-      reason = "missing LEAP SECONDS header required by gnss_comm::rinex2ephems";
-    } else if (!saw_end_header) {
-      reason = "missing END OF HEADER";
-    } else {
-      return true;
-    }
-    return false;
-  }
-
   bool ensure_rinex_loaded(rclcpp::Logger logger)
   {
     if (rinex_load_attempted_) {
@@ -670,17 +620,16 @@ private:
     }
     rinex_load_attempted_ = true;
 
-    std::string validation_error;
-    if (!validate_rinex_nav_header(validation_error)) {
-      rinex_error_message_ = validation_error;
-      RCLCPP_WARN(
-        logger, "RINEX NAV validation failed for '%s': %s",
+    std::map<uint32_t, std::vector<gnss_comm::EphemBasePtr>> sat2ephem_base;
+    try {
+      sat2ephem_base = iap::broadcast::load_nav(rinex_nav_file_,
+        std::vector<uint32_t>(enabled_systems_.begin(), enabled_systems_.end()));
+    } catch (const std::exception& error) {
+      rinex_error_message_ = error.what();
+      RCLCPP_ERROR(logger, "RINEX decode rejected '%s': %s",
         rinex_nav_file_.c_str(), rinex_error_message_.c_str());
       return false;
     }
-
-    std::map<uint32_t, std::vector<gnss_comm::EphemBasePtr>> sat2ephem_base;
-    gnss_comm::rinex2ephems(rinex_nav_file_, sat2ephem_base);
 
     const bool effective_gps_only = rinex_gps_only_ && !has_non_gps_enabled(enabled_systems_);
     for (const auto& [sat_id, base_ephems] : sat2ephem_base) {
@@ -743,6 +692,17 @@ private:
     return true;
   }
 
+  bool selected_constellations_complete() const
+  {
+    std::vector<uint32_t> present;
+    if (selected_gps_ephems_) present.push_back(SYS_GPS);
+    if (selected_bds_ephems_) present.push_back(SYS_BDS);
+    if (selected_gal_ephems_) present.push_back(SYS_GAL);
+    if (selected_glo_ephems_) present.push_back(SYS_GLO);
+    return iap::broadcast::all_requested_present(
+      std::vector<uint32_t>(enabled_systems_.begin(), enabled_systems_.end()), present);
+  }
+
   void select_rinex_ephemerides(const gnss_comm::gtime_t& gpst_time)
   {
     ephems_.clear();
@@ -774,7 +734,7 @@ private:
       gnss_comm::EphemPtr best;
       double best_age = std::numeric_limits<double>::infinity();
       for (const auto& eph : candidates) {
-        if (!eph || eph->health != 0) {
+        if (!iap::broadcast::available(eph, gpst_time, rinex_ephem_max_age_s_)) {
           continue;
         }
         const double age = std::abs(gnss_comm::time_diff(gpst_time, eph->toe));
@@ -805,7 +765,7 @@ private:
       gnss_comm::GloEphemPtr best;
       double best_age = std::numeric_limits<double>::infinity();
       for (const auto& geph : candidates) {
-        if (!geph || geph->health != 0) {
+        if (!iap::broadcast::available(geph, gpst_time, rinex_ephem_max_age_s_)) {
           continue;
         }
         const double age = std::abs(gnss_comm::time_diff(gpst_time, geph->toe));
@@ -1729,7 +1689,7 @@ private:
     (void)receiver_vel_ecef;
     (void)receiver_lla;
     double svdt_rx = 0.0;
-    const Eigen::Vector3d sat_rx = gnss_comm::eph2pos(gpst_rx_time, eph, &svdt_rx);
+    const Eigen::Vector3d sat_rx = iap::broadcast::position(gpst_rx_time, eph, &svdt_rx);
     if (!sat_rx.allFinite()) {
       return std::nullopt;
     }
@@ -1740,8 +1700,8 @@ private:
 
     double svdt = 0.0;
     double svddt = 0.0;
-    const Eigen::Vector3d sat_pos = gnss_comm::eph2pos(tx_time, eph, &svdt);
-    const Eigen::Vector3d sat_vel = gnss_comm::eph2vel(tx_time, eph, &svddt);
+    const Eigen::Vector3d sat_pos = iap::broadcast::position(tx_time, eph, &svdt);
+    const Eigen::Vector3d sat_vel = iap::broadcast::velocity(tx_time, eph, &svddt);
     if (!sat_pos.allFinite() || !sat_vel.allFinite()) {
       return std::nullopt;
     }

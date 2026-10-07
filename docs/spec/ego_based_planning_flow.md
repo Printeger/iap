@@ -912,3 +912,20 @@ observed reasons are retained. Its rejection
 and unchanged executing trajectory are retained explicitly. The identical OFF
 physical fixture checks legal P/V/A server handoff. Neither fixture grants field
 acceptance; the original ON red is not discarded to improve success statistics.
+
+
+### 当前 B 星历输入接口修复
+
+原 NAV → 唯一 broadcast loader（原 TOC/TOE、BDS TTR/AODE/AODC、整数资格）
+→ 健康／已播发／原年龄内且所有请求星座存在 → 原观测发布与前端接收
+→ 共享位置／差分速度模型 → 原 GNSS 因子／Monitor／Advisory。
+未取得资格的后续链保持基线：当前钟差仍单状态，历史统一 `/clock`、
+活动星座钟差列及真实联合贡献冻结／校准尚待实施。
+独立RTKLIB在12:00 UTC起六历元取得444组同记录比较，最大位置差
+2.493e-7m、速度差2.702e-4m/s，metadata一致；8项生产接口回归通过。
+这不授予正式B、9+9或D六次资格。
+
+C3 a301cb1 OFF300秒现场：5发布／5命令，前进10.724m，仍距终点25.290m；
+无本轮pending撤销／unverified hover，完整任务未到达。guide保留检查
+揭示物理合法但路线偏离的候选，原修复耗尽，A/C仍未取得现场资格。
+新证据在本轮分析run/export/analysis/channel_retention_live；旧证据原身份不变。

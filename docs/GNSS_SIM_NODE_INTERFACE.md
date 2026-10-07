@@ -265,3 +265,41 @@ class GnssSimNode(Node):
 - All-zero ephemeris fields leading to invalid satellite position.
 - GNSS time base not aligned with bag or LiDAR timestamps, causing epoch drops.
 - Too few visible satellites (< 4) for meaningful geometry and integrity metrics.
+
+## Historical broadcast qualification seam (current implementation)
+
+Simulator and GNSS extension share `iap/gnss/broadcast_ephemeris.hpp` for
+Keplerian position and velocity. BeiDou C59–C63 use the GEO tilted-frame
+composition; C01–C05 retain the installed GEO position branch. Velocity and
+satellite clock drift are central differences of that same model (10 ms).
+The input loader retains original TOC/TOE, converts BDS TTR from BDT to GPST
+(+14 s), reads AODE/AODC, and binds adjacent-week TTR to the original TOC.
+Health/week/issue integer fields are checked before the installed decoder's
+casts. Invalid headers, malformed/truncated records and unsupported selected
+BDS issue fields produce a diagnostic rejection. Complete unused S/J/I blocks
+in mixed NAV files grant no constellation availability.
+
+RINEX selection requires every requested constellation to have a healthy,
+already-broadcast record within the original configured TOE age limit. A
+future TOE does not imply unavailable data; a future TTR is unavailable.
+Missing one requested system fails the selection even if another has data.
+When `fallback_to_synthetic_on_rinex_error=false`, no synthetic data replace it.
+The GNSS extension also rejects unhealthy, expired or not-yet-broadcast
+Keplerian observations before propagation, using the original reception epoch.
+Existing BDS B1I frequency / CODE_L2I semantics remain in force.
+
+This is a propagation/input repair, not formal Advisory qualification. The
+current canonical graph still uses synthetic regression data until the
+historical `/clock` contract and explicit strict GPS+BDS configuration are
+implemented. GAL/GLO retain configuration support but were not used in this
+numerical qualification; GLO's legacy missing-TTR-to-TOE substitution cannot
+prove broadcast availability. Separate receiver clock states, active-clock
+FIM/fault subsets, frozen time/extrinsic identity, actual residual calibration
+and the formal 9+9 remain pending.
+
+Primary field authority: [RINEX 3.04](https://files.igs.org/pub/data/format/rinex304.pdf),
+appendix A14 and time-system sections. Numerical differential authority:
+[RTKLIB pinned 2.4.3](https://github.com/tomojitakasu/RTKLIB/tree/180043ee24b6d2b168f98b64be15f69d50046b1a).
+The BDS ICD download was unavailable during this audit; no ICD formula audit
+is claimed. The independently decoded six-epoch GPS+BDS comparison is under
+`log/20261007T091820Z_056/export/analysis/rinex_production_fixed`.

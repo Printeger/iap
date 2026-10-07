@@ -83,3 +83,24 @@ C3相关Release四包顺序构建通过；32 A*、46 baseline、GridMap行为回
 最终原弱墙ON输入还观察到首次solver -1008 rounding-error早退，严格保留为Curve拒绝，
 不放行、不增重试；该回归按权威Search超时、预算／修复耗尽或非正常solver退出
 核对失败身份与旧执行不变。OFF仍要求成功及全部PVA接续断言。
+
+
+B1事实：生产共享广播接口已修复C59–63 GEO及位置模型速度微分、
+BDS TTR +14/AODE/AODC；所请求星座必须全部有健康已播发原年龄内记录。
+唯一loader拥有格式及整数资格检查；无新鲜度重赋。仿真器与前端均接入。
+B1自动化：8接口回归（真实C59红绿、时间/issue、任一星座缺失、
+未使用mixed系统、畸形/截断、非整数健康、未选BDS问题）通过；两个Release生产目标构建通过。
+同原NAV、独立RTKLIB的available选择在6历元444配对身份/metadata一致，
+最大位置2.493e-7m、速度2.702e-4m/s。此前原实现及首版过严mixed拒绝红例保留。
+B1策略：保留原年龄限制及strict no-fallback配置；不改变Advisory准入。
+B1阻塞：canonical历史clock/严格输入配置、per-system clock/FIM/故障、
+冻结合格时间/外参/残差模型未完成；正式0/9+0/9，D0/6。
+
+C3现场事实：干净a301cb1、run20261007T115721Z_898、300秒OFF，
+5发布/5命令/ID4定时切换，真实前进10.724m，终点距离25.290m，未到达。
+本轮未记录pending撤销或unverified hover，不代表完整安全接续资格。
+首个Curve45/gen209：guide合法、动力学与物理通过，路线偏离0.590m
+大于策略corridor0.1366m；后续路线修正导致动态失败，原额度拒绝。
+末次仍为Budget，路线偏离后重定时/refine耗尽3次修复。不是通过放宽路线门解决。
+B仍未取得有效PL覆盖；来源贡献not_available，不能把UNKNOWN模型比较称为真实风险验证。
+图文/JSON在本轮分析run/export/analysis/channel_retention_live；原现场不删失。

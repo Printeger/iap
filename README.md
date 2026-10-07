@@ -1064,3 +1064,10 @@ Actual-curve continuous risk retention and forest qualification remain in progre
 全部物理、动力学和发布检查。当前实施与现场结果见
 [四阶段进度](docs/dev_planner/curve_advisory_channel_progress.md)；真实预测和正式
 9＋9／六次配对尚未取得资格，默认参数不推广。
+
+
+历史 GPS＋北斗星历输入修复：仿真器与 GNSS 前端共用轨道／速度模型，
+修正 C59/C60 GEO、北斗 TTR 与 AODE/AODC；所请求星座缺数据时严格选择失败。
+8 项生产接口回归：`ctest --test-dir ../../build/gnss_sim -R test_broadcast_ephemeris --output-on-failure`。
+字段、失效条件及 GAL/GLO 资格限制见 [GNSS 接口](docs/GNSS_SIM_NODE_INTERFACE.md)。
+这尚未取得历史统一时钟或真实联合 Advisory 资格，不能启动正式9＋9替代既有阻塞。

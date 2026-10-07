@@ -16,6 +16,7 @@
 //   on_smoother_update_()  →  GnssHandler::get_factors()  →  new_factors
 
 #include <iap/gnss/gnss_extension.hpp>
+#include <iap/gnss/broadcast_ephemeris.hpp>
 #include <iap/gnss/clock_between_factor.hpp>
 
 #include <chrono>
@@ -495,8 +496,9 @@ void GnssExtensionModule::on_range_meas_(
       // GPS / Galileo / BeiDou
       const auto it = ephem_cache_.find(sat_id);
       if (it == ephem_cache_.end()) continue;
-      sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::eph2vel(t_tx, it->second, &svddt);
+      if (!iap::broadcast::available(it->second, obs->time, EPH_VALID_SECONDS)) continue;
+      sat_ecef_pos = iap::broadcast::position(t_tx, it->second, &svdt);
+      sat_ecef_vel = iap::broadcast::velocity(t_tx, it->second, &svddt);
       tgd = it->second->tgd[0];  // TGD (seconds); factor multiplies by CLIGHT
     }
 

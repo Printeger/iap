@@ -24,7 +24,8 @@ find_package(gnss_comm REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 add_executable(gnss_sim_node src/gnss_sim_node.cpp)
-target_include_directories(gnss_sim_node PRIVATE ${EIGEN3_INCLUDE_DIR})
+target_include_directories(gnss_sim_node PRIVATE
+  ${EIGEN3_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../../include)
 ament_target_dependencies(gnss_sim_node
   rclcpp
   diagnostic_msgs
@@ -51,6 +52,11 @@ install(DIRECTORY config
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_broadcast_ephemeris test/test_broadcast_ephemeris.cpp)
+  target_include_directories(test_broadcast_ephemeris PRIVATE
+    ${EIGEN3_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../../include)
+  ament_target_dependencies(test_broadcast_ephemeris gnss_comm Eigen3)
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
