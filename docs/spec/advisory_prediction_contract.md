@@ -281,6 +281,16 @@ ROS IntegrityReport同条消息携带postopt证据；v8在旧字段之后追加�
 只表示诊断成功，生产来源准入仍由PredictorModule独立判断。原CSV复用本次
 R协方差块及优化V/B，不再额外计算旋转marginal。
 
-代码已接入；核心7组、规划7组、入口43项、离线审计14项与校准6项通过，新现场待完成。原codec7红例3项断言失败，
+代码已接入；核心7组、规划7组、入口43项、离线审计14项与校准6项通过，新60秒接口现场取证通过；完整预测资格待完成。原codec7红例3项断言失败，
 来源／binary／日志已登记optimized_bundle_red。正式B仍0/9＋0/9，D0/6，
 默认配置不推广。下一步核对实际packet/linearization/covariance身份与在线耗时。
+
+
+B v8干净732f057现场212610Z_122（60秒接口诊断）：549条实际CG、25维joint包，
+owner/layout/coordinate均值错配0；5/6冻结及5份同原时间重放／审计通过，失败请求保留。
+取证median5.566ms／P95 7.289ms，原预算保持；原state−epoch −60至＋47ms未传播，
+优化与线性化位置最大差17.392mm。11条可配对ISB CSV与同包差值完全一致；
+末次550帧Monitor未覆盖。图文／hash索引：
+`log/20261007T091820Z_056/export/analysis/optimized_bundle/report.md`。
+该短运行不是正式300秒任务；原FSM未到达，B空间／米数、真实GPU残差／联合故障、
+C真实通道保留、D0/6与B0/9＋0/9仍阻塞。继续可独立执行的生产取证工作。

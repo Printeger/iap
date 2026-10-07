@@ -1260,5 +1260,15 @@ the full joint covariance are stored separately, with original times and
 `NOT_PROPAGATED`. Older recordings stay readable as historical diagnostics;
 re-encoding grants no production qualification. Source admission, motion and
 planning budgets remain unchanged. Seven core and seven planner groups, 43 launch contracts, 14 coordinate/state
-audits and six calibration mechanism tests pass. Live verification is pending; formal
+audits and six calibration mechanism tests pass. The 60 s real postopt interface diagnostic and five original-time replays pass; formal
 9＋9 and six-run comparisons remain blocked.
+
+
+B v8干净732f057现场212610Z_122（60秒接口诊断）：549条实际CG、25维joint包，
+owner/layout/coordinate均值错配0；5/6冻结及5份同原时间重放／审计通过，失败请求保留。
+取证median5.566ms／P95 7.289ms，原预算保持；原state−epoch −60至＋47ms未传播，
+优化与线性化位置最大差17.392mm。11条可配对ISB CSV与同包差值完全一致；
+末次550帧Monitor未覆盖。图文／hash索引：
+`log/20261007T091820Z_056/export/analysis/optimized_bundle/report.md`。
+该短运行不是正式300秒任务；原FSM未到达，B空间／米数、真实GPU残差／联合故障、
+C真实通道保留、D0/6与B0/9＋0/9仍阻塞。继续可独立执行的生产取证工作。
