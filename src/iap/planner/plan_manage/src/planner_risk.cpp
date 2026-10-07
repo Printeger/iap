@@ -301,7 +301,11 @@ EGOPlannerManager::ExecutionView EGOPlannerManager::captureExecutionView(
     const double time=node_->now().seconds();
     auto physical=grid_map_->preparePlanningQuery(time,motion,epoch);
     if(time<earliest_time_s) physical.environment_reason=GridExecutionReason::ENVIRONMENT_STALE;
-    if(physical.required_clearance_m>radius) {
+    // captureFrozenCorridor stores the entire ceil(radius/resolution)+1 raw
+    // neighbourhood for each checked position. Keep the NEW exact threshold;
+    // recapture only when its required scan crosses a voxel-radius boundary.
+    if(std::ceil(physical.required_clearance_m/epoch->resolution_m)>
+        std::ceil(radius/epoch->resolution_m)) {
       radius=physical.required_clearance_m;
       continue; // recapture a sufficiently wide raw neighbourhood, once
     }
@@ -453,14 +457,9 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       ++assessment.advisory_unknown_samples;
     }
   }
-  const bool need_unknown = std::isfinite(assessment.first_unobserved_time_s) &&
-      !captured_failure_kinds_.count("curve_unobserved");
-  const bool need_failure = from_time_s <= 0.0
-      ? !captured_failure_kinds_.count("candidate")
-      : (!captured_failure_kinds_.count("remaining_failure") ||
-         !captured_failure_kinds_.count("remaining_stop"));
-  if (capture_failure_map_ && !assessment.executable() &&
-      (need_unknown || need_failure)) {
+  // Retain the immutable epoch for every rejected check, including repeated
+  // reasons; first-kind disk export deduplication must not erase terminal proof.
+  if (capture_failure_map_ && !assessment.executable()) {
     if (assessment.physical_epoch && assessment.physical_epoch->failure_evidence)
       assessment.failure_snapshot=assessment.physical_epoch->failure_evidence;
     else if (planning_view_ && physical_context==&planning_view_->physical_context)
@@ -562,7 +561,7 @@ void EGOPlannerManager::endPlanningView() {
       <<bspline_optimizer_->a_star_->lastResult().selected_goal<<','<<connection_predecessor_<<','
       <<(connection_time_ ? connection_time_->seconds() : 0)<<','<<publicationTrajectory().traj_id_<<','
       <<static_cast<unsigned>(last_plan_failure_)<<','<<b.count(PlanningBudget::Repair::CurveCorrection)<<','
-      <<.5*grid_map_->getResolution()<<'\n'; planning_metrics_.flush();
+      <<.5*grid_map_->getResolution()<<','<<planning_attempt_id_<<'\n'; planning_metrics_.flush();
   }
   planning_view_.reset();
 }
@@ -745,7 +744,7 @@ void EGOPlannerManager::initPredictionExport() {
   if (const auto log=glim::RunLogManager::get_if_initialized(); log && std::filesystem::exists(log->run_dir())) {
     const auto name="planner_flow_"+std::to_string(getpid());
     planning_metrics_.open(log->profiling_path(name+".csv"));
-    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m\n";
+    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id\n";
     export_metrics_.open(log->profiling_path(name+"_export.csv"));
     export_metrics_<<"reference_time,generation,total_s,payload_bytes,predictor_queries_before,predictor_queries_after\n";
     std::ofstream manifest(log->metadata_path("manifests/"+name+".json"));

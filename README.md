@@ -960,3 +960,8 @@ GNSS 已有 debug CSV 开启时，`export/glio/advisory_coordinate_dynamics.csv`
 同次优化 pose 原时间、接收 UTC、世界→ECEF/ENU、机体旋转、R(0) tangent
 边缘协方差、速度和 IMU bias。无协方差时标记 invalid 并留空，记录不能替代
 旋转传播、合格时间配对或 PL 授权；性能单列 `1.3_coordinate_evidence`。
+
+规划性能CSV追加 `planning_attempt_id`，以该身份匹配最终 `attempt_failure`。
+活动尝试中最终可修复的candidate不替换terminal失败。`final_check`保留最终
+检查代数/原时间；发布地图与规划地图不同则独立保存 `final_check_cells.bin`；
+无法捕获epoch明确写 `map_available=false`。候选未获ID时为null。

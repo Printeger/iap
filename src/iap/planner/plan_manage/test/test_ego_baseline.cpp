@@ -154,6 +154,14 @@ struct EGOPlannerManagerTestAccess {
   static void setExternalSupportAge(EGOPlannerManager& manager, double age) {
     manager.current_integrity_.current_external_support_age_s = age;
   }
+  static GridPlanningContext changingMotionCorridor(EGOPlannerManager& manager,
+      const std::vector<Eigen::Vector3d>& points) {
+    manager.latest_odom_provider_=[&manager, calls=0]() mutable {
+      manager.current_integrity_.current_motion_error_proxy_m=.05+1e-4*++calls;
+      return std::atomic_load(&manager.risk_odom_);
+    };
+    return manager.captureExecutionView(points,manager.node_->now().seconds(),false).physical;
+  }
   static void setMotionStamp(EGOPlannerManager& manager, double stamp) {
     manager.current_integrity_.stamp=stamp;
   }
@@ -619,10 +627,20 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   result.occupancy_generation = latest_cell.occupancy_generation;
   ego_planner::EGOPlannerManagerTestAccess::capture(manager, "endpoint", latest_cell, &result, &context);
   GridMapTestAccess::input(*manager.grid_map_, {Eigen::Vector3d(3, 2, 1)}, 10.3, Eigen::Vector3d(0, 0, 1));
+  // A repaired intermediate curve in a later attempt must not replace the
+  // last rejected attempt's terminal disposition.
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),10400000000LL),RCL_RET_OK);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,10.3,1);
+  ASSERT_TRUE(manager.beginPlanningView());
+  latest_cell=manager.queryPlanningViewCell(Eigen::Vector3d(-1,0,1));
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"attempt_failure",latest_cell);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"candidate",latest_cell);
   ego_planner::EGOPlannerManagerTestAccess::finalEvidence(manager);
+  manager.endPlanningView();
   std::ifstream final_metadata(root / "terminal_final/snapshot.json");
   std::string final_text((std::istreambuf_iterator<char>(final_metadata)), {});
   EXPECT_NE(final_text.find("\"generation\": " + std::to_string(latest_cell.occupancy_generation) + ","), std::string::npos);
+  EXPECT_NE(final_text.find("\"kind\": \"attempt_failure\""),std::string::npos);
   EXPECT_EQ(std::filesystem::last_write_time(root / "endpoint/snapshot.json"), before);
 }
 
@@ -1557,7 +1575,7 @@ TEST(EgoBaseline, GuidanceSwitchRetainsPredictionAndPhysicalAuthorization) {
     const auto preference=manager.queryGuidanceCell(Eigen::Vector3d(0,0,1));
     EXPECT_EQ(raw.advisory.classification,GridAdvisoryClass::AVOID);
     EXPECT_DOUBLE_EQ(raw.advisory.hpl,2.);
-    if(enabled) EXPECT_EQ(preference.advisory.query_status,raw.advisory.query_status);
+    if(enabled) { EXPECT_EQ(preference.advisory.query_status,raw.advisory.query_status); }
     EXPECT_EQ(preference.execution_reason,raw.execution_reason);
     EXPECT_EQ(preference.advisory.classification,enabled?GridAdvisoryClass::AVOID:GridAdvisoryClass::UNKNOWN);
     ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::searchGuidance(manager,start,goal));
@@ -1631,4 +1649,17 @@ TEST(EgoBaseline, DisabledGuidanceDoesNotRefreshUnusedPreferenceDuringPhysicalSe
   EXPECT_TRUE(manager.queryPlanningViewCell(start).executable());
   EXPECT_GT(ego_planner::EGOPlannerManagerTestAccess::advisoryQueries(manager),0u);
   manager.endPlanningView();
+}
+
+TEST(EgoBaseline, CorridorKeepsExactMotionThresholdAcrossSameNeighbourhoodUpdates) {
+  auto node=makeNode(false,1.,false,false);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const double now=node->now().seconds();const Eigen::Vector3d p(-2,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},now,p);GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,p);
+  const auto context=ego_planner::EGOPlannerManagerTestAccess::changingMotionCorridor(manager,{p});
+  ASSERT_TRUE(context.epoch);
+  EXPECT_NEAR(context.required_clearance_m,.35+.1+.0502+std::sqrt(3.)*.2/2.,1e-12);
+  EXPECT_EQ(context.environment_reason,GridExecutionReason::OK);
 }

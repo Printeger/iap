@@ -79,7 +79,7 @@ namespace ego_planner
     const auto attempt_id = planning_attempt_id_;
     const auto start_p = failure_start_p_, start_v = failure_start_v_, start_a = failure_start_a_;
     const int executing_id = local_data_.traj_id_, feedback_id = server_feedback_id_;
-    const int candidate_id = publicationTrajectory().traj_id_;
+    const int candidate_id = pending_trajectory_ ? pending_trajectory_->traj_id_ : 0;
     const double effective_time = connection_time_ ? connection_time_->seconds() : 0.;
     const double budget_elapsed = planning_budget_ ? planning_budget_->elapsed() : 0.;
     const unsigned repairs = planning_budget_ ? planning_budget_->used() : 0;
@@ -89,6 +89,11 @@ namespace ego_planner
     for(const auto& target : planning_targets_) goal_positions.push_back(target.position);
     const double fitting_reserve_m=.5*snapshot->resolution_m;
     const auto state_json = std::exchange(failure_state_json_, std::string{});
+    const bool has_final_check=kind=="attempt_failure" &&
+        (last_candidate_assessment_.sampled_points || last_candidate_assessment_.execution_reason!=GridExecutionReason::OK);
+    const auto final_check=has_final_check ? std::optional<TrajectoryAssessment>(last_candidate_assessment_) : std::nullopt;
+    const auto final_snapshot=final_check && final_check->physical_epoch
+        ? final_check->physical_epoch->failure_evidence : std::shared_ptr<const GridMapFailureSnapshot>{};
     const auto node = node_;
     auto write = [=](const std::string& label) mutable {
     const auto* search = search_value ? &*search_value : nullptr;
@@ -137,6 +142,11 @@ namespace ego_planner
                   snapshot->cell_flags.size());
       cells.close();
       if (!cells) throw std::runtime_error("cells.bin write failed");
+      if(final_snapshot && final_snapshot->generation!=snapshot->generation) {
+        std::ofstream final_cells(pending/"final_check_cells.bin",std::ios::binary);
+        final_cells.write(reinterpret_cast<const char*>(final_snapshot->cell_flags.data()),final_snapshot->cell_flags.size());
+        final_cells.close(); if(!final_cells) throw std::runtime_error("final_check_cells.bin write failed");
+      }
       std::ofstream risk(pending / "queried_risk.csv");
       risk << "address,hpl_m,vpl_m,status,version\n";
       for (const auto& sample : snapshot->queried_risk)
@@ -202,7 +212,7 @@ namespace ego_planner
           << "  \"artifact_label\": " << std::quoted(label) << ",\n"
           << "  \"executing_trajectory_id\": " << executing_id << ",\n"
           << "  \"server_feedback_id\": " << feedback_id << ",\n"
-          << "  \"candidate_trajectory_id\": " << candidate_id << ",\n"
+          << "  \"candidate_trajectory_id\": " << (candidate_id>0 ? std::to_string(candidate_id) : "null") << ",\n"
           << "  \"expected_effective_time_s\": " << number(effective_time) << ",\n"
           << "  \"real_start_p_m\": " << vector(start_p) << ",\n"
           << "  \"real_start_v_mps\": " << vector(start_v) << ",\n"
@@ -373,6 +383,21 @@ namespace ego_planner
           metadata << (i ? "," : "") << number(knots[i]);
         metadata << "]}";
       } else metadata << "null";
+      metadata << ",\n  \"final_check\": ";
+      if(final_check) {
+        metadata << "{\"execution_reason\":" << std::quoted(gridExecutionReasonName(final_check->execution_reason))
+          << ",\"generation\":" << final_check->evaluated_generation
+          << ",\"evaluation_time_s\":" << number(final_check->evaluation_time_s)
+          << ",\"first_position_m\":" << vector(final_check->first_execution_position)
+          << ",\"required_clearance_m\":" << number(final_check->first_execution_cell.required_clearance_m)
+          << ",\"map_available\":" << (final_snapshot ? "true" : "false");
+        if(final_snapshot) metadata << ",\"cloud_stamp_s\":" << number(final_snapshot->cloud_stamp_s)
+          << ",\"origin_m\":" << vector(final_snapshot->origin)
+          << ",\"dimensions\":[" << final_snapshot->dimensions.x() << ',' << final_snapshot->dimensions.y() << ',' << final_snapshot->dimensions.z() << ']'
+          << ",\"resolution_m\":" << number(final_snapshot->resolution_m)
+          << ",\"cell_flags_file\":" << std::quoted(final_snapshot->generation==snapshot->generation ? "cells.bin" : "final_check_cells.bin");
+        metadata << '}';
+      } else metadata << "null";
       metadata << ",\n  \"observation_evidence_available\": "
           << (snapshot->observation_evidence_available && snapshot->current_frame ? "true" : "false")
           << ",\n  \"observation_sources_file\": "
@@ -420,6 +445,8 @@ namespace ego_planner
       if (!snapshot->observation_sources.empty())
         manifest << ",\"observation_sources\":"
                  << std::quoted(relative + "/observation_sources.bin");
+      if(final_snapshot && final_snapshot->generation!=snapshot->generation)
+        manifest << ",\"final_check_cells\":" << std::quoted(relative+"/final_check_cells.bin");
       if (snapshot->current_frame)
         manifest << ",\"current_frame_hits\":"
                  << std::quoted(relative + "/current_frame_hits.csv")
@@ -440,7 +467,9 @@ namespace ego_planner
           "planner failure map %s save failed: %s", kind.c_str(), error.what());
     }
     };
-    latest_failure_export_ = write;
+    // Intermediate rejections may be repaired in this same attempt. Only a
+    // final disposition replaces terminal proof while a PlanningView is active.
+    if(!planning_view_ || kind=="attempt_failure") latest_failure_export_ = write;
     if (captured_failure_kinds_.insert(kind).second)
       queueFailureExport([write, kind]() mutable { write(kind); }, false);
   }
