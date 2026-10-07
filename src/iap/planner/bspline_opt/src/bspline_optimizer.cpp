@@ -2213,6 +2213,7 @@ namespace ego_planner
   // 使用L-BFGS方法对目标函数进行优化，得到重新分配时间后，光滑、拟合较好、动力学可行的轨迹。
   bool BsplineOptimizer::refine_optimize()
   {
+    optimization_result_.reset(); optimization_reason_="not_started";
     iter_num_ = 0;
     int start_id = order_;
     int end_id = this->cps_.points.cols() - order_;
@@ -2236,6 +2237,8 @@ namespace ego_planner
       lbfgs_params.g_epsilon = 0.001;
 
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
+      optimization_result_=result; optimization_reason_=lbfgs::lbfgs_strerror(result);
+      if(!lastOptimizationTerminatedNormally()) return false;
       if (result == lbfgs::LBFGS_CONVERGENCE ||
           result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
           result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
@@ -2284,6 +2287,7 @@ namespace ego_planner
 
     // cout << "iter_num_=" << iter_num_ << endl;
 
+    optimization_reason_+=flag_safe ? ";provisional_physical_pass" : ";provisional_physical_rejected";
     return flag_safe;
   }
 

@@ -109,6 +109,12 @@ namespace ego_planner
     ~BsplineOptimizer() {}
     std::optional<int> lastOptimizationResult() const { return optimization_result_; }
     const std::string& lastOptimizationReason() const { return optimization_reason_; }
+    bool lastOptimizationTerminatedNormally() const {
+      if(!optimization_result_) return false;
+      const int result=*optimization_result_;
+      return result==lbfgs::LBFGS_CONVERGENCE || result==lbfgs::LBFGSERR_MAXIMUMITERATION ||
+          result==lbfgs::LBFGS_ALREADY_MINIMIZED || result==lbfgs::LBFGS_STOP;
+    }
 
     /* main API */
     void setEnvironment(const GridMap::Ptr &map);

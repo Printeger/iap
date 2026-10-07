@@ -263,6 +263,8 @@ struct GridMapFailureSnapshot {
   // last observed->unknown producer (1=current replacement, 2=active delta,
   // 3=active recovery). Reset on reobservation; no age inference is made.
   std::vector<uint8_t> observation_sources;
+  double virtual_ceiling_height_m = -1.0;
+  double inflation_radius_m = 0.0;
 };
 
 // intermediate mapping data for fusion

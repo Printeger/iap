@@ -199,9 +199,7 @@ def _setup(context):
                           ("glo_ephem", "glo_ephem"), ("receiver_lla", "receiver_lla"),
                           ("iono", "iono_params")]:
         remaps.append((f"risk/{local}", f"/ublox_driver/{remote}"))
-    planner = Node(package="ego_planner", executable="ego_planner_node",
-                   name="drone_0_ego_planner_node", output="screen",
-                   parameters=[planner_parameters(
+    frozen_planner_parameters = planner_parameters(
                        scenario,
                        context.launch_configurations.get(
                            "capture_failure_map", "false").lower() == "true",
@@ -209,7 +207,13 @@ def _setup(context):
                            "advisory_posterior_prior", "false").lower() == "true",
                        context.launch_configurations.get("advisory_calibration", ""),
                        context.launch_configurations.get("advisory_guidance", "true").lower()=="true",
-                       context.launch_configurations.get("advisory_trial", ""))],
+                       context.launch_configurations.get("advisory_trial", ""))
+    parameters_path=run / "metadata/config/planner_parameters.json"
+    parameters_path.write_text(json.dumps(frozen_planner_parameters,sort_keys=True,allow_nan=False,indent=2)+"\n")
+    register_config_snapshot(run,parameters_path)
+    planner = Node(package="ego_planner", executable="ego_planner_node",
+                   name="drone_0_ego_planner_node", output="screen",
+                   parameters=[frozen_planner_parameters],
                    remappings=remaps)
     actions = [
         IncludeLaunchDescription(PythonLaunchDescriptionSource(

@@ -183,3 +183,45 @@ The 300-second OFF diagnostic at `log/20261007T092819Z_721` ended normally, with
 terminal attempt 432/gen 2803 rejected by physical clearance after feasible dynamics.
 Its older capture schema has the ownership limitations above; this is reference
 evidence, not A acceptance or a task completion.
+
+### Production Curve replay and boundary refinement
+
+`curve_backend_replay` reads captured candidate stages, original planning/cloud
+and motion times, frozen voxel flags and explicit parameter YAML. `retime` replays
+the old four-check symptom; `refine` starts at the captured optimized boundary;
+`backend` also repeats guide initialization and rebound optimization. These are
+read-only mechanism experiments. No ROS server publication or freshness renewal
+is available. Exit code zero describes dynamics, while the independent full
+physical verdict is separately retained in `result.json`.
+
+The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
+boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint
+P/V/A without updating adjacent interior controls reproduces that dynamic failure.
+Refine solves it in the translated free-map regression. The real frozen forest
+replay with production clearance planes still fails dynamics and exhausts the
+original repair allowance (`20261007T101503Z_947`); even an explicitly isolated
+full-budget experiment fails (`20261007T101513Z_849`). A is not passed. Earlier
+replays `20261007T100131Z_836` / `20261007T100133Z_005` omitted clearance planes
+and are limited diagnostic evidence, not equivalent production replays.
+
+The production seam rebinds constraints and refines the same guide after each
+useful stretch, keeping four dynamics checks and the shared steady budget.
+Adding clearance constraints consumes the existing CurveCorrection allowance.
+Solver termination and its provisional physical verdict remain separate;
+publication still requires the independent complete check. No unused stretch
+follows the last failed check.
+
+Default replay uses the captured stage's remaining 1.5-second budget and remaining
+three repair slots. `--isolated-budget` is explicitly separate mechanism evidence.
+Each new stage owns its guide; historical stages must match the supplied guide
+endpoint. Budget-interrupted final checks are `incomplete`, with sampled count and
+checked interval. Replay starts at the captured guide/optimized spline, so it does
+not reproduce pre-guide polynomial initialization, commit-window timing, or the
+previous server trajectory's connection check. Those require live evidence.
+No replay result declares full online attempt equivalence or A acceptance.
+
+Canonical simulation saves `metadata/config/planner_parameters.json`. Failure
+snapshots additionally retain `virtual_ceiling_height_m` and `inflation_radius_m`;
+old snapshots require explicit historical parameter supplementation and remain
+historical evidence. The captured-boundary regression uses a translated free map
+only to verify dynamics and exact endpoint P/V/A; it is not forest acceptance.

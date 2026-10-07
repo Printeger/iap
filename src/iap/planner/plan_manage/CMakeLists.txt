@@ -90,6 +90,10 @@ target_link_libraries(ego_planner_node
     ${IAP_MSGS_TYPESUPPORT_CPP}
 )
 
+add_executable(curve_backend_replay src/curve_backend_replay.cpp src/planner_manager.cpp src/planner_risk.cpp)
+ament_target_dependencies(curve_backend_replay rclcpp nav_msgs visualization_msgs geometry_msgs quadrotor_msgs plan_env path_searching bspline_opt traj_utils cv_bridge pcl_conversions iap gnss_comm sensor_msgs)
+target_link_libraries(curve_backend_replay prediction_input ${TRAJ_UTILS_LIB} iap::iap ${IAP_MSGS_TYPESUPPORT_CPP})
+
 add_executable(traj_server src/traj_server.cpp)
 
 add_executable(failure_map_replay src/failure_map_replay.cpp)
@@ -107,6 +111,8 @@ ament_target_dependencies(traj_server
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   find_package(ZLIB REQUIRED)
+  add_test(NAME test_curve_backend_replay COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_curve_backend_replay.py)
+  set_tests_properties(test_curve_backend_replay PROPERTIES ENVIRONMENT "IAP_CURVE_REPLAY_BIN=$<TARGET_FILE:curve_backend_replay>" TIMEOUT 30)
   add_test(NAME test_advisory_validation COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_validation.py
     --binary $<TARGET_FILE:advisory_validation>)
@@ -148,7 +154,7 @@ endif()
 
 # Install targets
 install(
-  TARGETS ego_planner_node grid_map_visualizer traj_server failure_map_replay advisory_validation
+  TARGETS ego_planner_node grid_map_visualizer traj_server failure_map_replay curve_backend_replay advisory_validation
   DESTINATION lib/${PROJECT_NAME}
 )
 

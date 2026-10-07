@@ -1027,3 +1027,23 @@ The forest capture driver owns finalization after all capture jobs stop. Startup
 failures remain failed runs with registered diagnostics; direct canonical launch
 retains ordinary shutdown ownership. Curve evidence is bound to its candidate
 revision; execution supervision does not borrow backend stages.
+
+Replay a Curve failure with explicit historical ROS parameters (all new artifacts
+receive a resolver run; the frozen input is read only):
+
+```bash
+python3 src/iap/scripts/dev_planner/replay_curve_backend.py /absolute/snapshot.json \
+  --parameters /absolute/frozen_parameters.yaml \
+  --binary /home/dev/ws_iap/build/ego_planner/curve_backend_replay --mode refine
+```
+
+`retime` retains the old diagnostic behavior, `refine` tests the captured optimized
+candidate and `backend` repeats guide initialization/rebound. Inspect both dynamics
+and physical verdicts; no replay result authorizes a server switch or task PASS.
+
+Replay preserves the captured remaining time/repair allowance. Use
+`--isolated-budget` only for a separately labelled mechanism experiment. New
+stages own their guide; mismatched historical stage/guide pairs are rejected.
+Budget-interrupted checks report `incomplete` with checked extent. Pre-guide
+initialization, prior-server connection and missed commit windows require live
+evidence. The real forest replay still fails; phase A remains unqualified.

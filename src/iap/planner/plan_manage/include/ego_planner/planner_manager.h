@@ -40,6 +40,7 @@ namespace ego_planner
   class EGOPlannerManager
   {
     friend struct EGOPlannerManagerTestAccess;
+    friend struct CurveBackendReplayAccess; // Standalone read-only replay binds the existing frozen view.
     // SECTION stable
   public:
     EGOPlannerManager();
@@ -232,6 +233,7 @@ namespace ego_planner
       GridExecutionReason physical_reason = GridExecutionReason::OK;
       Eigen::Vector3d first_physical_position = Eigen::Vector3d::Constant(NAN);
       double first_physical_time_s = std::numeric_limits<double>::quiet_NaN();
+      std::vector<Eigen::Vector3d> guide; // Geometry owned by this candidate revision.
     };
     // Opt-in evidence; exported by the existing bounded writer.
     std::vector<CurveStageEvidence> curve_stages_;
@@ -239,7 +241,7 @@ namespace ego_planner
     void recordCurveStage(const std::string& stage, const Eigen::MatrixXd& controls,
                           double interval, const LocalTarget& target,
                           double feasibility_ratio = std::numeric_limits<double>::quiet_NaN(),
-                          const TrajectoryAssessment* assessment = nullptr);
+                          const TrajectoryAssessment* assessment = nullptr, bool optimization_exit = false);
     void queueFailureExport(std::function<void()> job, bool terminal);
     void exportLatestFailure(bool final = false);
     void drainFailureExports();

@@ -23,7 +23,7 @@ namespace ego_planner
 
   void EGOPlannerManager::recordCurveStage(const std::string& stage,
       const Eigen::MatrixXd& controls, double interval, const LocalTarget& target,
-      double feasibility_ratio, const TrajectoryAssessment* assessment) {
+      double feasibility_ratio, const TrajectoryAssessment* assessment, bool optimization_exit) {
     // Every geometry revision invalidates the previous final assessment, even
     // when export is disabled. An early return must never pair it with a new curve.
     last_candidate_assessment_={};
@@ -34,9 +34,10 @@ namespace ego_planner
     CurveStageEvidence evidence{stage,curve,target,
         planning_budget_ ? planning_budget_->elapsed() : 0.,
         planning_budget_ ? planning_budget_->used() : 0,
-        stage.rfind("optimized",0)==0 ? bspline_optimizer_->lastOptimizationResult() : std::nullopt,
-        stage.rfind("optimized",0)==0 ? bspline_optimizer_->lastOptimizationReason() : std::string{},
+        optimization_exit ? bspline_optimizer_->lastOptimizationResult() : std::nullopt,
+        optimization_exit ? bspline_optimizer_->lastOptimizationReason() : std::string{},
         feasibility_ratio};
+    evidence.guide=bspline_optimizer_->recoveryGuide();
     if(assessment) {
       evidence.physical_checked=true; evidence.physical_reason=assessment->execution_reason;
       evidence.first_physical_position=assessment->first_execution_position;
@@ -271,6 +272,8 @@ namespace ego_planner
           << "  \"dimensions\": [" << snapshot->dimensions.x() << ','
           << snapshot->dimensions.y() << ',' << snapshot->dimensions.z()
           << "],\n  \"resolution_m\": " << number(snapshot->resolution_m)
+          << ",\n  \"virtual_ceiling_height_m\": " << number(snapshot->virtual_ceiling_height_m)
+          << ",\n  \"inflation_radius_m\": " << number(snapshot->inflation_radius_m)
           << ",\n  \"cell_flags_file\": \"cells.bin\",\n"
           << "  \"cell_flag_bits\": {\"raw\": 1, \"inflated\": 2, \"observed\": 4},\n"
           << "  \"risk_version\": " << snapshot->risk_version << ",\n"
@@ -462,6 +465,8 @@ namespace ego_planner
         for(int i=0;i<controls.cols();++i) metadata << (i ? "," : "") << vector(controls.col(i));
         metadata << "],\"knots_s\":[";
         for(int i=0;i<knots.size();++i) metadata << (i ? "," : "") << number(knots[i]);
+        metadata << "],\"guide_m\":[";
+        for(size_t i=0;i<evidence.guide.size();++i) metadata << (i ? "," : "") << vector(evidence.guide[i]);
         metadata << "]}";
       }
       metadata << "],\n  \"final_check\": ";
@@ -1010,7 +1015,7 @@ namespace ego_planner
       optimizer.addCurveClearanceConstraints(control,interval,initial.curve_clearance_violations);
       const auto backend_start=PlanningBudget::Clock::now();
       const bool optimized=optimizer.BsplineOptimizeTrajRebound(control,interval);
-      recordCurveStage(optimized ? "optimized" : "optimized_failed",control,interval,selected);
+      recordCurveStage(optimized ? "optimized" : "optimized_failed",control,interval,selected,NAN,nullptr,true);
       if(!optimized) {
         if(shorten_target()) continue;
         return fail(PlanFailure::Curve);
@@ -1029,8 +1034,26 @@ namespace ego_planner
         if(dynamics_ok) { feasible=true; break; }
         // Reconstruct a uniform spline and rebind physical derivatives after
         // stretching. A raw lengthenTime would silently change both endpoints.
+        if(retime==3) break; // The last checked candidate remains the failure authority.
         interval*=std::max(1.1,ratio*1.05); bind_boundaries();
         recordCurveStage("retimed_bound",control,interval,selected);
+        // Rebinding physical P/V/A moves endpoint controls; unchanged interior
+        // controls can retain a super-limit boundary derivative indefinitely.
+        // Rebind constraints to this parameterization and refine the same guide.
+        optimizer.initializeFromGuide(control);
+        const auto retimed=assessTrajectory(UniformBspline(control,3,interval),0,planning_view_->time_s,
+            false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
+        if(retimed.budget_exhausted) return fail(PlanFailure::Budget);
+        if(!retimed.curve_clearance_violations.empty() &&
+            !planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) return fail(PlanFailure::Budget);
+        optimizer.addCurveClearanceConstraints(control,interval,retimed.curve_clearance_violations);
+        const bool provisional=optimizer.BsplineOptimizeTrajRefine(control,interval,control);
+        recordCurveStage(provisional ? "refined" : "refined_provisional_rejected",control,interval,selected,NAN,nullptr,true);
+        if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+        if(!optimizer.lastOptimizationTerminatedNormally()) return fail(PlanFailure::Curve);
+        // A provisional physical rejection is never authorization. The complete
+        // independent final check below owns rejection and bounded correction.
+        bind_boundaries(); recordCurveStage("refined_bound",control,interval,selected);
       }
       if(!feasible) return fail(PlanFailure::Curve);
       const auto check_start=PlanningBudget::Clock::now();

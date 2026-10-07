@@ -491,6 +491,8 @@ std::optional<GridMapFailureSnapshot> GridMap::captureFailureSnapshotUnlocked(
   snapshot.max_boundary = mp_.map_max_boundary_;
   snapshot.dimensions = mp_.map_voxel_num_;
   snapshot.resolution_m = mp_.resolution_;
+  snapshot.virtual_ceiling_height_m = mp_.virtual_ceil_height_;
+  snapshot.inflation_radius_m = mp_.obstacles_inflation_;
   snapshot.cloud_stamp_s = occupancy_cloud_stamp_s_.load(
       std::memory_order_acquire);
   snapshot.generation = sequence / 2u;
@@ -558,6 +560,9 @@ GridMap::Ptr GridMap::fromFailureSnapshot(const GridMapFailureSnapshot& snapshot
   map->mp_.resolution_ = snapshot.resolution_m;
   map->mp_.resolution_inv_ = 1.0 / snapshot.resolution_m;
   map->mp_.frame_id_ = snapshot.frame_id;
+  map->mp_.virtual_ceil_height_ = snapshot.virtual_ceiling_height_m;
+  map->mp_.ground_height_ = snapshot.origin.z();
+  map->mp_.obstacles_inflation_ = snapshot.inflation_radius_m;
   map->mp_.min_occupancy_log_ = 0.5;
   map->md_.occupancy_buffer_.assign(count, 0.0);
   map->md_.occupancy_buffer_raw_cloud_.resize(count);
