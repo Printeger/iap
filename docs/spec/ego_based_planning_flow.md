@@ -1205,3 +1205,26 @@ prior OFF300秒run163937Z_338。attempt1/gen16的819次实际风险查询导出1
 首个Curve55/gen409与末次Budget563/gen2548保持；全部299次进程健康采样、
 命令／binary／配置／输入hash见frozen_risk_export_live_final。取证接口现场通过，
 A路线／物理拒绝及B正式0/9+0/9、D0/6继续阻塞，无参数推广。
+
+
+A/C路线纠正接口调查（未完成）：12/gen55生产backend重放164734Z_062保持原时刻、
+物理图、P/V/A及剩余额度，物理／动态通过但route0.232996>0.136603m。
+assert_route.py已实际exit1锁定路线症状；先前checker字段名错误单列，不算红例。
+独立固定控制点／interval／PVA拟合采样1→16倍后仍0.145149m，原拟合复算
+控制点差<2e-14；此假设不足以修复。fit_probe只诊断，不当生产绿证据。
+真实接口回归PureRouteCorrectionPreservesLegalDeviationInsideItsCorridor红：
+0.08m合法偏离仍被施加guide中心线约束。策略是纯几何只纠正超原corridor
+样本，使用原half-voxel拟合余量；将低预警线风险丢失与几何丢失分别传入，
+未知／物理与风险支持约束保持独立，最终corridor／物理／动态门不变。
+当前代码修复构建中；完整生产原输入纠正与新现场尚待验证，A未授予通过。
+
+
+路线接口最终Release bspline／planner构建安装、七组planner与43入口通过。
+Spec P2曾复现：最近AVOID段被过滤后，远处VALID段距离错误替代几何距离；
+现先计算全guide几何距离再独立选支撑，带预警回退回归通过。低预警风险
+目标恢复原中心线且不增余量，迭代-1008日志保留，没有放行异常退出。
+两轴最终无硬问题，命令／source／binary／失败日志hash见route_corridor_implementation。
+12/gen55诊断扩展probe170108Z_172不是完整生产入口：同原剩余两次额度，
+物理／动态通过但最终route0.264558m，额度拒绝；正式A仍未通过。首次单向
+纠正0.496693m、重定时refine0.234067m，保留平面另一侧及重绑定调查线索，
+不据接口绿例宣称整条根因修复。原始input/time/PVA未改；PL仍NOT_AVAILABLE。

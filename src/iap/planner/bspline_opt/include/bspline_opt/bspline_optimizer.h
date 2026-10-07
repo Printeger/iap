@@ -153,7 +153,7 @@ namespace ego_planner
     // Constrain violating actual samples toward the one existing legal guide.
     // This is a route preference; final physical/motion checks remain independent.
     bool addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval,
-                                 bool route_loss = false);
+                                 bool route_loss = false, bool risk_preference_loss = false);
     struct GuideRetention {
       bool checked = false, budget_exhausted = false;
       bool comparable_valid_risk = false, route_lost = false, risk_preference_lost = false;

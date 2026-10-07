@@ -2063,7 +2063,8 @@ TEST(EgoBaseline, ContinuousBelowWarningCurveRiskLossIsIndependentOfCorridorLoss
     const auto current=optimizer.assessGuideRetention(q,.4,risk);
     if(!current.route_lost && !current.risk_preference_lost) break;
     ASSERT_TRUE(budget->tryRepair(PlanningBudget::Repair::CurveCorrection));
-    optimizer.strengthenGuideTracking();ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,.4,true));
+    optimizer.strengthenGuideTracking();ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,.4,
+        current.route_lost,current.risk_preference_lost));
     ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,.4));
   }
   const auto repaired=optimizer.assessGuideRetention(q,.4,risk);
@@ -2075,6 +2076,34 @@ TEST(EgoBaseline, ContinuousBelowWarningCurveRiskLossIsIndependentOfCorridorLoss
   ego_planner::UniformBspline actual(q,3,.9);actual.setPhysicalLimits(2.,4.,0.);
   double ratio;EXPECT_TRUE(actual.checkFeasibility(ratio,false));
   for(double t=0;t<=actual.getTimeSum();t+=.02) EXPECT_TRUE(actual.evaluateDeBoorT(t).allFinite());
+}
+
+TEST(EgoBaseline, PureRouteCorrectionPreservesLegalDeviationInsideItsCorridor) {
+  auto node=makeNode(false,1.,false,false,.1);
+  auto map=std::make_shared<GridMap>();map->initMap(node);
+  GridMapTestAccess::markObserved(*map);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  Eigen::MatrixXd q(3,12);
+  for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1.08);
+  ego_planner::UniformBspline curve(q,3,.4);
+  for(bool warning_support : {false,true}) {
+    optimizer.setPlanningQuery([warning_support](const Eigen::Vector3d& p) {
+      GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+      if(warning_support) cell.advisory.classification=p.x()<1 ?
+          GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+      return cell;
+    },true);
+    optimizer.setControlPoints(q);
+    optimizer.setGuidePath({curve.evaluateDeBoorT(0),Eigen::Vector3d(-.8,0,1),
+        Eigen::Vector3d(.8,0,1),Eigen::Vector3d(1.2,0,1.04),
+        curve.evaluateDeBoorT(curve.getTimeSum())});
+    const auto retention=optimizer.assessGuideRetention(q,.4,[](const auto&) {return GridPlanningRisk{};});
+    ASSERT_TRUE(retention.checked);ASSERT_FALSE(retention.route_lost);
+    EXPECT_GT(retention.max_deviation_m,.07);
+    EXPECT_FALSE(optimizer.addCurveGuideConstraints(q,.4,true))
+        << "legal corridor samples need no correction, including warning-support fallback="
+        << warning_support;
+  }
 }
 
 TEST(EgoBaseline, UnknownRiskStillReportsLostGuideAndSentinelHasNoValidCoverage) {

@@ -187,3 +187,16 @@ raw values, including `1e9`, remain visible as INVALID and grant no current
 VALID preference. Existing eligible history retains its separately classified
 bounded STALE_REFERENCE fallback; without that history the preference is UNKNOWN.
 These diagnostics do not change execution authorization.
+
+
+## Guide correction reasons
+
+`addCurveGuideConstraints` receives geometric route loss separately from risk
+preference loss. Pure geometric correction skips samples inside the existing
+guide corridor and targets its interior with the existing half-voxel fitting
+reserve. It does not impose centerline equality on otherwise legal deviations.
+The corridor used by correction and independent retention comes from the same
+formula. Physical unknown/out-of-map support and independently lost risk
+preference retain their guide-directed sample constraints; no direct PL
+gradient is introduced. Re-fitting still invalidates old parameter indices.
+Independent physical, dynamics, retention and publication checks remain required.

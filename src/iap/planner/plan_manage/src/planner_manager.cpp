@@ -1125,7 +1125,9 @@ namespace ego_planner
               assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
           optimizer.setControlPoints(control);
         } else if((route_loss || advisory_violation || assessment.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-            assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) && optimizer.addCurveGuideConstraints(control,interval,route_loss)) {
+            assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) && optimizer.addCurveGuideConstraints(control,interval,
+                assessment.guide_retention.route_lost,
+                advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost)) {
           optimizer.setControlPoints(control);
         } else {
           if(!route_loss) optimizer.strengthenGuideTracking();

@@ -4,6 +4,11 @@
 
 namespace ego_planner
 {
+  namespace {
+    double guideCorridorM(double resolution) {
+      return (.5+std::sqrt(3.)/2)*resolution;
+    }
+  }
 
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
   {
@@ -165,7 +170,7 @@ namespace ego_planner
     const double resolution=grid_map_->getResolution();
     // Existing half-voxel fitting reserve plus the lattice cell's circumsphere.
     // This bounds route displacement; it does not relax execution clearance.
-    result.corridor_m=(.5+std::sqrt(3.)/2)*resolution;
+    result.corridor_m=guideCorridorM(resolution);
     const double speed=curve.getDerivative().getControlPoint().colwise().norm().maxCoeff();
     struct Integral { double length=0, risk=0, valid=0; bool all_valid=true, stable_cost=true; };
     std::optional<uint64_t> model_version;
@@ -240,33 +245,39 @@ namespace ego_planner
   }
 
   bool BsplineOptimizer::addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval,
-      bool route_loss) {
+      bool route_loss, bool risk_preference_loss) {
     if(!planning_query_ || guide_pts_.size()<2 || points.cols()<7 || !(interval>0)) return false;
     UniformBspline curve(points,3,interval);
     const size_t previous=curve_clearance_constraints_.size();
     const double reserve=.5*grid_map_->getResolution();
+    const double corridor=guideCorridorM(grid_map_->getResolution());
     for(double time=0;time<=curve.getTimeSum();time+=.02) {
       if(budget_ && budget_->expired()) return false;
       const Eigen::Vector3d position=curve.evaluateDeBoorT(time);
       const auto cell=planning_query_(position);
       const bool physical_boundary=cell.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
           cell.execution_reason==GridExecutionReason::OUT_OF_MAP;
-      const bool preference=!planning_advisory_fallback_ &&
+      const bool warning_preference=!planning_advisory_fallback_ &&
           (cell.advisory.classification==GridAdvisoryClass::AVOID ||
            cell.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED);
+      const bool preference=warning_preference || (!planning_advisory_fallback_ && risk_preference_loss);
       if(!physical_boundary && !preference && !route_loss) continue;
       Eigen::Vector3d nearest=position; double best=std::numeric_limits<double>::infinity();
+      double geometric_best=std::numeric_limits<double>::infinity();
       for(size_t j=1;j<guide_pts_.size();++j) {
         const Eigen::Vector3d segment=guide_pts_[j]-guide_pts_[j-1];
         const double fraction=segment.squaredNorm()>1e-12 ? std::clamp(
             (position-guide_pts_[j-1]).dot(segment)/segment.squaredNorm(),0.,1.) : 0.;
         const Eigen::Vector3d candidate=guide_pts_[j-1]+fraction*segment;
+        geometric_best=std::min(geometric_best,(candidate-position).squaredNorm());
         const auto support=guide_query_(candidate);
         if(!support.executable() || support.advisory.classification==GridAdvisoryClass::AVOID ||
             support.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED) continue;
         const double distance=(candidate-position).squaredNorm();
         if(distance<best) {best=distance;nearest=candidate;}
       }
+      const bool geometry_only=route_loss && !physical_boundary && !preference;
+      if(geometry_only && std::sqrt(geometric_best)<=corridor+1e-6) continue;
       if(!std::isfinite(best) || best<1e-12) continue;
       Eigen::Vector3d direction=(nearest-position).normalized();
       const auto farther=guide_query_(nearest+reserve*direction);
@@ -283,8 +294,13 @@ namespace ego_planner
       // Reuse the actual-sample plane objective for unknown/map boundaries and
       // advisory preferences. Each supporting guide point is independently
       // checked; this gradient grants no observation or execution authority.
-      curve_clearance_constraints_.push_back({first,weights,position,direction,
-          std::sqrt(best)+(room && (!route_loss || preference || physical_boundary)?reserve:0.)});
+      // Pure route loss is a corridor inequality, not centerline equality.
+      // Keep its existing fitting reserve inside the unchanged corridor;
+      // physical boundaries and independently lost risk preference retain
+      // their original guide-support target and available reserve.
+      const double correction=geometry_only ? std::sqrt(best)-(corridor-reserve) :
+          std::sqrt(best)+(room && (physical_boundary || warning_preference) ? reserve : 0.);
+      curve_clearance_constraints_.push_back({first,weights,position,direction,correction});
     }
     return curve_clearance_constraints_.size()>previous;
   }
