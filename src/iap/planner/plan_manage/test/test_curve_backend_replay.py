@@ -13,6 +13,83 @@ from run_directory import resolve_run_directory
 
 
 class CurveReplayTest(unittest.TestCase):
+    def test_captured_guide_correction_and_late_failure_own_current_evidence(self):
+        fixture=json.loads((Path(__file__).parent /
+                            "fixtures/curve_attempt12_gen55_geometry.json").read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            data=json.loads(json.dumps(fixture))
+            # Captured geometry and acquisition time; observed-free physics is
+            # explicitly a mechanism fixture, never the original forest.
+            data.update(kind="attempt_failure_curve",origin_m=[-6.,-6.,0.],
+                        max_boundary_m=[6.,6.,6.],dimensions=[120,120,60],resolution_m=.1,
+                        virtual_ceiling_height_m=-1.,inflation_radius_m=0.,frame_id="map",
+                        cell_flags_file="cells.bin")
+            for p in [data["real_start_p_m"],*data["guide_m"]]: p[0]+=16.
+            for stage in data["curve_stages"]:
+                stage["target_p_m"][0]+=16.
+                for key in ("guide_m","control_points_m"):
+                    for p in stage[key]: p[0]+=16.
+            (root/"cells.bin").write_bytes(bytes([4])*(120*120*60))
+            parameters=root/"parameters.yaml"
+            parameters.write_text("""/**:
+  ros__parameters:
+    optimization/order: 3
+    optimization/lambda_smooth: 1.0
+    optimization/lambda_collision: 0.5
+    optimization/lambda_feasibility: 0.1
+    optimization/lambda_fitness: 1.0
+    optimization/dist0: 0.5
+    optimization/swarm_clearance: 0.5
+    optimization/max_vel: 0.5
+    optimization/max_acc: 2.0
+    planning/advisory_guidance_enabled: false
+""")
+            snapshot=root/"snapshot.json"
+            for scenario in ("normal","late_failure","quota_denied"):
+                current=json.loads(json.dumps(data))
+                if scenario=="quota_denied": current["curve_stages"][0]["repairs"]=3
+                snapshot.write_text(json.dumps(current))
+                previous=os.environ.get("IAP_RUN_ROOT")
+                os.environ["IAP_RUN_ROOT"]=temporary
+                try:
+                    run=resolve_run_directory(entrypoint="curve_backend_replay")
+                finally:
+                    if previous is None: os.environ.pop("IAP_RUN_ROOT",None)
+                    else: os.environ["IAP_RUN_ROOT"]=previous
+                binary=os.environ["IAP_CURVE_REPLAY_FAILURE_BIN" if scenario=="late_failure"
+                                  else "IAP_CURVE_REPLAY_BIN"]
+                process=subprocess.run([binary,str(snapshot),"backend","--ros-args",
+                                        "--params-file",str(parameters)],
+                                       env={**os.environ,"IAP_RUN_DIR":str(run)},
+                                       capture_output=True,text=True,timeout=15)
+                self.assertEqual(process.returncode,0 if scenario=="normal" else 1,
+                                 process.stderr+process.stdout)
+                result=json.loads((run/"export/planner/curve_replay/result.json").read_text())
+                self.assertEqual(result["original_time_s"],fixture["planning_time_s"])
+                self.assertEqual(result["original_cloud_stamp_s"],fixture["cloud_stamp_s"])
+                self.assertFalse(result["execution_authorized"])
+                self.assertEqual(result["risk_evidence"],"NOT_AVAILABLE")
+                stages=[stage["stage"] for stage in result["curve_stages"]]
+                self.assertIn("dynamics_pass",stages)
+                if scenario=="normal":
+                    self.assertTrue(result["physical_geometric_candidate_valid"])
+                    self.assertEqual(result["added_repairs"],2)
+                    self.assertLess(result["guide_max_deviation_m"],result["guide_corridor_m"])
+                elif scenario=="late_failure":
+                    self.assertIn("correction_failed",stages)
+                    self.assertFalse(result["physical_geometric_candidate_valid"])
+                    self.assertFalse(result["dynamics_feasible"])
+                    self.assertEqual(result["final_check_state"],"not_checked")
+                    self.assertIn("budget_expired",result["solver_reason"])
+                else:
+                    self.assertTrue(result["dynamics_feasible"])
+                    self.assertTrue(result["physical_executable"])
+                    self.assertFalse(result["guide_route_preserved"])
+                    self.assertFalse(result["physical_geometric_candidate_valid"])
+                    self.assertEqual(result["added_repairs"],0)
+                    self.assertEqual(result["termination"],"curve_correction_budget_denied")
+
     def test_real_route_loss_is_visible_before_final_check(self):
         fixture = json.loads((Path(__file__).parent /
                               "fixtures/curve_attempt45_gen209_geometry.json").read_text())
@@ -84,7 +161,10 @@ class CurveReplayTest(unittest.TestCase):
                     self.assertAlmostEqual(stage["max_deviation_m"], expected, delta=.0001)
                 self.assertLess(stages[0]["max_deviation_m"], stages[1]["max_deviation_m"])
                 self.assertLess(stages[1]["max_deviation_m"], stages[3]["max_deviation_m"])
-            for scenario in ("same_input", "zero_without_policy", "unowned", "explicit_stop"):
+            base_parameters=parameters.read_text()
+            for scenario in ("same_input", "zero_without_policy", "unowned", "explicit_stop", "guidance_without_predictor"):
+                parameters.write_text(base_parameters + ("\n    planning/advisory_guidance_enabled: true\n"
+                    if scenario=="guidance_without_predictor" else ""))
                 current = json.loads(json.dumps(data))
                 first = current["curve_stages"][0]
                 if scenario in ("zero_without_policy", "explicit_stop"):
@@ -101,7 +181,7 @@ class CurveReplayTest(unittest.TestCase):
                                          env={**os.environ, "IAP_RUN_ROOT": temporary},
                                          capture_output=True, text=True, timeout=15)
                 run, = set(root.iterdir()) - existing
-                rejected = scenario in ("zero_without_policy", "unowned")
+                rejected = scenario in ("zero_without_policy", "unowned", "guidance_without_predictor")
                 self.assertEqual(process.returncode, 1 if rejected else 0, process.stderr + process.stdout)
                 output = run / "export/planner/curve_replay/result.json"
                 if rejected:
@@ -111,6 +191,8 @@ class CurveReplayTest(unittest.TestCase):
                 self.assertTrue(result["physical_executable"])
                 self.assertTrue(result["dynamics_feasible"])
                 self.assertTrue(result["guide_route_preserved"])
+                self.assertTrue(result["physical_geometric_candidate_valid"])
+                self.assertFalse(result["execution_authorized"])
                 self.assertEqual(result["original_time_s"], fixture["planning_time_s"])
                 self.assertEqual(result["captured_target_velocity_mps"], first["target_v_mps"])
                 self.assertEqual(result["curve_stages"][0]["stage"], "captured_initial")
@@ -206,12 +288,18 @@ class CurveReplayTest(unittest.TestCase):
                     self.assertIn("stage target/guide mismatch", process.stderr)
                     self.assertFalse((run / "export/planner/curve_replay/result.json").exists())
                     continue
-                self.assertEqual(process.returncode, 0 if expected else 1, process.stderr + process.stdout)
+                # This refine-only fixture repairs dynamics but still loses its
+                # guide. A dynamic PASS must never become a composite PASS.
+                self.assertEqual(process.returncode, 1, process.stderr + process.stdout)
                 result = json.loads((run / "export/planner/curve_replay/result.json").read_text())
                 self.assertEqual(result["dynamics_feasible"], expected)
                 self.assertEqual(result["original_time_s"], 100.1)
                 self.assertEqual(result["original_cloud_stamp_s"], 100.)
                 self.assertEqual(result["physical_executable"], expected)
+                self.assertFalse(result["physical_geometric_candidate_valid"])
+                self.assertFalse(result["execution_authorized"])
+                if scenario=="refine":
+                    self.assertFalse(result["guide_route_preserved"])
                 if scenario == "obstacle_budget_denied":
                     self.assertGreater(result["constraint_samples"], 0)
                     self.assertEqual(result["termination"], "curve_correction_budget_denied")

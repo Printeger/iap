@@ -192,9 +192,16 @@ These diagnostics do not change execution authorization.
 ## Guide correction reasons
 
 `addCurveGuideConstraints` receives geometric route loss separately from risk
-preference loss. Pure geometric correction skips samples inside the existing
-guide corridor and targets its interior with the existing half-voxel fitting
-reserve. It does not impose centerline equality on otherwise legal deviations.
+preference loss. Pure geometric correction uses a bilateral distance to the existing whole
+guide. Once an actual geometric violation is found, all movable actual samples
+use the same interior fitting corridor with the existing half-voxel reserve.
+Deviation within that fitting corridor carries no geometric penalty; a transaction
+without geometric violations adds no corridor sample constraints. The fourth-power
+excess cost emphasizes concentrated peaks, scaled by the same fitting reserve,
+and consumes the existing budgeted guide-tracking weight. Physical supporting
+planes retain their quadratic cost and original weight.
+Crossing to the opposite side cannot satisfy a one-sided plane. No centerline
+equality is imposed on otherwise legal deviations.
 The corridor used by correction and independent retention comes from the same
 formula. Physical unknown/out-of-map support and independently lost risk
 preference retain their guide-directed sample constraints; no direct PL

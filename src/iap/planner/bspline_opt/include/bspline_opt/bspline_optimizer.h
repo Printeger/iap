@@ -238,11 +238,13 @@ namespace ego_planner
     PlanningBudget::Ptr budget_;
     std::vector<Eigen::Vector3d> planning_goals_;
     double guide_weight_ = 1.0;
+    enum class CurveConstraintKind { ClearancePlane, GuideCorridor };
     struct CurveClearanceConstraint {
       int first_control;
       Eigen::Vector4d weights;
       Eigen::Vector3d center, direction;
       double clearance;
+      CurveConstraintKind kind = CurveConstraintKind::ClearancePlane;
     };
     std::vector<CurveClearanceConstraint> curve_clearance_constraints_;
     std::optional<std::pair<Eigen::Vector3d,Eigen::Vector3d>> curve_bounds_;

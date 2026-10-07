@@ -1114,24 +1114,10 @@ namespace ego_planner
       if(optimizer.recoveryGuide().empty()) {
         if(!optimizer.searchRecoveryGuide() || !initialize_guide()) return fail(PlanFailure::Search);
       } else {
-        if(!planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) return fail(PlanFailure::Budget);
-        if(route_loss) optimizer.strengthenGuideTracking();
-        if(!assessment.curve_clearance_violations.empty()) {
-          if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations)) {
-            if(shorten_target()) continue;
-            return fail(PlanFailure::Curve);
-          }
-          RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
-              assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
-          optimizer.setControlPoints(control);
-        } else if((route_loss || advisory_violation || assessment.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-            assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) && optimizer.addCurveGuideConstraints(control,interval,
-                assessment.guide_retention.route_lost,
-                advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost)) {
-          optimizer.setControlPoints(control);
-        } else {
-          if(!route_loss) optimizer.strengthenGuideTracking();
-          optimizer.initializeFromGuide(control);
+        const auto correction=correctCurveCandidate(optimizer,control,interval,assessment);
+        if(correction!=PlanFailure::None) {
+          if(correction==PlanFailure::Curve && shorten_target()) continue;
+          return fail(correction);
         }
       }
     }
@@ -1286,6 +1272,35 @@ namespace ego_planner
     UniformBspline::parameterizeToBspline(interval,points,
         {start_vel,selected.velocity,start_acc,selected.acceleration},control);
     return true;
+  }
+
+  EGOPlannerManager::PlanFailure EGOPlannerManager::correctCurveCandidate(
+      BsplineOptimizer& optimizer,Eigen::MatrixXd& control,double interval,
+      const TrajectoryAssessment& assessment) {
+    if(!planning_budget_ || !planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection))
+      return PlanFailure::Budget;
+    const bool route_loss=assessment.guide_retention.route_lost ||
+        (advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
+    const bool advisory_violation=advisory_guidance_enabled_ && assessment.advisory_avoid_samples &&
+        !optimizer.advisoryFallbackUsed();
+    if(route_loss) optimizer.strengthenGuideTracking();
+    if(!assessment.curve_clearance_violations.empty()) {
+      if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations))
+        return PlanFailure::Curve;
+      RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
+          assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
+      optimizer.setControlPoints(control);
+    } else if((route_loss || advisory_violation ||
+        assessment.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+        assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) &&
+        optimizer.addCurveGuideConstraints(control,interval,assessment.guide_retention.route_lost,
+            advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost)) {
+      optimizer.setControlPoints(control);
+    } else {
+      if(!route_loss) optimizer.strengthenGuideTracking();
+      optimizer.initializeFromGuide(control);
+    }
+    return PlanFailure::None;
   }
 
   bool EGOPlannerManager::planCheckedBrake(

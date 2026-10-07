@@ -802,10 +802,15 @@ The existing single recent-terminal closure, writer queue and stage cap are unch
 `curve_backend_replay` reads captured candidate stages, original planning/cloud
 and motion times, frozen voxel flags and explicit parameter YAML. `retime` replays
 the old four-check symptom; `refine` starts at the captured optimized boundary;
-`backend` also repeats guide initialization and rebound optimization. These are
-read-only mechanism experiments. No ROS server publication or freshness renewal
-is available. Exit code zero describes dynamics, while the independent full
-physical verdict is separately retained in `result.json`.
+`backend` also repeats guide initialization and rebound optimization, then the
+bounded candidate-correction loop through the same production
+`EGOPlannerManager::correctCurveCandidate` authority. These are read-only
+mechanism experiments. No ROS server publication or freshness renewal is available.
+Exit zero requires `physical_geometric_candidate_valid`: normal backend termination,
+dynamics, full physical checking and geometric retention. Each constituent verdict
+remains separately retained. `execution_authorized` is always false. Missing frozen
+predictor input limits this replay to `OFF_GEOMETRY_ONLY`; explicit guidance ON
+is rejected for `backend`/`initialize`.
 
 For already captured candidates, `--mode audit` applies the production geometric
 retention check at every stage with its owned guide. It runs no optimizer or
@@ -1228,3 +1233,41 @@ Spec P2曾复现：最近AVOID段被过滤后，远处VALID段距离错误替代
 物理／动态通过但最终route0.264558m，额度拒绝；正式A仍未通过。首次单向
 纠正0.496693m、重定时refine0.234067m，保留平面另一侧及重绑定调查线索，
 不据接口绿例宣称整条根因修复。原始input/time/PVA未改；PL仍NOT_AVAILABLE。
+
+
+A/C双侧路线约束调查：固定捕获12/gen55控制点及简化共线guide，平移+16m x到
+已观测自由fixture；端点PVA绑定后，生产接口一次原额度内纠正偏离0.491611m，
+其余断言通过，guide_tube_symptom_red实际exit1。此fixture物理近似明确，
+不等同原森林数值／资格；原冻结生产红例仍在164734Z_062。
+事实：双侧二次成本改善偏离但原剩余两次纠正后仍0.139751m；删控制点平面
+仅改3.1e-5m，不足解释残余。可移动basis归一化／端点余量版本恶化，失败日志
+与hash保留，没有采用。策略：原半体素余量在真实几何丢失时绑定整条实际曲线，
+双侧四次excess成本重视峰值并消费现有guide_weight；无真实几何违反仍不添加。
+原始time／图／PVA／额度下，诊断扩展175524Z_207在两次原纠正后动态与完整物理
+通过、route0.135264<0.136603m。此结果尚不是正式生产重放或现场资格。
+现在将纠正额度／原因／约束绑定收拢为生产manager与backend replay共用接口；
+原例测试覆盖原剩余两次且逐次独立查动力学，未扩大任何预算。正式入口将分别
+报告各门及physical_geometric_candidate_valid，禁止以仅动态绿值表示候选合法。
+重定时后同guide约束及新森林接续仍待后续验证；B正式0/9+0/9、D0/6不变。
+
+
+重放取证边界补充：真实生产重放在已dynamic pass后发生纠正backend早退时，
+原feasible会错误沿用。测试只包装生产main的输出，在“纠正准备完成”处消耗
+原steady预算，不改ROS采集时间、不加生产fault开关；旧源码单项实际红
+curve_late_failure_red：dynamics_feasible=True。现新solver前清除结论，当前候选
+未查即not_checked。另将旧refine-only“动态／物理绿但route丢失”的exit0改为
+复合拒绝；不是放宽原拒绝。ON缺原冻结预测输入拒绝回归。最终重建待验证。
+
+
+A/C双侧路线纠正正式生产验证：Release构建／安装、七组planner行为回归及43项
+入口检查通过。backend run182744Z_678、initialize run182745Z_581均保持原
+attempt12/gen55图、时刻、冻结参数与PVA，原剩余两次纠正后动态／601点物理／
+独立路线门全部通过：max0.135264m < 原corridor0.136603m，无重定时。
+assert_route.py两次exit0；独立NumPy均匀601点采样图production_red_green.png保留优化红
+0.233010m、第一纠正0.137271m仍拒绝、第二纠正0.135320m绿；此均匀采样
+与生产实际采样的最大值分别报告，不混作逐点一致性证明。不存在预测PL输入，
+OFF_GEOMETRY_ONLY，execution_authorized=false；不授予现场发布或Advisory米数资格。
+晚期纠正失败红例修复及额度耗尽／ON缺冻结输入拒绝回归通过，旧refine-only
+动态／物理通过但route丢失仍复合拒绝。两项审查最终无硬问题。
+命令与源码／binary／配置／input／日志hash登记guide_tube_production_implementation。
+新森林接续与重定时同guide保留仍待验证；B正式0/9+0/9、D0/6保持阻塞。

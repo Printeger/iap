@@ -189,10 +189,17 @@ evidence, not A acceptance or a task completion.
 `curve_backend_replay` reads captured candidate stages, original planning/cloud
 and motion times, frozen voxel flags and explicit parameter YAML. `retime` replays
 the old four-check symptom; `refine` starts at the captured optimized boundary;
-`backend` also repeats guide initialization and rebound optimization. These are
-read-only mechanism experiments. No ROS server publication or freshness renewal
-is available. Exit code zero describes dynamics, while the independent full
-physical verdict is separately retained in `result.json`.
+`backend` also repeats guide initialization and rebound optimization, then the
+bounded candidate-correction loop through the same production
+`EGOPlannerManager::correctCurveCandidate` authority. These are read-only
+mechanism experiments. No ROS server publication or freshness renewal is available.
+Exit zero requires `physical_geometric_candidate_valid`: normal backend termination,
+dynamics, full physical checking and geometric retention. Each constituent verdict
+remains separately retained. Replacing a candidate clears the preceding dynamics
+conclusion before invoking its solver; a failed new backend leaves the current
+final check `not_checked`, while earlier stage evidence remains historical. `execution_authorized` is always false. Missing frozen
+predictor input limits this replay to `OFF_GEOMETRY_ONLY`; explicit guidance ON
+is rejected for `backend`/`initialize`.
 
 `audit` evaluates the production geometric guide-retention check independently
 for every already captured stage and its owned guide. The result schema is
@@ -213,7 +220,9 @@ Captured controls precede refitted controls; target velocities and policy source
 are named separately. Captured remaining resources are retained even though the
 fit is repeated. Full physical, dynamic and geometric-retention verdicts are
 independent; absent PL stays `NOT_AVAILABLE`. This replay does not publish,
-exercise all subsequent manager repair rounds or authorize a server switch.
+repeat target-search/shortening policy or authorize a server switch. Backend
+correction, original remaining repairs, boundary binding, checked retiming and
+refine share the production policy; raw PL qualification is excluded.
 
 The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
 boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint

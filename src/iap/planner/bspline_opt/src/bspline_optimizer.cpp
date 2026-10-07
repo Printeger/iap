@@ -8,6 +8,20 @@ namespace ego_planner
     double guideCorridorM(double resolution) {
       return (.5+std::sqrt(3.)/2)*resolution;
     }
+    Eigen::Vector3d nearestGuidePoint(const std::vector<Eigen::Vector3d>& guide,
+        const Eigen::Vector3d& position) {
+      Eigen::Vector3d nearest=guide.front();
+      double best=std::numeric_limits<double>::infinity();
+      for(size_t j=1;j<guide.size();++j) {
+        const Eigen::Vector3d edge=guide[j]-guide[j-1];
+        const double fraction=edge.squaredNorm()>1e-12 ? std::clamp(
+            (position-guide[j-1]).dot(edge)/edge.squaredNorm(),0.,1.) : 0.;
+        const Eigen::Vector3d point=guide[j-1]+fraction*edge;
+        const double distance=(point-position).squaredNorm();
+        if(distance<best) {best=distance;nearest=point;}
+      }
+      return nearest;
+    }
   }
 
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
@@ -190,14 +204,8 @@ namespace ego_planner
             std::isfinite(value.cost_multiplier) && value.cost_multiplier>=1;
         if (!valid || value.version!=result.risk_version) integral.all_valid=false;
         if(actual) {
-          double nearest=std::numeric_limits<double>::infinity();
-          for(size_t j=1;j<guide_pts_.size();++j) {
-            const Eigen::Vector3d edge=guide_pts_[j]-guide_pts_[j-1];
-            const double fraction=edge.squaredNorm()>1e-12 ? std::clamp(
-                (point-guide_pts_[j-1]).dot(edge)/edge.squaredNorm(),0.,1.) : 0.;
-            nearest=std::min(nearest,(point-guide_pts_[j-1]-fraction*edge).norm());
-          }
-          result.max_deviation_m=std::max(result.max_deviation_m,nearest);
+          result.max_deviation_m=std::max(result.max_deviation_m,
+              (point-nearestGuidePoint(guide_pts_,point)).norm());
         }
         return std::make_pair(gridAdvisoryCostMultiplier(value.classification,value.cost_multiplier)-1,
             valid ? 1. : 0.);
@@ -251,6 +259,8 @@ namespace ego_planner
     const size_t previous=curve_clearance_constraints_.size();
     const double reserve=.5*grid_map_->getResolution();
     const double corridor=guideCorridorM(grid_map_->getResolution());
+    std::vector<CurveClearanceConstraint> corridor_constraints;
+    bool corridor_violated=false;
     for(double time=0;time<=curve.getTimeSum();time+=.02) {
       if(budget_ && budget_->expired()) return false;
       const Eigen::Vector3d position=curve.evaluateDeBoorT(time);
@@ -277,7 +287,25 @@ namespace ego_planner
         if(distance<best) {best=distance;nearest=candidate;}
       }
       const bool geometry_only=route_loss && !physical_boundary && !preference;
-      if(geometry_only && std::sqrt(geometric_best)<=corridor+1e-6) continue;
+      if(geometry_only) {
+        const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
+        const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));
+        const double u=parameter-first;
+        const Eigen::Vector4d weights(std::pow(1-u,3)/6.,(3*u*u*u-6*u*u+4)/6.,
+            (-3*u*u*u+3*u*u+3*u+1)/6.,u*u*u/6.);
+        double movable=0;
+        for(int j=0;j<4;++j) if(first+j>=order_ && first+j<points.cols()-order_) movable+=weights[j];
+        if(movable<1e-8) continue;
+        const bool violated=std::sqrt(geometric_best)>corridor+1e-6;
+        corridor_violated=corridor_violated || violated;
+        // The distance is recomputed against the same whole guide during the
+        // solve, so crossing to the other side never satisfies a one-sided
+        // supporting plane. A real route loss activates the same fitting
+        // corridor for all movable samples, without imposing a centerline.
+        corridor_constraints.push_back({first,weights,Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),
+            corridor-reserve,CurveConstraintKind::GuideCorridor});
+        continue;
+      }
       if(!std::isfinite(best) || best<1e-12) continue;
       Eigen::Vector3d direction=(nearest-position).normalized();
       const auto farther=guide_query_(nearest+reserve*direction);
@@ -294,14 +322,11 @@ namespace ego_planner
       // Reuse the actual-sample plane objective for unknown/map boundaries and
       // advisory preferences. Each supporting guide point is independently
       // checked; this gradient grants no observation or execution authority.
-      // Pure route loss is a corridor inequality, not centerline equality.
-      // Keep its existing fitting reserve inside the unchanged corridor;
-      // physical boundaries and independently lost risk preference retain
-      // their original guide-support target and available reserve.
-      const double correction=geometry_only ? std::sqrt(best)-(corridor-reserve) :
-          std::sqrt(best)+(room && (physical_boundary || warning_preference) ? reserve : 0.);
+      const double correction=std::sqrt(best)+(room && (physical_boundary || warning_preference) ? reserve : 0.);
       curve_clearance_constraints_.push_back({first,weights,position,direction,correction});
     }
+    if(corridor_violated) curve_clearance_constraints_.insert(curve_clearance_constraints_.end(),
+        corridor_constraints.begin(),corridor_constraints.end());
     return curve_clearance_constraints_.size()>previous;
   }
 
@@ -1496,6 +1521,24 @@ namespace ego_planner
     for(const auto& constraint:curve_clearance_constraints_) {
       Eigen::Vector3d position=Eigen::Vector3d::Zero();
       for(int j=0;j<4;++j) position+=constraint.weights[j]*q.col(constraint.first_control+j);
+      if(constraint.kind==CurveConstraintKind::GuideCorridor) {
+        const Eigen::Vector3d offset=position-nearestGuidePoint(guide_pts_,position);
+        const double distance=offset.norm(),deficit=distance-constraint.clearance;
+        if(deficit<=0) continue;
+        // This is guide tracking, so it consumes the same existing budgeted
+        // guide weight as knot tracking. Physical supporting planes below
+        // retain their original independent weight.
+        const double sample_weight=weight*guide_weight_;
+        // Independent retention limits the largest deviation. Emphasize a
+        // concentrated peak instead of trading it for many smaller residuals;
+        // the existing half-voxel reserve supplies the dimensional scale.
+        const double reserve=.5*grid_map_->getResolution();
+        const double squared_ratio=deficit*deficit/(reserve*reserve);
+        cost+=sample_weight*squared_ratio*deficit*deficit;
+        for(int j=0;j<4;++j) gradient.col(constraint.first_control+j)+=
+            4*sample_weight*squared_ratio*deficit*constraint.weights[j]*offset/distance;
+        continue;
+      }
       const double deficit=constraint.clearance-(position-constraint.center).dot(constraint.direction);
       if(deficit<=0) continue;
       cost+=weight*deficit*deficit;

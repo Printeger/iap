@@ -2236,3 +2236,58 @@ TEST(EgoBaseline, SplineFitKeepsExactNonzeroPvaAndRejectsInvalidInputs) {
       std::vector<Eigen::Vector3d>(4,Eigen::Vector3d::Zero()),
       std::vector<Eigen::Vector3d>(4,Eigen::Vector3d::Zero()),controls),std::invalid_argument);
 }
+
+TEST(EgoBaseline, GeometricGuideCorrectionDoesNotOvershootOppositeSide) {
+  // attempt12/gen55 captured guide/controls, translated +16m in x into the
+  // observed-free fixture. This is geometry regression, not field qualification.
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  auto map=std::make_shared<GridMap>();map->initMap(node);
+  GridMapTestAccess::markObserved(*map);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  optimizer.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;return cell;
+  },true);
+  Eigen::MatrixXd q(3,13);
+  q.col(0)=Eigen::Vector3d(-1.7163242878995995,-0.041889467148327801,1.5583019688214073);
+  q.col(1)=Eigen::Vector3d(-1.2495774455611581,-0.021208581954911956,1.7690548129507766);
+  q.col(2)=Eigen::Vector3d(-0.68457448896400663,0.0038118299468810511,1.9565948488399614);
+  q.col(3)=Eigen::Vector3d(-0.67202702734135045,-0.0073084309533040757,1.5972426540765845);
+  q.col(4)=Eigen::Vector3d(-0.14120123205473689,-0.0030297098669553909,1.7762900031663078);
+  q.col(5)=Eigen::Vector3d(0.15549506060014018,-0.0048977456605702272,1.7063460570414846);
+  q.col(6)=Eigen::Vector3d(0.52808387545291602,-0.0030287635662399012,1.7303228646428979);
+  q.col(7)=Eigen::Vector3d(0.91409238575678309,-0.00746548382641978,1.7244728361239876);
+  q.col(8)=Eigen::Vector3d(1.1814356202794745,0.005052165819643387,1.7201947473586845);
+  q.col(9)=Eigen::Vector3d(1.783535867980417,-0.028311887626651867,1.7378494561350246);
+  q.col(10)=Eigen::Vector3d(1.6603048885100478,0.046907626301681882,1.69644080424963);
+  q.col(11)=Eigen::Vector3d(2.25,-0.049999999999998934,1.75);
+  q.col(12)=Eigen::Vector3d(2.8396951114899522,-0.14690762630167975,1.80355919575037);
+  ego_planner::UniformBspline initial(q,3,1.2);
+  optimizer.setPlanningEndpoints(initial.evaluateDeBoorT(0),initial.evaluateDeBoorT(initial.getTimeSum()));
+  optimizer.setControlPoints(q);optimizer.setGuidePath({Eigen::Vector3d(-1.2332014265180398,-0.020485327503515761,1.7651860115774125),Eigen::Vector3d(-1.2260364881281909,-0.0042055867815430636,1.7246902072061374),Eigen::Vector3d(2.2739635118718091,-0.0042055867815430636,1.7246902072061374),Eigen::Vector3d(2.25,-0.049999999999998934,1.75)});
+  optimizer.initializeFromGuide(q);
+  ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);optimizer.setDroneId(0);
+  optimizer.setLocalTargetPt(optimizer.recoveryGuide().back());optimizer.a_star_=std::make_shared<AStar>();
+  auto budget=std::make_shared<PlanningBudget>(1.5-.168518054,2);optimizer.setPlanningBudget(budget);
+  const auto fixed_start=q.leftCols(3).eval(),fixed_end=q.rightCols(3).eval();
+  ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,1.2));
+  const auto before=optimizer.assessGuideRetention(q,1.2,[](const auto&) {return GridPlanningRisk{};});
+  ASSERT_TRUE(before.checked);ASSERT_TRUE(before.route_lost);
+  EXPECT_GT(before.max_deviation_m,before.corridor_m+.05);
+  auto corrected=before;
+  // Captured stage had used 1/3 repairs: preserve both remaining corrections,
+  // and never accept a geometric improvement that violates dynamics.
+  while(corrected.route_lost && budget->used()<2) {
+    ASSERT_TRUE(budget->tryRepair(PlanningBudget::Repair::CurveCorrection));
+    optimizer.strengthenGuideTracking();ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,1.2,true));
+    ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,1.2));
+    ego_planner::UniformBspline candidate(q,3,1.2);candidate.setPhysicalLimits(.5,2.,.05);
+    double ratio=1.;ASSERT_TRUE(candidate.checkFeasibility(ratio));
+    corrected=optimizer.assessGuideRetention(q,1.2,[](const auto&) {return GridPlanningRisk{};});
+  }
+  ASSERT_TRUE(corrected.checked);
+  std::ostringstream candidate;candidate<<q.format(Eigen::IOFormat(Eigen::FullPrecision));
+  EXPECT_FALSE(corrected.route_lost) << corrected.max_deviation_m << '\n' << candidate.str();
+  EXPECT_TRUE(q.leftCols(3).isApprox(fixed_start,1e-12));
+  EXPECT_TRUE(q.rightCols(3).isApprox(fixed_end,1e-12));
+  EXPECT_EQ(budget->used(),2u);
+}

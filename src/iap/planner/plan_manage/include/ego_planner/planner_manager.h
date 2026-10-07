@@ -322,6 +322,10 @@ namespace ego_planner
 
     BsplineOptimizer::Ptr bspline_optimizer_;
 
+    // One budgeted candidate correction policy, shared with frozen backend replay.
+    PlanFailure correctCurveCandidate(BsplineOptimizer& optimizer,
+        Eigen::MatrixXd& control, double interval, const TrajectoryAssessment& assessment);
+
     int continous_failures_count_{0};
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);

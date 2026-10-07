@@ -30,9 +30,15 @@ struct CurveBackendReplayAccess {
       GridMap::Ptr map,const GridPlanningContext& context,const GridMotionContext& motion,
       double time,PlanningBudget::Ptr budget) {
     manager.node_=std::move(node);manager.grid_map_=std::move(map);manager.planning_budget_=std::move(budget);
+    manager.advisory_guidance_enabled_=false; // No captured predictor input in this physical replay.
     EGOPlannerManager::PlanningView view;view.physical=context.epoch;view.generation=context.generation;
     view.time_s=time;view.motion=motion;view.physical_context=context;manager.planning_view_=std::move(view);
     return manager.planning_view_->physical_context;
+  }
+  static EGOPlannerManager::PlanFailure correct(EGOPlannerManager& manager,
+      BsplineOptimizer& optimizer,Eigen::MatrixXd& control,double interval,
+      const EGOPlannerManager::TrajectoryAssessment& assessment) {
+    return manager.correctCurveCandidate(optimizer,control,interval,assessment);
   }
 };
 }
@@ -181,6 +187,9 @@ int main(int argc,char**argv) {
     rclcpp::shutdown();return all_checked && route_preserved ? 0 : 1;
   }
   ego_planner::EGOPlannerManager manager;
+  const bool configured_guidance=node->declare_parameter("planning/advisory_guidance_enabled",false);
+  if(configured_guidance && (mode=="backend" || mode=="initialize"))
+    throw std::invalid_argument("Advisory guidance replay requires original frozen predictor input; this replay is OFF geometry-only");
   const auto& assessment_context=ego_planner::CurveBackendReplayAccess::bind(manager,node,map,context,motion,time,budget);
   save("captured_initial",q,dt);
   bool terminal_stop=false;std::string stop_policy_source="NOT_REPLAYED";
@@ -210,6 +219,9 @@ int main(int argc,char**argv) {
   save("boundary_bound",q,dt);
   bool feasible=false;UniformBspline curve;
   std::cout<<std::setprecision(17)<<"attempt="<<input.get<uint64_t>("planning_attempt_id")<<" generation="<<snapshot.generation<<" original_time="<<time<<'\n';
+  const bool complete_backend=mode=="backend" || mode=="initialize";
+  do {
+  feasible=false;
   for(int i=0;backend_ok && i<4;++i) {
     curve=UniformBspline(q,3,dt);curve.setPhysicalLimits(v,a,tol); double ratio=1;
     feasible=curve.checkFeasibility(ratio);std::cout<<"dynamics "<<i<<" interval="<<dt<<" feasible="<<feasible<<" ratio="<<ratio<<'\n';
@@ -232,13 +244,50 @@ int main(int argc,char**argv) {
       UniformBspline::enforceBoundaryStates(q,dt,start,sv,sa,end,ev,ea);
     }
   }
+  if(!feasible || !complete_backend) break;
+  auto candidate=assess(q,dt);
+  candidate.guide_retention=optimizer.assessGuideRetention(q,dt,
+      [](const Eigen::Vector3d&) {return GridPlanningRisk{};});
+  save("route_checked",q,dt);
+  std::cout<<"route checked="<<candidate.guide_retention.checked
+      <<" lost="<<candidate.guide_retention.route_lost
+      <<" max="<<candidate.guide_retention.max_deviation_m<<" repairs="<<budget->used()<<'\n';
+  if(candidate.budget_exhausted || candidate.guide_retention.budget_exhausted ||
+      !candidate.guide_retention.checked) {termination="route_check_incomplete";break;}
+  if(candidate.executable() && !candidate.guide_retention.route_lost) break;
+  if(!candidate.executable() && candidate.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
+      candidate.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
+      candidate.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
+      candidate.execution_reason!=GridExecutionReason::OUT_OF_MAP) {termination="candidate_rejected";break;}
+  const auto correction=ego_planner::CurveBackendReplayAccess::correct(manager,optimizer,q,dt,candidate);
+  if(correction!=ego_planner::EGOPlannerManager::PlanFailure::None) {
+    termination=correction==ego_planner::EGOPlannerManager::PlanFailure::Budget ?
+        "curve_correction_budget_denied" : "curve_correction_rejected";
+    break;
+  }
+  // The production loop rechecks the corrected input before the next solver.
+  const auto initial=assess(q,dt);constraint_samples+=initial.curve_clearance_violations.size();
+  optimizer.addCurveClearanceConstraints(q,dt,initial.curve_clearance_violations);
+  std::cout<<"correction prepared repairs="<<budget->used()<<'\n';
+  feasible=false; // The next solver owns a new candidate, even if it exits early.
+  backend_ok=!initial.budget_exhausted && optimizer.BsplineOptimizeTrajRebound(q,dt);
+  save(backend_ok ? "corrected" : "correction_failed",q,dt);
+  UniformBspline::enforceBoundaryStates(q,dt,start,sv,sa,end,ev,ea);
+  save("corrected_bound",q,dt);
+  if(!backend_ok) termination="backend_correction_rejected";
+  } while(backend_ok);
   const auto final=feasible ? assess(q,dt) : ego_planner::EGOPlannerManager::TrajectoryAssessment{};
   const auto retention=feasible ? optimizer.assessGuideRetention(q,dt,
       [](const Eigen::Vector3d&) {return GridPlanningRisk{};}) : ego_planner::BsplineOptimizer::GuideRetention{};
+  const bool candidate_valid=backend_ok && feasible && final.executable() && !final.budget_exhausted &&
+      retention.checked && !retention.budget_exhausted && !retention.route_lost;
   std::cout<<"final_check="<<(feasible ? gridExecutionReasonName(final.execution_reason) : "not_checked")<<" elapsed="<<budget->elapsed()<<'\n';
   std::ofstream result(output);
   result<<std::setprecision(17)<<"{\"schema\":\"iap_curve_backend_replay_v1\",\"identity\":\"OFFLINE_MECHANISM_REPLAY\",\"mode\":"<<std::quoted(mode)
       <<",\"planning_attempt_id\":"<<input.get<uint64_t>("planning_attempt_id")<<",\"generation\":"<<snapshot.generation
+      <<",\"physical_geometric_candidate_valid\":"<<(candidate_valid ? "true" : "false")
+      <<",\"execution_authorized\":false,\"correction_authority\":\"EGOPlannerManager::correctCurveCandidate\""
+      <<",\"advisory_scope\":\"OFF_GEOMETRY_ONLY\""
       <<",\"original_time_s\":"<<time<<",\"original_cloud_stamp_s\":"<<snapshot.cloud_stamp_s
       <<",\"dynamics_feasible\":"<<(feasible ? "true" : "false")<<",\"final_check_state\":"<<std::quoted(!feasible ? "not_checked" : final.budget_exhausted ? "incomplete" : "checked")
       <<",\"physical_executable\":"<<(feasible && final.executable() ? "true" : "false")<<",\"final_check_reason\":"<<std::quoted(!feasible ? "not_checked" : final.budget_exhausted ? "budget_exhausted" : gridExecutionReasonName(final.execution_reason))
@@ -260,6 +309,6 @@ int main(int argc,char**argv) {
       <<",\"solver_reason\":"<<std::quoted(optimizer.lastOptimizationReason())
       <<",\"elapsed_s\":"<<budget->elapsed()<<",\"curve_stages\":["<<trace.str()<<"]}\n";
   result.close();if(!result) throw std::runtime_error("result write failed");
-  rclcpp::shutdown();return feasible ? 0:1; // Dynamics verdict; final physical verdict is independent.
+  rclcpp::shutdown();return candidate_valid ? 0:1; // Frozen replay never authorizes execution.
  } catch(const std::exception& e) {std::cerr<<"curve replay failed: "<<e.what()<<'\n';rclcpp::shutdown();return 2;}
 }

@@ -71,7 +71,10 @@ def main():
         summary.update(all_stages_checked=verdict.get("all_stages_checked"),
                        all_stages_preserve_route=verdict.get("all_stages_preserve_route"))
     else:
-        summary["verdict"] = verdict.get("dynamics_feasible")
+        summary.update(verdict=verdict.get("physical_geometric_candidate_valid"),
+                       dynamics_feasible=verdict.get("dynamics_feasible"),
+                       physical_executable=verdict.get("physical_executable"),
+                       guide_route_preserved=verdict.get("guide_route_preserved"))
     print(json.dumps(summary))
     return 0 if status == "completed" else 1
 
