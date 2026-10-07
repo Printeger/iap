@@ -863,7 +863,8 @@ Budgets/reserves remain the configured task limits, never a map/color-scale maxi
 
 The complete search objective is metric path length + spatially integrated risk
 cost + local endpoint's Euclidean distance to the fixed task goal, once. Edge and
-start/terminal connector costs share half-voxel trapezoidal sampling. Full voxel
+start/terminal connector costs share quarter-voxel trapezoidal sampling, matching
+the fine actual-curve audit (half-voxel remains its numerical convergence comparison). Full voxel
 physical checks remain in addition to this cost quadrature. The heuristic is the
 minimum lattice metric distance + terminal connector lower bound + endpoint
 remaining distance; its old amplification is removed. A* retains the best complete
@@ -871,7 +872,26 @@ incumbent and waits for a lower-bound proof. Budget expiry returns an existing
 complete route as unproven; no complete route yields TIME_BUDGET. Changed advisory
 costs suppress an optimality claim. A stale physical geometry still rejects.
 Every actual candidate and release independently passes the original checks.
-Continuous risk retention by the actual curve remains C3 work, so C is unqualified.
+The same-guide independent audit now runs after optimization and retiming, before
+release. It reports actual/guide metric length, risk-cost integral, valid spatial
+coverage, frozen version and maximum sampled 3D distance to the guide. Its geometric corridor
+is the existing half-voxel fitting reserve plus a voxel circumsphere; this controls
+route retention and does not change physical clearance. Half/quarter-voxel spatial
+quadrature reports the change in both normalized integrals as numerical uncertainty.
+The frozen model cost is compared for finite multipliers at a single version,
+including the declared UNKNOWN multiplier 1.5. ON rejects an increased normalized
+actual model cost beyond that numerical uncertainty; OFF records the same raw audit
+without that preference gate. Separately, only complete VALID, finite, non-sentinel
+below-warning samples can support a valid-PL comparison; partial/unknown data never
+become a valid PL claim. Source contribution coverage is not yet available and must
+not be inferred from the valid-status spatial fraction.
+Both modes enforce route retention and use the original CurveCorrection slots for
+same-guide supporting-plane repair. A warning fallback admits warnings with its
+existing multiplier 3; it still must preserve that model-cost preference. Refine
+uses the same guide tracking weight as
+rebound. Every corrected candidate repeats dynamics/physical/release checks. No
+additional PL gradient or retry is added. C remains unqualified in real data until
+B and the new forest evidence satisfy the applicable requirements.
 
 Focused evidence: 31 A* cases, GridMap continuous/sentinel checks and planner
 six planner/feedback and 40 canonical-launch checks in
@@ -881,3 +901,14 @@ as correct physical rejections, not a server-switch defect. The two original
 meter-unit defects have retained red outputs in `channel_metric_red.log`.
 Legacy all-package CMake/style lint failures are recorded separately; CMake was
 not changed for this implementation.
+
+C3 regression policy distinguishes execution from route retention: the original
+weak-wall ON future-connection input can be physically legal yet exceed the guide
+corridor after the original search/fallback/retime slots are consumed; with the finer shared
+quadrature it can instead exhaust the unchanged search deadline before a complete
+guide exists. The nonlinear solver can also terminate with its recorded rounding-error code
+before the first ON commit; that remains a Curve rejection. These directly
+observed reasons are retained. Its rejection
+and unchanged executing trajectory are retained explicitly. The identical OFF
+physical fixture checks legal P/V/A server handoff. Neither fixture grants field
+acceptance; the original ON red is not discarded to improve success statistics.

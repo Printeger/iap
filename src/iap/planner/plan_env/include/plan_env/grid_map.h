@@ -154,6 +154,13 @@ struct GridPlanningRisk {
   double cost_multiplier = 1.5;
   uint64_t version = 0;
 };
+// Shared metric preference for search and same-guide curve audit. Warning
+// classes still require the existing explicit search fallback to be admitted.
+inline double gridAdvisoryCostMultiplier(GridAdvisoryClass classification, double multiplier) {
+  if(classification==GridAdvisoryClass::AVOID || classification==GridAdvisoryClass::PREDICTED_DEGRADED)
+    return 3.;
+  return std::isfinite(multiplier) ? std::max(1.,multiplier) : 1.5;
+}
 
 enum class GridExecutionReason : uint8_t {
   OK, OUT_OF_MAP, ENVIRONMENT_UNOBSERVED, ENVIRONMENT_STALE,

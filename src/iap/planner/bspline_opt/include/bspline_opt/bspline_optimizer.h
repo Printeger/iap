@@ -152,7 +152,22 @@ namespace ego_planner
     void strengthenGuideTracking() { guide_weight_ *= 2.0; }
     // Constrain violating actual samples toward the one existing legal guide.
     // This is a route preference; final physical/motion checks remain independent.
-    bool addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval);
+    bool addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval,
+                                 bool route_loss = false);
+    struct GuideRetention {
+      bool checked = false, budget_exhausted = false;
+      bool comparable_valid_risk = false, route_lost = false, risk_preference_lost = false;
+      bool comparable_model_cost = false;
+      uint64_t risk_version = 0;
+      double guide_length_m = 0, curve_length_m = 0;
+      double guide_risk_cost_m = 0, curve_risk_cost_m = 0;
+      double guide_valid_fraction = 0, curve_valid_fraction = 0;
+      double max_deviation_m = 0, corridor_m = 0, quadrature_uncertainty = 0;
+      size_t samples = 0;
+    };
+    // Diagnostic frozen raw Advisory in OFF and ON; this grants no physical authority.
+    GuideRetention assessGuideRetention(const Eigen::MatrixXd& points, double interval,
+        const std::function<GridPlanningRisk(const Eigen::Vector3d&)>& advisory) const;
     bool addCurveClearanceConstraints(const Eigen::MatrixXd& points, double interval,
         const std::vector<std::pair<double,GridPlanningCell>>& violations);
     bool curveViolates(const Eigen::MatrixXd& points, double interval) const;

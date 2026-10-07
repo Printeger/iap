@@ -261,7 +261,9 @@ std::optional<double> AStar::segmentCost(const Vector3d& from, const Vector3d& t
     // Complete edge physics is checked separately before advisory-only samples.
     const double length = (to - from).norm();
     const double resolution = frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution();
-    const int count = std::max(1, static_cast<int>(std::ceil(length / (resolution * .5))));
+    // Share the actual-curve audit's fine spatial scale, including short
+    // diagonal corner crossings that a half-voxel midpoint can miss.
+    const int count = std::max(1, static_cast<int>(std::ceil(length / (resolution * .25))));
     double sum = 0.;
     for (int i = 0; i <= count; ++i) {
         if (deadlineExpired()) return std::nullopt;
@@ -296,8 +298,7 @@ std::optional<double> AStar::segmentCost(const Vector3d& from, const Vector3d& t
             ++result_.rejected_advisory;
             return std::nullopt;
         }
-        const double multiplier = warning ? 3. : std::isfinite(cell.cost_multiplier)
-            ? std::max(1., cell.cost_multiplier) : 1.5;
+        const double multiplier = gridAdvisoryCostMultiplier(cell.advisory_class,cell.cost_multiplier);
         sum += (i == 0 || i == count ? .5 : 1.) * multiplier;
     }
     return length * sum / count;

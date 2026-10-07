@@ -109,6 +109,7 @@ namespace ego_planner
       size_t advisory_unknown_samples = 0;
       size_t sampled_points = 0;
       bool map_changed = false;
+      BsplineOptimizer::GuideRetention guide_retention;
       std::shared_ptr<const FrozenOccupancyEpoch> physical_epoch;
       uint64_t evaluated_generation = 0;
       uint8_t evaluated_motion_quality = 0;
@@ -236,6 +237,7 @@ namespace ego_planner
       Eigen::Vector3d first_physical_position = Eigen::Vector3d::Constant(NAN);
       double first_physical_time_s = std::numeric_limits<double>::quiet_NaN();
       std::vector<Eigen::Vector3d> guide; // Geometry owned by this candidate revision.
+      BsplineOptimizer::GuideRetention guide_retention;
     };
     // Opt-in evidence; exported by the existing bounded writer.
     std::vector<CurveStageEvidence> curve_stages_;

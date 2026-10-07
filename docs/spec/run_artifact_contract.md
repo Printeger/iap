@@ -237,3 +237,22 @@ exactly once. Unknown/sentinel values retain their status; raw HPL/VPL and versi
 are unchanged. Cost fields without a search are JSON null. A successful guide can
 be explicitly unproven; this field is not execution authorization. Historical cost
 fields before this contract used lattice-step units and must not be compared as metres.
+
+
+Curve stages and `final_check` append `guide_retention`: checked/budget status,
+original risk version, guide/actual metric length and risk costs, valid spatial
+fractions, maximum sampled 3D guide deviation, geometric corridor, quadrature uncertainty,
+route/risk loss and query count. `comparable_model_cost` separately describes stable finite model multipliers, including
+UNKNOWN 1.5; it can support preference repair without valid PL.
+`source_contribution_coverage` is explicitly `not_available` until the production
+source model supplies it. `comparable_valid_risk` describes numerical sample
+coverage only; it does not grant independently validated PL or source contribution
+qualification. `route_checked` belongs to the captured candidate revision. The
+attempt CSV includes the same metrics for successful and rejected candidates;
+a new geometry invalidates the preceding final assessment. Unchecked values have
+`checked=false`, and must not be interpreted as a zero-risk curve. Export continues
+through the existing bounded writer and shared resolver.
+
+`guide_retention.risk_version` is the first frozen model sample's version, including
+all-UNKNOWN input. Search and audit use `gridAdvisoryCostMultiplier` for the same
+warning/degraded fallback multiplier 3; raw PL/classification remain intact.

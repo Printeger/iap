@@ -1056,3 +1056,11 @@ Below-warning costs use `1+0.5r`; unknown uses 1.5. A* now reports metre-based
 length/risk/remaining-distance costs, includes both connectors and distinguishes
 proven optimum from an incumbent returned when the original budget expires.
 Actual-curve continuous risk retention and forest qualification remain in progress.
+
+
+实际曲线在优化及重定时后独立审计同一 guide 的三维偏离、米制连续风险成本、
+有效覆盖率及版本；OFF/ON 都记录 raw 诊断，ON 才施加连续风险偏好门。
+未知/失效/哨兵数据不授予 PL 米数资格；原 CurveCorrection 额度内修正仍须通过
+全部物理、动力学和发布检查。当前实施与现场结果见
+[四阶段进度](docs/dev_planner/curve_advisory_channel_progress.md)；真实预测和正式
+9＋9／六次配对尚未取得资格，默认参数不推广。

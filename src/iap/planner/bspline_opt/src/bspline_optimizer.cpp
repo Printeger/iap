@@ -155,7 +155,92 @@ namespace ego_planner
     return curve_clearance_constraints_.size()>previous;
   }
 
-  bool BsplineOptimizer::addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval) {
+  BsplineOptimizer::GuideRetention BsplineOptimizer::assessGuideRetention(
+      const Eigen::MatrixXd& points, double interval,
+      const std::function<GridPlanningRisk(const Eigen::Vector3d&)>& advisory) const {
+    GuideRetention result;
+    if (!grid_map_ || guide_pts_.size()<2 || points.rows()!=3 || points.cols()<7 ||
+        !points.allFinite() || !std::isfinite(interval) || interval<=0 || !advisory) return result;
+    UniformBspline curve(points,3,interval);
+    const double resolution=grid_map_->getResolution();
+    // Existing half-voxel fitting reserve plus the lattice cell's circumsphere.
+    // This bounds route displacement; it does not relax execution clearance.
+    result.corridor_m=(.5+std::sqrt(3.)/2)*resolution;
+    const double speed=curve.getDerivative().getControlPoint().colwise().norm().maxCoeff();
+    struct Integral { double length=0, risk=0, valid=0; bool all_valid=true, stable_cost=true; };
+    std::optional<uint64_t> model_version;
+    const auto integrate=[&](bool actual,double step) {
+      Integral integral;
+      if(budget_ && budget_->expired()) {result.budget_exhausted=true;return integral;}
+      const auto sample=[&](const Eigen::Vector3d& point) {
+        ++result.samples;
+        const auto value=advisory(point);
+        if(!model_version) {model_version=value.version;result.risk_version=value.version;}
+        if(value.version!=*model_version || !std::isfinite(value.cost_multiplier) ||
+           value.cost_multiplier<1) integral.stable_cost=false;
+        const bool valid=value.classification==GridAdvisoryClass::VALID &&
+            value.query_status==GridRiskStatus::VALID && value.version!=0 &&
+            std::isfinite(value.hpl) && std::isfinite(value.vpl) &&
+            value.hpl>=0 && value.vpl>=0 && value.hpl<1e9 && value.vpl<1e9 &&
+            std::isfinite(value.cost_multiplier) && value.cost_multiplier>=1;
+        if (!valid || value.version!=result.risk_version) integral.all_valid=false;
+        if(actual) {
+          double nearest=std::numeric_limits<double>::infinity();
+          for(size_t j=1;j<guide_pts_.size();++j) {
+            const Eigen::Vector3d edge=guide_pts_[j]-guide_pts_[j-1];
+            const double fraction=edge.squaredNorm()>1e-12 ? std::clamp(
+                (point-guide_pts_[j-1]).dot(edge)/edge.squaredNorm(),0.,1.) : 0.;
+            nearest=std::min(nearest,(point-guide_pts_[j-1]-fraction*edge).norm());
+          }
+          result.max_deviation_m=std::max(result.max_deviation_m,nearest);
+        }
+        return std::make_pair(gridAdvisoryCostMultiplier(value.classification,value.cost_multiplier)-1,
+            valid ? 1. : 0.);
+      };
+      Eigen::Vector3d previous=actual ? Eigen::Vector3d(curve.evaluateDeBoorT(0)) : guide_pts_.front();
+      auto previous_value=sample(previous);
+      const size_t edges=actual ? 1 : guide_pts_.size()-1;
+      for(size_t edge=0;edge<edges;++edge) {
+        const double measure=actual ? curve.getTimeSum()*speed :
+            (guide_pts_[edge+1]-guide_pts_[edge]).norm();
+        const size_t count=std::max<size_t>(1,std::ceil(measure/step));
+        for(size_t i=1;i<=count;++i) {
+          if(budget_ && budget_->expired()) {result.budget_exhausted=true;return integral;}
+          const double fraction=double(i)/count;
+          const Eigen::Vector3d point=actual ? Eigen::Vector3d(curve.evaluateDeBoorT(curve.getTimeSum()*fraction)) :
+              Eigen::Vector3d(guide_pts_[edge]+fraction*(guide_pts_[edge+1]-guide_pts_[edge]));
+          const auto value=sample(point);const double length=(point-previous).norm();
+          integral.length+=length;integral.risk+=length*.5*(previous_value.first+value.first);
+          integral.valid+=length*.5*(previous_value.second+value.second);
+          previous=point;previous_value=value;
+        }
+      }
+      return integral;
+    };
+    const auto guide_coarse=integrate(false,.5*resolution);
+    const auto actual_coarse=integrate(true,.5*resolution);
+    const auto guide=integrate(false,.25*resolution);
+    const auto actual=integrate(true,.25*resolution);
+    if(result.budget_exhausted) return result;
+    result.checked=true;result.guide_length_m=guide.length;result.curve_length_m=actual.length;
+    result.guide_risk_cost_m=guide.risk;result.curve_risk_cost_m=actual.risk;
+    result.guide_valid_fraction=guide.length>0 ? guide.valid/guide.length : 0;
+    result.curve_valid_fraction=actual.length>0 ? actual.valid/actual.length : 0;
+    const auto mean=[](const Integral& x) {return x.length>1e-9 ? x.risk/x.length : 0.;};
+    result.quadrature_uncertainty=std::abs(mean(guide)-mean(guide_coarse))+
+        std::abs(mean(actual)-mean(actual_coarse));
+    result.comparable_valid_risk=guide.all_valid && actual.all_valid && guide_coarse.all_valid &&
+        actual_coarse.all_valid && guide.length>1e-9 && actual.length>1e-9;
+    result.comparable_model_cost=guide.stable_cost && actual.stable_cost && guide_coarse.stable_cost &&
+        actual_coarse.stable_cost && guide.length>1e-9 && actual.length>1e-9;
+    result.route_lost=result.max_deviation_m>result.corridor_m+1e-6;
+    result.risk_preference_lost=result.comparable_model_cost &&
+        mean(actual)>mean(guide)+result.quadrature_uncertainty+1e-6;
+    return result;
+  }
+
+  bool BsplineOptimizer::addCurveGuideConstraints(const Eigen::MatrixXd& points, double interval,
+      bool route_loss) {
     if(!planning_query_ || guide_pts_.size()<2 || points.cols()<7 || !(interval>0)) return false;
     UniformBspline curve(points,3,interval);
     const size_t previous=curve_clearance_constraints_.size();
@@ -169,7 +254,7 @@ namespace ego_planner
       const bool preference=!planning_advisory_fallback_ &&
           (cell.advisory.classification==GridAdvisoryClass::AVOID ||
            cell.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED);
-      if(!physical_boundary && !preference) continue;
+      if(!physical_boundary && !preference && !route_loss) continue;
       Eigen::Vector3d nearest=position; double best=std::numeric_limits<double>::infinity();
       for(size_t j=1;j<guide_pts_.size();++j) {
         const Eigen::Vector3d segment=guide_pts_[j]-guide_pts_[j-1];
@@ -199,7 +284,7 @@ namespace ego_planner
       // advisory preferences. Each supporting guide point is independently
       // checked; this gradient grants no observation or execution authority.
       curve_clearance_constraints_.push_back({first,weights,position,direction,
-          std::sqrt(best)+(room?reserve:0.)});
+          std::sqrt(best)+(room && (!route_loss || preference || physical_boundary)?reserve:0.)});
     }
     return curve_clearance_constraints_.size()>previous;
   }
@@ -2356,10 +2441,10 @@ namespace ego_planner
     calcCurvePhysicalCost(cps_.points,f_physical,g_physical);
 
     /* ---------- convert to solver format...---------- */
-    f_combine = lambda1_ * f_smoothness + lambda4_ * f_fitness + lambda3_ * f_feasibility + lambda2_ * f_physical;
+    f_combine = lambda1_ * f_smoothness + lambda4_ * guide_weight_ * f_fitness + lambda3_ * f_feasibility + lambda2_ * f_physical;
     // printf("origin %f %f %f %f\n", f_smoothness, f_fitness, f_feasibility, f_combine);
 
-    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * g_fitness + lambda3_ * g_feasibility + lambda2_ * g_physical;
+    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * guide_weight_ * g_fitness + lambda3_ * g_feasibility + lambda2_ * g_physical;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
 

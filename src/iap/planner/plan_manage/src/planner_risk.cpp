@@ -570,7 +570,23 @@ void EGOPlannerManager::endPlanningView() {
       <<bspline_optimizer_->a_star_->lastResult().terminal_cost_m<<','
       <<bspline_optimizer_->a_star_->lastResult().optimality_proven<<','
       <<bspline_optimizer_->a_star_->lastResult().search_budget_exhausted<<','
-      <<bspline_optimizer_->a_star_->lastResult().advisory_changed<<'\n'; planning_metrics_.flush();
+      <<bspline_optimizer_->a_star_->lastResult().advisory_changed<<','
+      <<last_candidate_assessment_.guide_retention.checked<<','
+      <<last_candidate_assessment_.guide_retention.guide_length_m<<','
+      <<last_candidate_assessment_.guide_retention.curve_length_m<<','
+      <<last_candidate_assessment_.guide_retention.guide_risk_cost_m<<','
+      <<last_candidate_assessment_.guide_retention.curve_risk_cost_m<<','
+      <<last_candidate_assessment_.guide_retention.guide_valid_fraction<<','
+      <<last_candidate_assessment_.guide_retention.curve_valid_fraction<<','
+      <<last_candidate_assessment_.guide_retention.max_deviation_m<<','
+      <<last_candidate_assessment_.guide_retention.corridor_m<<','
+      <<last_candidate_assessment_.guide_retention.risk_version<<','
+      <<last_candidate_assessment_.guide_retention.comparable_valid_risk<<','
+      <<last_candidate_assessment_.guide_retention.route_lost<<','
+      <<last_candidate_assessment_.guide_retention.risk_preference_lost<<','
+      <<last_candidate_assessment_.guide_retention.quadrature_uncertainty<<','
+      <<last_candidate_assessment_.guide_retention.samples<<','
+      <<last_candidate_assessment_.guide_retention.comparable_model_cost<<'\n'; planning_metrics_.flush();
   }
   planning_view_.reset();
 }
@@ -753,7 +769,7 @@ void EGOPlannerManager::initPredictionExport() {
   if (const auto log=glim::RunLogManager::get_if_initialized(); log && std::filesystem::exists(log->run_dir())) {
     const auto name="planner_flow_"+std::to_string(getpid());
     planning_metrics_.open(log->profiling_path(name+".csv"));
-    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id,search_path_cost_m,search_path_length_m,search_risk_cost_m,search_terminal_cost_m,search_optimality_proven,search_budget_exhausted,search_advisory_changed\n";
+    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id,search_path_cost_m,search_path_length_m,search_risk_cost_m,search_terminal_cost_m,search_optimality_proven,search_budget_exhausted,search_advisory_changed,route_checked,guide_length_m,curve_length_m,guide_risk_cost_m,curve_risk_cost_m,guide_valid_fraction,curve_valid_fraction,max_guide_deviation_m,guide_corridor_m,route_risk_version,route_comparable_valid_risk,route_lost,continuous_risk_preference_lost,route_quadrature_uncertainty,route_samples,route_comparable_model_cost\n";
     export_metrics_.open(log->profiling_path(name+"_export.csv"));
     export_metrics_<<"reference_time,generation,total_s,payload_bytes,predictor_queries_before,predictor_queries_after\n";
     std::ofstream manifest(log->metadata_path("manifests/"+name+".json"));

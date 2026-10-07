@@ -110,6 +110,9 @@ struct EGOPlannerManagerTestAccess {
   static iap::IntegritySnapshot snapshot(const EGOPlannerManager& manager, double now) {
     return manager.capturePredictionSnapshot(now);
   }
+  static BsplineOptimizer::GuideRetention retention(const EGOPlannerManager& manager) {return manager.last_candidate_assessment_.guide_retention;}
+  static std::optional<int> solverResult(const EGOPlannerManager& manager) {return manager.bspline_optimizer_->lastOptimizationResult();}
+  static bool solverNormal(const EGOPlannerManager& manager) {return manager.bspline_optimizer_->lastOptimizationTerminatedNormally();}
   static size_t advisoryQueries(const EGOPlannerManager& manager) { return manager.planning_view_->advisory_stats.queries; }
   static void injectAdvisory(EGOPlannerManager& manager) {
     manager.planning_view_->advisory_query=[](const Eigen::Vector3d& p) {
@@ -1534,7 +1537,10 @@ TEST(EgoBaseline, AdvisoryPriorToggleSharesExportAndPreservesMotionAuthority) {
 }
 
 TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
-  auto node=makeNode(true);
+  // Preserve the original ON input as a bounded rejection regression. OFF
+  // isolates the same physical/connection path without consuming fallback slots.
+  for(bool guidance : {false,true}) {
+  auto node=makeNode(true,1.,false,guidance);
   // Deterministic frozen-input CPU regression. Steady-clock search/repair
   // budgets remain active; online sensor freshness needs separate live testing.
   ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
@@ -1555,10 +1561,25 @@ TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
   const auto id=manager.local_data_.traj_id_;
   ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
   ASSERT_TRUE(manager.beginPlanningView());
-  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+  const bool first=manager.reboundReplan(start,zero,zero,goal,zero,true,false);
+  if(guidance && !first) {
+    // Do not force a correctly rejected ON route through the original quota.
+    if(manager.lastPlanFailure()==ego_planner::EGOPlannerManager::PlanFailure::Search)
+      EXPECT_EQ(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager).failure,AStar::Failure::TIME_BUDGET);
+    else if(manager.lastPlanFailure()==ego_planner::EGOPlannerManager::PlanFailure::Budget)
+      EXPECT_TRUE(manager.planningBudget()->expired() || manager.planningBudget()->denied());
+    else {
+      EXPECT_EQ(manager.lastPlanFailure(),ego_planner::EGOPlannerManager::PlanFailure::Curve);
+      EXPECT_TRUE(ego_planner::EGOPlannerManagerTestAccess::solverResult(manager).has_value());
+      EXPECT_FALSE(ego_planner::EGOPlannerManagerTestAccess::solverNormal(manager));
+    }
+    EXPECT_EQ(manager.local_data_.traj_id_,id);EXPECT_FALSE(manager.hasPendingTrajectory());
+    manager.endPlanningView();continue;
+  }
+  ASSERT_TRUE(first);
   ASSERT_GT(manager.local_data_.traj_id_,id);
   ASSERT_TRUE(manager.publicationStillTimely());
-  const auto predecessor=manager.local_data_;
+  auto predecessor=manager.local_data_;
   manager.observeExecutingTrajectory(predecessor.traj_id_);
   manager.endPlanningView();
   const auto connection=node->now()+rclcpp::Duration::from_seconds(1.6);
@@ -1568,7 +1589,26 @@ TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
   const auto acceleration=manager.local_data_.acceleration_traj_.evaluateDeBoorT(t);
   ASSERT_TRUE(manager.beginPlanningView());
   manager.setPlanningConnection(connection,predecessor.traj_id_);
-  ASSERT_TRUE(manager.reboundReplan(position,velocity,acceleration,goal,zero,false,false));
+  const bool connected=manager.reboundReplan(position,velocity,acceleration,goal,zero,false,false);
+  const auto retention=ego_planner::EGOPlannerManagerTestAccess::retention(manager);
+  if(guidance) {
+    EXPECT_FALSE(connected);
+    if(manager.lastPlanFailure()==ego_planner::EGOPlannerManager::PlanFailure::Search) {
+      // The finer shared quadrature may exhaust the unchanged one-second
+      // fallback search before it has any complete route on this input.
+      EXPECT_EQ(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(manager).failure,AStar::Failure::TIME_BUDGET);
+    } else {
+      EXPECT_EQ(manager.lastPlanFailure(),ego_planner::EGOPlannerManager::PlanFailure::Budget);
+      EXPECT_TRUE(retention.route_lost);EXPECT_TRUE(manager.planningBudget()->denied());
+    }
+    EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);EXPECT_FALSE(manager.hasPendingTrajectory());
+    EXPECT_TRUE(manager.local_data_.position_traj_.getControlPoint().isApprox(predecessor.position_traj_.getControlPoint(),0.));
+    manager.endPlanningView();continue;
+  }
+  ASSERT_TRUE(connected) << "phase=" << int(manager.lastPlanFailure()) << " deviation=" << retention.max_deviation_m
+      << " corridor=" << retention.corridor_m << " route_lost=" << retention.route_lost
+      << " checked=" << retention.checked << " budget=" << manager.planningBudget()->expired()
+      << " denied=" << manager.planningBudget()->denied();
   ASSERT_TRUE(manager.hasPendingTrajectory());
   ASSERT_TRUE(manager.publicationStillTimely());
   auto successor=manager.publicationTrajectory();
@@ -1579,6 +1619,7 @@ TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
   EXPECT_EQ(manager.local_data_.traj_id_,successor.traj_id_);
   EXPECT_FALSE(manager.hasPendingTrajectory());
   manager.endPlanningView();
+  }
 }
 
 TEST(EgoBaseline, ConcurrentReadOnlyAndPlanningFreezeShareOneEpoch) {
@@ -1650,7 +1691,12 @@ TEST(EgoBaseline, GuidanceSwitchRetainsPredictionAndPhysicalAuthorization) {
       EXPECT_GT(search.advisory_refresh_calls,0u);
       EXPECT_GT(search.rejected_advisory,0u);
     }
-    ASSERT_TRUE(manager.reboundReplan(start,zero,zero,goal,zero,true,false));
+    const bool published=manager.reboundReplan(start,zero,zero,goal,zero,true,false);
+    const auto retention=ego_planner::EGOPlannerManagerTestAccess::retention(manager);
+    ASSERT_TRUE(published) << "guidance=" << enabled << " phase=" << int(manager.lastPlanFailure())
+        << " deviation=" << retention.max_deviation_m << " route_lost=" << retention.route_lost
+        << " model_lost=" << retention.risk_preference_lost << " guide_cost=" << retention.guide_risk_cost_m
+        << " actual_cost=" << retention.curve_risk_cost_m;
     ASSERT_TRUE(manager.publicationStillTimely());
     double detour=0;
     auto curve=manager.publicationTrajectory().position_traj_;
@@ -1808,4 +1854,108 @@ TEST(EgoBaseline, SidewaysEndpointDoesNotRequireReferenceProgress) {
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
   manager->reboundReplan(start,zero,zero,targets.front(),zero,true,false);
   EXPECT_TRUE(ego_planner::EGOPlannerManagerTestAccess::lastSearchResult(*manager).pool_center.isApprox(center,1e-9));
+}
+
+
+TEST(EgoBaseline, ContinuousBelowWarningCurveRiskLossIsIndependentOfCorridorLoss) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  Eigen::MatrixXd q(3,12);for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  ego_planner::UniformBspline curve(q,3,.4);
+  const auto start=curve.evaluateDeBoorT(0),end=curve.evaluateDeBoorT(curve.getTimeSum());
+  optimizer.setControlPoints(q);optimizer.setGuidePath({start,Eigen::Vector3d(-.8,.2,1),Eigen::Vector3d(.8,.2,1),end});
+  const auto risk=[](const Eigen::Vector3d& p) {
+    GridPlanningRisk value;value.query_status=GridRiskStatus::VALID;value.classification=GridAdvisoryClass::VALID;
+    value.version=7;value.hpl=std::abs(p.x())<.75 && std::abs(p.y())<.1 ? .3 : .05;
+    value.vpl=.05;value.cost_multiplier=1+.5*std::max((value.hpl+.1)/.55,(value.vpl+.1)/.60);return value;
+  };
+  const auto result=optimizer.assessGuideRetention(q,.4,risk);
+  ASSERT_TRUE(result.checked);ASSERT_TRUE(result.comparable_valid_risk);
+  EXPECT_FALSE(result.route_lost);EXPECT_TRUE(result.risk_preference_lost);
+  EXPECT_GT(result.curve_risk_cost_m/result.curve_length_m,result.guide_risk_cost_m/result.guide_length_m);
+  EXPECT_EQ(result.risk_version,7u);EXPECT_NEAR(result.curve_valid_fraction,1.,1e-12);
+  const auto unknown=optimizer.assessGuideRetention(q,.4,[&](const Eigen::Vector3d& p) {
+    auto r=risk(p);if(std::abs(p.x())<.75 && std::abs(p.y())<.1) {
+      r.classification=GridAdvisoryClass::UNKNOWN;r.query_status=GridRiskStatus::UNCOMPUTED;
+      r.hpl=r.vpl=std::numeric_limits<double>::quiet_NaN();r.cost_multiplier=1.5;
+    }return r;
+  });
+  EXPECT_TRUE(unknown.comparable_model_cost);EXPECT_FALSE(unknown.comparable_valid_risk);
+  EXPECT_TRUE(unknown.risk_preference_lost);EXPECT_LT(unknown.curve_valid_fraction,1.);
+
+  // The gate sees a genuine loss of below-warning preference, with all physical samples legal.
+  optimizer.setPlanningQuery([&](const Eigen::Vector3d& p) {GridPlanningCell c;c.execution_reason=GridExecutionReason::OK;c.advisory=risk(p);return c;});
+  optimizer.setControlPoints(q);optimizer.setGuidePath({start,Eigen::Vector3d(-.8,.2,1),Eigen::Vector3d(.8,.2,1),end});
+  optimizer.initializeFromGuide(q);
+  ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);optimizer.setDroneId(0);
+  optimizer.setLocalTargetPt(end);optimizer.a_star_=std::make_shared<AStar>();
+  auto budget=std::make_shared<PlanningBudget>();optimizer.setPlanningBudget(budget);
+  for(int correction=0;correction<2;++correction) {
+    const auto current=optimizer.assessGuideRetention(q,.4,risk);
+    if(!current.route_lost && !current.risk_preference_lost) break;
+    ASSERT_TRUE(budget->tryRepair(PlanningBudget::Repair::CurveCorrection));
+    optimizer.strengthenGuideTracking();ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,.4,true));
+    ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,.4));
+  }
+  const auto repaired=optimizer.assessGuideRetention(q,.4,risk);
+  EXPECT_FALSE(repaired.route_lost);EXPECT_FALSE(repaired.risk_preference_lost);
+  EXPECT_TRUE(repaired.comparable_valid_risk);
+  const auto retimed=optimizer.assessGuideRetention(q,.9,risk);
+  EXPECT_FALSE(retimed.route_lost);EXPECT_FALSE(retimed.risk_preference_lost);
+  EXPECT_NEAR(retimed.curve_risk_cost_m,repaired.curve_risk_cost_m,1e-10);
+  ego_planner::UniformBspline actual(q,3,.9);actual.setPhysicalLimits(2.,4.,0.);
+  double ratio;EXPECT_TRUE(actual.checkFeasibility(ratio,false));
+  for(double t=0;t<=actual.getTimeSum();t+=.02) EXPECT_TRUE(actual.evaluateDeBoorT(t).allFinite());
+}
+
+TEST(EgoBaseline, UnknownRiskStillReportsLostGuideAndSentinelHasNoValidCoverage) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  Eigen::MatrixXd q(3,12);for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  ego_planner::UniformBspline curve(q,3,.4);optimizer.setControlPoints(q);
+  optimizer.setGuidePath({curve.evaluateDeBoorT(0),Eigen::Vector3d(-.8,.8,1),Eigen::Vector3d(.8,.8,1),curve.evaluateDeBoorT(curve.getTimeSum())});
+  auto result=optimizer.assessGuideRetention(q,.4,[](const auto&) {return GridPlanningRisk{};});
+  EXPECT_TRUE(result.checked);EXPECT_TRUE(result.route_lost);
+  EXPECT_FALSE(result.comparable_valid_risk);EXPECT_FALSE(result.risk_preference_lost);
+  EXPECT_EQ(result.curve_valid_fraction,0.);EXPECT_NEAR(result.curve_risk_cost_m,.5*result.curve_length_m,1e-12);
+  const auto unknown_version=optimizer.assessGuideRetention(q,.4,[](const auto&) {GridPlanningRisk r;r.version=17;return r;});
+  EXPECT_EQ(unknown_version.risk_version,17u);EXPECT_TRUE(unknown_version.comparable_model_cost);
+  EXPECT_FALSE(unknown_version.comparable_valid_risk);
+  const auto fallback=optimizer.assessGuideRetention(q,.4,[](const auto&) {GridPlanningRisk r;r.version=19;
+    r.classification=GridAdvisoryClass::AVOID;r.cost_multiplier=1.;return r;});
+  EXPECT_TRUE(fallback.comparable_model_cost);EXPECT_FALSE(fallback.comparable_valid_risk);
+  EXPECT_NEAR(fallback.curve_risk_cost_m,2.*fallback.curve_length_m,1e-12);
+
+  result=optimizer.assessGuideRetention(q,.4,[](const auto&) {GridPlanningRisk r;r.query_status=GridRiskStatus::VALID;
+    r.classification=GridAdvisoryClass::VALID;r.hpl=1e9;r.vpl=.1;r.version=7;return r;});
+  EXPECT_FALSE(result.comparable_valid_risk);EXPECT_EQ(result.curve_valid_fraction,0.);
+}
+
+TEST(EgoBaseline, RetimeKeepsSpatialGuideMetricsAndCannotRenewRiskVersion) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  Eigen::MatrixXd q(3,12);for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  ego_planner::UniformBspline curve(q,3,.4);optimizer.setControlPoints(q);
+  optimizer.setGuidePath({curve.evaluateDeBoorT(0),curve.evaluateDeBoorT(curve.getTimeSum())});
+  const auto risk=[](const auto&) {GridPlanningRisk r;r.query_status=GridRiskStatus::VALID;
+    r.classification=GridAdvisoryClass::VALID;r.hpl=r.vpl=.1;r.version=9;r.cost_multiplier=1.2;return r;};
+  const auto before=optimizer.assessGuideRetention(q,.4,risk),after=optimizer.assessGuideRetention(q,.9,risk);
+  EXPECT_TRUE(before.comparable_valid_risk);EXPECT_FALSE(after.route_lost);EXPECT_FALSE(after.risk_preference_lost);
+  EXPECT_EQ(before.risk_version,after.risk_version);EXPECT_NEAR(before.curve_length_m,after.curve_length_m,1e-12);
+  EXPECT_NEAR(before.curve_risk_cost_m,after.curve_risk_cost_m,1e-12);
+  auto changed=optimizer.assessGuideRetention(q,.4,[&](const Eigen::Vector3d& p) {auto r=risk(p);if(p.x()>0) r.version=10;return r;});
+  EXPECT_FALSE(changed.comparable_valid_risk);
+  auto stale=optimizer.assessGuideRetention(q,.4,[&](const auto& p) {auto r=risk(p);r.query_status=GridRiskStatus::STALE;return r;});
+  EXPECT_FALSE(stale.comparable_valid_risk);EXPECT_EQ(stale.curve_valid_fraction,0.);
+}
+
+TEST(EgoBaseline, RouteAssessmentStopsAtOriginalSharedDeadline) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  optimizer.a_star_=std::make_shared<AStar>();optimizer.setPlanningBudget(std::make_shared<PlanningBudget>(0.));
+  Eigen::MatrixXd q(3,12);for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  optimizer.setControlPoints(q);optimizer.setGuidePath({Eigen::Vector3d(-2,0,1),Eigen::Vector3d(2,0,1)});
+  const auto result=optimizer.assessGuideRetention(q,.4,[](const auto&) {return GridPlanningRisk{};});
+  EXPECT_TRUE(result.budget_exhausted);EXPECT_FALSE(result.checked);EXPECT_FALSE(result.comparable_valid_risk);
+  EXPECT_LE(result.samples,4u);
 }

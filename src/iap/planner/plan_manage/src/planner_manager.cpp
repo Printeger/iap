@@ -39,6 +39,7 @@ namespace ego_planner
         feasibility_ratio};
     evidence.guide=bspline_optimizer_->recoveryGuide();
     if(assessment) {
+      evidence.guide_retention=assessment->guide_retention;
       evidence.physical_checked=true; evidence.physical_reason=assessment->execution_reason;
       evidence.first_physical_position=assessment->first_execution_position;
       evidence.first_physical_time_s=assessment->first_execution_time_s;
@@ -147,6 +148,27 @@ namespace ego_planner
     const auto vector = [&number](const Eigen::Vector3d& value) {
       return "[" + number(value.x()) + "," + number(value.y()) +
           "," + number(value.z()) + "]";
+    };
+    const auto retention = [&](const BsplineOptimizer::GuideRetention& value) {
+      std::ostringstream out;
+      out << "{\"source_contribution_coverage\":\"not_available\",\"checked\":" << (value.checked ? "true" : "false")
+          << ",\"budget_exhausted\":" << (value.budget_exhausted ? "true" : "false")
+          << ",\"comparable_valid_risk\":" << (value.comparable_valid_risk ? "true" : "false")
+          << ",\"comparable_model_cost\":" << (value.comparable_model_cost ? "true" : "false")
+          << ",\"risk_version\":" << value.risk_version
+          << ",\"guide_length_m\":" << number(value.guide_length_m)
+          << ",\"curve_length_m\":" << number(value.curve_length_m)
+          << ",\"guide_risk_cost_m\":" << number(value.guide_risk_cost_m)
+          << ",\"curve_risk_cost_m\":" << number(value.curve_risk_cost_m)
+          << ",\"guide_valid_fraction\":" << number(value.guide_valid_fraction)
+          << ",\"curve_valid_fraction\":" << number(value.curve_valid_fraction)
+          << ",\"max_deviation_m\":" << number(value.max_deviation_m)
+          << ",\"corridor_m\":" << number(value.corridor_m)
+          << ",\"quadrature_uncertainty\":" << number(value.quadrature_uncertainty)
+          << ",\"route_lost\":" << (value.route_lost ? "true" : "false")
+          << ",\"risk_preference_lost\":" << (value.risk_preference_lost ? "true" : "false")
+          << ",\"samples\":" << value.samples << '}';
+      return out.str();
     };
     try {
       if (std::filesystem::exists(directory)) {
@@ -474,11 +496,12 @@ namespace ego_planner
         for(int i=0;i<knots.size();++i) metadata << (i ? "," : "") << number(knots[i]);
         metadata << "],\"guide_m\":[";
         for(size_t i=0;i<evidence.guide.size();++i) metadata << (i ? "," : "") << vector(evidence.guide[i]);
-        metadata << "]}";
+        metadata << "],\"guide_retention\":" << retention(evidence.guide_retention) << '}';
       }
       metadata << "],\n  \"final_check\": ";
       if(final_check) {
         metadata << "{\"execution_reason\":" << std::quoted(gridExecutionReasonName(final_check->execution_reason))
+          << ",\"guide_retention\":" << retention(final_check->guide_retention)
           << ",\"generation\":" << final_check->evaluated_generation
           << ",\"evaluation_time_s\":" << number(final_check->evaluation_time_s)
           << ",\"first_position_m\":" << vector(final_check->first_execution_position)
@@ -1061,15 +1084,22 @@ namespace ego_planner
       const auto check_start=PlanningBudget::Clock::now();
       assessment=assessTrajectory(curve,planning_view_->risk_version,planning_view_->time_s,
           false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
+      assessment.guide_retention=optimizer.assessGuideRetention(control,interval,
+          [this](const Eigen::Vector3d& p) {return queryPlanningViewAdvisory(p);});
+      assessment.budget_exhausted=assessment.budget_exhausted || assessment.guide_retention.budget_exhausted;
+      recordCurveStage("route_checked",control,interval,selected,NAN,&assessment);
       planning_timings_.final_checks_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-check_start).count();
       last_candidate_assessment_=assessment;
       if(capture_failure_map_) failed_candidate_curve_=curve;
       if(assessment.budget_exhausted) return fail(PlanFailure::Budget);
+      if(!assessment.guide_retention.checked) return fail(PlanFailure::Curve);
       // Terminal speed is rechecked after optimization against the same input.
       if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6)
         return fail(PlanFailure::Target);
       const bool advisory_violation=advisory_guidance_enabled_ && assessment.advisory_avoid_samples && !optimizer.advisoryFallbackUsed();
-      if(assessment.executable() && !advisory_violation) break;
+      const bool route_loss=assessment.guide_retention.route_lost ||
+          (advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
+      if(assessment.executable() && !advisory_violation && !route_loss) break;
       if(!assessment.executable() && assessment.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
           assessment.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
           assessment.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
@@ -1081,6 +1111,7 @@ namespace ego_planner
         if(!optimizer.searchRecoveryGuide() || !initialize_guide()) return fail(PlanFailure::Search);
       } else {
         if(!planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) return fail(PlanFailure::Budget);
+        if(route_loss) optimizer.strengthenGuideTracking();
         if(!assessment.curve_clearance_violations.empty()) {
           if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations)) {
             if(shorten_target()) continue;
@@ -1089,11 +1120,11 @@ namespace ego_planner
           RCLCPP_INFO(node_->get_logger(),"Curve correction: %zu actual clearance violations, fitting reserve=%.3fm",
               assessment.curve_clearance_violations.size(),.5*grid_map_->getResolution());
           optimizer.setControlPoints(control);
-        } else if((advisory_violation || assessment.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
-            assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) && optimizer.addCurveGuideConstraints(control,interval)) {
+        } else if((route_loss || advisory_violation || assessment.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
+            assessment.execution_reason==GridExecutionReason::OUT_OF_MAP) && optimizer.addCurveGuideConstraints(control,interval,route_loss)) {
           optimizer.setControlPoints(control);
         } else {
-          optimizer.strengthenGuideTracking();
+          if(!route_loss) optimizer.strengthenGuideTracking();
           optimizer.initializeFromGuide(control);
         }
       }

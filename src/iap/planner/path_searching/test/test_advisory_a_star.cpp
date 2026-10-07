@@ -682,3 +682,19 @@ TEST(AdvisoryAStar, SharedGoalVoxelMatchesIndependentOneDimensionalCost) {
   EXPECT_NEAR(search.lastResult().terminal_cost_m, 1.77, 1e-12);
   EXPECT_TRUE(search.lastResult().optimality_proven);
 }
+
+
+TEST(AdvisoryAStar, FineCornerIntegralRejectsWarningBetweenOldHalfVoxelSamples) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(8,8,8));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell c;c.execution_reason=std::abs(p.x()-p.y())<1e-8 &&
+        p.x()>-1e-8 && p.x()<.10000001 && std::abs(p.z()-1)<.06 ?
+        GridExecutionReason::OK : GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+    c.advisory.classification=p.x()>.012 && p.x()<.020 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    c.advisory.cost_multiplier=c.advisory.classification==GridAdvisoryClass::AVOID ? 3. : 1.;return c;
+  });
+  EXPECT_FALSE(search.AstarSearch(.1,Eigen::Vector3d(0,0,1),Eigen::Vector3d(.1,.1,1),-1,Eigen::Vector3d(0,0,1)));
+  EXPECT_GT(search.lastResult().rejected_advisory,0u);
+  EXPECT_TRUE(search.getPath().empty());
+}
