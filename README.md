@@ -890,3 +890,19 @@ ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 advis
 分阶段报告由 `advisory_staged_report.py --campaign <A/B label> --label <new report label>`
 生成，保存原始链接、矩阵、来源审计、数值与采样检查，以及绑定源码/二进制的
 测试证据。受阻项目明确为 INCONCLUSIVE，不自动推广默认校准参数。
+
+### Advisory 坐标与现场证据
+
+后验代理默认关闭。真实输入 v5 保存优化后的坐标链，缺少 GNSS 坐标证明时
+仍允许合法 LiDAR 诊断；当前运动质量与实际曲线发布条件独立生效。
+在已提交、干净工作树及 GPU 预检通过后启动：
+
+```bash
+ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 \
+  start_rviz:=false advisory_posterior_prior:=false capture_failure_map:=true
+```
+
+录制器采用该启动分配的 `IAP_RUN_DIR`，不能自行新建现场运行。
+使用 `advisory_validation.py record` 保存完整输入，`replay` 查询原时刻；
+`advisory_coordinate_evidence.py --input <重放的input.json> --record <原始record.json> --label <名称>`
+核验实际转换，输出位于该 run 的 `export/analysis/advisory_validation/coordinates/`。

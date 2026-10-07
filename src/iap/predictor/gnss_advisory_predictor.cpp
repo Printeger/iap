@@ -83,6 +83,8 @@ std::size_t receiver_epoch_identity(const GnssEpoch& epoch) {
   const auto combine = [&seed](const std::size_t value) {
     seed ^= value + 0x9e3779b9u + (seed << 6) + (seed >> 2);
   };
+  for(double value:epoch.R_query_enu.reshaped()) combine(std::hash<double>{}(value));
+  for(double value:epoch.antenna_offset_query) combine(std::hash<double>{}(value));
   for (const auto& sat : epoch.sats) {
     combine(std::hash<int>{}(sat.sat_id));
     combine(std::hash<bool>{}(sat.excluded));
@@ -356,6 +358,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
          std::cos(sat.elevation) * std::cos(sat.azimuth),
          std::sin(sat.elevation),
          1.0;
+    g.head<3>() = epoch.R_query_enu * g.head<3>().eval();
     const double sigma = std::max(sat.pr_sigma, 0.01);
     h_full += (1.0 / (sigma * sigma)) * (g * g.transpose());
   }

@@ -494,6 +494,23 @@ PredictorAdmission PredictorModule::admission(const PredictorQueryInput& input) 
          s.current.gnss_epoch_identity != gnss_epoch_identity(s.gnss_epoch,s.current.excluded_prns)))
       out.gnss_reason = "gnss_anchor_inconsistent";
   }
+  if(out.gnss_reason.empty() && s.require_coordinates) {
+    out.gnss_reason=s.coordinates.rejection();
+    if(out.gnss_reason.empty() &&
+       (s.coordinates.frame_id!=s.current.estimation_frame_id ||
+        std::abs(s.coordinates.stamp-s.current.stamp)>1e-6 ||
+        std::abs(s.coordinates.stamp-s.pose_stamp)>1e-6 ||
+        ((s.coordinates.T_map_world*s.coordinates.T_world_imu).topRightCorner<3,1>()-s.p_wb).norm()>1e-6 ||
+        ((s.coordinates.T_map_world*s.coordinates.T_world_imu).topLeftCorner<3,3>()-s.q_wb.normalized().toRotationMatrix()).norm()>1e-6 ||
+        s.coordinates.epoch_source_identity!=s.gnss_epoch.source_identity ||
+        s.coordinates.map_frame!=input.frame_id ||
+        (s.gnss_epoch.R_query_enu-s.coordinates.R_map_enu()).norm()>1e-9 ||
+        (s.gnss_epoch.antenna_offset_query-s.coordinates.antenna_offset_map()).norm()>1e-9))
+      out.gnss_reason="gnss_coordinate_identity_mismatch";
+  }
+  if(out.gnss_reason.empty() && s.require_coordinates && params_.fusion.conservative_max_with_gnss &&
+     (s.coordinates.R_map_enu()*Eigen::Vector3d::UnitZ()-Eigen::Vector3d::UnitZ()).norm()>1e-9)
+    out.gnss_reason="gnss_legacy_floor_frame_incompatible";
   if(out.gnss_reason.empty() && !std::isnan(input.gnss_map_support_stamp_s) &&
      age_exceeds(now,input.gnss_map_support_stamp_s,input.lidar_support_max_age_s))
     out.gnss_reason="stale_gnss_map_support";
@@ -837,6 +854,13 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
         (!input.snapshot.has_epoch || std::isfinite(gnss_epoch_stamp));
     std::size_t source_identity=gnss_epoch_identity(input.snapshot.gnss_epoch,input.snapshot.current.excluded_prns);
     const auto mix=[&](double value) {source_identity ^= std::hash<double>{}(value)+0x9e3779b9u+(source_identity<<6)+(source_identity>>2);};
+    for(double value:input.snapshot.gnss_epoch.R_query_enu.reshaped()) mix(value);
+    for(double value:input.snapshot.gnss_epoch.antenna_offset_query) mix(value);
+    mix(double(input.snapshot.require_coordinates));
+    mix(double(input.snapshot.coordinates.valid));
+    mix(double(input.snapshot.coordinates.frame_id));
+    source_identity ^= std::hash<uint64_t>{}(input.snapshot.coordinates.identity());
+    for(const auto& sat:input.snapshot.gnss_epoch.sats) {mix(sat.azimuth);mix(sat.elevation);mix(sat.pr_sigma);}
     const auto& current=input.snapshot.current;
     for(double value:{double(current.valid),double(current.gnss_valid),
         current.gnss_epoch_stamp,current.icp_rmse,current.icp_condition,current.icp_gamma_lidar,

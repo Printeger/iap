@@ -52,6 +52,9 @@ struct SatObs {
 
 /// @brief All per-satellite observations at one GNSS epoch.
 struct GnssEpoch {
+  // Advisory-only geometry projection; immutable measurement identity excludes it.
+  Eigen::Matrix3d R_query_enu = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d antenna_offset_query = Eigen::Vector3d::Zero();
   double stamp    = 0.0;           ///< UTC ROS timestamp [s]
   double gps_sec  = 0.0;           ///< GPS time [s since GPS epoch] — for iono/trop models
   std::vector<SatObs>    sats;     ///< per-satellite channels

@@ -119,6 +119,8 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o << "{\"schema\":\"iap_advisory_frozen_metadata_v1\",\"reference_time_s\":"; number(o,in.reference_time_s);
   o << ",\"recording_codec_version\":"<<in.recording_codec_version;
   o << ",\"pose_stamp\":"; number(o,s.pose_stamp);
+  o << ",\"estimation_frame_id\":"<<s.current.estimation_frame_id;
+  o << ",\"epoch_source_identity\":"<<s.gnss_epoch.source_identity;
   o << ",\"current_stamp\":"; number(o,s.current.stamp);
   o << ",\"snapshot_stamp\":"; number(o,s.stamp);
   o << ",\"gnss_stamp\":"; number(o,s.gnss_epoch.stamp);
@@ -135,11 +137,37 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o << ",\"gnss_epoch_policy\":" << static_cast<int>(in.params.gnss_epoch_policy);
   o << ",\"gnss_sigma\": [";
   for(size_t i=0;i<s.gnss_epoch.sats.size();++i) {if(i)o<<',';number(o,s.gnss_epoch.sats[i].pr_sigma);} o<<']';
+  o<<",\"gps_sec\":";number(o,s.gnss_epoch.gps_sec);
+  o<<",\"gnss_satellites\":[";
+  for(size_t i=0;i<s.gnss_epoch.sats.size();++i) {
+    if(i)o<<',';const auto& sat=s.gnss_epoch.sats[i];
+    o<<"{\"id\":"<<sat.sat_id<<",\"ecef\":";array(o,sat.sat_pos);
+    o<<",\"azimuth\":";number(o,sat.azimuth);o<<",\"elevation\":";number(o,sat.elevation);
+    o<<",\"nominal_sigma_m\":";number(o,sat.pr_sigma);
+    o<<",\"measurement_residual_available\":false";
+    o<<",\"excluded\":"<<(sat.excluded?"true":"false")<<"}";
+  }o<<']';
   o << ",\"excluded_prns\": [";
   for(size_t i=0;i<s.current.excluded_prns.size();++i) {if(i)o<<',';o<<s.current.excluded_prns[i];} o<<']';
   o << ",\"lidar_sigma\":";number(o,in.params.lidar.fim_params.fim_range_sigma_base);
   o << ",\"conservative_max_with_gnss\":" << (in.params.fusion.conservative_max_with_gnss?"true":"false");
   o << ",\"parameter_authority\":\"complete serialized PredictorParams in input.bin\",\"primitive_derivation\":\"make_lidar_fim_primitives(default generation params), frozen raw centers\"";
+  const auto& c=s.coordinates;
+  o<<",\"coordinates\":{\"required\":"<<(s.require_coordinates?"true":"false")
+   <<",\"valid\":"<<(c.valid?"true":"false")<<",\"reason\":"<<std::quoted(c.rejection())
+   <<",\"frame_id\":"<<c.frame_id<<",\"stamp\":";number(o,c.stamp);
+  o<<",\"epoch_source_identity\":"<<c.epoch_source_identity;
+  o<<",\"map_frame\":"<<std::quoted(c.map_frame)<<",\"body_frame\":"<<std::quoted(c.body_frame);
+  o<<",\"time_contract\":"<<std::quoted(c.time_contract);
+  o<<",\"enu_origin_ecef\":";array(o,c.enu_origin_ecef);
+  o<<",\"anchor_ecef\":";array(o,c.anchor_ecef);
+  o<<",\"R_ecef_enu\":";array(o,c.R_ecef_enu);
+  o<<",\"R_ecef_world\":";array(o,c.R_ecef_world);
+  o<<",\"R_map_enu\":";array(o,c.R_map_enu());
+  o<<",\"T_map_world\":";array(o,c.T_map_world);
+  o<<",\"T_world_imu\":";array(o,c.T_world_imu);
+  o<<",\"T_lidar_imu\":";array(o,c.T_lidar_imu);
+  o<<",\"lever_arm_imu\":";array(o,c.lever_arm_imu);o<<"}";
   if(in.occupancy) {
     const auto& e=*in.occupancy;
     o<<",\"frame_id\":"<<std::quoted(e.frame_id)<<",\"geometry_id\":"<<std::quoted(e.geometry_id)<<",\"generation\":"<<e.generation;
@@ -456,7 +484,7 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
-      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<4?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<5?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
       for (const bool enabled : {true, false}) {
         auto variant=in;
         ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
@@ -467,8 +495,8 @@ int main(int argc,char** argv) {
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
-      evaluate(in,label,in.recording_codec_version<4?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
-      evaluate(in,label+"_current",in.recording_codec_version<4?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
+      evaluate(in,label,in.recording_codec_version<5?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
+      evaluate(in,label+"_current",in.recording_codec_version<5?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
     }
     std::cout<<log.run_dir()<<'\n';
   } catch(const std::exception& e) {std::cerr<<"advisory_validation: "<<e.what()<<'\n';return 1;}

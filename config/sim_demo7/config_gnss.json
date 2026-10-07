@@ -18,7 +18,7 @@
   // max_epoch_queue   : Maximum buffered GNSS epochs (back-pressure guard)
   //
   // --- Lever arm ---
-  // lever_arm         : GNSS antenna phase center → IMU origin in body frame [m] (x,y,z)
+  // lever_arm         : IMU origin → GNSS antenna phase center in body frame [m] (x,y,z)
   //
   // --- Clock between-factor (constant-drift random-walk) ---
   // clock_q_bias      : Clock bias random-walk density [m/√s]   (TCXO typical: 1.0)

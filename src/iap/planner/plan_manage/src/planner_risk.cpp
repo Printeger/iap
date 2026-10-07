@@ -338,6 +338,47 @@ iap::IntegritySnapshot EGOPlannerManager::capturePredictionSnapshot(const double
   // Planner binding and independent visualization export consume this same
   // snapshot. Current-motion authority remains currentMotionContext().
   auto snapshot = iap::IntegritySnapshotBuilder().build_from_latest(input);
+  snapshot.require_coordinates=true;
+  if(pending) {
+    auto& c=snapshot.coordinates;
+    c.valid=pending->advisory_coordinates_valid;
+    c.failure_reason=pending->advisory_coordinates_failure_reason;
+    c.frame_id=pending->advisory_coordinates_frame_id;
+    c.stamp=pending->advisory_coordinates_stamp;
+    c.epoch_source_identity=pending->advisory_coordinates_epoch_source_identity;
+    c.map_frame=pending->header.frame_id;
+    c.body_frame=latest_odom->child_frame_id;
+    const auto copy=[](auto& matrix,const auto& values) {
+      for(int i=0;i<matrix.size();++i) matrix.data()[i]=values[i];
+    };
+    copy(c.enu_origin_ecef,pending->advisory_enu_origin_ecef);
+    copy(c.anchor_ecef,pending->advisory_anchor_ecef);
+    copy(c.R_ecef_enu,pending->advisory_r_ecef_enu);
+    copy(c.R_ecef_world,pending->advisory_r_ecef_world);
+    copy(c.T_map_world,pending->advisory_t_map_world);
+    copy(c.T_world_imu,pending->advisory_t_world_imu);
+    copy(c.T_lidar_imu,pending->advisory_t_lidar_imu);
+    copy(c.lever_arm_imu,pending->advisory_lever_arm_imu);
+    if(c.rejection().empty()) {
+      // Freeze the posterior pose that owns this coordinate estimate. The
+      // latest execution odometry and Current Monitor are never overwritten.
+      const Eigen::Matrix4d T_map_imu=c.T_map_world*c.T_world_imu;
+      snapshot.p_wb=T_map_imu.topRightCorner<3,1>();
+      snapshot.q_wb=Eigen::Quaterniond(T_map_imu.topLeftCorner<3,3>()).normalized();
+      snapshot.pose_stamp=c.stamp;
+
+      snapshot.gnss_epoch.R_query_enu=c.R_map_enu();
+      snapshot.gnss_epoch.antenna_offset_query=c.antenna_offset_map();
+      const Eigen::Vector3d antenna_ecef=c.anchor_ecef+c.R_ecef_world*(
+          c.T_world_imu.topRightCorner<3,1>()+
+          c.T_world_imu.topLeftCorner<3,3>()*c.lever_arm_imu);
+      for(auto& sat:snapshot.gnss_epoch.sats) {
+        const Eigen::Vector3d d=c.R_ecef_enu.transpose()*(sat.sat_pos-antenna_ecef).normalized();
+        sat.azimuth=std::atan2(d.x(),d.y());
+        sat.elevation=std::asin(std::clamp(d.z(),-1.,1.));
+      }
+    }
+  }
   setAdvisoryPosteriorPrior(snapshot, advisory_posterior_prior_enabled_);
   return snapshot;
 }

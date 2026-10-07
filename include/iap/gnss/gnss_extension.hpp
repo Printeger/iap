@@ -116,6 +116,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   mutable std::mutex  frame_mutex_;
   bool                origin_set_ = false;
   Eigen::Vector3d     origin_ecef_{Eigen::Vector3d::Zero()};  ///< NavSatFix ECEF origin
+  Eigen::Vector3d advisory_lever_arm_ = Eigen::Vector3d::Zero();
   Eigen::Matrix3d     R_ecef_world_init_{Eigen::Matrix3d::Identity()}; ///< world→ECEF seed (ENU at NavSatFix)
 
   // E(0)/R(0) insertion guard: only insert once, on first GNSS injection

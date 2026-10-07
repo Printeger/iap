@@ -28,7 +28,7 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
     return context;
   }
   context.occupancy_generation = occupancy->generation;
-  if(input.recording_codec_version < 4) {reject("historical_codec_input");return context;}
+  if(input.recording_codec_version < 5) {reject("historical_codec_input");return context;}
   // Source admission belongs to PredictorModule. An unavailable source must
   // not expire the other source or prevent its actual prediction call.
   context.valid_until_s = now + risk_validity_s_;

@@ -25,3 +25,27 @@ Python 入口 `scripts/dev_predictor/advisory_validation.py` 由现有 run resol
 产物：`runtime/ros` 日志；`profiling/advisory_validation_*.csv`；`export/advisory/validation` 完整输入、逐点表、矩阵、状态；`export/analysis/advisory_validation/LABEL/report.md` 和图/summary；`metadata/manifests` 登记版本、参数权威、hash、模型代码证据及产物。子进程仅写子清单，外层 owner 登记并完成主 manifest；已有同名证据拒绝覆盖。
 
 复现入口和已执行结果见 [当前验证方案](../dev_predictor/advisory_spatial_validation_plan.md)。真实输入可用性、真实空间敏感性和实际误差符合性独立下结论；合成机制的 PASS 不代替现场结论。
+
+## Coordinate proof v5
+
+`T_A_B` maps B into A. Production snapshots require a post-optimization proof:
+`R_ecef_world`, optimized ECEF anchor, ENU datum/rotation, `T_world_imu`,
+`T_map_world`, `T_lidar_imu`, and IMU→antenna lever arm. The factor computes
+`p_ant_world = p_imu_world + R_world_imu * lever_arm_imu`.
+The GNSS extension exports one optimizer estimate; IntegrityReport carries its
+frame/time/epoch identity alongside the unchanged Current Monitor. The shared
+PredictionInput constructor projects GNSS LOS and FIM into map coordinates.
+Current quality remains execution authority, never a coordinate permission.
+Missing/mismatched proof excludes GNSS only. Map XY/Z define HPL/VPL; raw and
+anchored legacy GNSS PL remain ENU diagnostics. Attitude and world→ECEF rotation
+are conditioned upon, not uncertainty-marginalized; empirical calibration must
+not conceal this limitation or a frame error.
+
+Codec v5 and cache identity contain the full proof and projected geometry.
+V1–V4 retain historical reading; absence of proof cannot grant calibration
+qualification. Reference time is saved unchanged. GPST→UTC is performed by
+production gnss_comm; scan start/end, pose and observation times stay distinct.
+The audit compares direct ECEF and transformed ENU directions (1e-9 norm),
+rigid transforms (1e-9 rotation, 1e-12 homogeneous row) and exact optimizer
+frame/time/epoch association. Static simulation truth alignment comes from the
+canonical configuration; truth never supplies the Advisory transformation.

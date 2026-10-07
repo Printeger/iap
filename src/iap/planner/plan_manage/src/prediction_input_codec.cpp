@@ -16,6 +16,12 @@ void serialize(A& ar, Eigen::Matrix<T,R,C,O,MR,MC>& value, unsigned) {
 template<class A> void serialize(A& ar, Eigen::Quaterniond& value, unsigned) {
   ar & value.coeffs();
 }
+template<class A> void serialize(A& ar, iap::AdvisoryCoordinateContract& c, unsigned) {
+  ar & c.valid & c.frame_id & c.stamp & c.epoch_source_identity;
+  ar & c.enu_origin_ecef & c.anchor_ecef & c.R_ecef_enu & c.R_ecef_world;
+  ar & c.T_map_world & c.T_world_imu & c.T_lidar_imu & c.lever_arm_imu;
+  ar & c.map_frame & c.body_frame & c.time_contract & c.failure_reason;
+}
 template<class A> void serialize(A& ar, iap::SatObs& value, unsigned) {
   ar & value.sat_id;
   ar & value.constellation;
@@ -262,15 +268,16 @@ template<class Archive> void fields(Archive& ar, FrozenOccupancyEpoch& value) {
   ar & value.current_vehicle_clearance_radius_m;
 }
 template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
-  std::string schema="iap_prediction_input_v4";
+  std::string schema="iap_prediction_input_v5";
   ar & schema;
-  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4") throw std::runtime_error("unsupported prediction export schema");
+  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5") throw std::runtime_error("unsupported prediction export schema");
   ar & input.reference_time_s & input.validity_s & input.integrity & input.params;
   // v1 reads preserve historical fields; new parameters are an explicit v2 tail.
   if (schema != "iap_prediction_input_v1") ar & input.params.fusion.max_regularization_fraction;
-  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
+  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
   else input.recording_codec_version = schema == "iap_prediction_input_v1" ? 1 : 2;
-  if(schema == "iap_prediction_input_v4") ar & input.params.gnss.measurement_noise_scale;
+  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5") ar & input.params.gnss.measurement_noise_scale;
+  if(schema == "iap_prediction_input_v5") ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
   auto epoch=std::make_shared<FrozenOccupancyEpoch>();
   if constexpr (Archive::is_saving::value) *epoch=*input.occupancy;
   fields(ar,*epoch);
@@ -359,6 +366,7 @@ uint64_t predictionInputIdentity(const PredictionInput& input) {
   std::ostringstream stream(std::ios::binary);
   { boost::archive::binary_oarchive ar(stream);
     ar & snapshot & params;
+    if(input.recording_codec_version>=5) ar & snapshot.require_coordinates & snapshot.coordinates & snapshot.gnss_epoch.R_query_enu & snapshot.gnss_epoch.antenna_offset_query;
     ar & params.fusion.max_regularization_fraction & params.lidar.fim_params.fim_support_voxel_m & params.gnss.measurement_noise_scale;
     ar << input.recording_codec_version << input.validity_s << input.occupancy->generation << input.occupancy->geometry_id;
   }

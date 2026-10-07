@@ -65,6 +65,12 @@ void assign_header_stamp(std_msgs::msg::Header& header, double stamp_s) {
 IntegrityExtensionModule::IntegrityExtensionModule()
     : logger_(glim::create_module_logger("integrity_ext")) {
 
+  glim::Config ros_config(glim::GlobalConfig::get_config_path("config_ros"));
+  const auto translation=ros_config.param_nested<std::vector<double>>(
+      {"glim_ros","planner_local_map"},"static_planner_translation_m",{0.,0.,0.});
+  if(translation.size()!=3) throw std::runtime_error("invalid Advisory map transform");
+  for(int i=0;i<3;++i) advisory_T_map_world_(i,3)=translation[i];
+
   // ── Load config ──────────────────────────────────────────────────────────
   glim::Config config(glim::GlobalConfig::get_config_path("config_gnss"));
 
@@ -545,6 +551,27 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
 
   fill_integrity_report_msg(report, msg);
 
+  auto coordinates=IapSharedState::instance().get_gnss_coordinates();
+  coordinates.T_map_world=advisory_T_map_world_;
+  coordinates.T_lidar_imu=frame->T_lidar_imu.matrix();
+  msg.advisory_coordinates_valid=coordinates.rejection().empty() &&
+      coordinates.frame_id==report.estimation_frame_id &&
+      std::abs(coordinates.stamp-frame->stamp)<1e-6;
+  msg.advisory_coordinates_failure_reason=coordinates.failure_reason;
+  msg.advisory_coordinates_frame_id=coordinates.frame_id;
+  msg.advisory_coordinates_stamp=coordinates.stamp;
+  msg.advisory_coordinates_epoch_source_identity=coordinates.epoch_source_identity;
+  const auto copy=[](auto& out,const auto& matrix) {
+    for(int i=0;i<matrix.size();++i) out[i]=matrix.data()[i];
+  };
+  copy(msg.advisory_enu_origin_ecef,coordinates.enu_origin_ecef);
+  copy(msg.advisory_anchor_ecef,coordinates.anchor_ecef);
+  copy(msg.advisory_r_ecef_enu,coordinates.R_ecef_enu);
+  copy(msg.advisory_r_ecef_world,coordinates.R_ecef_world);
+  copy(msg.advisory_t_map_world,coordinates.T_map_world);
+  copy(msg.advisory_t_world_imu,coordinates.T_world_imu);
+  copy(msg.advisory_t_lidar_imu,coordinates.T_lidar_imu);
+  copy(msg.advisory_lever_arm_imu,coordinates.lever_arm_imu);
   pub.publish(msg);
   publish_araim_markers_(report, *frame);
 

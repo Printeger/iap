@@ -23,6 +23,7 @@
 //     int  n     = IapSharedState::instance().get_n_confirmed_trunks();
 
 #include <iap/gnss/gnss_types.hpp>
+#include <iap/predictor/coordinate_contract.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
 #include <mutex>
@@ -50,6 +51,13 @@ class IapSharedState {
   std::optional<GnssEpoch> get_gnss_epoch() const {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
     return latest_gnss_epoch_;
+  }
+
+  void set_gnss_coordinates(const AdvisoryCoordinateContract& value) {
+    std::lock_guard<std::mutex> lock(gnss_mutex_); gnss_coordinates_=value;
+  }
+  AdvisoryCoordinateContract get_gnss_coordinates() const {
+    std::lock_guard<std::mutex> lock(gnss_mutex_); return gnss_coordinates_;
   }
 
   // ── Confirmed trunk count ─────────────────────────────────────────────
@@ -107,6 +115,7 @@ class IapSharedState {
 
   mutable std::mutex gnss_mutex_;
   std::optional<GnssEpoch> latest_gnss_epoch_;
+  AdvisoryCoordinateContract gnss_coordinates_;
 
   std::atomic<int> n_confirmed_trunks_{0};
 

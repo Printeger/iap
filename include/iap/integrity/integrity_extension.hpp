@@ -94,6 +94,8 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
   bool        marker_show_lidar_ = true;
   bool        marker_show_final_ = true;
 
+  Eigen::Matrix4d advisory_T_map_world_ = Eigen::Matrix4d::Identity();
+
   // ── Components ────────────────────────────────────────────────────────
   IntegrityMonitor       monitor_;
   FGOInformationManager  fgo_info_;

@@ -144,6 +144,7 @@ GnssExtensionModule::GnssExtensionModule()
 
   // Lever arm
   hp.lever_arm = config.param<Eigen::Vector3d>("gnss", "lever_arm", Eigen::Vector3d::Zero());
+  advisory_lever_arm_ = hp.lever_arm;
 
   gnss_handler_ = std::make_unique<GnssHandler>(hp);
 
@@ -809,6 +810,36 @@ void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double st
 void iap::GnssExtensionModule::on_smoother_update_finish_(
     gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
   const auto t0_gnss = std::chrono::high_resolution_clock::now();
+  // Export the same optimized frame even when no new GNSS factor was injected.
+  // Source admission still binds the exact certified epoch/FDE identity.
+  try {
+    const auto all_vals=smoother.calculateEstimate();
+    AdvisoryCoordinateContract coordinates;
+    coordinates.frame_id=last_frame_id_.load();
+    coordinates.stamp=last_frame_stamp_.load();
+    const auto prior_epoch=IapSharedState::instance().get_gnss_epoch();
+    coordinates.epoch_source_identity=prior_epoch ? prior_epoch->source_identity : 0;
+    {
+      std::lock_guard<std::mutex> lock(frame_mutex_);
+      coordinates.enu_origin_ecef=origin_ecef_;
+      coordinates.R_ecef_enu=R_ecef_world_init_;
+    }
+    coordinates.anchor_ecef=all_vals.at<gtsam::Vector3>(E(0));
+    coordinates.R_ecef_world=all_vals.at<gtsam::Rot3>(R(0)).matrix();
+    coordinates.T_world_imu=all_vals.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(coordinates.frame_id)).matrix();
+    coordinates.lever_arm_imu=advisory_lever_arm_;
+    coordinates.valid=true;
+    IapSharedState::instance().set_gnss_coordinates(coordinates);
+
+
+  } catch(const std::exception& error) {
+    AdvisoryCoordinateContract missing;missing.failure_reason=error.what();
+    IapSharedState::instance().set_gnss_coordinates(missing);
+    static std::atomic<std::uint64_t> failures{0};const auto count=++failures;
+    if(count==1 || count%100==0) logger_->warn(
+      "[gnss_ext] export optimized Advisory coordinates failed: {} (count={})",error.what(),count);
+  }
+
 
   std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
   std::optional<GnssEpoch> postopt_epoch;
@@ -964,6 +995,9 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     }
     if (active_with_residual > 0) {
       IapSharedState::instance().set_gnss_epoch(*postopt_epoch);
+      auto coordinates=IapSharedState::instance().get_gnss_coordinates();
+      coordinates.epoch_source_identity=postopt_epoch->source_identity;
+      IapSharedState::instance().set_gnss_coordinates(coordinates);
     }
   }
 

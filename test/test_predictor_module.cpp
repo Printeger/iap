@@ -4347,3 +4347,74 @@ TEST(AdvisoryCalibration, GnssNoiseScaleChangesInformationWithoutAnchorInversion
   params.gnss.measurement_noise_scale=0;
   EXPECT_THROW(iap::GnssAdvisoryPredictor invalid(params.gnss),std::invalid_argument);
 }
+
+TEST(AdvisoryCoordinateContract, RotationLeverArmAndInformationShareQueryFrame) {
+  iap::AdvisoryCoordinateContract c;
+  c.valid=true; c.frame_id=7; c.stamp=100.; c.epoch_source_identity=9;
+  c.R_ecef_enu=Eigen::AngleAxisd(.8,Eigen::Vector3d::UnitX()).toRotationMatrix();
+  c.R_ecef_world=c.R_ecef_enu*Eigen::AngleAxisd(.4,Eigen::Vector3d::UnitZ()).toRotationMatrix();
+  c.T_map_world.topRightCorner<3,1>()=Eigen::Vector3d(-18,0,1.5);
+  c.T_world_imu.topLeftCorner<3,3>()=Eigen::AngleAxisd(.3,Eigen::Vector3d::UnitZ()).toRotationMatrix();
+  c.lever_arm_imu=Eigen::Vector3d(.3,-.2,.1);
+  ASSERT_TRUE(c.rejection().empty());
+  for(int axis=0;axis<3;++axis) {
+    const auto direct=c.R_ecef_world.transpose()*c.R_ecef_enu*Eigen::Vector3d::Unit(axis);
+    EXPECT_LT((c.R_map_enu()*Eigen::Vector3d::Unit(axis)-direct).norm(),1e-12);
+  }
+  EXPECT_LT((c.R_map_enu().transpose()*c.R_map_enu()-Eigen::Matrix3d::Identity()).norm(),1e-12);
+  EXPECT_LT((c.antenna_offset_map()-c.T_world_imu.topLeftCorner<3,3>()*c.lever_arm_imu).norm(),1e-12);
+  iap::GnssAdvisoryPredictor predictor(make_params().gnss);
+  auto original=make_snapshot(true,false);
+  const auto a=predictor.query_receiver_measured(original);
+  original.gnss_epoch.R_query_enu=c.R_map_enu();
+  const auto b=predictor.query_receiver_measured(original);
+  ASSERT_TRUE(a.fim_valid); ASSERT_TRUE(b.fim_valid);
+  EXPECT_LT((b.lambda_gnss-c.R_map_enu()*a.lambda_gnss*c.R_map_enu().transpose()).norm(),1e-10);
+  c.R_ecef_world(0,0)=2.; EXPECT_EQ(c.rejection(),"gnss_coordinate_invalid");
+}
+
+TEST(AdvisoryCoordinateContract, MissingOrMismatchedProofExcludesOnlyGnss) {
+  iap::PredictorModule predictor(make_params());
+  iap::PredictorQueryInput query(Eigen::Vector3d::Zero(),make_snapshot(true,false),100.,0.);
+  auto& s=query.snapshot;
+  s.require_coordinates=true;
+  auto a=predictor.admission(query);
+  EXPECT_TRUE(a.input_valid); EXPECT_TRUE(a.lidar_allowed); EXPECT_FALSE(a.gnss_allowed);
+  EXPECT_EQ(a.gnss_reason,"gnss_coordinate_unavailable");
+  s.gnss_epoch.source_identity=9;
+  s.current.gnss_epoch_identity=iap::gnss_epoch_identity(s.gnss_epoch,s.current.excluded_prns);
+  s.current.estimation_frame_id=7;
+  auto& c=s.coordinates;c.valid=true;c.frame_id=7;c.stamp=100.;c.epoch_source_identity=9;
+  a=predictor.admission(query);EXPECT_TRUE(a.gnss_allowed);
+  c.epoch_source_identity=10;
+  a=predictor.admission(query);EXPECT_FALSE(a.gnss_allowed);EXPECT_TRUE(a.lidar_allowed);
+  EXPECT_EQ(a.gnss_reason,"gnss_coordinate_identity_mismatch");
+  EXPECT_EQ(s.current.valid,make_snapshot(true,false).current.valid);
+}
+
+TEST(AdvisoryCoordinateContract, BatchCacheTracksPosteriorAnchorAndProjectedGeometry) {
+  iap::PredictorModule predictor(make_params());
+  predictor.set_lidar_fim_primitives(make_lidar_primitives());
+  predictor.set_observation_predicate([](const Eigen::Vector3d&){return true;});
+  predictor.set_occupancy_query([](const Eigen::Vector3d&){return false;},.1);
+  iap::PredictorQueryInput a(Eigen::Vector3d::Zero(),make_snapshot(true,false),100.,0.);
+  a.snapshot.require_coordinates=true;
+  a.snapshot.gnss_epoch.source_identity=9;
+  a.snapshot.current.gnss_epoch_identity=iap::gnss_epoch_identity(a.snapshot.gnss_epoch,a.snapshot.current.excluded_prns);
+  a.snapshot.current.estimation_frame_id=7;
+  auto& c=a.snapshot.coordinates;c.valid=true;c.frame_id=7;c.stamp=100.;c.epoch_source_identity=9;
+  auto b=a;b.snapshot.coordinates.anchor_ecef.x()+=1.;
+  b.snapshot.gnss_epoch.sats[0].azimuth+=.2;
+  EXPECT_NE(c.identity(),b.snapshot.coordinates.identity());
+  ASSERT_TRUE(predictor.admission(a).gnss_allowed);
+  ASSERT_TRUE(predictor.admission(b).gnss_allowed);
+  const auto reference=predictor.query(b);
+  const auto batch=predictor.queryBatch({a,b});
+  ASSERT_EQ(batch.size(),2u);
+  ASSERT_TRUE(reference.gnss.fim_valid);
+  EXPECT_LT((batch[1].gnss.lambda_gnss-reference.gnss.lambda_gnss).norm(),1e-12);
+  EXPECT_GT((batch[0].gnss.lambda_gnss-batch[1].gnss.lambda_gnss).norm(),1e-6);
+  b.snapshot.p_wb.x()=.1;
+  EXPECT_EQ(predictor.admission(b).gnss_reason,"gnss_coordinate_identity_mismatch");
+  EXPECT_TRUE(predictor.admission(b).lidar_allowed);
+}

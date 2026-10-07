@@ -53,6 +53,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
                                               const double query_time_s,
                                               const double evaluation_time_s,
                                               const bool unknown_as_open_bound) const {
+  const Eigen::Vector3d antenna_position = pos_world + epoch.antenna_offset_query;
   VisibilityResult res;
   const std::size_t N = epoch.sats.size();
   res.vis_flags.resize(N, false);
@@ -92,7 +93,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     }
     ++n_above_el;
 
-    const Eigen::Vector3d dir = enu_dir(sat.elevation, sat.azimuth);
+    const Eigen::Vector3d dir = epoch.R_query_enu * enu_dir(sat.elevation, sat.azimuth);
 
     if (measured_epoch_support &&
         (!std::isfinite(sat.pr_sigma) || sat.pr_sigma <= 0.0)) {
@@ -119,7 +120,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
            distance <= support_length + 1.0e-9;
            distance += kSupportStepM) {
         ++res.support_sample_counts[i];
-        const Eigen::Vector3d support_point = pos_world + distance * dir;
+        const Eigen::Vector3d support_point = antenna_position + distance * dir;
         bool complete = false;
         LocalMapSupportStatus sample_status =
             LocalMapSupportStatus::MODEL_COMPLETE;
@@ -180,7 +181,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     bool blocked = false;
     if (occupancy_query_) {
       const double offset = std::max(0.0, params_.ray_start_offset);
-      const Eigen::Vector3d origin = pos_world + offset * dir;
+      const Eigen::Vector3d origin = antenna_position + offset * dir;
       const double step = 0.5 * occupancy_resolution_m_;
       const int samples = std::max(1, static_cast<int>(std::ceil(params_.occ_L / step)));
       for (int k = 0; k < samples; ++k)
@@ -195,7 +196,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
       }
     } else if (grid_ != nullptr) {
       const double start_offset = std::max(0.0, params_.ray_start_offset);
-      const Eigen::Vector3d ray_origin = pos_world + start_offset * dir;
+      const Eigen::Vector3d ray_origin = antenna_position + start_offset * dir;
       const double occ_range = std::max(0.0, params_.occ_range - start_offset);
       if (params_.clearance_transition_m > 0.0) {
         // Evaluate the bounded union per LOS sample. The clearance proximity
@@ -255,7 +256,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   spdlog::trace("[VisibilityPredictor] pos=({:.1f},{:.1f},{:.1f}) "
                 "n_sats={} n_above_el={} n_vis={} n_unknown={} "
                 "mean_kappa={:.3f}",
-                pos_world.x(), pos_world.y(), pos_world.z(),
+                antenna_position.x(), antenna_position.y(), antenna_position.z(),
                 N, n_above_el, res.n_vis, res.n_unknown, res.mean_kappa);
 
   return res;

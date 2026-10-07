@@ -133,3 +133,18 @@ uint8 current_motion_quality
 float64 current_motion_error_proxy_m
 float64 current_external_support_age_s
 string current_motion_reason
+
+# Advisory-only post-optimization coordinate proof; never motion authority.
+bool advisory_coordinates_valid
+int64 advisory_coordinates_frame_id
+float64 advisory_coordinates_stamp
+uint64 advisory_coordinates_epoch_source_identity
+float64[3] advisory_enu_origin_ecef
+float64[3] advisory_anchor_ecef
+float64[9] advisory_r_ecef_enu
+float64[9] advisory_r_ecef_world
+float64[16] advisory_t_map_world
+float64[16] advisory_t_world_imu
+float64[16] advisory_t_lidar_imu
+float64[3] advisory_lever_arm_imu
+string advisory_coordinates_failure_reason

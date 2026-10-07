@@ -17,7 +17,7 @@ from run_directory import (adopt_run_directory, resolve_run_directory, finalize_
                            write_subordinate_manifest)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
-CODEC = "iap_prediction_input_v4/boost_binary/zlib_length_u64le"
+CODEC = "iap_prediction_input_v5/boost_binary/zlib_length_u64le"
 SOURCES = ["src/iap/planner/plan_manage/src/prediction_input.cpp",
            "src/iap/planner/plan_manage/src/prediction_input_codec.cpp",
            "src/iap/planner/plan_manage/src/planner_risk.cpp",
@@ -29,7 +29,11 @@ SOURCES += ["src/iap/gnss/visibility_predictor.cpp", "include/iap/gnss/visibilit
             "src/iap/planner/plan_env/include/plan_env/grid_map.h",
             "src/iap/planner/plan_env/src/local_evidence_snapshot.cpp",
             "src/iap/planner/plan_env/include/plan_env/local_evidence_snapshot.h"]
-SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predictor/compare_advisory_error.py"]
+SOURCES += ["include/iap/gnss/gnss_types.hpp", "include/iap/planner/integrity_snapshot.hpp",
+            "include/iap/util/shared_state.hpp", "msg/IntegrityReport.msg",
+            "src/iap/gnss/gnss_extension.cpp", "src/iap/integrity/integrity_extension.cpp"]
+SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predictor/compare_advisory_error.py",
+            "scripts/dev_predictor/advisory_coordinate_evidence.py", "scripts/dev_predictor/advisory_live_capture.py"]
 
 
 def git(*args):
