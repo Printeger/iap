@@ -6,7 +6,7 @@
 
 | 阶段 | 代码 | 自动化 | 现场 | 直接阻塞 |
 |---|---|---|---|---|
-| A Curve接续 | 取证／逐阶段审计／生产初始化重放；一致切向与精确PVA拟合已实施 | 实际45/gen209红例→合法冻结曲线；50项baseline、server时间及2项重放回归通过 | d2f0c7a OFF300s：39曲线／38命令ID，前进36.096m；原规则未到达 | 精确pending撤销现场确认；旧hover越权与撤销确认接口已修待现场；物理时效与Curve／Target阻塞 |
+| A Curve接续 | 取证／逐阶段审计／生产初始化重放；一致切向与精确PVA拟合已实施 | 实际45/gen209红例→合法冻结曲线；50项baseline、server时间及2项重放回归通过 | 941fe41 OFF300s：27曲线／26命令ID，前进29.289m；原规则未到达 | 精确pending撤销现场确认；拒绝／撤销确认现场已有证据；物理时效与Curve／Target仍阻塞 |
 | B Advisory空间／米数 | 历史RINEX／统一clock／前端、Monitor、Advisory活动钟差及v6冻结已实施 | 星历8项／43入口；100 ARAIM、clock／FIM／codec与baseline回归通过 | dcd7462历史60秒，5/6冻结，Monitor UNSAFE；正式0/9＋0/9 | raw整星座／联合故障、时间协方差／旋转与实际GPU残差资格不足 |
 | C 通道／后端 | <=16前左右目标、米制连续多终端目标、同guide与实际曲线保留审计已实施；拟合接口修复 | 32 A*、48 baseline；真实冻结曲线路线偏离0.120m小于0.137m | d2f0c7a距终点0.447m；只进入0.5m邻域，任务未完成 | 真实原始PL导出／风险资格与现场后端保留不足 |
 | D 完整任务收益 | 试验驱动／报告待完善 | 待做 | 配对0/6 | A/B/C真实前置未满足 |
@@ -231,3 +231,22 @@ red_verified及source/binary hash保留。修复：现有pending只追加撤销�
 管线／定时／完整反馈共六组CTest与43项入口通过；probe-free三项八轮全绿。
 迭代两次139失败仍留存，崩溃原因未证实，不能把重复成功写成根因修复。
 Spec／Standards复查分别登记，无剩余硬问题；新现场待干净提交。
+
+
+A恢复接口现场：干净941fe41、GPU三项／安装Release身份复核，唯一入口OFF／
+prior OFF300秒run160125Z_356。27条曲线／26个命令ID、8次定时激活；
+真值末[11.289083,.231779,2.419395]，前进29.289m、距终点6.778m，原规则未完成。
+ID4提前0.714918s撤下，未激活／命令；检查制动拒绝后旧ID3继续，在预定生效后
+确认并退役本地pending。2次检查制动拒绝、未见unchecked hover；不能据此声称
+安全停止或整轮安全。末次362/gen2151 Search、首个Curve12/gen55与完整原图保留。
+图文／独立wire→command核对在analysis/checked_recovery_live；物理时效仍阻塞。
+
+B真实空间诊断：原历史v6 input SHA296d38f5...未经重编码，原时刻1657108846.095、
+原图gen326同输入生产wrapper重放。100个物理样本（63可查询／37物理过滤）；
+63中38仅LiDAR、15 GNSS raw有效＋LiDAR、10 GNSS information贡献＋LiDAR但
+raw singular_geometry。63/63重复／batch／wrapper一致只证明确定性。
+联合诊断HPL0.273–0.446m／VPL0.261–0.504m；raw与information值分别留存，
+不能以联合小值消除raw大值或资格缺失。原状态与GNSS差49ms未传播；Up／旋转、
+实际GPU残差、raw整星座与联合故障资格未完成，无可达路线覆盖资格。
+图文physical_pl_sources.png与report在analysis/clock_v6_original_diag，原正式0/9+0/9、
+D0/6继续阻塞；未调参、未推广。

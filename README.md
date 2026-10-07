@@ -1133,3 +1133,11 @@ Advisory raw几何和查询FIM现在按活动星座分别消元钟差，缓存�
 raw分离方差改为subset−full；epsilon不作钟差先验。新冻结输入为v6并绑定
 clock_model，v1–v5只保留历史诊断读取；禁止借重编码升级来源资格。raw整星座
 与联合故障处理、冻结优化协方差时间和实际残差资格仍缺，正式9＋9／六次对照不启动。
+
+
+本轮最新参考现场：`941fe41`、`20261007T160125Z_356`，300秒OFF，撤销确认及
+检查制动拒绝接口已有真实证据，任务未完成（距固定终点6.778m）。图文与独立
+命令核对见`log/20261007T091820Z_056/export/analysis/checked_recovery_live`。
+历史v6同输入物理／PL／来源图见同run的`analysis/clock_v6_original_diag`；
+仅诊断资格，正式9＋9和六次对照仍阻塞。分阶段结论见
+[实施进度](docs/dev_planner/curve_advisory_channel_progress.md)。

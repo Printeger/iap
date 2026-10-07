@@ -1136,3 +1136,16 @@ relaxation, timing budget or motion qualification is introduced.
 移除临时SIGSEGV探针后，三个相关baseline八轮重复全部通过；两次先前139退出
 日志仍保留，未取得崩溃根因资格。`checked_recovery_implementation`绑定命令、
 源／binary及全部日志hash。Spec／Standards复查分别登记；新森林现场尚待提交。
+
+
+941fe41干净OFF300秒森林run160125Z_356验证ID4提前0.715s撤下且未激活；
+检查刹车拒绝后旧ID3在原生效时刻后确认取消，本地pending释放。27曲线／26命令ID、
+8次定时激活、2次制动拒绝且无unchecked hover；前进29.289m、距目标6.778m，
+原任务规则未完成。末次362/gen2151 Search及首个Curve12/gen55留存，物理时效
+仍阻塞；不声明安全停止或正式任务收益。图文／hash见analysis/checked_recovery_live。
+
+历史v6原input、原时间／gen326重放100物理样本：63可查询、37物理过滤；
+38仅LiDAR、15 GNSS raw有效＋LiDAR、10 information贡献＋LiDAR但raw退化。
+重复／batch／wrapper63/63一致未授予米数或双源资格；49ms状态epoch差与实际GPU
+残差／故障资格仍缺。analysis/clock_v6_original_diag保留物理／原始PL／来源图，
+不插值、不称路线可达或正式9＋9通过。
