@@ -157,3 +157,6 @@ float64 advisory_gnss_gps_sec
 uint64 advisory_gnss_source_identity
 float64[] advisory_gnss_iono_params
 iap/AdvisoryGnssObservation[] advisory_gnss_observations
+
+# Atomic post-opt epoch/state/covariance proof; availability is not admission.
+iap/GnssPostoptEvidence advisory_postopt

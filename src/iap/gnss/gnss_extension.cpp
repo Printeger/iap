@@ -185,6 +185,7 @@ GnssExtensionModule::GnssExtensionModule()
 
   // Register on_new_frame to track frame index/stamp for factor injection
   Callbacks::on_new_frame.add([this](const glim::EstimationFrame::ConstPtr& f) {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
     last_frame_id_.store(f->id);
     last_frame_stamp_.store(f->stamp);
   });
@@ -594,8 +595,11 @@ void GnssExtensionModule::on_smoother_update_(
     gtsam::NonlinearFactorGraph&                              new_factors,
     gtsam::Values&                                            new_values,
     std::map<std::uint64_t, double>&                          new_stamps) {
-  const long   frame_id    = last_frame_id_.load();
-  const double frame_stamp = last_frame_stamp_.load();
+  long frame_id; double frame_stamp;
+  {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    frame_id=last_frame_id_.load(); frame_stamp=last_frame_stamp_.load();
+  }
   if (frame_id < 0) return;
 
   // Retrieve current ECEF anchor for get_factors()
@@ -877,6 +881,7 @@ void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double st
   }
 
   IapSharedState::instance().clear_clock_ready();
+  IapSharedState::instance().set_gnss_postopt_bundle(GnssPostoptBundle{});
 
   ++clock_reset_count_;
   set_clock_chain_state_(ClockChainState::RECOVERING, reason, stamp, true);
@@ -895,15 +900,39 @@ void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double st
 void iap::GnssExtensionModule::on_smoother_update_finish_(
     gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
   const auto t0_gnss = std::chrono::high_resolution_clock::now();
-  // Export the same optimized frame even when no new GNSS factor was injected.
-  // Source admission still binds the exact certified epoch/FDE identity.
+  std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
+  std::optional<GnssEpoch> postopt_epoch;
+  long frame_id;
+  double frame_stamp;
+  {
+    std::lock_guard<std::mutex> lk(factors_mutex_);
+    pr_factors = std::move(last_pr_factors_);
+    dop_factors = std::move(last_dop_factors_);
+    postopt_epoch = std::move(last_injected_epoch_);
+    last_injected_epoch_.reset();
+    frame_id = last_injected_frame_id_;
+    frame_stamp = last_injected_frame_stamp_;
+  }
+  GnssPostoptBundle bundle;
+  auto& coordinates=bundle.coordinates;
+  auto& evidence=bundle.state;
+  evidence.update_sequence=++postopt_sequence_;
+  evidence.frame_id=frame_id;
+  evidence.state_stamp=frame_stamp;
+  evidence.gnss_stamp=postopt_epoch ? postopt_epoch->stamp : 0.;
+  evidence.epoch_source_identity=postopt_epoch ? postopt_epoch->source_identity : 0;
+  if (!postopt_epoch || (pr_factors.empty() && dop_factors.empty())) {
+    coordinates.failure_reason="no_epoch_injected_in_update";
+    evidence.failure_reason=coordinates.failure_reason;
+    IapSharedState::instance().set_gnss_postopt_bundle(bundle);
+    return;
+  }
+  gtsam::Values all_vals;
   try {
-    const auto all_vals=smoother.calculateEstimate();
-    AdvisoryCoordinateContract coordinates;
-    coordinates.frame_id=last_frame_id_.load();
-    coordinates.stamp=last_frame_stamp_.load();
-    const auto prior_epoch=IapSharedState::instance().get_gnss_epoch();
-    coordinates.epoch_source_identity=prior_epoch ? prior_epoch->source_identity : 0;
+    all_vals=smoother.calculateEstimate();
+    coordinates.frame_id=frame_id;
+    coordinates.stamp=frame_stamp;
+    coordinates.epoch_source_identity=postopt_epoch->source_identity;
     {
       std::lock_guard<std::mutex> lock(frame_mutex_);
       coordinates.enu_origin_ecef=origin_ecef_;
@@ -911,74 +940,11 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     }
     coordinates.anchor_ecef=all_vals.at<gtsam::Vector3>(E(0));
     coordinates.R_ecef_world=all_vals.at<gtsam::Rot3>(R(0)).matrix();
-    coordinates.T_world_imu=all_vals.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(coordinates.frame_id)).matrix();
+    coordinates.T_world_imu=all_vals.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(frame_id)).matrix();
     coordinates.lever_arm_imu=advisory_lever_arm_;
     coordinates.valid=true;
-    IapSharedState::instance().set_gnss_coordinates(coordinates);
-    if (coordinate_evidence_csv_.is_open()) {
-      try {
-      const auto began=std::chrono::steady_clock::now();
-      Eigen::Matrix3d covariance=Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN());
-      bool covariance_valid=false;
-      try {
-        covariance=smoother.marginalCovariance(R(0));
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(covariance);
-        covariance_valid=covariance.allFinite() && (covariance-covariance.transpose()).norm()<1e-9 &&
-            eigen.info()==Eigen::Success && eigen.eigenvalues().minCoeff()>=-1e-12;
-      } catch (const std::exception& error) {
-        if(coordinate_evidence_rows_%100==0) logger_->warn("[gnss_ext] rotation uncertainty unavailable: {}",error.what());
-      }
-      const auto velocity_key=gtsam::Symbol('v',coordinates.frame_id), bias_key=gtsam::Symbol('b',coordinates.frame_id);
-      Eigen::Vector3d velocity=Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-      Eigen::Matrix<double,6,1> bias=Eigen::Matrix<double,6,1>::Constant(std::numeric_limits<double>::quiet_NaN());
-      if(all_vals.exists(velocity_key)) velocity=all_vals.at<gtsam::Vector3>(velocity_key);
-      if(all_vals.exists(bias_key)) bias=all_vals.at<gtsam::imuBias::ConstantBias>(bias_key).vector();
-      const double received=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-      coordinate_evidence_csv_ << std::setprecision(17) << coordinates.stamp << ',' << coordinates.frame_id
-          << ',' << coordinates.epoch_source_identity << ',' << received << ',' << covariance_valid;
-      const auto value=[&](double v) { coordinate_evidence_csv_ << ','; if(std::isfinite(v)) coordinate_evidence_csv_ << v; };
-      for(const Eigen::Matrix3d& matrix : {coordinates.R_ecef_world,coordinates.R_ecef_enu,
-          covariance_valid ? covariance : Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN()).eval(),
-          coordinates.T_world_imu.topLeftCorner<3,3>().eval()})
-        for(int row=0;row<3;++row) for(int col=0;col<3;++col) value(matrix(row,col));
-      for(int i=0;i<3;++i) value(coordinates.T_world_imu(i,3));
-      for(int i=0;i<3;++i) value(velocity[i]);
-      for(int i=0;i<6;++i) value(bias[i]);
-      coordinate_evidence_csv_ << '\n';
-      if(++coordinate_evidence_rows_%100==0) coordinate_evidence_csv_.flush();
-      timing_csv::append(coordinates.stamp,"1.3_coordinate_evidence",std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
-      } catch (const std::exception& error) {
-        // Diagnostics do not revoke or authorize the independently exported source.
-        static std::atomic<std::uint64_t> diagnostic_failures{0};
-        const auto count=++diagnostic_failures;
-        if(count==1 || count%100==0) logger_->warn("[gnss_ext] coordinate evidence unavailable: {} (count={})",error.what(),count);
-      }
-    }
-
   } catch(const std::exception& error) {
-    AdvisoryCoordinateContract missing;missing.failure_reason=error.what();
-    IapSharedState::instance().set_gnss_coordinates(missing);
-    static std::atomic<std::uint64_t> failures{0};const auto count=++failures;
-    if(count==1 || count%100==0) logger_->warn(
-      "[gnss_ext] export optimized Advisory coordinates failed: {} (count={})",error.what(),count);
-  }
-
-
-  std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
-  std::optional<GnssEpoch> postopt_epoch;
-  long frame_id;
-  double frame_stamp;
-  {
-    std::lock_guard<std::mutex> lk(factors_mutex_);
-    if (last_pr_factors_.empty() && last_dop_factors_.empty()) return;
-    pr_factors  = last_pr_factors_;
-    dop_factors = last_dop_factors_;
-    postopt_epoch = last_injected_epoch_;
-    frame_id    = last_injected_frame_id_;
-    frame_stamp = last_injected_frame_stamp_;
-    last_pr_factors_.clear();
-    last_dop_factors_.clear();
-    last_injected_epoch_.reset();
+    coordinates.failure_reason=error.what();
   }
 
   // ── 1. Clock state ────────────────────────────────────────────────────────────
@@ -990,7 +956,7 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   });
   if (uses_gps) try {
     using gtsam::symbol_shorthand::C;
-    const auto clk = smoother.calculateEstimate().at<gtsam::Vector2>(C(frame_id));
+    const auto clk = all_vals.at<gtsam::Vector2>(C(frame_id));
     clk_bias  = clk(0);
     clk_drift = clk(1);
     clk_ok = true;
@@ -1037,7 +1003,6 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   const bool do_csv = debug_csv_enabled_;
 
   try {
-    const auto all_vals = smoother.calculateEstimate();
     for (auto& [system, clock] : constellation_clocks_) {
       const auto key = gnss_clock_key(system, frame_id);
       if (all_vals.exists(key)) {
@@ -1130,11 +1095,89 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
       }
     }
     if (active_with_residual > 0) {
-      IapSharedState::instance().set_gnss_epoch(*postopt_epoch);
-      auto coordinates=IapSharedState::instance().get_gnss_coordinates();
-      coordinates.epoch_source_identity=postopt_epoch->source_identity;
-      IapSharedState::instance().set_gnss_coordinates(coordinates);
+      bundle.epoch=postopt_epoch;
     }
+  }
+
+  // Capture the actual optimized and linearized states independently. iSAM2
+  // covariance is a tangent covariance at its linearization point, not proof
+  // that the current optimized mean or GNSS acquisition time was propagated.
+  const auto evidence_began=std::chrono::steady_clock::now();
+  try {
+    std::set<char> active;
+    for (const auto& factor:pr_factors) {
+      const auto pr=std::dynamic_pointer_cast<PseudorangeFactor>(factor);
+      if (pr) active.insert(pr->constellation());
+    }
+    for (const auto& factor:dop_factors) {
+      const auto dop=std::dynamic_pointer_cast<DopplerFactor>(factor);
+      if (dop) active.insert(dop->constellation());
+    }
+    evidence.used_constellations.assign(active.begin(),active.end());
+    evidence.keys={gtsam::Symbol('x',frame_id),gtsam::Symbol('v',frame_id),
+                   gtsam::Symbol('b',frame_id),R(0),E(0)};
+    evidence.tangent_dimensions={6,3,6,3,3};
+    evidence.mean_dimensions={16,3,6,9,3};
+    for (const char system:active) {
+      evidence.keys.push_back(gnss_clock_key(system,frame_id));
+      evidence.tangent_dimensions.push_back(2); evidence.mean_dimensions.push_back(2);
+    }
+    const auto means=[&](const gtsam::Values& values) {
+      std::vector<double> out;
+      const auto append=[&](const auto& matrix) {
+        for(int row=0;row<matrix.rows();++row) for(int col=0;col<matrix.cols();++col)
+          out.push_back(matrix(row,col));
+      };
+      append(values.at<gtsam::Pose3>(evidence.keys[0]).matrix());
+      append(values.at<gtsam::Vector3>(evidence.keys[1]));
+      append(values.at<gtsam::imuBias::ConstantBias>(evidence.keys[2]).vector());
+      append(values.at<gtsam::Rot3>(evidence.keys[3]).matrix());
+      append(values.at<gtsam::Vector3>(evidence.keys[4]));
+      for(std::size_t i=5;i<evidence.keys.size();++i) append(values.at<gtsam::Vector2>(evidence.keys[i]));
+      if (!std::all_of(out.begin(),out.end(),[](double value){return std::isfinite(value);}))
+        throw std::runtime_error("postopt means nonfinite");
+      return out;
+    };
+    evidence.optimized_means=means(all_vals);
+    evidence.optimized_valid=true;
+    evidence.linearization_means=means(smoother.getLinearizationPoint());
+    if (smoother.fallbackHappened()) throw std::runtime_error("smoother_fallback_unqualified_covariance");
+    const auto covariance=gnss_postopt_joint_covariance(smoother.getLinearFactors(),
+        gtsam::KeyVector(evidence.keys.begin(),evidence.keys.end()),evidence.tangent_dimensions);
+    for(int row=0;row<covariance.rows();++row) for(int col=0;col<covariance.cols();++col)
+      evidence.joint_covariance_row_major.push_back(covariance(row,col));
+    evidence.covariance_valid=true;
+    evidence.failure_reason.clear();
+  } catch (const std::exception& error) {
+    evidence.failure_reason=error.what();
+    static std::atomic<std::uint64_t> failures{0}; const auto count=++failures;
+    if(count==1 || count%100==0) logger_->warn("[gnss_ext] postopt state evidence unavailable: {} (count={})",error.what(),count);
+  }
+  IapSharedState::instance().set_gnss_postopt_bundle(bundle);
+  timing_csv::append(frame_stamp,"1.3_postopt_joint_evidence",
+      std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-evidence_began).count());
+
+  // The existing bounded diagnostic CSV consumes this capture; it performs
+  // no additional marginalization and never substitutes an earlier covariance.
+  if (coordinate_evidence_csv_.is_open() && coordinates.valid) {
+    const auto value=[&](double v) { coordinate_evidence_csv_ << ','; if(std::isfinite(v)) coordinate_evidence_csv_ << v; };
+    coordinate_evidence_csv_ << std::setprecision(17) << coordinates.stamp << ',' << coordinates.frame_id
+        << ',' << coordinates.epoch_source_identity << ','
+        << std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()
+        << ',' << evidence.covariance_valid;
+    Eigen::Matrix3d rotation_covariance=Eigen::Matrix3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    if (evidence.covariance_valid) {
+      const auto size=static_cast<int>(std::accumulate(evidence.tangent_dimensions.begin(),evidence.tangent_dimensions.end(),0u));
+      for(int row=0;row<3;++row) for(int col=0;col<3;++col)
+        rotation_covariance(row,col)=evidence.joint_covariance_row_major[(15+row)*size+15+col];
+    }
+    for(const Eigen::Matrix3d& matrix : {coordinates.R_ecef_world,coordinates.R_ecef_enu,
+        rotation_covariance,coordinates.T_world_imu.topLeftCorner<3,3>().eval()})
+      for(int row=0;row<3;++row) for(int col=0;col<3;++col) value(matrix(row,col));
+    for(int i=0;i<3;++i) value(coordinates.T_world_imu(i,3));
+    for(int i=16;i<25;++i) value(evidence.optimized_valid ? evidence.optimized_means[i] : std::numeric_limits<double>::quiet_NaN());
+    coordinate_evidence_csv_ << '\n';
+    if(++coordinate_evidence_rows_%100==0) coordinate_evidence_csv_.flush();
   }
 
   // ── 3. Write debug CSV ────────────────────────────────────────────────────────
@@ -1150,7 +1193,7 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     try {
       std::set<char> active;
       for (const auto& sat : postopt_epoch->sats) if (!sat.excluded) active.insert(sat.constellation);
-      const auto values = smoother.calculateEstimate();
+      const auto& values = all_vals;
       for (const char system : active) {
         const auto key = gnss_clock_key(system, frame_id);
         if (!values.exists(key)) continue;
@@ -1160,12 +1203,19 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
             gtsam::Vector2::Constant(std::numeric_limits<double>::quiet_NaN()).eval();
         Eigen::Matrix2d covariance = Eigen::Matrix2d::Constant(std::numeric_limits<double>::quiet_NaN());
         bool covariance_valid = false;
-        if (has_reference) {
-          try {
-            covariance = gnss_clock_difference_covariance(smoother.getLinearFactors(), C(frame_id), key);
-            covariance_valid = true;
-          } catch (const std::exception& error) {
-            logger_->warn("[gnss_ext] {}-GPS clock covariance unavailable at frame {}: {}", system, frame_id, error.what());
+        if (has_reference && evidence.covariance_valid) {
+          const auto reference=evidence.used_constellations.find('G');
+          const auto selected=evidence.used_constellations.find(system);
+          if(reference!=std::string::npos && selected!=std::string::npos) {
+            const auto dimension=21+2*evidence.used_constellations.size();
+            const auto r=21+2*reference, s=21+2*selected;
+            const auto element=[&](std::size_t row,std::size_t col) {
+              return evidence.joint_covariance_row_major[row*dimension+col];
+            };
+            for(std::size_t row=0;row<2;++row) for(std::size_t col=0;col<2;++col)
+              covariance(row,col)=element(s+row,s+col)+element(r+row,r+col)-
+                                  element(s+row,r+col)-element(r+row,s+col);
+            covariance_valid=covariance.allFinite();
           }
         }
         clock_evidence_csv_ << std::setprecision(17) << stamp << ',' << postopt_epoch->stamp << ','

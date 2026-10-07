@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <iap/gnss/gnss_types.hpp>
+#include <iap/gnss/postopt_evidence.hpp>
 #include <iap/predictor/coordinate_contract.hpp>
 #include <iap/integrity/lidar_araim.hpp>
 
@@ -87,6 +88,7 @@ struct CurrentIntegrityState {
 struct IntegritySnapshot {
   bool require_coordinates = false; // historical/synthetic diagnostics remain readable
   AdvisoryCoordinateContract coordinates;
+  GnssPostoptEvidence postopt_evidence;
   double stamp = std::numeric_limits<double>::quiet_NaN();
   bool valid = false;
 

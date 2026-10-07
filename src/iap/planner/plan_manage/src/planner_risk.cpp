@@ -196,6 +196,7 @@ iap::IntegritySnapshot EGOPlannerManager::capturePredictionSnapshot(const double
   auto snapshot = iap::IntegritySnapshotBuilder().build_from_latest(input);
   snapshot.require_coordinates=true;
   if(pending) {
+    snapshot.postopt_evidence=iap::copy_gnss_postopt_evidence<iap::GnssPostoptEvidence>(pending->advisory_postopt);
     auto& c=snapshot.coordinates;
     c.valid=pending->advisory_coordinates_valid;
     c.failure_reason=pending->advisory_coordinates_failure_reason;

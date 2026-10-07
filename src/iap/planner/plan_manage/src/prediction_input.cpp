@@ -28,9 +28,10 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
     return context;
   }
   context.occupancy_generation = occupancy->generation;
-  if(input.recording_codec_version < 7) {reject("historical_codec_input");return context;}
+  if(input.recording_codec_version < 8) {reject("historical_codec_input");return context;}
   if(input.clock_model != iap::kGnssClockGeometryModel) {reject("unsupported_clock_model");return context;}
   if(input.gnss_fault_model != iap::kGnssGeometryFaultModel) {reject("unsupported_gnss_fault_model");return context;}
+  if(snapshot.postopt_evidence.model != iap::kGnssPostoptModel) {reject("unsupported_postopt_model");return context;}
   // Source admission belongs to PredictorModule. An unavailable source must
   // not expire the other source or prevent its actual prediction call.
   context.valid_until_s = now + risk_validity_s_;

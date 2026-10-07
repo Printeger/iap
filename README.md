@@ -1252,3 +1252,13 @@ separately; withdrawal and checked recovery stay in effect. Frozen forensic
 queries never substitute a current map when the assessed epoch is missing.
 The production FSM combination regression, seven planner groups and 43 entry
 contracts pass; the next live diagnostic verifies the new export identity.
+
+
+Frozen Advisory inputs now use codec v8 and carry one actual post-optimization
+GNSS epoch/state bundle. Optimized means and the linearization means owning
+the full joint covariance are stored separately, with original times and
+`NOT_PROPAGATED`. Older recordings stay readable as historical diagnostics;
+re-encoding grants no production qualification. Source admission, motion and
+planning budgets remain unchanged. Seven core and seven planner groups, 43 launch contracts, 14 coordinate/state
+audits and six calibration mechanism tests pass. Live verification is pending; formal
+9＋9 and six-run comparisons remain blocked.

@@ -1410,3 +1410,13 @@ pending物理拒绝与active tracking并发时，物理失败保留pending曲线
 active误差与参考ID在stopstate单列。仅active所属assessment可获active tracking覆写，
 首个违反cell仍从原物理epoch/time/motion查询，无epoch不借live图。原撤销／恢复／命令
 确认链保持；组合生产红→绿、7组规划＋43入口通过。新现场导出验证待完成。
+
+
+## B 原子优化冻结接口（v8）
+
+GNSS smoother finish按实际注入帧／epoch保存优化与线性化均值，以及包含
+活动星座clock交叉项的联合协方差；一次bundle发布／Monitor读取。缺数据或
+失败不借旧状态，原时间差标明NOT_PROPAGATED。ROS及v8冻结接口详见
+[Advisory契约](advisory_prediction_contract.md#b-原子优化冻结接口v8)。
+旧≤7维持历史读取；原来源准入／运动／预算不变。codec红例3项失败已保存，
+核心7组、规划7组、入口43项、离线14项与校准6项通过；新现场待完成。正式B0/9＋0/9、D0/6。

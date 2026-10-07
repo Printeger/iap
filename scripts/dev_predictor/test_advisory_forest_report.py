@@ -3,14 +3,14 @@ from pathlib import Path
 import tempfile
 import unittest
 import numpy as np
-from advisory_coordinate_evidence import audit
+from advisory_coordinate_evidence import audit, audit_postopt
 from advisory_forest_report import truth_at, csv_write, analyze, information_diagnostics, unique_trials, validated_replays, digest, araim_rows
 
 
 class ForestReportContract(unittest.TestCase):
     def coordinate_input(self):
         eye3=np.eye(3).tolist();eye4=np.eye(4).tolist()
-        return {'recording_codec_version':7,'clock_model':'per_constellation_pseudorange_bias_v1',
+        return {'recording_codec_version':8,'clock_model':'per_constellation_pseudorange_bias_v1',
                 'gnss_fault_model':'single_satellite_and_constellation_v1',
                 'frame_id':'map','estimation_frame_id':'optimized','current_stamp':100.,'pose_stamp':100.,
                 'reference_time_s':100.,'gnss_stamp':99.95,'gps_sec':117.95,'has_epoch':True,
@@ -28,7 +28,7 @@ class ForestReportContract(unittest.TestCase):
         self.assertIn('uncertainty is not propagated',result['conditioning'])
 
     def test_old_or_unknown_models_cannot_acquire_current_coordinate_qualification(self):
-        for key,value in [('recording_codec_version',6),('clock_model','unknown'),('gnss_fault_model','unknown')]:
+        for key,value in [('recording_codec_version',7),('clock_model','unknown'),('gnss_fault_model','unknown')]:
             with self.subTest(key=key):
                 meta=self.coordinate_input();meta[key]=value
                 with self.assertRaisesRegex(ValueError,'production_coordinate_evidence_unavailable'):audit(meta)
@@ -41,6 +41,40 @@ class ForestReportContract(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,reason):audit(meta)
         meta=self.coordinate_input();meta['gnss_satellites'][0]['azimuth']=.1
         with self.assertRaisesRegex(ValueError,'direct_ecef_direction_mismatch'):audit(meta)
+
+    def postopt_input(self):
+        meta=self.coordinate_input();meta['estimation_frame_id']=meta['coordinates']['frame_id']=17
+        meta['epoch_source_identity']=meta['coordinates']['epoch_source_identity']=101
+        key=lambda symbol,index:(ord(symbol)<<56)|index
+        means=np.eye(4).flatten().tolist()+[0.]*9+np.eye(3).flatten().tolist()+[0.]*7
+        covariance=np.eye(25);covariance[21,23]=covariance[23,21]=.4
+        meta['postopt_evidence']={'model':'postopt_X_V_B_R_E_active_clocks_joint_v1',
+            'update_sequence':2,'frame_id':17,'state_stamp':100.,'gnss_stamp':99.95,
+            'epoch_source_identity':101,'used_constellations':'CG','optimized_valid':True,
+            'covariance_valid':True,'propagation':'NOT_PROPAGATED',
+            'keys':[key(k,i) for k,i in [('x',17),('v',17),('b',17),('r',0),('e',0),('d',17),('c',17)]],
+            'tangent_dimensions':[6,3,6,3,3,2,2],'mean_dimensions':[16,3,6,9,3,2,2],
+            'optimized_means':means,'linearization_means':means,
+            'joint_covariance_row_major':covariance.flatten().tolist()}
+        return meta
+
+    def test_postopt_covariance_uses_cross_terms_and_retains_acquisition_gap(self):
+        result=audit_postopt(self.postopt_input())
+        self.assertTrue(result['available']);self.assertEqual(result['joint_dimension'],25)
+        self.assertAlmostEqual(result['clock_difference_joint_covariance']['C-G'][0][0],1.2)
+        self.assertAlmostEqual(result['state_gnss_delta_s'],.05)
+        self.assertFalse(result['meter_qualified']);self.assertFalse(result['time_propagation_qualified'])
+
+    def test_mixed_owner_and_invalid_joint_evidence_do_not_gain_qualification(self):
+        for field,value,reason in [('frame_id',18,'owner_mismatch'),('gnss_stamp',100.,'owner_mismatch'),
+                                  ('keys',[1],'layout_mismatch'),('joint_covariance_row_major',[0.],'data_invalid')]:
+            with self.subTest(field=field):
+                meta=self.postopt_input();meta['postopt_evidence'][field]=value
+                with self.assertRaisesRegex(ValueError,reason):audit_postopt(meta)
+        meta=self.postopt_input();meta['postopt_evidence']['covariance_valid']=False
+        meta['postopt_evidence']['failure_reason']='missing_current_covariance'
+        result=audit_postopt(meta);self.assertFalse(result['available']);self.assertFalse(result['meter_qualified'])
+        self.assertEqual(result['reason'],'missing_current_covariance')
 
     def test_misaligned_hypothesis_rows_are_not_zero_or_valid_counts(self):
         with tempfile.TemporaryDirectory() as root:

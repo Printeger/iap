@@ -5,7 +5,7 @@
 //   Extension modules run as independent shared libraries loaded by GLIM.
 //   There is no built-in mechanism for an extension to query data from
 //   another.  This singleton provides a thread-safe mailbox where:
-//     - gnss_extension writes the latest GnssEpoch after building each epoch.
+//     - gnss_extension writes one epoch/coordinates/state bundle after optimization.
 //     - trunk_extension writes the confirmed landmark count after each
 //       smoother update.
 //     - integrity_extension reads both in on_smoother_update_finish to run
@@ -13,7 +13,7 @@
 //
 // Usage:
 //   Writer (gnss_extension):
-//     IapSharedState::instance().set_gnss_epoch(epoch);
+//     IapSharedState::instance().set_gnss_postopt_bundle(bundle);
 //
 //   Writer (trunk_extension):
 //     IapSharedState::instance().set_n_confirmed_trunks(n);
@@ -23,6 +23,7 @@
 //     int  n     = IapSharedState::instance().get_n_confirmed_trunks();
 
 #include <iap/gnss/gnss_types.hpp>
+#include <iap/gnss/postopt_evidence.hpp>
 #include <iap/predictor/coordinate_contract.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
@@ -30,6 +31,12 @@
 #include <optional>
 
 namespace iap {
+
+struct GnssPostoptBundle {
+  std::optional<GnssEpoch> epoch;
+  AdvisoryCoordinateContract coordinates;
+  GnssPostoptEvidence state;
+};
 
 class IapSharedState {
  public:
@@ -41,23 +48,21 @@ class IapSharedState {
 
   // ── GNSS epoch ──────────────────────────────────────────────────────────
 
-  /// Called by gnss_extension after each epoch is built and enqueued.
-  void set_gnss_epoch(const GnssEpoch& epoch) {
+  // The GNSS owner publishes only after residual evaluation. Epoch, pose and
+  // covariance are one replacement; failures cannot borrow an older member.
+  void set_gnss_postopt_bundle(const GnssPostoptBundle& bundle) {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
-    latest_gnss_epoch_ = epoch;
+    gnss_bundle_ = bundle;
+  }
+  GnssPostoptBundle get_gnss_postopt_bundle() const {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    return gnss_bundle_;
   }
 
   /// Returns a copy of the latest GnssEpoch, or nullopt if none yet.
   std::optional<GnssEpoch> get_gnss_epoch() const {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
-    return latest_gnss_epoch_;
-  }
-
-  void set_gnss_coordinates(const AdvisoryCoordinateContract& value) {
-    std::lock_guard<std::mutex> lock(gnss_mutex_); gnss_coordinates_=value;
-  }
-  AdvisoryCoordinateContract get_gnss_coordinates() const {
-    std::lock_guard<std::mutex> lock(gnss_mutex_); return gnss_coordinates_;
+    return gnss_bundle_.epoch;
   }
 
   // ── Confirmed trunk count ─────────────────────────────────────────────
@@ -114,8 +119,7 @@ class IapSharedState {
   IapSharedState() = default;
 
   mutable std::mutex gnss_mutex_;
-  std::optional<GnssEpoch> latest_gnss_epoch_;
-  AdvisoryCoordinateContract gnss_coordinates_;
+  GnssPostoptBundle gnss_bundle_;
 
   std::atomic<int> n_confirmed_trunks_{0};
 

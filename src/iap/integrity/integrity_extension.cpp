@@ -467,11 +467,12 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
     lidar_snapshot_ptr = &lidar_snapshot;
   }
 
+  const auto gnss_bundle=IapSharedState::instance().get_gnss_postopt_bundle();
   std::optional<GnssEpoch>  epoch_opt;
   const GnssEpoch*          epoch_ptr = nullptr;
 
   if (enable_araim_) {
-    epoch_opt = IapSharedState::instance().get_gnss_epoch();
+    epoch_opt = gnss_bundle.epoch;
     if (epoch_opt.has_value()) {
       const double dt = std::abs(epoch_opt->stamp - frame->stamp);
       if (dt < 1.0) {
@@ -553,7 +554,8 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   fill_integrity_report_msg(report, msg);
   write_advisory_epoch(epoch_ptr, msg);
 
-  auto coordinates=IapSharedState::instance().get_gnss_coordinates();
+  auto coordinates=gnss_bundle.coordinates;
+  msg.advisory_postopt=copy_gnss_postopt_evidence<iap::msg::GnssPostoptEvidence>(gnss_bundle.state);
   coordinates.T_map_world=advisory_T_map_world_;
   coordinates.T_lidar_imu=frame->T_lidar_imu.matrix();
   msg.advisory_coordinates_valid=coordinates.rejection().empty() &&

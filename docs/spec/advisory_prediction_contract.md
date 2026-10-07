@@ -22,7 +22,7 @@ monitor PL are distinct diagnostic quantities, never reconstructed into FIM.
 The shared result carries numerical status, original eigenvalues and weak
 direction; GridMap does not store per-cell matrices.
 
-Frozen inputs write `iap_prediction_input_v6`; v1–v5 remain readable for historical
+Frozen inputs write `iap_prediction_input_v8`; v1–v7 remain readable for historical
 diagnostics. New numerical parameters are serialized and hashed in the input
 identity. Historic payloads are not relabelled as new real recordings. Prediction
 queries use saved reference time. Per-source expiry never grants renewed
@@ -50,7 +50,7 @@ When frozen support has only observed flags, both LiDAR and GNSS map visibility
 require a fresh cloud support time. Local evidence snapshots instead check their
 own per-voxel support timestamps.
 
-Model semantics audit: GNSS eliminates one bias per actually used constellation; LiDAR
+Historical pre-coordinate-interface model audit (superseded by the frozen coordinate proof below): GNSS eliminates one bias per actually used constellation; LiDAR
 conditions on map surface normals and ignores pose/attitude marginalization.
 Both are position information in inverse square meters, with common PL conversion.
 However GNSS azimuth/elevation are ENU while map normals are in map coordinates.
@@ -255,3 +255,32 @@ requirements. No prior, synthetic freshness or integrity validity is added.
 Server lifecycle clock evidence follows the [run artifact contract](run_artifact_contract.md):
 explicit ROS receipt/effective times are comparable; wall logger prefixes are
 not historical ROS timestamps. These diagnostic fields grant no execution authority.
+
+
+## B 原子优化冻结接口（v8）
+
+事实：v7分别发布GNSS epoch与坐标，Monitor分别读取，且坐标使用最新传感器
+帧号而非实际注入帧；速度、bias和旋转协方差仅在CSV，冻结输入没有完整状态。
+这不能证明一份输入来自同次优化。假设：并发会产生混合来源；不将潜在错配写成
+已观察到的每帧故障。策略：在GNSS owner的smoother finish取实际注入帧／epoch，
+只发布一个immutable值包，Monitor只读一次；未注入、失败和reset清除旧包。
+
+`GnssPostoptEvidence`由一个update_sequence、原frame/state_stamp/gnss_stamp和
+原epoch_source_identity绑定。实际PR/Doppler因子决定used_constellations，
+与Monitor/FDE最终保留卫星分开。均值按X(4×4)、V(3)、B(accel/gyro6)、
+R(3×3)、E(3)、活动星座clock(bias/drift2)行序保存；优化均值和线性化均值
+分别记录。联合协方差以X右局部rotation/translation6、V世界3、B6、R局部3、
+E ECEF3、活动clock2为切空间顺序，维数21+2K≤29，保留所有交叉项，
+不加epsilon／先验／放宽准入。协方差属于记录的线性化点；原时刻差保留且
+标明NOT_PROPAGATED，不能据此取得实测传播、物理Up、联合故障或米数资格。
+外参名义值仍在同一coordinates及配置身份；外参不确定性尚未取得资格。
+
+ROS IntegrityReport同条消息携带postopt证据；v8在旧字段之后追加独立tail，
+不更改v1–v7原坐标序列／身份hash。旧≤7只供历史读取，生产绑定拒绝，
+不以重编码刷新记录。v8状态tail纳入predictionInputIdentity；采集可用标志
+只表示诊断成功，生产来源准入仍由PredictorModule独立判断。原CSV复用本次
+R协方差块及优化V/B，不再额外计算旋转marginal。
+
+代码已接入；核心7组、规划7组、入口43项、离线审计14项与校准6项通过，新现场待完成。原codec7红例3项断言失败，
+来源／binary／日志已登记optimized_bundle_red。正式B仍0/9＋0/9，D0/6，
+默认配置不推广。下一步核对实际packet/linearization/covariance身份与在线耗时。

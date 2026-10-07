@@ -3,7 +3,9 @@
 #include <iap/gnss/constellation_clock.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/shared_state.hpp>
+#include <iap/msg/gnss_postopt_evidence.hpp>
 #include <gtsam/nonlinear/PriorFactor.h>
+#include <gtsam/navigation/ImuBias.h>
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
@@ -30,6 +32,10 @@ struct GnssClockInjectionTestAccess {
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
     module.on_smoother_update_finish_(smoother);
   }
+  static void steer_frame_only(GnssExtensionModule& module,long id,double stamp) {
+    std::lock_guard<std::mutex> lock(module.frame_mutex_);
+    module.last_frame_id_=id;module.last_frame_stamp_=stamp;
+  }
   static void advance(GnssExtensionModule& module, long frame, const GnssEpoch& epoch, bool reset) {
     if (reset) module.reset_clock_chain_state_("test_reset", epoch.stamp);
     module.last_frame_id_ = frame;
@@ -43,6 +49,7 @@ namespace {
 gtsam::ISAM2Params production_clock_params() {
   glim::RelinearizationPolicyRegistry registry;
   registry.register_policy('x', 6, gtsam::Vector6::Constant(0.1));
+  registry.register_policy('b', 6, gtsam::Vector6::Constant(0.1));
   for (const char symbol : {'v', 'e', 'r'}) registry.register_policy(symbol, 3, gtsam::Vector3::Constant(0.1));
   iap::register_gnss_clock_relinearization(registry, gtsam::Vector2(500, 5));
   registry.validate_or_throw();
@@ -68,6 +75,7 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
       SCOPED_TRACE(systems + ":owner_case=" + std::to_string(owner_case));
       iap::GnssEpoch epoch;
       epoch.stamp = 100;
+      epoch.source_identity = 1701;
       for (const char system : systems) {
         for (int i = 0; i < 8; ++i) {
           iap::SatObs satellite;
@@ -86,6 +94,10 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
       std::map<std::uint64_t, double> stamps;
       const auto pose = gtsam::Symbol('x', 1), velocity = gtsam::Symbol('v', 1);
       values.insert(pose, gtsam::Pose3());
+      const auto bias=gtsam::Symbol('b',1);
+      values.insert(bias,gtsam::imuBias::ConstantBias());
+      factors.addPrior<gtsam::imuBias::ConstantBias>(bias,gtsam::imuBias::ConstantBias(),gtsam::noiseModel::Isotropic::Sigma(6,.01));
+      stamps[bias]=epoch.stamp;
       values.insert(velocity, gtsam::Vector3::Zero().eval());
       factors.addPrior<gtsam::Pose3>(pose, gtsam::Pose3(), gtsam::noiseModel::Isotropic::Sigma(6, 0.001));
       factors.addPrior<gtsam::Vector3>(velocity, gtsam::Vector3::Zero(), gtsam::noiseModel::Isotropic::Sigma(3, 0.001));
@@ -106,8 +118,33 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
       ASSERT_NO_THROW(smoother.update(factors, values, stamps));
       EXPECT_FALSE(smoother.fallbackHappened());
       if (!systems.empty()) {
+        // A newer sensor frame must not relabel the injected state/epoch.
+        iap::GnssClockInjectionTestAccess::steer_frame_only(extension,999,101.);
         ASSERT_NO_THROW(iap::GnssClockInjectionTestAccess::finish(extension, smoother));
         EXPECT_FALSE(smoother.fallbackHappened());
+        const auto bundle=iap::IapSharedState::instance().get_gnss_postopt_bundle();
+        ASSERT_TRUE(bundle.epoch);EXPECT_EQ(bundle.epoch->source_identity,epoch.source_identity);
+        EXPECT_EQ(bundle.coordinates.frame_id,1);EXPECT_DOUBLE_EQ(bundle.coordinates.stamp,100.);
+        EXPECT_EQ(bundle.state.frame_id,1);EXPECT_DOUBLE_EQ(bundle.state.state_stamp,100.);
+        EXPECT_EQ(bundle.state.epoch_source_identity,epoch.source_identity);
+        EXPECT_EQ(bundle.state.used_constellations,systems=="GC" ? "CG" : systems);
+        EXPECT_TRUE(bundle.state.optimized_valid)<<bundle.state.failure_reason;
+        EXPECT_TRUE(bundle.state.covariance_valid)<<bundle.state.failure_reason;
+        EXPECT_EQ(bundle.state.propagation,"NOT_PROPAGATED");
+        const auto dimension=21+2*systems.size();
+        EXPECT_EQ(bundle.state.joint_covariance_row_major.size(),dimension*dimension);
+        EXPECT_EQ(bundle.state.optimized_means.size(),37+2*systems.size());
+        EXPECT_EQ(bundle.state.linearization_means.size(),37+2*systems.size());
+        const auto wire=iap::copy_gnss_postopt_evidence<iap::msg::GnssPostoptEvidence>(bundle.state);
+        const auto copy=iap::copy_gnss_postopt_evidence<iap::GnssPostoptEvidence>(wire);
+        EXPECT_EQ(copy.joint_covariance_row_major,bundle.state.joint_covariance_row_major);
+        EXPECT_EQ(copy.linearization_means,bundle.state.linearization_means);
+        ASSERT_NO_THROW(iap::GnssClockInjectionTestAccess::finish(extension,smoother));
+        const auto missing=iap::IapSharedState::instance().get_gnss_postopt_bundle();
+        EXPECT_FALSE(missing.epoch);EXPECT_FALSE(missing.coordinates.valid);
+        EXPECT_FALSE(missing.state.optimized_valid);EXPECT_FALSE(missing.state.covariance_valid);
+        EXPECT_TRUE(missing.state.joint_covariance_row_major.empty());
+        EXPECT_GT(missing.state.update_sequence,bundle.state.update_sequence);
       }
     }
   }
@@ -171,5 +208,13 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
     ASSERT_NO_THROW(smoother.update(factors, values, stamps));
     ASSERT_NO_THROW(iap::GnssClockInjectionTestAccess::finish(extension, smoother));
     EXPECT_FALSE(smoother.fallbackHappened());
+    // This deliberately pose/velocity-only graph lacks B. It can still own
+    // the new residual epoch but cannot reuse an earlier full covariance.
+    const auto incomplete=iap::IapSharedState::instance().get_gnss_postopt_bundle();
+    ASSERT_TRUE(incomplete.epoch);
+    EXPECT_EQ(incomplete.coordinates.frame_id,frame);
+    EXPECT_FALSE(incomplete.state.optimized_valid);EXPECT_FALSE(incomplete.state.covariance_valid);
+    EXPECT_TRUE(incomplete.state.joint_covariance_row_major.empty());
+    EXPECT_FALSE(incomplete.state.failure_reason.empty());
   }
 }

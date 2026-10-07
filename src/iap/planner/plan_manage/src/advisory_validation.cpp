@@ -145,7 +145,7 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o<<",\"gnss_satellites\":[";
   for(size_t i=0;i<s.gnss_epoch.sats.size();++i) {
     if(i)o<<',';const auto& sat=s.gnss_epoch.sats[i];
-    o<<"{\"id\":"<<sat.sat_id<<",\"ecef\":";array(o,sat.sat_pos);
+    o<<"{\"id\":"<<sat.sat_id<<",\"constellation\":"<<std::quoted(std::string(1,sat.constellation))<<",\"ecef\":";array(o,sat.sat_pos);
     o<<",\"azimuth\":";number(o,sat.azimuth);o<<",\"elevation\":";number(o,sat.elevation);
     o<<",\"nominal_sigma_m\":";number(o,sat.pr_sigma);
     const bool residual_available=std::isfinite(sat.pr_residual) && s.require_coordinates &&
@@ -177,6 +177,24 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o<<",\"T_world_imu\":";array(o,c.T_world_imu);
   o<<",\"T_lidar_imu\":";array(o,c.T_lidar_imu);
   o<<",\"lever_arm_imu\":";array(o,c.lever_arm_imu);o<<"}";
+  const auto& state=s.postopt_evidence;
+  o<<",\"postopt_evidence\":{\"model\":"<<std::quoted(state.model)
+   <<",\"update_sequence\":"<<state.update_sequence<<",\"frame_id\":"<<state.frame_id;
+  o<<",\"state_stamp\":";number(o,state.state_stamp);o<<",\"gnss_stamp\":";number(o,state.gnss_stamp);
+  o<<",\"epoch_source_identity\":"<<state.epoch_source_identity;
+  o<<",\"used_constellations\":"<<std::quoted(state.used_constellations)
+   <<",\"optimized_valid\":"<<(state.optimized_valid?"true":"false")
+   <<",\"covariance_valid\":"<<(state.covariance_valid?"true":"false")
+   <<",\"failure_reason\":"<<std::quoted(state.failure_reason)
+   <<",\"propagation\":"<<std::quoted(state.propagation);
+  const auto values=[&](const char* name,const auto& data) {
+    o<<",\""<<name<<"\":[";for(std::size_t i=0;i<data.size();++i) {if(i)o<<',';number(o,data[i]);}o<<']';
+  };
+  // Keys are uint64 identities: preserve integer precision in JSON.
+  o<<",\"keys\":[";for(std::size_t i=0;i<state.keys.size();++i){if(i)o<<',';o<<state.keys[i];}o<<']';
+  values("tangent_dimensions",state.tangent_dimensions);values("mean_dimensions",state.mean_dimensions);
+  values("optimized_means",state.optimized_means);values("linearization_means",state.linearization_means);
+  values("joint_covariance_row_major",state.joint_covariance_row_major);o<<'}';
   if(in.occupancy) {
     const auto& e=*in.occupancy;
     o<<",\"frame_id\":"<<std::quoted(e.frame_id)<<",\"geometry_id\":"<<std::quoted(e.geometry_id)<<",\"generation\":"<<e.generation;
@@ -503,7 +521,7 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
-      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<7?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
+      const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<8?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
       for (const bool enabled : {true, false}) {
         auto variant=in;
         ego_planner::setAdvisoryPosteriorPrior(variant.integrity,enabled);
@@ -514,8 +532,8 @@ int main(int argc,char** argv) {
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {
-      evaluate(in,label,in.recording_codec_version<7?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
-      evaluate(in,label+"_current",in.recording_codec_version<7?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
+      evaluate(in,label,in.recording_codec_version<8?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",true,budget,log);
+      evaluate(in,label+"_current",in.recording_codec_version<8?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY",false,budget,log);
     }
     std::cout<<log.run_dir()<<'\n';
   } catch(const std::exception& e) {std::cerr<<"advisory_validation: "<<e.what()<<'\n';return 1;}

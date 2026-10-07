@@ -10,9 +10,61 @@ from advisory_validation import adopt_run_directory, artifact, json_write, manif
 from advisory_coordinates import rigid
 
 
+def audit_postopt(meta):
+    """Check frozen owner/layout without granting propagation or meter coverage."""
+    e=meta.get('postopt_evidence',{})
+    if not e.get('optimized_valid') or not e.get('covariance_valid'):
+        return {'available':False,'reason':e.get('failure_reason','postopt_evidence_unavailable'),
+                'time_propagation_qualified':False,'meter_qualified':False}
+    if e.get('model')!='postopt_X_V_B_R_E_active_clocks_joint_v1' or e.get('propagation')!='NOT_PROPAGATED':
+        raise ValueError('postopt_model_or_propagation_mismatch')
+    c=meta['coordinates']
+    if (e['frame_id']!=c['frame_id'] or abs(e['state_stamp']-c['stamp'])>1e-6 or
+        abs(e['gnss_stamp']-meta['gnss_stamp'])>1e-6 or
+        e['epoch_source_identity']!=meta['epoch_source_identity'] or not e['update_sequence']):
+        raise ValueError('postopt_epoch_or_state_owner_mismatch')
+    systems=e['used_constellations'];clock_symbols={'G':'c','C':'d','E':'h','R':'j'}
+    if not systems or ''.join(sorted(set(systems)))!=systems or any(k not in clock_symbols for k in systems):
+        raise ValueError('postopt_used_constellations_invalid')
+    expected=[('x',e['frame_id']),('v',e['frame_id']),('b',e['frame_id']),('r',0),('e',0)]
+    expected += [(clock_symbols[k],e['frame_id']) for k in systems]
+    keys=[(ord(symbol)<<56)|index for symbol,index in expected]
+    tangent=[6,3,6,3,3]+[2]*len(systems);means=[16,3,6,9,3]+[2]*len(systems)
+    if e['keys']!=keys or e['tangent_dimensions']!=tangent or e['mean_dimensions']!=means:
+        raise ValueError('postopt_joint_layout_mismatch')
+    optimized=np.asarray(e['optimized_means'],dtype=float);linearization=np.asarray(e['linearization_means'],dtype=float)
+    size=sum(tangent);covariance=np.asarray(e['joint_covariance_row_major'],dtype=float)
+    if (optimized.size!=sum(means) or linearization.size!=sum(means) or covariance.size!=size*size or
+        not all(np.isfinite(v).all() for v in (optimized,linearization,covariance))):
+        raise ValueError('postopt_joint_data_invalid')
+    covariance=covariance.reshape(size,size)
+    if (np.linalg.norm(covariance-covariance.T)>1e-9*max(1.,np.linalg.norm(covariance)) or
+        np.linalg.eigvalsh(covariance).min()<=0):
+        raise ValueError('postopt_joint_covariance_invalid')
+    T=rigid(optimized[:16].reshape(4,4));rigid(linearization[:16].reshape(4,4))
+    if (np.linalg.norm(T-np.asarray(c['T_world_imu']).reshape(4,4))>1e-9 or
+        np.linalg.norm(optimized[25:34].reshape(3,3)-np.asarray(c['R_ecef_world']).reshape(3,3))>1e-9 or
+        np.linalg.norm(optimized[34:37]-np.asarray(c['anchor_ecef']))>1e-9):
+        raise ValueError('postopt_coordinate_mean_mismatch')
+    differences={}
+    if 'G' in systems:
+        reference=21+2*systems.index('G')
+        for i,system in enumerate(systems):
+            if system=='G':continue
+            projection=np.zeros((2,size));projection[:,reference:reference+2]=-np.eye(2)
+            projection[:,21+2*i:23+2*i]=np.eye(2)
+            differences[system+'-G']=(projection@covariance@projection.T).tolist()
+    return {'available':True,'update_sequence':e['update_sequence'],'joint_dimension':size,
+            'used_constellations':systems,'state_gnss_delta_s':e['state_stamp']-e['gnss_stamp'],
+            'rotation_tangent_covariance_rad2':covariance[15:18,15:18].tolist(),
+            'clock_difference_joint_covariance':differences,
+            'covariance_point':'captured linearization_means; optimized_means separately recorded',
+            'time_propagation_qualified':False,'meter_qualified':False}
+
+
 def audit(meta):
     c=meta['coordinates']
-    if (meta.get('recording_codec_version')!=7 or
+    if (meta.get('recording_codec_version')!=8 or
         meta.get('clock_model')!='per_constellation_pseudorange_bias_v1' or
         meta.get('gnss_fault_model')!='single_satellite_and_constellation_v1') or not c.get('required') or not c.get('valid'):
         raise ValueError('production_coordinate_evidence_unavailable')
@@ -44,7 +96,7 @@ def audit(meta):
         errors.append(float(np.linalg.norm(direct-projected)))
     if not errors:raise ValueError('no_gnss_directions_to_verify')
     if max(errors)>1e-9:raise ValueError('direct_ecef_direction_mismatch')
-    return {'valid':True,'rotation_algebra_error':algebra,'max_direction_error':max(errors),
+    return {'valid':True,'postopt_evidence':audit_postopt(meta),'rotation_algebra_error':algebra,'max_direction_error':max(errors),
             'directions_checked':len(errors),'coordinate_frame_id':c['frame_id'],
             'reference_pose_delta_s':meta['reference_time_s']-meta['pose_stamp'],
             'calibration_time_qualified':abs(meta['reference_time_s']-meta['pose_stamp'])<=.05,

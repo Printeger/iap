@@ -8,6 +8,7 @@
 #include <Eigen/Cholesky>
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 using gtsam::symbol_shorthand::X;
 using gtsam::symbol_shorthand::V;
@@ -15,6 +16,37 @@ using gtsam::symbol_shorthand::E;  // ECEF origin of world frame  E(0)
 using gtsam::symbol_shorthand::R;  // world→ECEF rotation         R(0)
 
 namespace iap {
+
+Eigen::MatrixXd gnss_postopt_joint_covariance(
+    const gtsam::GaussianFactorGraph& linear_graph,
+    const gtsam::KeyVector& keys, const std::vector<std::uint32_t>& dimensions) {
+  if (keys.empty() || keys.size()!=dimensions.size() || keys.size()>9 ||
+      std::set<gtsam::Key>(keys.begin(),keys.end()).size()!=keys.size())
+    throw std::invalid_argument("invalid postopt joint keys");
+  std::uint32_t size=0;
+  for (auto dimension:dimensions) {
+    if (dimension==0 || dimension>6) throw std::invalid_argument("invalid postopt block dimension");
+    size+=dimension;
+  }
+  if (size>29) throw std::invalid_argument("postopt joint dimension exceeds model");
+  const auto marginal=linear_graph.marginal(keys);
+  const auto actual_dimensions=marginal->getKeyDimMap();
+  for(std::size_t i=0;i<keys.size();++i) {
+    const auto found=actual_dimensions.find(keys[i]);
+    if(found==actual_dimensions.end() || found->second!=dimensions[i])
+      throw std::runtime_error("postopt joint block dimension mismatch");
+  }
+  const auto information=marginal->hessian(gtsam::Ordering(keys.begin(),keys.end())).first;
+  if (information.rows()!=size || information.cols()!=size || !information.allFinite() ||
+      (information-information.transpose()).norm()>1e-9*std::max(1.,information.norm()))
+    throw std::runtime_error("postopt joint information unavailable");
+  const Eigen::LDLT<Eigen::MatrixXd> factorization(information);
+  if (factorization.info()!=Eigen::Success || factorization.vectorD().minCoeff()<=0.)
+    throw std::runtime_error("postopt joint information not positive definite");
+  const Eigen::MatrixXd covariance=factorization.solve(Eigen::MatrixXd::Identity(size,size));
+  if (!covariance.allFinite()) throw std::runtime_error("postopt joint covariance nonfinite");
+  return covariance;
+}
 
 Eigen::Matrix2d gnss_clock_difference_covariance(
     const gtsam::GaussianFactorGraph& linear_graph,

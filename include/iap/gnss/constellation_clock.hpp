@@ -4,6 +4,7 @@
 #include <iap/util/relinearization_policy.hpp>
 #include <Eigen/Core>
 #include <stdexcept>
+#include <vector>
 
 namespace gtsam { class GaussianFactorGraph; }
 
@@ -38,5 +39,11 @@ inline void register_gnss_clock_relinearization(
 Eigen::Matrix2d gnss_clock_difference_covariance(
     const gtsam::GaussianFactorGraph& linear_graph,
     gtsam::Key reference, gtsam::Key system);
+
+// At most X/V/B/R/E + four Vector2 clocks (29 tangent dimensions). No
+// regularization or independent-marginal reconstruction is permitted.
+Eigen::MatrixXd gnss_postopt_joint_covariance(
+    const gtsam::GaussianFactorGraph& linear_graph,
+    const gtsam::KeyVector& keys, const std::vector<std::uint32_t>& dimensions);
 
 }  // namespace iap

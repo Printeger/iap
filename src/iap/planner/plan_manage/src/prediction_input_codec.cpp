@@ -22,6 +22,31 @@ template<class A> void serialize(A& ar, iap::AdvisoryCoordinateContract& c, unsi
   ar & c.T_map_world & c.T_world_imu & c.T_lidar_imu & c.lever_arm_imu;
   ar & c.map_frame & c.body_frame & c.time_contract & c.failure_reason;
 }
+template<class A> void serialize(A& ar, iap::GnssPostoptEvidence& value, unsigned) {
+  ar & value.model;
+  ar & value.update_sequence;
+  ar & value.frame_id;
+  ar & value.state_stamp;
+  ar & value.gnss_stamp;
+  ar & value.epoch_source_identity;
+  ar & value.used_constellations;
+  ar & value.optimized_valid;
+  ar & value.covariance_valid;
+  ar & value.failure_reason;
+  ar & value.propagation;
+  ar & value.keys;
+  ar & value.tangent_dimensions;
+  ar & value.mean_dimensions;
+  ar & value.optimized_means;
+  ar & value.linearization_means;
+  ar & value.joint_covariance_row_major;
+  if constexpr (A::is_loading::value) {
+    if(value.keys.size()>9 || value.tangent_dimensions.size()>9 || value.mean_dimensions.size()>9 ||
+       value.optimized_means.size()>45 || value.linearization_means.size()>45 ||
+       value.joint_covariance_row_major.size()>841)
+      throw std::runtime_error("postopt evidence exceeds bounded model");
+  }
+}
 template<class A> void serialize(A& ar, iap::SatObs& value, unsigned) {
   ar & value.sat_id;
   ar & value.constellation;
@@ -268,23 +293,30 @@ template<class Archive> void fields(Archive& ar, FrozenOccupancyEpoch& value) {
   ar & value.current_vehicle_clearance_radius_m;
 }
 template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
-  std::string schema="iap_prediction_input_v7";
+  std::string schema="iap_prediction_input_v8";
   ar & schema;
-  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6" && schema!="iap_prediction_input_v7") throw std::runtime_error("unsupported prediction export schema");
+  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6" && schema!="iap_prediction_input_v7" && schema!="iap_prediction_input_v8") throw std::runtime_error("unsupported prediction export schema");
   ar & input.reference_time_s & input.validity_s & input.integrity & input.params;
   // v1 reads preserve historical fields; new parameters are an explicit v2 tail.
   if (schema != "iap_prediction_input_v1") ar & input.params.fusion.max_regularization_fraction;
-  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
+  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
   else input.recording_codec_version = schema == "iap_prediction_input_v1" ? 1 : 2;
-  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.params.gnss.measurement_noise_scale;
-  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
-  if (schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7") ar & input.clock_model;
+  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8") ar & input.params.gnss.measurement_noise_scale;
+  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8") ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
+  if (schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8") ar & input.clock_model;
   else input.clock_model = "legacy_common_clock";
-  if(schema == "iap_prediction_input_v7") ar & input.gnss_fault_model;
+  if(schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8") ar & input.gnss_fault_model;
   else {
     input.gnss_fault_model="legacy_single_satellite_v1";
     // An older wire schema cannot claim a newer recording authority.
     input.recording_codec_version=std::min(input.recording_codec_version,6u);
+  }
+  if(schema == "iap_prediction_input_v8") ar & input.integrity.postopt_evidence;
+  else {
+    input.integrity.postopt_evidence=iap::GnssPostoptEvidence{};
+    input.integrity.postopt_evidence.model="";
+    input.integrity.postopt_evidence.failure_reason="historical_state_evidence_unavailable";
+    input.recording_codec_version=std::min(input.recording_codec_version,7u);
   }
   auto epoch=std::make_shared<FrozenOccupancyEpoch>();
   if constexpr (Archive::is_saving::value) *epoch=*input.occupancy;
@@ -378,6 +410,7 @@ uint64_t predictionInputIdentity(const PredictionInput& input) {
     ar & params.fusion.max_regularization_fraction & params.lidar.fim_params.fim_support_voxel_m & params.gnss.measurement_noise_scale;
     if(input.recording_codec_version>=6) ar & input.clock_model;
     if(input.recording_codec_version>=7) ar & input.gnss_fault_model;
+    if(input.recording_codec_version>=8) ar & snapshot.postopt_evidence;
     ar << input.recording_codec_version << input.validity_s << input.occupancy->generation << input.occupancy->geometry_id;
   }
   uint64_t hash=1469598103934665603ULL;

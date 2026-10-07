@@ -111,6 +111,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::atomic<double>   last_frame_stamp_{0.0};
   std::atomic<uint64_t> epoch_count_{0};   ///< total epochs received
   std::atomic<uint64_t> factor_count_{0};  ///< total smoother injections
+  std::uint64_t postopt_sequence_ = 0; // smoother-finish owner only
   std::atomic<uint64_t> factor_count_diag_{0}; ///< post-opt diagnostic calls
 
   // Coordinate frame: ECEF origin + seed rotation ECEF→world (used to init E(0)/R(0))

@@ -107,6 +107,29 @@ TEST(GnssHandlerEpochBindingTest, ClockDifferenceCovarianceRetainsCorrelation) {
       std::invalid_argument);
 }
 
+TEST(GnssHandlerEpochBindingTest, JointCovarianceKeepsOrderedCrossTermsWithoutRegularization) {
+  const auto gps=gnss_clock_key('G',7), bds=gnss_clock_key('C',7);
+  gtsam::NonlinearFactorGraph graph;
+  graph.addPrior<gtsam::Vector2>(gps,gtsam::Vector2::Zero(),
+      gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector2(2.,.2)));
+  graph.emplace_shared<gtsam::BetweenFactor<gtsam::Vector2>>(
+      gps,bds,gtsam::Vector2(20,.5),gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector2(.3,.05)));
+  gtsam::Values states;states.insert(gps,gtsam::Vector2::Zero().eval());states.insert(bds,gtsam::Vector2(20,.5));
+  const auto linear=graph.linearize(states);
+  // Analytic random variables: BDS=GPS+independent difference. Reverse the
+  // requested order to verify both key ordering and full correlation.
+  const auto covariance=gnss_postopt_joint_covariance(*linear,{bds,gps},{2,2});
+  EXPECT_NEAR(covariance(0,0),4.09,1e-11);EXPECT_NEAR(covariance(2,2),4.,1e-11);
+  EXPECT_NEAR(covariance(0,2),4.,1e-11);EXPECT_NEAR(covariance(1,3),.04,1e-12);
+  EXPECT_NEAR(covariance(1,1),.0425,1e-12);
+  EXPECT_THROW(gnss_postopt_joint_covariance(*linear,{gps,gps},{2,2}),std::invalid_argument);
+  EXPECT_THROW(gnss_postopt_joint_covariance(*linear,{gps,bds},{1,3}),std::runtime_error);
+  gtsam::NonlinearFactorGraph singular;
+  singular.emplace_shared<gtsam::BetweenFactor<gtsam::Vector2>>(
+      gps,bds,gtsam::Vector2(20,.5),gtsam::noiseModel::Isotropic::Sigma(2,1.));
+  EXPECT_THROW(gnss_postopt_joint_covariance(*singular.linearize(states),{gps,bds},{2,2}),std::exception);
+}
+
 TEST(GnssHandlerEpochBindingTest, OnlyUsedConstellationsCreateFactorKeys) {
   GnssHandler handler;
   GnssEpoch epoch;

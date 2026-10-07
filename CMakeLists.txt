@@ -358,6 +358,7 @@ if(DEFINED ENV{ROS_VERSION})
     find_package(geometry_msgs REQUIRED)
     rosidl_generate_interfaces(${PROJECT_NAME}_msgs
       "msg/IntegrityReport.msg"
+      "msg/GnssPostoptEvidence.msg"
       "msg/AdvisoryGnssObservation.msg"
       "msg/DynamicALResult.msg"
       "msg/TrunkLandmark.msg"
@@ -624,7 +625,7 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_araim iap iap_current_integrity)
       if(TARGET gnss_extension)
         ament_add_gtest(test_gnss_clock_injection test/test_gnss_clock_injection.cpp)
-        target_link_libraries(test_gnss_clock_injection gnss_extension iap)
+        target_link_libraries(test_gnss_clock_injection gnss_extension iap "${iap_msgs_cpp_ts}")
       endif()
       if(DEFINED iap_msgs_cpp_ts)
         target_link_libraries(test_araim "${iap_msgs_cpp_ts}")
