@@ -33,7 +33,7 @@ factor的代价／Hessian／inlier，与完整小fixture的样本和代价相符
 binary、surface validation和未请求时无旧证据。Release构建与8组合等价通过（100／1000点、unary／binary、surface validation）；
 无匹配、一次消费、未收取A后无request B、同步接口，以及测试专用CUDA
 allocation/download/sync失败与恢复覆盖。旧样本红例8项失败已保存。GPU构建要求CMake≥3.24。
-证据：log/20261007T091820Z_056/metadata/gpu_match_evidence_*。真实运行尚待完成。
+证据：log/20261007T091820Z_056/metadata/gpu_match_evidence_*。干净7634cb49现场样本审计通过；独立噪声／空间与米数资格保持未完成。
 
 生产配置：唯一iap_sim.launch.py新增capture_advisory_residuals:=true（默认false）。
 只在run-local config_odometry设置enable_gpu_match_evidence；不改quality stride，
@@ -69,3 +69,19 @@ whitened分布单列；S是matcher几何协方差，不自动等于独立测量�
 审计身份红例4项已保留；green进一步覆盖source/target时间、fixed/voxel、keys、
 sequence以及GNSS frame/update/epoch/time/constellation。请求available与exported available
 分别计数，drop仍属于请求分母。
+
+
+B GPU现场闭环（干净7634cb49／222259Z_458，60秒显式诊断）：GPU3／安装Release／配置NAV
+身份前置通过，全部进程exit0。3,983账本、3,982请求／可用导出、545 source frame、
+357,945实际样本，queue drop／写失败0。独立e/S最大误差1.339e-6m／2.207e-7m²，
+owner全部匹配；抽样median2.181%与多层相关性明确不授予独立noise或米数资格。
+544双星座Monitor均UNSAFE，25D包owner/layout/means错配0；原state−epoch −91至＋50ms
+NOT_PROPAGATED，5/6冻结、500原时间空间请求357 VALID／133 PHYSICAL_FILTERED／10
+COORDINATE_ERROR，4 raw GNSS有限请求仍是诊断。18发布／13命令ID／3定时激活，5条
+生效前撤销无对应激活／命令；前进10.251743m、末距固定终点25.759394m，原FSM未到达。
+末attempt31实际曲线同图重放通过，但生产发布前制动空间净空拒绝；原代码仅覆写旧
+assessment reason/position，未绑定新release epoch/time/cell，取证owner缺口需下一项修复。
+同输入backend通过不等于release授权。核心9组、规划7组、入口43项、审计4项通过；
+B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广。
+图文与原hash索引：log/20261007T091820Z_056/export/analysis/gpu_match_live/report_v2.md，
+原相对图链接报告及manifest均保留，correction manifest只修正新报告链接。

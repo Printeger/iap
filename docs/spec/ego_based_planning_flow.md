@@ -1446,7 +1446,7 @@ B GPU生产取证已接入原postopt quality pass；默认capture_advisory_resid
 显式true仅更改run-local取证开关，原stride／匹配／预算不变。16×128后台raw queue，
 小请求账本保留全部身份与drop，原实际CUDA e/S与归约count/cost独立保存；
 frame/target/level/原时刻／外参／GNSS owner绑定，未匹配不借旧epoch授予资格。
-核心9组、规划7组、入口43项、审计4项通过；新干净历史现场待验证；正式噪声／联合故障及B0/9＋0/9、D0/6保持阻塞。
+核心9组、规划7组、入口43项、审计4项通过；新干净历史现场样本审计通过；正式噪声／联合故障及B0/9＋0/9、D0/6保持阻塞。
 接口：docs/spec/gpu_match_evidence_contract.md。
 
 GPU取证评审修复：全请求ledger保留原target/voxel/keys和GNSS epoch/update身份；
@@ -1475,3 +1475,19 @@ flowchart TD
   Server --> Progress[实际odom进度 / 固定终点18,0,1.5]
   Progress --> Search
 ```
+
+
+B GPU现场闭环（干净7634cb49／222259Z_458，60秒显式诊断）：GPU3／安装Release／配置NAV
+身份前置通过，全部进程exit0。3,983账本、3,982请求／可用导出、545 source frame、
+357,945实际样本，queue drop／写失败0。独立e/S最大误差1.339e-6m／2.207e-7m²，
+owner全部匹配；抽样median2.181%与多层相关性明确不授予独立noise或米数资格。
+544双星座Monitor均UNSAFE，25D包owner/layout/means错配0；原state−epoch −91至＋50ms
+NOT_PROPAGATED，5/6冻结、500原时间空间请求357 VALID／133 PHYSICAL_FILTERED／10
+COORDINATE_ERROR，4 raw GNSS有限请求仍是诊断。18发布／13命令ID／3定时激活，5条
+生效前撤销无对应激活／命令；前进10.251743m、末距固定终点25.759394m，原FSM未到达。
+末attempt31实际曲线同图重放通过，但生产发布前制动空间净空拒绝；原代码仅覆写旧
+assessment reason/position，未绑定新release epoch/time/cell，取证owner缺口需下一项修复。
+同输入backend通过不等于release授权。核心9组、规划7组、入口43项、审计4项通过；
+B空间／米数与C真实收益未资格，B0/9＋0/9、D0/6、默认不推广。
+图文与原hash索引：log/20261007T091820Z_056/export/analysis/gpu_match_live/report_v2.md，
+原相对图链接报告及manifest均保留，correction manifest只修正新报告链接。
