@@ -1196,3 +1196,9 @@ backend/initialize重放使用生产候选纠正接口；exit0须物理、动态
 `log/20261007T091820Z_056/export/analysis/uniform_retime_live/report.md`。
 89曲线／81命令ID，末距固定目标0.328m但原规则未完成；一次撤销晚于server激活，
 完整接续仍待修复。首个与末次Curve候选及原始LiDAR-only样本保留，正式实验不计入。
+
+FGO导出的3×3位置协方差现在属于优化位姿的世界坐标轴；原6×6 Pose3局部切空间
+协方差保留供LiDAR使用，世界系与ENU不能自动等同。原运动准入和prior OFF不变。
+历史GPS＋北斗10Hz／300秒广播传播独立对照及B1I官方规范审计见
+`log/20261007T091820Z_056/export/analysis/rinex_full_window/report.md`与
+`export/analysis/bds_icd_audit/report.md`（同一campaign下）。此证据不授予真实PL米数或正式9＋9资格。

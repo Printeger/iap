@@ -49,3 +49,23 @@ separation compares only position blocks; its whole-constellation fault model
 is still pending. Query FIM eliminates actual clock information without an
 epsilon prior. Frozen v6 records the clock geometry model, while full optimizer
 time/covariance uncertainty qualification remains unfinished.
+
+
+## FGO position covariance axes
+
+`FGOPositionInfo::bindPoseCovariance` binds one nominal optimized `X(frame_id)`
+(IMU pose in the current odometry graph) and its unchanged 6×6 Pose3 marginal
+before extraction derives inverse, sigmas and validity. GTSAM uses right-local
+pose retraction; the translation block is in pose-local axes. World position
+covariance is `J_translation * Sigma_local * J_translation.transpose()` using
+that same nominal pose's canonical GTSAM translation Jacobian. The raw
+`pose_cov_6x6` remains local for LiDAR pose Jacobians. `lambda_p` is the inverse
+world position marginal, not a position block of the full pose Hessian.
+
+Frame ID and the original state timestamp are unchanged. World axes are not
+labelled ENU without physical alignment qualification; the legacy E/N/U field
+names denote world-axis sigmas at this interface. The max-eigenvalue motion
+proxy is rotation invariant and its original admission gates remain. This
+transform covers the IMU-origin position; antenna/LiDAR lever arms, rotation
+uncertainty, GNSS epoch alignment and any propagation remain separate unqualified
+requirements. No prior, synthetic freshness or integrity validity is added.

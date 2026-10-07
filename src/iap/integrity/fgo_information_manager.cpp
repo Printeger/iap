@@ -22,6 +22,18 @@ using gtsam::symbol_shorthand::X;
 
 namespace iap {
 
+void FGOPositionInfo::bindPoseCovariance(
+    const gtsam::Pose3& pose,
+    const Eigen::Matrix<double, 6, 6>& covariance) {
+  // GTSAM retracts Pose3 on the right: its marginal is in the pose-local
+  // tangent, not world axes. Use the nominal translation Jacobian to push
+  // this same marginal into world position; keep the raw tangent for LiDAR.
+  gtsam::Matrix36 translation_jacobian;
+  p_world = pose.translation(translation_jacobian);
+  pose_cov_6x6 = covariance;
+  sigma_p = translation_jacobian * covariance * translation_jacobian.transpose();
+}
+
 // ---------------------------------------------------------------------------
 FGOInformationManager::FGOInformationManager() : params_{} {
   logger_ = glim::create_module_logger("fgo_info");
@@ -44,14 +56,10 @@ void FGOInformationManager::extract(
 
   try {
     const gtsam::Pose3 pose = smoother.calculateEstimate<gtsam::Pose3>(X(frame_id));
-    info.p_world = pose.translation();
-
-    // Extract 6×6 marginal covariance for Pose3: [rotation(3) | translation(3)]
+    // Pose3 right-local marginal: [rotation(3) | translation(3)].
     const gtsam::Matrix pose_cov = smoother.marginalCovariance(X(frame_id));
 
-    info.pose_cov_6x6 = pose_cov;
-    // Position block is the lower-right 3×3
-    info.sigma_p = pose_cov.block<3, 3>(3, 3);
+    info.bindPoseCovariance(pose, pose_cov);
     info.pose_cov_valid = true;
 
     // Validate: check eigenvalues

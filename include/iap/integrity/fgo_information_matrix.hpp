@@ -2,9 +2,9 @@
 // IAP-RQ-300: FGO Information Matrix extraction from iSAM2
 // §1.9 Step C+: Σ^(0) from factor-graph marginals → feed ARAIM
 //
-// Extracts the position-block (3×3) of the information (Hessian) matrix
-// from the incremental fixed-lag smoother after each optimization cycle.
-// This gives us Σ^(0) = Λ^{-1}_{p,p} which is more rigorous than the
+// Pushes the Pose3 marginal into world position using its translation
+// Jacobian after each fixed-lag optimization cycle. Its inverse is position
+// marginal information, not a block of the full pose Hessian. This differs from
 // WLS-only S0 = (G^T W G)^{-1} used by ARAIM's own geometry matrix.
 
 #include <Eigen/Core>
@@ -15,6 +15,9 @@
 #include <vector>
 
 // Forward declarations to avoid heavy GTSAM headers in this header
+namespace gtsam {
+class Pose3;
+}
 namespace gtsam_points {
 class IncrementalFixedLagSmootherExtWithFallback;
 }
@@ -24,25 +27,31 @@ namespace iap {
 // ---------------------------------------------------------------------------
 /// @brief Per-epoch snapshot of FGO-derived position information.
 struct FGOPositionInfo {
+  /// Bind one marginal to a fresh snapshot before extraction derives inverse,
+  /// sigmas and validity. Does not grant validity or change the timestamp.
+  void bindPoseCovariance(const gtsam::Pose3& pose,
+                         const Eigen::Matrix<double, 6, 6>& covariance);
+
   double stamp          = 0.0;     ///< timestamp of the extraction
   long   frame_id       = -1;      ///< frame id of the extracted pose key
   bool   valid          = false;   ///< true if extraction succeeded
   bool   pose_cov_valid = false;   ///< true if pose_cov_6x6 and sigma_p are valid
 
-  /// Position covariance Σ^(0)_{p,p} (3×3, ENU or world frame)
+  /// Position marginal covariance in estimator world axes (ENU only if aligned).
   Eigen::Matrix3d sigma_p = Eigen::Matrix3d::Identity();
 
-  /// Information matrix block Λ_{p,p} = Σ^{-1}_{p,p}
+  /// Inverse world position marginal covariance (not the full Hessian block).
   Eigen::Matrix3d lambda_p = Eigen::Matrix3d::Zero();
 
-  /// Full 6×6 pose covariance marginal for Pose3 [rot(3) | trans(3)]
+  /// Unchanged Pose3 right-local tangent marginal [rot(3) | trans(3)], for
+  /// consumers with local pose Jacobians; never relabel it as world covariance.
   Eigen::Matrix<double, 6, 6> pose_cov_6x6 =
       Eigen::Matrix<double, 6, 6>::Zero();
 
   /// Current nominal pose translation in world frame.
   Eigen::Vector3d p_world = Eigen::Vector3d::Zero();
 
-  /// Per-axis position sigmas [m]
+  /// Per-world-axis position sigmas [m]; E/N/U names require world/ENU alignment.
   double sigma_E = 1e9;
   double sigma_N = 1e9;
   double sigma_U = 1e9;

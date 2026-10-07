@@ -1314,3 +1314,25 @@ server忽略，planner报告ENVIRONMENT_STALE随后独立已检查制动，完�
 6/gen100/risk114原始144项全部LiDAR-only flags1433，GNSSraw未计算。
 图文／3D／命令／hash索引analysis/uniform_retime_live及uniform_retime_live_final。
 B正式0/9+0/9、D0/6、默认不推广；重定时接口回归绿不表示全部Curve／任务通过。
+
+
+B坐标接口：FGO原6×6是Pose3右局部切空间，平移块不等于world。
+实际Pose3::retract数值扰动单项红例Up方差0.000425、独立期望0.0401m²。
+生产提取现用同一优化X(IMU)的translation Jacobian，原local6×6仍交给LiDAR；
+world位置协方差逆与轴sigma由原提取派生。时间／frame／准入／prior OFF不变，
+旋转后谱及最大特征值运动代理保持；ENU与天线/外参旋转不确定性仍未取得资格。
+Release core／实际GNSS及Integrity插件构建安装，16项fusion/covariance单项、
+6组完整性／预测回归与43入口通过；两轴无硬问题，fresh snapshot前提写入接口。
+红／绿／源码／binary／日志hash索引fgo_covariance_red_verified、fgo_covariance_implementation。
+此修复尚无独立新现场协方差／GNSS时间配对验证，B不授予通过。
+
+B星历扩窗：原历史NAV在2022-07-06 12:00UTC起300秒、10Hz共3001历元，
+每历元31GPS／43BDS健康且原播发时间可用的NAV记录；222074生产／独立RTKLIB配对，
+TOC/TOE/TTR/AODE及健康metadata全部一致，最大ECEF差2.766e-7m、
+速度差2.828e-4mps、钟差1.084e-19s。速度为生产中央10ms与参考前向1ms分别保存。
+仅广播传播接口，NAV总数不等于实际可见/使用数。原6历元证据不改写。
+官方B1I3.0时间／钟差/TGD／GEO旋转审计见analysis/bds_icd_audit；C59/C60轨道身份
+独立依据、信号传播/接收时间误差与生产双源各层资格仍待验证。
+analysis/rinex_full_window绑定命令、NAV/独立源码/实际binary/输入hash；初次分析
+仅小数offset字符串不同拒绝，改按原数值配对，原CSV不改写，不算模型红例。
+正式B0/9+0/9、D0/6、默认不推广。

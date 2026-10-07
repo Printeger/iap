@@ -4,6 +4,9 @@
 #include <iap/integrity/integrity_types.hpp>
 #include <iap/integrity/integrity_source_result.hpp>
 #include <iap/integrity/integrity_fusion_policy.hpp>
+#include <iap/integrity/fgo_information_matrix.hpp>
+#include <gtsam/geometry/Pose3.h>
+#include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -67,6 +70,53 @@ void expect_same_fusion_result(const IntegrityFusionResult& a,
 }
 
 }  // namespace
+
+TEST(FGOPositionCovarianceTest, WorldAxesMatchActualPoseRetraction) {
+  Eigen::Matrix<double, 6, 6> root = Eigen::Matrix<double, 6, 6>::Zero();
+  root.diagonal() << .03, .02, .01, .2, .05, .02;
+  // Correlated positive-definite marginal, including rotation/translation.
+  root(3, 0) = .01;
+  root(4, 3) = .015;
+  root(5, 1) = .005;
+  const Eigen::Matrix<double, 6, 6> covariance = root * root.transpose();
+  const gtsam::Pose3 pose(gtsam::Rot3::RzRyRx(.2, 1.5707963267948966, .3),
+                          gtsam::Point3(4., -2., 1.5));
+  FGOPositionInfo info;
+  info.stamp = 123.0;
+  info.frame_id = 42;
+  info.bindPoseCovariance(pose, covariance);
+
+  // Independent numerical derivative of the installed GTSAM manifold,
+  // rather than restating a rotation formula in the expected result.
+  Eigen::Matrix<double, 3, 6> numerical;
+  constexpr double step = 1e-6;
+  for (int axis = 0; axis < 6; ++axis) {
+    gtsam::Vector6 delta = gtsam::Vector6::Zero();
+    delta(axis) = step;
+    numerical.col(axis) = (pose.retract(delta).translation() -
+                          pose.retract(-delta).translation()) / (2. * step);
+  }
+  const Eigen::Matrix3d expected = numerical * covariance * numerical.transpose();
+  EXPECT_TRUE(info.sigma_p.isApprox(expected, 1e-8))
+      << "world covariance mismatch\n" << info.sigma_p << "\nexpected\n" << expected;
+  EXPECT_TRUE(info.pose_cov_6x6.isApprox(covariance, 0.0));
+  EXPECT_TRUE(info.p_world.isApprox(pose.translation(), 0.0));
+  EXPECT_DOUBLE_EQ(info.stamp, 123.0);
+  EXPECT_EQ(info.frame_id, 42);
+  EXPECT_FALSE(info.valid);
+  EXPECT_FALSE(info.pose_cov_valid);
+  const Eigen::Matrix3d local = covariance.block<3, 3>(3, 3);
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> before(local), after(info.sigma_p);
+  EXPECT_TRUE(before.eigenvalues().isApprox(after.eigenvalues(), 1e-12));
+  EXPECT_NEAR(info.sigma_p.trace(), local.trace(), 1e-12);
+  // A pitched pose moves the largest translational uncertainty into Up.
+  EXPECT_GT(info.sigma_p(2, 2), 50. * local(2, 2));
+
+  FGOPositionInfo identity;
+  identity.bindPoseCovariance(gtsam::Pose3(), covariance);
+  EXPECT_TRUE(identity.sigma_p.isApprox(local, 0.0));
+  EXPECT_TRUE(identity.pose_cov_6x6.isApprox(covariance, 0.0));
+}
 
 // ============================================================================
 // T4.1: to_string / from_string
