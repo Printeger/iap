@@ -659,3 +659,27 @@ receiver sibling CSV，其米数仅列诊断，不追认校准资格。报告相
 报告将这些假设行标为格式无效、身份统计为空，保留原日志及旧报告快照；不重新
 排列列值追认假设身份。epoch 行和冻结输入支持当前 GNSS 监测拒绝的观察，
 整星座退化的精确假设身份仍需修复生产导出后核验。现场停车归因与此独立。
+
+### 2026-10-07 四轮现场最终审计
+
+最新结果/实际系统流程见
+[四阶段图文报告](../../log/20261007T050106Z_396/export/analysis/forest_four_stage_final/report.md)。
+本轮4次guide/prior OFF GPU探索均未到原终点。第四轮3c84bcd、300s，
+实际前进16.422m，38发布ID/34实际命令ID，最终执行反馈38。
+末次attempt265/gen2398与末CSV同身份；尚无候选曲线，actual_curve和
+final_check为null，不能挪用旧曲线/guide。真实起点和接入合法，在线1s
+TIME_BUDGET；完整原16目标、原池、原guide净空规则离线exhausted=true，
+226897节点无路；最低原物理净空归因242253节点也穷尽无路。范围限冻结
+已观测池，不表示全森林无路。未扩搜索预算或放松未知/净空。
+第三轮attempt730/gen1575合法guide、实际曲线切未知，原静态后端与当前
+后端同夹具红绿通过；末次失败与实际check地图独立绑定，失败不覆盖执行。
+未验证的simulation hover fallback不算已验证制动/安全完成。
+
+53列坐标动力学CSV与原IMU/pose实测记录物理Up/旋转边缘cov；第四轮
+world/ENU Up漂移37.508°，参考与pose四份配对差0.176–0.208s仍超0.05。
+CSV pre-postopt epoch身份只是诊断；最终report/输入使用postopt同epoch身份。
+Current Monitor gnss_src.valid保持权威，GPS-only加整星座假设无有限PL是
+完整性无法判定而非全部卫星已确认故障。当前合法LiDAR来源可以支持运动；
+Advisory缺失不独立急停。未传播旋转/时间不确定性，无匹配GPU逐观测残差，
+真实双源仍未验证。校准0/9、独立验证0/9、任务对照0/6，冻结配置null、
+默认未推广；完整解锁条件与全量失败/命令/hash在报告中，不声明森林PASS。

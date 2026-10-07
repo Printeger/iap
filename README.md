@@ -970,3 +970,10 @@ GNSS 已有 debug CSV 开启时，`export/glio/advisory_coordinate_dynamics.csv`
 时使用None，报告须结合真实发布/命令ID。新版本未选到目标记Target/Budget，
 同代final证据保留。guide OFF下实际未知/越界采样点可复用单guide平面目标
 修正，Unknown执行拒绝及原修正配额不变。
+
+本次四阶段实际结果见
+[图文报告](log/20261007T050106Z_396/export/analysis/forest_four_stage_final/report.md)。
+第四轮300s观察窗口（单次在线预算不变）前进16.422m仍未到终点；literal
+末次attempt265/gen2398在原已观测池内离线穷尽无路。固定路线/时间与旋转
+资格/双源尚未通过，9+9和6均未启动，默认不推广。报告含全部四轮失败、
+原始命令/配置hash、同输入对照、地图/曲线及未合格误差诊断图。
