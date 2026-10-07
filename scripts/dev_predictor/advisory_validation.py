@@ -421,7 +421,6 @@ def report(run, dataset=None):
     json_write(out / "summary.json", summary)
     raw = [(p.parent.name, p) for p in sorted(data_root.glob("*/points.csv"))]
     text = ["# Advisory PL 空间退化验证：实际执行报告", "", f"场景目标：`{SCENARIO}`。现场状态：`{summary['live_status']}`。",
-            f"模型/工具提交：`{git('rev-parse', 'HEAD')}`；参数权威为完整 input.bin，默认融合 K_H=K_V=5、偏差/预留=0，alpha 变体仅诊断。版本与代码 hash 见 [审计 JSON]({os.path.relpath(audit, out)})；二进制、动态库、编译选项与 payload hash 在 metadata/manifests/advisory_fixture_*.json。",
             "", ("本轮真实四分叉冻结输入、真实扫描和 GLIO 重复运行均未取得；已有日志和解析图未冒充本轮实测。" if not summary["real_requested"] else
                    f"本报告包含 {summary['real_requested']} 个真实冻结重放请求；覆盖仅限这些输入和查询点，不能据此宣称全部地图或实际误差尺度已验证。"),
             "", "| 独立结论 | 状态 |", "|---|---|"]

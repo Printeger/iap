@@ -2,7 +2,7 @@
 
 ## 状态与依据
 
-Advisory 验证见 [方案与实施结果](../dev_predictor/advisory_spatial_validation_plan.md)、[工具契约](advisory_validation_contract.md) 和 [正式报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/committed/report.md)。实验代码 `21f692e` 完成完整录制、原 codec/生产 PredictorModule 重放、来源拆分、S1–S5 合成机制对照及报告；共享同一冻结准备与状态映射，包装器只增加拒绝原因，来源准入、物理地图、执行授权和阈值不变。9 项新增 CPU 合同测试、EGO baseline/进程管线、PredictorModule CTest 与产物契约检查通过；提交后 135 个合成请求已重跑，225 项产物 hash 和报告链接已核验。缺 GNSS 阻断有效 LiDAR 的准入差异已复现，合成双源退化的弱方向先验贡献约 99.6965%，不等于真实森林结论，未擅自修正模型。真实输入可用性/空间敏感性为 `INCONCLUSIVE_INPUT_UNAVAILABLE`，实际误差为 `INCONCLUSIVE_LIVE_NOT_RUN`；GPU READY，但原有 RViz 修改仍触发 `LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE`，没有启动现场。真实 start/middle/stop、固定合法路线和至少三次 GLIO 配对重复仍待测。
+历史 Advisory 工具验证见 [方案与实施结果](../dev_predictor/advisory_spatial_validation_plan.md)、[冻结验证工具契约](advisory_validation_contract.md) 和 [21f692e 正式报告](../../log/20261006T123756Z_794/export/analysis/advisory_validation/committed/report.md)。本段描述该历史版本；后续准入／数值修复及本轮待测状态见下方分阶段契约。完整录制、原 codec/生产 PredictorModule 重放、来源拆分、S1–S5 合成机制对照与报告已实施；生产包装器增加拒绝原因并共享相同冻结准备/状态映射，来源准入、物理地图、执行授权和阈值不变。缺 GNSS 阻断有效 LiDAR 的准入差异及强先验主导已在合成输入复现；未擅自修正模型。真实 start/middle/stop 扫描和三次 GLIO 误差重复仍为 INCONCLUSIVE，现场受无关 RViz 修改阻止，不声明风险地图已验证正确。
 
 结构基线：`../ego-planner-swarm`，提交 `23a8d5a191711dd65633df689bd00f55d4dea8f9`。原版目录只读。
 设计依据：工作区 `docs/0928_review.md` 第 1862 行以后的最终收敛，以及本轮用户确认。
