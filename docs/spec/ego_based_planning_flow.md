@@ -1175,3 +1175,20 @@ risk与occupancy epoch三组回归，以及六组生产Curve／执行回归、43
 analysis/physical_snapshot_live。12/gen55同输入initialize物理／动态通过而路线0.233m
 仍超0.137m，physical verdict不能授予路线资格；原预算／修复与时刻保留。
 上轮362/gen2151的阶段是Target，先前文档误读为Search已校正，原枚举数据保持。
+
+
+### Frozen raw risk export authority
+
+现场attempt3/gen18的793次冻结查询与零行CSV形成真实红例；旧export读取全局
+cache，而规划读取事务内cache，物理snapshot也早于当前risk绑定。现在一份原始
+cache同时提供分类查询与取证，按明确冻结代数绑定，不因live图先更新而清零
+版本。export在规划线程核验原物理身份并复制已查询样本，后台不重新预测。
+JSON显式区分冻结query与旧全局cache旁证；CSV保留raw H/V、status/version并
+追加PredictorResultFlags及raw geometry诊断。INVALID/1e9不授予当前VALID，
+无合格历史时为UNKNOWN；原有STALE_REFERENCE有界回退语义保持；
+物理、年龄、来源、实际曲线和发布检查保持。回归包括live更新前后两种绑定时序、
+错代数与几何拒绝、原时刻不刷新及哨兵。正式B／D仍阻塞，新的现场核对待提交。
+
+最终Release构建／安装、三组地图与七组planner行为检查、43项canonical通过；
+首次编译失败保留。命令、source/binary/log hash登记于frozen_risk_export_implementation。
+冻结查询取证修复的现场仍待干净提交，不替代B／D资格。

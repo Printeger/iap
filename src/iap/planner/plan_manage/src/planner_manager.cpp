@@ -130,6 +130,10 @@ namespace ego_planner
     const auto final_check=has_final_check ? std::optional<TrajectoryAssessment>(*checked) : std::nullopt;
     const auto final_snapshot=final_check && final_check->physical_epoch
         ? final_check->physical_epoch->failure_evidence : std::shared_ptr<const GridMapFailureSnapshot>{};
+    // Capture the same frozen raw cache on the serialized planning thread.
+    // The writer receives values, never a mutable query or a live re-query.
+    const auto risk_evidence=planning_view_ && planning_view_->advisory_query.captureEvidence
+        ? planning_view_->advisory_query.captureEvidence(*snapshot) : std::optional<GridRiskEvidence>{};
     const auto node = node_;
     auto write = [=](const std::string& label) mutable {
     const auto* search = search_value ? &*search_value : nullptr;
@@ -205,12 +209,15 @@ namespace ego_planner
         final_cells.close(); if(!final_cells) throw std::runtime_error("final_check_cells.bin write failed");
       }
       std::ofstream risk(pending / "queried_risk.csv");
-      risk << "address,hpl_m,vpl_m,status,version\n";
-      for (const auto& sample : snapshot->queried_risk)
+      risk << "address,hpl_m,vpl_m,status,version,source_flags,gnss_raw_valid,gnss_geometry_status\n";
+      risk << std::setprecision(17);
+      for (const auto& sample : risk_evidence ? risk_evidence->queried_risk : snapshot->queried_risk)
         risk << sample.address << ',' << sample.value.hpl << ','
              << sample.value.vpl << ','
              << static_cast<unsigned>(sample.value.status) << ','
-             << sample.value.version << '\n';
+             << sample.value.version << ',' << sample.value.source_flags << ','
+             << sample.value.gnss_raw_valid << ','
+             << static_cast<unsigned>(sample.value.gnss_geometry_status) << '\n';
       risk.close();
       if (!risk) throw std::runtime_error("queried_risk.csv write failed");
       if (!snapshot->observation_sources.empty()) {
@@ -300,14 +307,16 @@ namespace ego_planner
           << ",\n  \"inflation_radius_m\": " << number(snapshot->inflation_radius_m)
           << ",\n  \"cell_flags_file\": \"cells.bin\",\n"
           << "  \"cell_flag_bits\": {\"raw\": 1, \"inflated\": 2, \"observed\": 4},\n"
-          << "  \"risk_version\": " << snapshot->risk_version << ",\n"
+          << "  \"risk_version\": " << (risk_evidence ? risk_evidence->risk_version : snapshot->risk_version) << ",\n"
           << "  \"risk_context_matches_map\": "
-          << (snapshot->risk_context_matches_map ? "true" : "false") << ",\n"
+          << ((risk_evidence ? risk_evidence->risk_context_matches_map : snapshot->risk_context_matches_map) ? "true" : "false") << ",\n"
           << "  \"risk_reference_time_s\": "
-          << number(snapshot->risk_reference_time_s) << ",\n"
+          << number(risk_evidence ? risk_evidence->risk_reference_time_s : snapshot->risk_reference_time_s) << ",\n"
           << "  \"risk_valid_until_s\": "
-          << number(snapshot->risk_valid_until_s) << ",\n"
+          << number(risk_evidence ? risk_evidence->risk_valid_until_s : snapshot->risk_valid_until_s) << ",\n"
           << "  \"risk_samples_file\": \"queried_risk.csv\",\n"
+          << "  \"risk_samples_authority\": "
+          << std::quoted(risk_evidence ? "FROZEN_PLANNING_QUERY_CACHE" : "GLOBAL_GRIDMAP_CACHE_HISTORY") << ",\n"
           << "  \"motion_allow_bridged\": "
           << (capture_motion.allow_bridged ? "true" : "false") << ",\n"
           << "  \"motion_stamp_s\": " << number(capture_motion.stamp_s) << ",\n"

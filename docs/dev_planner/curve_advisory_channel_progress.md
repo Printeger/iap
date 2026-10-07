@@ -282,3 +282,18 @@ C原始风险导出红例：同一真实attempt3/gen18已查询793次冻结风�
 context_matches=false。冻结query局部缓存与旧全局缓存导出分离，且物理snapshot
 取得早于当前风险绑定；不借插值／色标补值。assert_frozen_risk_export.py一条命令
 复现，原代码／input／binary hash在frozen_risk_export_red_before。修复待实施。
+
+
+C取证接口修复：共享原始query cache与分类视图，按明确冻结物理代数绑定；
+导出前核对几何并在规划线程复制值。事实是旧export与实际query不共享authority；
+策略是修该接口，不补算／插值，不以live最新值替换。CSV新增原来源mask与GNSS
+raw geometry状态，后者不授予联合资格；1e9保留INVALID。测试夹具按新接口
+赋值，补live先更新再capture及错代数回归；首次planner编译失败日志原样留存。
+自动化最终结果与新现场待补；A路线红例、B正式0/9+0/9、D0/6保持阻塞。
+
+最终Release构建／安装、三组地图与七组planner行为检查、43项canonical通过；
+首次编译失败保留。命令、source/binary/log hash登记于frozen_risk_export_implementation。
+冻结查询取证修复的现场仍待干净提交，不替代B／D资格。
+
+Spec／Standards最终均无硬问题；INVALID不授予当前VALID，既有合格历史的
+STALE_REFERENCE有界回退保持，缺历史时UNKNOWN。

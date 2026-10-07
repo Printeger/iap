@@ -536,8 +536,9 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
     }
     view.physical_context = grid_map_->preparePlanningQuery(time_s, motion, epoch);
     // The bound PL context has to refer to this same occupancy generation.
-    view.risk_version = epoch->generation == grid_map_->occupancyGeneration() ? risk_version : 0;
-    view.advisory_query=grid_map_->capturePlanningRiskQuery(view.risk_version,time_s,planning_risk_policy_,&view.advisory_valid_until_s);
+    view.risk_version = risk_version;
+    view.advisory_query=grid_map_->capturePlanningRiskQuery(view.risk_version,time_s,
+        planning_risk_policy_,&view.advisory_valid_until_s,epoch->generation);
     planning_view_ = std::move(view);
     return true;
   }

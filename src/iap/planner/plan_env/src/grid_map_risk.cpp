@@ -178,8 +178,9 @@ GridPlanningRisk GridMap::classifyPlanningRisk(const GridRiskVoxel& live,
   return planning;
 }
 
-std::function<GridPlanningRisk(const Eigen::Vector3d&)> GridMap::capturePlanningRiskQuery(
-    uint64_t version, double now, const GridPlanningRiskPolicy& policy, double* valid_until_s) {
+GridFrozenRiskQuery GridMap::capturePlanningRiskQuery(
+    uint64_t version, double now, const GridPlanningRiskPolicy& policy,
+    double* valid_until_s, uint64_t frozen_occupancy_generation) {
   std::lock_guard<std::mutex> map_lock(occupancy_epoch_mutex_);
   std::lock_guard<std::mutex> risk_lock(risk_mutex_);
   const auto context=risk_context_;
@@ -187,11 +188,18 @@ std::function<GridPlanningRisk(const Eigen::Vector3d&)> GridMap::capturePlanning
   const auto origin=mp_.map_origin_, low=mp_.map_min_boundary_, high=mp_.map_max_boundary_;
   const auto dimensions=mp_.map_voxel_num_;
   const double resolution=mp_.resolution_, inverse=mp_.resolution_inv_;
+  const auto sequence=occupancy_update_sequence_.load();
+  const auto generation=frozen_occupancy_generation ? frozen_occupancy_generation : sequence/2;
   const bool bound=version!=0 && version==risk_version_ && context.frame_id==mp_.frame_id_ &&
-      context.occupancy_generation==occupancy_update_sequence_.load()/2;
+      context.occupancy_generation==generation && (frozen_occupancy_generation || !(sequence&1u));
   if(valid_until_s) *valid_until_s=bound ? context.valid_until_s : std::numeric_limits<double>::quiet_NaN();
-  return [context,history,origin,low,high,dimensions,resolution,inverse,bound,version,now,policy,
-          cache=std::unordered_map<size_t,GridPlanningRisk>{}](const Eigen::Vector3d& position) mutable {
+  // Replace the previous classified-value cache with raw values in the same
+  // scope. Classification remains a view of that cache; evidence never reads
+  // a newer global buffer or invokes prediction again.
+  const auto cache=std::make_shared<std::unordered_map<size_t,GridRiskVoxel>>();
+  GridFrozenRiskQuery frozen;
+  frozen.query=[context,history,origin,low,high,dimensions,resolution,inverse,bound,version,now,policy,cache]
+      (const Eigen::Vector3d& position) {
     GridRiskVoxel value; value.version=version;
     if (!position.allFinite() || !(position.array()>low.array()+1e-4).all() ||
         !(position.array()<high.array()-1e-4).all()) {
@@ -199,22 +207,41 @@ std::function<GridPlanningRisk(const Eigen::Vector3d&)> GridMap::capturePlanning
     }
     const Eigen::Vector3i index=((position-origin)*inverse).array().floor().cast<int>();
     const size_t address=(static_cast<size_t>(index.x())*dimensions.y()+index.y())*dimensions.z()+index.z();
-    if (const auto found=cache.find(address); found!=cache.end()) return found->second;
-    value.status=!bound ? GridRiskStatus::VERSION_CHANGED :
-        (!std::isfinite(context.reference_time_s) || !std::isfinite(context.valid_until_s)) ? GridRiskStatus::INVALID :
-        now<context.reference_time_s || now>context.valid_until_s ? GridRiskStatus::STALE :
-        !context.predict ? GridRiskStatus::UNCOMPUTED : GridRiskStatus::VALID;
-    if(value.status==GridRiskStatus::VALID) {
-      try { value=context.predict(origin+(index.cast<double>()+Eigen::Vector3d::Constant(.5))*resolution); }
-      catch(const std::exception&) { value.status=GridRiskStatus::INVALID; }
-      value.version=version;
-      if(value.status==GridRiskStatus::VALID && (!std::isfinite(value.hpl) || !std::isfinite(value.vpl) || value.hpl<0 || value.vpl<0 || value.hpl>=1e9 || value.vpl>=1e9)) value.status=GridRiskStatus::INVALID;
+    if (const auto found=cache->find(address); found!=cache->end()) value=found->second;
+    else {
+      value.status=!bound ? GridRiskStatus::VERSION_CHANGED :
+          (!std::isfinite(context.reference_time_s) || !std::isfinite(context.valid_until_s)) ? GridRiskStatus::INVALID :
+          now<context.reference_time_s || now>context.valid_until_s ? GridRiskStatus::STALE :
+          !context.predict ? GridRiskStatus::UNCOMPUTED : GridRiskStatus::VALID;
+      if(value.status==GridRiskStatus::VALID) {
+        try { value=context.predict(origin+(index.cast<double>()+Eigen::Vector3d::Constant(.5))*resolution); }
+        catch(const std::exception&) { value.status=GridRiskStatus::INVALID; }
+        value.version=version;
+        if(value.status==GridRiskStatus::VALID && (!std::isfinite(value.hpl) || !std::isfinite(value.vpl) || value.hpl<0 || value.vpl<0 || value.hpl>=1e9 || value.vpl>=1e9)) value.status=GridRiskStatus::INVALID;
+      }
+      cache->emplace(address,value);
     }
     const auto found=history.find(address);
-    auto risk=classifyPlanningRisk(value,policy,context,
+    return classifyPlanningRisk(value,policy,context,
         found==history.end() ? nullptr : &found->second,now);
-    cache.emplace(address,risk); return risk;
   };
+  frozen.captureEvidence=[context,origin,high,dimensions,resolution,bound,version,generation,cache]
+      (const GridMapFailureSnapshot& physical) -> std::optional<GridRiskEvidence> {
+    if(physical.generation!=generation || physical.frame_id!=context.frame_id ||
+        physical.origin!=origin || physical.max_boundary!=high ||
+        physical.dimensions!=dimensions || physical.resolution_m!=resolution) return std::nullopt;
+    GridRiskEvidence evidence;
+    evidence.risk_version=version; evidence.risk_context_matches_map=bound;
+    evidence.risk_reference_time_s=context.reference_time_s;
+    evidence.risk_valid_until_s=context.valid_until_s;
+    evidence.queried_risk.reserve(cache->size());
+    for(const auto& [address,value]:*cache)
+      evidence.queried_risk.push_back({static_cast<uint32_t>(address),value});
+    std::sort(evidence.queried_risk.begin(),evidence.queried_risk.end(),
+        [](const auto& a,const auto& b) {return a.address<b.address;});
+    return evidence;
+  };
+  return frozen;
 }
 
 GridPlanningContext GridMap::preparePlanningQuery(

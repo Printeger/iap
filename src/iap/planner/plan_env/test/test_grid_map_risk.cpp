@@ -427,3 +427,86 @@ TEST_F(GridRiskTest, BelowWarningCostUsesRawProtectionLevelsContinuously) {
     EXPECT_EQ(risk.version, version);
   }
 }
+
+
+TEST_F(GridRiskTest, FrozenQueryExportsItsOwnRawSamplesAfterLiveContextChanges) {
+  const auto physical = map.captureFailureSnapshot();
+  ASSERT_TRUE(physical);
+  auto prediction = context();
+  prediction.predict = [this](const Eigen::Vector3d&) {
+    ++calls;
+    GridRiskVoxel raw;
+    raw.status = GridRiskStatus::VALID; raw.hpl = .4; raw.vpl = .2;
+    raw.source_flags = 3; raw.gnss_raw_valid = false;
+    raw.gnss_geometry_status = 3;
+    return raw;
+  };
+  const auto version = map.bindRiskContext(prediction);
+  auto frozen = map.capturePlanningRiskQuery(version,10.,{},nullptr,physical->generation);
+  const auto actual = frozen(point);
+  ASSERT_EQ(actual.query_status,GridRiskStatus::VALID);
+  EXPECT_EQ(calls,1);
+  map.bindRiskContext(context());
+  map.setOccupied(Eigen::Vector3d(1.5,1.5,.5));
+  EXPECT_DOUBLE_EQ(frozen(point).hpl,.4);
+  EXPECT_EQ(calls,1) << "export/repeated lookup must not re-run prediction";
+  const auto raw = frozen.captureEvidence(*physical);
+  ASSERT_TRUE(raw);
+  EXPECT_TRUE(raw->risk_context_matches_map);
+  EXPECT_EQ(raw->risk_version,version);
+  EXPECT_DOUBLE_EQ(raw->risk_reference_time_s,10.);
+  EXPECT_DOUBLE_EQ(raw->risk_valid_until_s,11.);
+  ASSERT_EQ(raw->queried_risk.size(),1u);
+  EXPECT_DOUBLE_EQ(raw->queried_risk[0].value.hpl,.4);
+  EXPECT_EQ(raw->queried_risk[0].value.source_flags,3u);
+  EXPECT_FALSE(raw->queried_risk[0].value.gnss_raw_valid);
+  EXPECT_EQ(raw->queried_risk[0].value.gnss_geometry_status,3u);
+  auto other = *physical; ++other.generation;
+  EXPECT_FALSE(frozen.captureEvidence(other));
+  other = *physical; other.origin.x() += 1.;
+  EXPECT_FALSE(frozen.captureEvidence(other));
+  const auto after = frozen.captureEvidence(*physical);
+  ASSERT_TRUE(after);
+  EXPECT_EQ(after->queried_risk[0].value.version,version);
+  EXPECT_EQ(calls,1);
+}
+
+TEST_F(GridRiskTest, FrozenGenerationBindingSurvivesAdvanceBeforeQueryCapture) {
+  const auto physical = map.captureFailureSnapshot();
+  ASSERT_TRUE(physical);
+  const auto version = map.bindRiskContext(context());
+  map.setOccupied(Eigen::Vector3d(1.5,1.5,.5));
+  ASSERT_NE(map.occupancyGeneration(),physical->generation);
+  auto frozen = map.capturePlanningRiskQuery(version,10.,{},nullptr,physical->generation);
+  EXPECT_EQ(frozen(point).query_status,GridRiskStatus::VALID);
+  const auto evidence = frozen.captureEvidence(*physical);
+  ASSERT_TRUE(evidence);
+  EXPECT_TRUE(evidence->risk_context_matches_map);
+  EXPECT_EQ(evidence->risk_version,version);
+  auto wrong = map.capturePlanningRiskQuery(version,10.,{},nullptr,physical->generation+2);
+  EXPECT_EQ(wrong(point).query_status,GridRiskStatus::VERSION_CHANGED);
+  auto live = map.capturePlanningRiskQuery(version,10.,{});
+  EXPECT_EQ(live(point).query_status,GridRiskStatus::VERSION_CHANGED);
+}
+
+TEST_F(GridRiskTest, FrozenQueryRetainsInvalidSentinelWithUnknownPreference) {
+  auto prediction = context();
+  prediction.predict = [](const Eigen::Vector3d&) {
+    GridRiskVoxel value; value.status = GridRiskStatus::VALID;
+    value.hpl = 1e9; value.vpl = .2; return value;
+  };
+  const auto physical = map.captureFailureSnapshot();
+  ASSERT_TRUE(physical);
+  const auto version = map.bindRiskContext(prediction);
+  auto frozen = map.capturePlanningRiskQuery(version,10.,{},nullptr,physical->generation);
+  const auto cost = frozen(point);
+  EXPECT_EQ(cost.query_status,GridRiskStatus::INVALID);
+  EXPECT_EQ(cost.classification,GridAdvisoryClass::UNKNOWN);
+  EXPECT_DOUBLE_EQ(cost.cost_multiplier,1.5);
+  const auto raw = frozen.captureEvidence(*physical);
+  ASSERT_TRUE(raw); ASSERT_EQ(raw->queried_risk.size(),1u);
+  EXPECT_EQ(raw->queried_risk[0].value.status,GridRiskStatus::INVALID);
+  EXPECT_DOUBLE_EQ(raw->queried_risk[0].value.hpl,1e9)
+      << "invalid raw evidence is never turned into a valid preference";
+  EXPECT_EQ(sizeof(GridRiskVoxel),32u) << "preserve the existing dense voxel cache footprint";
+}

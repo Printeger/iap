@@ -1152,3 +1152,11 @@ clock_model，v1–v5只保留历史诊断读取；禁止借重编码升级来�
 物理快照优化的`61f6425`森林参考运行`20261007T161537Z_154`已保存于
 `analysis/physical_snapshot_live`：前进30.464m、距目标5.559m，原规则未完成。
 完整回调仍超原10ms指标，未知覆盖／净空与额度拒绝保留；不授予正式预测或任务资格。
+
+
+失败图现在从本次冻结查询缓存导出原始风险样本；检查
+`snapshot.json` 的 `risk_samples_authority=FROZEN_PLANNING_QUERY_CACHE`
+及匹配的 physical generation/risk version。`GLOBAL_GRIDMAP_CACHE_HISTORY`
+表示旧全局缓存旁证，不能当成本次查询。CSV追加来源 flags 和 GNSS raw geometry
+状态；raw geometry 有效不代表双源或米数验证通过。接口见
+[Advisory 契约](docs/spec/advisory_prediction_contract.md#frozen-planning-risk-evidence)。

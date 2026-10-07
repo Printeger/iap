@@ -163,3 +163,27 @@ original version and `legacy_common_clock` identity; re-encoding never upgrades
 recording provenance. Frozen optimizer covariance timing, rotation uncertainty
 and actual matching-residual qualifications are still pending. No formal
 9+9 or task comparison is granted by these mechanism checks.
+
+
+## Frozen planning risk evidence
+
+`GridFrozenRiskQuery` owns the original raw query cache and its classification
+view. Binding compares the requested frozen physical generation with the risk
+context, rather than a later live generation. Existing freshness and source
+admission still apply. Evidence capture checks generation, frame, lattice origin,
+extent, dimensions and resolution against the physical snapshot; it never
+re-evaluates prediction or copies risk from another transaction.
+
+The bounded background exporter receives a value copy taken on the serialized
+planning thread. `snapshot.json:risk_samples_authority` identifies
+`FROZEN_PLANNING_QUERY_CACHE` or the existing `GLOBAL_GRIDMAP_CACHE_HISTORY`
+fallback. Only the former describes this transaction's actual cached queries.
+`queried_risk.csv` preserves the original first five columns and adds
+`source_flags`, `gnss_raw_valid`, and `gnss_geometry_status`, with round-trip
+double precision. Flags use `PredictorResultFlags`, not a two-source bit mask.
+`gnss_raw_valid` means raw geometry status VALID; it grants neither whole
+constellation fault qualification nor joint meter-scale qualification. Invalid
+raw values, including `1e9`, remain visible as INVALID and grant no current
+VALID preference. Existing eligible history retains its separately classified
+bounded STALE_REFERENCE fallback; without that history the preference is UNKNOWN.
+These diagnostics do not change execution authorization.

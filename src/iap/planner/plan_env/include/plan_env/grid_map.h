@@ -119,6 +119,11 @@ struct GridRiskVoxel {
   double vpl = std::numeric_limits<double>::quiet_NaN();
   uint64_t version = 0;
   GridRiskStatus status = GridRiskStatus::UNCOMPUTED;
+  // Source diagnostics occupy the original voxel's padding on the 64-bit
+  // production platform; they do not qualify fusion or change its PL.
+  uint8_t gnss_geometry_status = 0;
+  bool gnss_raw_valid = false;
+  uint32_t source_flags = 0;
 };
 struct GridRiskContext {
   double reference_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -273,6 +278,24 @@ struct GridMapFailureSnapshot {
   double virtual_ceiling_height_m = -1.0;
   double inflation_radius_m = 0.0;
 };
+
+struct GridRiskEvidence {
+  uint64_t risk_version = 0;
+  bool risk_context_matches_map = false;
+  double risk_reference_time_s = std::numeric_limits<double>::quiet_NaN();
+  double risk_valid_until_s = std::numeric_limits<double>::quiet_NaN();
+  std::vector<GridMapFailureSnapshot::RiskSample> queried_risk;
+};
+
+// One frozen cache owns both planning queries and their raw evidence. Capture
+// runs on the planning thread before the immutable result enters the writer.
+struct GridFrozenRiskQuery {
+  std::function<GridPlanningRisk(const Eigen::Vector3d&)> query;
+  std::function<std::optional<GridRiskEvidence>(const GridMapFailureSnapshot&)> captureEvidence;
+  explicit operator bool() const { return static_cast<bool>(query); }
+  GridPlanningRisk operator()(const Eigen::Vector3d& position) const { return query(position); }
+};
+
 
 // intermediate mapping data for fusion
 
@@ -488,9 +511,9 @@ public:
   GridPlanningRisk queryPlanningRisk(const Eigen::Vector3d& position,
                                      uint64_t version, double evaluation_time_s,
                                      const GridPlanningRiskPolicy& policy);
-  std::function<GridPlanningRisk(const Eigen::Vector3d&)> capturePlanningRiskQuery(
+  GridFrozenRiskQuery capturePlanningRiskQuery(
       uint64_t version, double evaluation_time_s, const GridPlanningRiskPolicy& policy,
-      double* valid_until_s = nullptr);
+      double* valid_until_s = nullptr, uint64_t frozen_occupancy_generation = 0);
   GridPlanningCell queryPlanningCell(const Eigen::Vector3d& position,
                                     uint64_t version, double evaluation_time_s,
                                     const GridPlanningRiskPolicy& risk_policy,

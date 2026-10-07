@@ -89,6 +89,9 @@ iap::PredictorModule makeFrozenPredictor(const PredictionInput& input) {
 }
 GridRiskVoxel predictionRiskVoxel(const iap::PredictorQueryResult& result) {
     GridRiskVoxel voxel;
+    voxel.source_flags = result.source_flags;
+    voxel.gnss_geometry_status = static_cast<uint8_t>(result.gnss.geometry_status);
+    voxel.gnss_raw_valid = result.gnss.geometry_status == iap::GnssGeometryStatus::VALID;
     voxel.status = result.freshness_status == iap::PredictorFreshnessStatus::STALE
         ? GridRiskStatus::STALE : GridRiskStatus::INVALID;
     if (result.available && result.valid && result.fused.valid && !result.fallback) {

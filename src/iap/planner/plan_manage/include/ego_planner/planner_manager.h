@@ -266,7 +266,7 @@ namespace ego_planner
       GridMotionContext motion;
       std::optional<Eigen::Vector3d> reference_position;
       GridPlanningContext physical_context;
-      std::function<GridPlanningRisk(const Eigen::Vector3d&)> advisory_query;
+      GridFrozenRiskQuery advisory_query;
       double advisory_valid_until_s = 0.0;
       mutable GridPlanningQueryStats advisory_stats;
     };

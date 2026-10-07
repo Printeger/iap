@@ -149,7 +149,7 @@ struct EGOPlannerManagerTestAccess {
   static bool solverNormal(const EGOPlannerManager& manager) {return manager.bspline_optimizer_->lastOptimizationTerminatedNormally();}
   static size_t advisoryQueries(const EGOPlannerManager& manager) { return manager.planning_view_->advisory_stats.queries; }
   static void injectAdvisory(EGOPlannerManager& manager) {
-    manager.planning_view_->advisory_query=[](const Eigen::Vector3d& p) {
+    manager.planning_view_->advisory_query.query=[](const Eigen::Vector3d& p) {
       GridPlanningRisk r; r.query_status=GridRiskStatus::VALID;
       r.hpl=std::abs(p.x())<.35 && std::abs(p.y())<.6 ? 2. : .1;
       r.vpl=.1; r.classification=r.hpl>1 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
