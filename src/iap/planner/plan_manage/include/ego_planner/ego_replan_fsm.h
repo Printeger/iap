@@ -95,9 +95,9 @@ namespace ego_planner
     std::shared_ptr<const nav_msgs::msg::Odometry> pending_odom_;
     double applied_odom_stamp_s_ =
         -std::numeric_limits<double>::infinity();
-    std::atomic<double> last_command_time_s_{
-        -std::numeric_limits<double>::infinity()};
-    std::atomic<int> executing_trajectory_id_{-1};
+    // ID and timestamp belong to one command receipt. Independent atomics
+    // could acknowledge withdrawal using an old ID and a newer timestamp.
+    std::shared_ptr<const quadrotor_msgs::msg::PositionCommand> pending_command_;
     rclcpp::CallbackGroup::SharedPtr odom_callback_group_;
     Eigen::Quaterniond odom_orient_;
 

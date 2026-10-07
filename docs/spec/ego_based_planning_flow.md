@@ -400,7 +400,7 @@ A* 节点状态只在一条可执行 incoming edge 通过后写入本轮 `rounds
 | 2：代码已接入，现场待验 | 初值的完整性预警触发一条 guide；A* 逐体素检查物理与当前运动条件，advisory 优先避让、未知有限代价 | 无物理障碍仍绕开有效预测退化；宽远路线不受固定 30% 长度上限排除 |
 | 3：代码已接入，现场待验 | guide 建立 rebound 基点并进入主优化 fitness 项；优化中新违反调用相同查询 | 平滑后实际曲线保留选路偏好，允许有记录的 advisory 回退 |
 | 4：代码已接入，现场待验 | 时间调整后整条实际曲线与动力学检查；运行期检查剩余实际曲线 | 真实执行条件失败不覆盖当前轨迹；advisory 缺失不单独拒绝提交 |
-| 5：部分实现 | 通过后写 `local_data`；无可执行接续时尝试检查连续制动，失败才使用标记未验证的仿真悬停 | 同一状态/时间接续及正式停止契约仍待完成；不能报告正式 PASS |
+| 5：部分实现 | 通过后写 `local_data`；无可执行接续时尝试检查连续制动，失败不发布替代曲线、保留当前执行ID及拒绝证据 | 同一状态/时间接续及正式停止契约仍待完成；不能报告正式 PASS |
 
 ```mermaid
 flowchart TD
@@ -464,7 +464,7 @@ flowchart TD
 - `BsplineOptimizer::setPlanningQuery()` 继续消费 `GridPlanningCell`；A* 的 `setPlanningQuery()` 将同一查询投影为 `GridSearchCell`（执行原因、advisory 类别、代价）。manager 给 A* 绑定 `setAdvisoryQuery()`，缓存命中也复核最新预测有效性。初值违反时顺序运行一次正常避让搜索，确认 advisory 阻断后最多运行一次同搜索器的高代价回退；搜索边检查经过的体素。rebound 的基点/方向及优化中新违反检测调用同一查询，主目标可对一条 guide 做 fitness 跟踪。
 - 四分叉停滞修复后，局部目标若在环境未观测区或 GridMap 范围外，FSM 从本轮 GLIO 的单调实际投影扫描前方参考弧长，选择可执行的前方点，要求至少 0.8 m 前进并以零末速度收束；没有足够范围或地图过期时等待新地图代数，不重复搜索同一旧输入。几何目标按现有搜索池上限和前进余量有界缩短（下限 0.8 m），每次扣同一修复预算；搜索失败后保留失败证据，若仍无可行段，保留失败而不挪动真实起点。A* 返回端点、环境、当前质量、穷尽、超时或 advisory 的分类原因；它不再把未观测或过期端点当障碍向外无限挪。物理端点只有在原始请求点有效、搜索格点舍入落入障碍且连接线可检查通过时，才允许 1 m 内调整；真实起点不能被挪成另一个规划起点。终点本身属于有效 advisory 避让区，或正常搜索穷尽且有 advisory 拒绝时，才运行现有一次高代价回退；超时不等价于该条件。
 - A* 的体素中心和半格采样结果只在本次固定地图、搜索坐标和运动参数下复用，边仍逐体素检查；冻结物理 epoch 不随 live 代数变化；几何/坐标变化在节点循环撤销，普通 live 更新仅统计并使 advisory 按原规则软失效。物理结果缓存不延长 PL 有效期。最终曲线检查继续按实际位置重新查询，不读取 A* 缓存。`GridPlanningCell` 保留所需净空、局部扫描内最近原始障碍距离及位置、观测状态、地图代数与云时间。最近障碍未测到时记录为 `not_measured` 或 `no_raw_obstacle_in_scan`，不得打印有效零距离。
-- `EGOPlannerManager::assessTrajectory()` 在提交前检查完整的时间调整后曲线、当前运动条件及候选起点与最新 GLIO 位置接续（0.30 m 门限），结果分开统计真实执行违反、advisory 预警和未知样本；预警切回时尝试一次修正，仍可执行则记录 degraded fallback。只有通过真实执行条件的候选写入 `local_data`。跟踪失效时从当前 GLIO 状态重新生成初值，不从已经偏离的旧曲线取起点。FSM 每 200 ms 检查剩余曲线、跟踪与新信息；advisory 预警只请求提前重规划，短暂缺失不触发急停。真正无法继续时尝试从当前速度生成、检查制动曲线；失败使用原版定点仿真悬停，并明确标记未验证。
+- `EGOPlannerManager::assessTrajectory()` 在提交前检查完整的时间调整后曲线、当前运动条件及候选起点与最新 GLIO 位置接续（0.30 m 门限），结果分开统计真实执行违反、advisory 预警和未知样本；预警切回时尝试一次修正，仍可执行则记录 degraded fallback。只有通过真实执行条件的候选写入 `local_data`。跟踪失效时从当前 GLIO 状态重新生成初值，不从已经偏离的旧曲线取起点。FSM 每 200 ms 检查剩余曲线、跟踪与新信息；advisory 预警只请求提前重规划，短暂缺失不触发急停。真正无法继续时尝试从当前速度生成、检查制动曲线；失败不发布替代曲线、保留当前执行轨迹；拒绝不授予停止／悬停保证。旧未验证定点悬停生成入口已删除。
 - 上述 0.55/0.60 m、0.45/0.50 m、1.5 倍、0.35/0.10 m、0.5 s/1 s 等值是版本化四分叉机制实验参数，不是适航或概率完整性证明。环境观测范围外没有物理通行授权；当前质量也不保证未来未知空间。
 
 ### 清理与兼容边界
@@ -1070,11 +1070,69 @@ highest-accepted ID rejects replayed/reordered curves after withdrawal; invalid
 requests and unknown withdrawals consume no identity. A late cancellation of an
 already active curve has no effect and cannot replace checked braking. The FSM
 keeps captured pending identity until actual command acknowledgement/recovery;
-withdrawal alone is neither a new motion grant nor a success state.
+withdrawal alone is neither a new motion grant nor a success state. The manager
+records the withdrawal request time on its existing pending lifecycle. Matching
+predecessor command ID/time after both request and scheduled start confirms that
+the server retained the old curve, so the local pending is retired without changing
+execution. Before-start/stale/future/foreign commands cannot acknowledge it. A
+pending ID that actually activated still becomes the executing curve, retaining
+race ownership and the original recovery requirement. ID and timestamp are latched
+from one immutable command message, replacing independent atomics.
 
 Release `traj_utils`及全部五个下游包统一构建／安装通过。四组行为CTest
 （48项baseline、生产管线、真实server定时执行、完整反馈）、43项canonical
 入口及2项Curve重放方法通过。精确撤销回归同时验证当前P/V/A命令不变、
 错误ID不清合法队列、非空载荷拒绝、迟到副本不恢复、已激活ID不受影响以及
 立即替代仍清队列。日志与版本/hash见分析run/runtime/pending_withdrawal_*；
-新干净提交森林现场尚待执行，不把自动化通过写为现场资格。
+c426b81干净300秒OFF森林run152217Z_653已完成：ID10于1791386606.353944597
+撤下，比其预定生效1791386606.9630907提前0.609s，未激活／未产生命令；ID9
+继续且随后检查刹车发布。33条曲线／32个命令ID，9次定时激活；前进36.062m，
+终点距离0.669m，未按原规则到达。仍有一次后续unverified hover，不能声明整轮
+安全或A/C全部通过；末次266/gen1870 Target及首个55/gen107 Curve留存。
+图文／独立wire与command核对在analysis/pending_withdrawal_live。
+
+### Rejected braking is not a replacement authorization
+
+The actual c426b81 forest trace at1791386794.095217834 rejects checked braking
+but publishes unchecked stationary trajectory33. The production FSM regression
+reproduces this for physical unknown, stale map and unsupported current motion:
+`planCheckedBrake=false` was converted to a new ID/curve and return true.
+Original production/test hashes and the red verdict are retained in
+`checked_brake_rejection_red_verified_before`; the preceding fixture compilation
+failure is retained separately and is not counted as the symptom red.
+
+Current `callEmergencyStop` returns false before serialization/publication when
+checked braking fails. The unchecked `EGOPlannerManager::EmergencyStop` generator
+and API are deleted. Active ID/control points stay
+unchanged; pending identity stays until actual command acknowledgement/recovery.
+The existing FSM and retry conditions are retained. A reproduced combination
+(withdrawn pending + failed brake) previously blocked qualified input indefinitely;
+post-start predecessor acknowledgement retires that revoked local pending while
+preserving captured evidence and monotone IDs. This is cancellation confirmation,
+not a replacement motion grant. The server continues
+its prior commands; no safe hold, verified stopping or recovered authorization is
+inferred from rejection. Physical input may still block progress. A changed qualified
+input can pass the original three-attempt checked brake and publish its exact-PVA
+IMMEDIATE curve, consuming exactly one execution ID. No added retries, clearance
+relaxation, timing budget or motion qualification is introduced.
+
+组合red_verified见`withdrawn_failed_brake_red_verified_before`：原生产FSM
+消费生效时刻之后的旧ID命令仍保留pending。回归使用明确合成ROS时钟100→101.7s，
+不改真实记录时间；检查撤销、失败刹车、旧ID反馈与之后合格刹车的整条局部链。
+命令消息ID和header时间原子锁存为同一对象，避免并发回调混配。
+
+
+### Coherent server command time
+
+撤销确认要求server切换判断、实际曲线求值及命令header共享一次ROS时间采样。
+原callback第二次读clock可能跨越pending生效时刻，发布旧ID＋生效后的时间，
+造成错误确认并丢失随后激活的轨迹归属。真实生产callback在合成101.5→103s
+跨102s边界的红例中复现；`server_clock_boundary_red_before`绑定修复前身份。
+`cmdCallback`采样一次并传入`cmdCallbackAt`，排队／求值／header全部消费该时间。
+首帧或暂停造成零dt时yaw rate为0，避免NaN；没有提高角速度限值或改变接续规则。
+
+最终Release构建／安装与六组CTest全部通过：50项baseline、真实server时间回归、
+生产管线／定时执行／完整反馈及两项Curve重放方法；43项canonical通过。
+移除临时SIGSEGV探针后，三个相关baseline八轮重复全部通过；两次先前139退出
+日志仍保留，未取得崩溃根因资格。`checked_recovery_implementation`绑定命令、
+源／binary及全部日志hash。Spec／Standards复查分别登记；新森林现场尚待提交。

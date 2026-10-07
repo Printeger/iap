@@ -133,6 +133,10 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_scheduled_execution.py
     --server $<TARGET_FILE:traj_server>)
   set_tests_properties(test_ego_scheduled_execution PROPERTIES TIMEOUT 30)
+  ament_add_gtest(test_traj_server_time test/test_traj_server_time.cpp)
+  ament_target_dependencies(test_traj_server_time rclcpp nav_msgs
+    visualization_msgs geometry_msgs quadrotor_msgs plan_env path_searching
+    bspline_opt traj_utils cv_bridge pcl_conversions)
   add_test(NAME test_ego_full_stack_feedback COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_ego_full_stack_feedback.py)
   set_tests_properties(test_ego_full_stack_feedback PROPERTIES TIMEOUT 30)

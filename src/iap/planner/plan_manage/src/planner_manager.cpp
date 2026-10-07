@@ -842,11 +842,29 @@ namespace ego_planner
     connection_time_=start_time; connection_predecessor_=predecessor_id;
   }
 
-  void EGOPlannerManager::observeExecutingTrajectory(int trajectory_id) {
+  std::optional<int> EGOPlannerManager::requestPendingWithdrawal() {
+    if(!pending_trajectory_) return std::nullopt;
+    if(!pending_withdrawal_requested_s_) pending_withdrawal_requested_s_=node_->now().seconds();
+    return pending_trajectory_->traj_id_;
+  }
+
+  void EGOPlannerManager::observeExecutingTrajectory(int trajectory_id,double command_time_s) {
     server_feedback_id_ = trajectory_id;
     if(pending_trajectory_ && pending_trajectory_->traj_id_==trajectory_id) {
       local_data_=*pending_trajectory_; pending_trajectory_.reset();
+      pending_withdrawal_requested_s_.reset();
       RCLCPP_INFO(node_->get_logger(),"Trajectory %d executing at its scheduled connection",trajectory_id);
+    } else if(pending_trajectory_ && pending_withdrawal_requested_s_ &&
+        trajectory_id==local_data_.traj_id_ && std::isfinite(command_time_s) &&
+        command_time_s<=node_->now().seconds() &&
+        command_time_s>=*pending_withdrawal_requested_s_ &&
+        command_time_s>=pending_trajectory_->start_time_.seconds()) {
+      // Only a real predecessor command after both withdrawal and activation
+      // time proves the server kept the old curve. Before-start/stale/foreign
+      // IDs cannot acknowledge cancellation. This grants no motion authority.
+      RCLCPP_INFO(node_->get_logger(),"Pending trajectory %d withdrawal confirmed by predecessor %d command at %.6f",
+          pending_trajectory_->traj_id_,trajectory_id,command_time_s);
+      pending_trajectory_.reset();pending_withdrawal_requested_s_.reset();
     }
   }
 
@@ -859,6 +877,7 @@ namespace ego_planner
   void EGOPlannerManager::discardUnpublishedTrajectory(const LocalTrajData& predecessor) {
     if(pending_trajectory_) pending_trajectory_.reset();
     else local_data_=predecessor;
+    pending_withdrawal_requested_s_.reset();
     last_plan_failure_=planning_budget_ && planning_budget_->expired() ? PlanFailure::Budget : PlanFailure::Connection;
   }
 
@@ -1207,6 +1226,7 @@ namespace ego_planner
           candidate.start_pos_=start_pt; candidate.duration_=curve.getTimeSum();
           next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
           candidate.traj_id_=next_trajectory_id_; pending_trajectory_=candidate;
+          pending_withdrawal_requested_s_.reset();
         } else updateTrajInfo(curve,node_->now());
         return true;
       },planning_budget_);
@@ -1254,19 +1274,6 @@ namespace ego_planner
     interval=std::max(interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
     UniformBspline::parameterizeToBspline(interval,points,
         {start_vel,selected.velocity,start_acc,selected.acceleration},control);
-    return true;
-  }
-
-  bool EGOPlannerManager::EmergencyStop(Eigen::Vector3d stop_pos)
-  {
-    Eigen::MatrixXd control_points(3, 6);
-    for (int i = 0; i < 6; i++)
-    {
-      control_points.col(i) = stop_pos;
-    }
-
-    updateTrajInfo(UniformBspline(control_points, 3, 1.0), node_->now());
-
     return true;
   }
 
@@ -1502,6 +1509,7 @@ namespace ego_planner
   void EGOPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now)
   {
     pending_trajectory_.reset();
+    pending_withdrawal_requested_s_.reset();
     next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
     local_data_.start_time_ = time_now;
     local_data_.position_traj_ = position_traj;

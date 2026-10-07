@@ -64,7 +64,6 @@ namespace ego_planner
     // by GridMap::queryRisk; binding failure is represented by query status.
     uint64_t bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
                                 double reference_time_s, std::shared_ptr<const FrozenOccupancyEpoch> occupancy = {});
-    bool EmergencyStop(Eigen::Vector3d stop_pos);
     bool planCheckedBrake(const Eigen::Vector3d& position,
                           const Eigen::Vector3d& velocity,
                           const Eigen::Vector3d& acceleration);
@@ -140,7 +139,9 @@ namespace ego_planner
     const LocalTrajData& publicationTrajectory() const {
       return pending_trajectory_ ? *pending_trajectory_ : local_data_;
     }
-    void observeExecutingTrajectory(int trajectory_id);
+    std::optional<int> requestPendingWithdrawal();
+    void observeExecutingTrajectory(int trajectory_id,
+        double command_time_s = -std::numeric_limits<double>::infinity());
     bool publicationStillTimely() const;
     void discardUnpublishedTrajectory(const LocalTrajData& predecessor);
     enum class PlanFailure { None, Budget, Target, Search, Curve, Release, Connection };
@@ -274,6 +275,7 @@ namespace ego_planner
     std::vector<LocalTarget> planning_targets_;
     std::optional<Eigen::Vector3d> planning_target_center_;
     std::optional<LocalTrajData> pending_trajectory_;
+    std::optional<double> pending_withdrawal_requested_s_;
     std::optional<rclcpp::Time> connection_time_;
     int connection_predecessor_ = -1;
     int next_trajectory_id_ = 0;

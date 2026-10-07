@@ -184,6 +184,10 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
 {
   constexpr double PI = 3.1415926;
   constexpr double YAW_DOT_MAX_PER_SEC = PI;
+  if((time_now-time_last).seconds()<=0) {
+    last_yaw_dot_=0.;
+    return {last_yaw_,0.};
+  }
   // constexpr double YAW_DOT_DOT_MAX_PER_SEC = PI;
   std::pair<double, double> yaw_yawdot(0, 0);
   double yaw = 0;
@@ -272,9 +276,8 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
   return yaw_yawdot;
 }
 
-void cmdCallback()
+void cmdCallbackAt(const rclcpp::Time& clock_now)
 {
-  const auto clock_now=server_node->now();
   static std::optional<rclcpp::Time> last_clock;
   if(last_clock && clock_now<*last_clock) {
     pending_traj.reset(); receive_traj_=false;
@@ -290,15 +293,16 @@ void cmdCallback()
   if (!receive_traj_)
     return;
 
-  // 统一时间源
-  auto& clock = *server_node->get_clock();
-  rclcpp::Time time_now = clock.now();
+  // Queue decision, evaluation and command identity share one captured time.
+  // A second clock read could stamp the predecessor after a pending start,
+  // falsely acknowledging its withdrawal while the queue remains armed.
+  rclcpp::Time time_now = clock_now;
   double t_cur = (time_now - start_time_).seconds();
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
 
-  static rclcpp::Time time_last = clock.now();
+  static rclcpp::Time time_last = clock_now;
   if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
     pos = traj_[0].evaluateDeBoorT(t_cur);
@@ -354,6 +358,8 @@ void cmdCallback()
 
   pos_cmd_pub->publish(cmd);
 }
+
+void cmdCallback() { cmdCallbackAt(server_node->now()); }
 
 int main(int argc, char **argv)
 {

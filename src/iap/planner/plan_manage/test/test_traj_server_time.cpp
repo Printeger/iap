@@ -1,0 +1,51 @@
+#include <gtest/gtest.h>
+#include <rcl/time.h>
+
+// Exercise the actual command callback, queue and wire message. The process
+// entrypoint is renamed only to let gtest own this synthetic-clock process.
+#define main iap_traj_server_process_main
+#include "../src/traj_server.cpp"
+#undef main
+
+TEST(TrajectoryServerTime, ActivationEvaluationAndStampUseOneCapturedTime) {
+  if(!rclcpp::ok()) rclcpp::init(0,nullptr);
+  server_node=rclcpp::Node::make_shared("traj_server_time_test");
+  command_frame="map";
+  pos_cmd_pub=server_node->create_publisher<quadrotor_msgs::msg::PositionCommand>("time_command_test",10);
+  trajectory_curve_pub=server_node->create_publisher<visualization_msgs::msg::Marker>("time_curve_test",10);
+  auto* clock=server_node->get_clock()->get_clock_handle();
+  ASSERT_EQ(rcl_enable_ros_time_override(clock),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(clock,100000000000LL),RCL_RET_OK);
+  const auto curve=[&](int id,double start,double position,uint8_t mode) {
+    auto message=std::make_shared<traj_utils::msg::Bspline>();
+    message->order=3;message->traj_id=id;message->start_mode=mode;
+    message->start_time=rclcpp::Time(static_cast<int64_t>(start*1e9));
+    for(int i=0;i<11;++i) message->knots.push_back(i-3.);
+    for(int i=0;i<7;++i) {
+      geometry_msgs::msg::Point point;point.x=position+i-1.;point.z=1.;
+      message->pos_pts.push_back(point);
+    }
+    return message;
+  };
+  last_yaw_=last_yaw_dot_=0.;time_forward_=.5;
+  bsplineCallback(curve(1,100.,0.,traj_utils::msg::Bspline::IMMEDIATE));
+  bsplineCallback(curve(2,102.,2.,traj_utils::msg::Bspline::AT_TIME));
+  ASSERT_TRUE(pending_traj);
+  // Time advances after the command tick was sampled, crossing activation.
+  // An old ID stamped 103 would falsely acknowledge cancellation of ID2.
+  ASSERT_EQ(rcl_set_ros_time_override(clock,103000000000LL),RCL_RET_OK);
+  cmdCallbackAt(rclcpp::Time(101500000000LL,RCL_ROS_TIME));
+  EXPECT_EQ(cmd.trajectory_id,1);
+  EXPECT_EQ(rclcpp::Time(cmd.header.stamp).nanoseconds(),101500000000LL);
+  EXPECT_NEAR(cmd.position.x,1.5,1e-12);
+  EXPECT_TRUE(pending_traj);
+  EXPECT_TRUE(std::isfinite(cmd.yaw));
+  EXPECT_TRUE(std::isfinite(cmd.yaw_dot));
+  cmdCallbackAt(rclcpp::Time(103000000000LL,RCL_ROS_TIME));
+  EXPECT_EQ(cmd.trajectory_id,2);
+  EXPECT_FALSE(pending_traj);
+  EXPECT_EQ(rclcpp::Time(cmd.header.stamp).nanoseconds(),103000000000LL);
+  EXPECT_NEAR(cmd.position.x,3.,1e-12);
+  EXPECT_TRUE(std::isfinite(cmd.yaw_dot));
+  pending_traj.reset();pos_cmd_pub.reset();trajectory_curve_pub.reset();server_node.reset();
+}

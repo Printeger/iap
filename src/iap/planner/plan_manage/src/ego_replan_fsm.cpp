@@ -85,10 +85,7 @@ namespace ego_planner
         node_->create_subscription<quadrotor_msgs::msg::PositionCommand>(
             "/position_cmd", rclcpp::QoS(1),
             [this](quadrotor_msgs::msg::PositionCommand::ConstSharedPtr msg) {
-              executing_trajectory_id_.store(msg->trajectory_id, std::memory_order_relaxed);
-              last_command_time_s_.store(
-                  rclcpp::Time(msg->header.stamp).seconds(),
-                  std::memory_order_relaxed);
+              std::atomic_store(&pending_command_,msg);
             }, odom_options);
     // std::bind(&EGOReplanFSM::odometryCallback, this, std::placeholders::_1));
 
@@ -493,7 +490,9 @@ namespace ego_planner
   void EGOReplanFSM::execFSMCallback()
   {
     applyLatestOdometry();
-    planner_manager_->observeExecutingTrajectory(executing_trajectory_id_.load(std::memory_order_relaxed));
+    const auto command=std::atomic_load(&pending_command_);
+    if(command) planner_manager_->observeExecutingTrajectory(command->trajectory_id,
+        rclcpp::Time(command->header.stamp).seconds());
     if(planner_manager_->hasPendingTrajectory() && node_->now().seconds()>
         planner_manager_->publicationTrajectory().start_time_.seconds()+.1)
       changeFSMExecState(EMERGENCY_STOP,"connection command missing");
@@ -744,9 +743,10 @@ namespace ego_planner
           odom_pos_, now);
       const double map_age = std::isfinite(map_cell.cloud_stamp_s)
           ? now - map_cell.cloud_stamp_s : -1.0;
+      const auto command=std::atomic_load(&pending_command_);
       planner_manager_->captureRemainingFailure(kind, expected, odom_pos_,
           (expected - odom_pos_).norm(), info.traj_id_,
-          last_command_time_s_.load(std::memory_order_relaxed),
+          command ? rclcpp::Time(command->header.stamp).seconds() : -std::numeric_limits<double>::infinity(),
           odom_age, map_age, reason, &assessment);
     };
 
@@ -770,12 +770,12 @@ namespace ego_planner
     }
 
     if (!assessment.executable()) {
-      if(planner_manager_->hasPendingTrajectory()) {
+      if(const auto pending_id=planner_manager_->requestPendingWithdrawal()) {
         // Withdraw at the revocation seam, before evidence export or checked
         // brake construction. The server retains the active predecessor.
         traj_utils::msg::Bspline withdrawal;
         withdrawal.start_mode=traj_utils::msg::Bspline::CANCEL_PENDING;
-        withdrawal.traj_id=planner_manager_->publicationTrajectory().traj_id_;
+        withdrawal.traj_id=*pending_id;
         bspline_pub_->publish(withdrawal);
       }
       capture_remaining(assessment.execution_reason ==
@@ -1054,9 +1054,9 @@ namespace ego_planner
 
     if (!planner_manager_->planCheckedBrake(stop_pos, odom_vel_,
                                             Eigen::Vector3d::Zero())) {
-      RCLCPP_ERROR(node_->get_logger(),
-                   "Checked braking unavailable; simulation hover fallback is unverified");
-      planner_manager_->EmergencyStop(stop_pos);
+      RCLCPP_ERROR_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+          "Checked braking rejected; no replacement authorized; current trajectory retained");
+      return false;
     }
 
     auto published = planner_manager_->publicationTrajectory();

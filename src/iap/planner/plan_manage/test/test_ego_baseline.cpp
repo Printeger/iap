@@ -95,6 +95,24 @@ struct EGOReplanFSMTestAccess {
       rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr publisher) {
     fsm.bspline_pub_=std::move(publisher);
   }
+  static bool stop(EGOReplanFSM& fsm,const Eigen::Vector3d& position,
+                   const Eigen::Vector3d& velocity) {
+    fsm.odom_vel_=velocity;
+    return fsm.callEmergencyStop(position);
+  }
+  static void predecessorCommand(EGOReplanFSM& fsm,int id,double stamp) {
+    auto command=std::make_shared<quadrotor_msgs::msg::PositionCommand>();
+    command->trajectory_id=id;
+    command->header.stamp=rclcpp::Time(static_cast<int64_t>(stamp*1e9));
+    std::atomic_store(&fsm.pending_command_,
+        std::shared_ptr<const quadrotor_msgs::msg::PositionCommand>(command));
+    fsm.exec_state_=EGOReplanFSM::EMERGENCY_STOP;
+    fsm.flag_escape_emergency_=false;fsm.enable_fail_safe_=false;
+    fsm.have_odom_=fsm.have_target_=fsm.have_trigger_=true;
+    fsm.exec_timer_=fsm.node_->create_wall_timer(std::chrono::hours(1),[]{});
+    fsm.data_disp_pub_=fsm.node_->create_publisher<traj_utils::msg::DataDisp>("withdrawal_feedback_test",10);
+    fsm.execFSMCallback();
+  }
   static bool supervise(EGOReplanFSM& fsm, double stamp) {
     fsm.applied_odom_stamp_s_=stamp;
     fsm.exec_state_=EGOReplanFSM::EXEC_TRAJ;
@@ -1103,6 +1121,114 @@ TEST(EgoBaseline, ScheduledCandidateKeepsPredecessorUntilMatchingCommand) {
   EXPECT_FALSE(manager.hasPendingTrajectory());
   EXPECT_EQ(manager.local_data_.traj_id_,pending.traj_id_);
   manager.endPlanningView();
+}
+
+TEST(EgoBaseline, RejectedCheckedBrakeCannotPublishOrReplaceExecutingCurve) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  auto vis=std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager.initPlanModules(node,vis);manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),end(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
+  auto executing=manager.local_data_;
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,end);
+  std::vector<traj_utils::msg::Bspline> messages;
+  auto subscription=node->create_subscription<traj_utils::msg::Bspline>(
+      "checked_brake_test",10,[&](traj_utils::msg::Bspline::ConstSharedPtr msg){messages.push_back(*msg);});
+  auto publisher=node->create_publisher<traj_utils::msg::Bspline>("checked_brake_test",10);
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
+  for(int i=0;i<100 && publisher->get_subscription_count()==0;++i) {
+    rclcpp::spin_some(node);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_GT(publisher->get_subscription_count(),0u);
+  for(int reason=0;reason<3;++reason) {
+    GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds()-(reason==1 ? 2. : 0.),start);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    if(reason==0) GridMapTestAccess::clearObserved(*manager.grid_map_,start);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),reason==2 ? 0 : 1,start);
+    EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero)) << "reason=" << reason;
+    rclcpp::spin_some(node);
+    EXPECT_TRUE(messages.empty());
+    EXPECT_EQ(manager.local_data_.traj_id_,executing.traj_id_);
+    EXPECT_TRUE(manager.local_data_.position_traj_.getControlPoint().isApprox(
+        executing.position_traj_.getControlPoint(),1e-12));
+  }
+  // Changed qualified input permits the original checked-brake path; the
+  // failed requests consumed no execution ID or publication slot.
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,start);
+  const Eigen::Vector3d velocity(.2,0,0);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,velocity));
+  for(int i=0;i<100 && messages.empty();++i) {
+    rclcpp::spin_some(node);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_EQ(messages.size(),1u);
+  EXPECT_EQ(messages.front().start_mode,traj_utils::msg::Bspline::IMMEDIATE);
+  EXPECT_EQ(messages.front().traj_id,executing.traj_id_+1);
+  EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(start,1e-9));
+  EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(velocity,1e-9));
+  EXPECT_LT(manager.local_data_.acceleration_traj_.evaluateDeBoorT(0).norm(),1e-9);
+  EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
+}
+
+TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredecessorCommand) {
+  auto node=makeNode();
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  auto vis=std::make_shared<ego_planner::PlanningVisualization>(node);
+  manager.initPlanModules(node,vis);manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),end(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},100.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
+  auto predecessor=manager.local_data_;
+  ASSERT_TRUE(manager.beginPlanningView());
+  manager.setPlanningConnection(rclcpp::Time(101600000000LL,node->get_clock()->get_clock_type()),predecessor.traj_id_);
+  ASSERT_TRUE(manager.reboundReplan(predecessor.position_traj_.evaluateDeBoorT(1.6),
+      predecessor.velocity_traj_.evaluateDeBoorT(1.6),predecessor.acceleration_traj_.evaluateDeBoorT(1.6),
+      end,zero,false,false));
+  const int withdrawn_id=manager.publicationTrajectory().traj_id_;
+  manager.endPlanningView();
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,end);
+  auto publisher=node->create_publisher<traj_utils::msg::Bspline>("withdrawn_failed_brake_test",10);
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
+  GridMapTestAccess::clearObserved(*manager.grid_map_,start);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.));
+  ASSERT_FALSE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));
+  ASSERT_TRUE(manager.hasPendingTrajectory());
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100100000000LL),RCL_RET_OK);
+  ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,predecessor.traj_id_,100.1);
+  EXPECT_TRUE(manager.hasPendingTrajectory()); // before scheduled start is no acknowledgement
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),101700000000LL),RCL_RET_OK);
+  ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,predecessor.traj_id_,100.1);
+  EXPECT_TRUE(manager.hasPendingTrajectory()); // stale pre-start packet
+  ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,predecessor.traj_id_,102.);
+  EXPECT_TRUE(manager.hasPendingTrajectory()); // future packet
+  ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,999,101.7);
+  EXPECT_TRUE(manager.hasPendingTrajectory()); // another trajectory is no proof
+  ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,predecessor.traj_id_,101.7);
+  EXPECT_FALSE(manager.hasPendingTrajectory());
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  EXPECT_TRUE(manager.local_data_.position_traj_.getControlPoint().isApprox(
+      predecessor.position_traj_.getControlPoint(),1e-12));
+  // Restored qualified input can use existing recovery, retaining monotone IDs.
+  const auto measured=predecessor.position_traj_.evaluateDeBoorT(1.7);
+  GridMapTestAccess::input(*manager.grid_map_,{},101.7,measured);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,101.7,1,measured);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,measured,
+      predecessor.velocity_traj_.evaluateDeBoorT(1.7)));
+  EXPECT_GT(manager.local_data_.traj_id_,withdrawn_id);
 }
 
 TEST(EgoBaseline, FullEpochMatchesExactQueriesAndSurvivesRemoteGenerations) {
