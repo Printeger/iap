@@ -67,6 +67,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   };
 
  private:
+  friend struct GnssClockInjectionTestAccess;
   // ── ROS topic handlers ──────────────────────────────────────────────────
   template <typename GnssMeasMsgT>
   void on_range_meas_(const std::shared_ptr<const GnssMeasMsgT>& msg,
@@ -133,6 +134,15 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::atomic<double> last_clk_stamp_{0.0};  ///< frame stamp of last stored clock
   std::string clock_owner_mode_{"dual"};
   bool gnss_owns_clock_{true};
+  struct ConstellationClockState {
+    gtsam::Vector2 optimized = gtsam::Vector2::Zero();
+    double optimized_stamp = 0.0;
+    long previous_frame_id = -1;
+    double previous_frame_stamp = 0.0;
+  };
+  // Accessed only on the smoother callback thread. GPS continues to use the
+  // original state above; no inactive constellation variable is manufactured.
+  std::map<char, ConstellationClockState> constellation_clocks_;
 
   // Last injected GNSS factors — evaluated post-optimization for diagnostics
   std::mutex                                         factors_mutex_;
@@ -140,6 +150,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::vector<gtsam::NonlinearFactor::shared_ptr>    last_dop_factors_;
   std::optional<GnssEpoch>                           last_injected_epoch_;
   long                                               last_injected_frame_id_{-1};
+  double                                             last_injected_frame_stamp_{0.0};
 
   // Clock between-epoch factor: tracks the previous GNSS-injected frame so
   // that a ClockBetweenFactor can connect C(prev) → C(curr).
@@ -169,6 +180,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   bool                debug_csv_enabled_ = false;
   std::ofstream       debug_csv_file_;
   std::ofstream       coordinate_evidence_csv_;
+  std::ofstream       clock_evidence_csv_;
   uint64_t coordinate_evidence_rows_ = 0;
   std::mutex          debug_csv_mutex_;
 };

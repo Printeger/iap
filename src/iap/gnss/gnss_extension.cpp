@@ -18,11 +18,13 @@
 #include <iap/gnss/gnss_extension.hpp>
 #include <iap/gnss/broadcast_ephemeris.hpp>
 #include <iap/gnss/clock_between_factor.hpp>
+#include <iap/gnss/constellation_clock.hpp>
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <numeric>
+#include <set>
 #include <spdlog/spdlog.h>
 
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
@@ -172,6 +174,9 @@ GnssExtensionModule::GnssExtensionModule()
   auto& lifecycle = glim::KeyLifecycleMonitor::instance();
   lifecycle.set_expected_owner('e', "gnss");
   lifecycle.set_expected_owner('r', "gnss");
+  for (const char system : {'C', 'E', 'R'}) {
+    lifecycle.set_expected_owner(gnss_clock_symbol(system), "gnss");
+  }
   if (clock_owner_mode_ == "gnss") {
     lifecycle.set_expected_owner('c', "gnss");
   } else if (clock_owner_mode_ == "odometry") {
@@ -238,9 +243,20 @@ GnssExtensionModule::GnssExtensionModule()
       for (const auto prefix : {"p_world_imu", "v_world_imu", "accel_bias", "gyro_bias"})
         for (const auto axis : {"x", "y", "z"}) coordinate_evidence_csv_ << ',' << prefix << '_' << axis;
       coordinate_evidence_csv_ << '\n';
+      const auto clock_path = artifacts->export_path("glio/constellation_clock.csv");
+      if (std::filesystem::exists(clock_path)) throw std::runtime_error("clock evidence artifact already exists");
+      clock_evidence_csv_.open(clock_path);
+      if (!clock_evidence_csv_) throw std::runtime_error("clock evidence artifact open failed");
+      clock_evidence_csv_ << "state_stamp_s,gnss_epoch_stamp_s,frame_id,epoch_source_identity,"
+          "constellation,bias_m,drift_mps,isb_reference,isb_bias_m,isb_drift_mps,"
+          "joint_cov_valid,isb_cov_00,isb_cov_01,isb_cov_10,isb_cov_11\n";
       std::ofstream manifest(artifacts->metadata_path("manifests/gnss_coordinate_dynamics.json"));
-      manifest << "{\"schema_version\":\"iap_gnss_coordinate_dynamics_v1\","
+      manifest << "{\"schema_version\":\"iap_gnss_coordinate_dynamics_v2\","
           "\"csv\":\"export/glio/advisory_coordinate_dynamics.csv\","
+          "\"clock_csv\":\"export/glio/constellation_clock.csv\","
+          "\"clock_model\":\"per_constellation_bias_drift_v1\","
+          "\"clock_keys\":{\"GPS\":\"c\",\"BDS\":\"d\",\"GAL\":\"h\",\"GLO\":\"j\"},"
+          "\"clock_covariance\":\"joint marginal of current linearized graph; system-minus-GPS with cross terms; sampled diagnostics only\","
           "\"rotation_uncertainty\":\"post-optimization marginal covariance of R(0), local Rot3 tangent, rad^2\","
           "\"time\":\"original state acquisition stamp and separate diagnostic receipt UTC\","
           "\"authority\":\"evidence only; no propagation, truth alignment or PL authorization\"}\n";
@@ -624,102 +640,144 @@ void GnssExtensionModule::on_smoother_update_(
     new_stamps[E(0)] = frame_stamp;
     new_stamps[R(0)] = frame_stamp;
 
-    // ── Ensure C(frame_id) exists ─────────────────────────────────────────────
-    // glim's base OdometryEstimationIMU does not add C; due to dynamic symbol
-    // resolution glim's version may take precedence over IAP's override, leaving C
-    // absent from the smoother.  We always insert it here so GNSS factors are valid.
-    //
-    // CRITICAL: do NOT cold-start at [0,0] — the receiver clock bias at bag time is
-    // O(100-400 km).  iSAM2 cannot converge that far in one real-time step, leaving
-    // huge PR residuals (~237 km) permanently.  Instead, propagate the last post-opt
-    // clock estimate with the clock-walk model:  bias_next = bias + drift * dt.
-    if (!new_values.exists(C(frame_id))) {
-      if (!gnss_owns_clock_) {
-        lifecycle.record_missing('c', "gnss.owner_odometry_required");
-        if (clock_prev_missing_count_ == 0 || clock_prev_missing_count_ % 100 == 0) {
-          logger_->warn("[gnss_ext] C({}) missing while clock_owner_mode=odometry; skip GNSS factor injection for this frame", frame_id);
-        }
-        ++clock_prev_missing_count_;
-        return;
-      }
-
-      // Warm-start: propagate last known clock state forward by dt
-      gtsam::Vector2 init_clk(0.0, 0.0);
-      const double prev_stamp = last_clk_stamp_.load();
-      if (prev_stamp > 0.0) {
-        const double dt = frame_stamp - prev_stamp;
-        if (dt > 0.0 && dt < 2.0) {  // guard against large gaps or backwards time
-          init_clk(0) = last_clk_bias_.load() + last_clk_drift_.load() * dt;
-          init_clk(1) = last_clk_drift_.load();
-        }
-      }
-
-      new_values.insert(C(frame_id), init_clk);
-      new_stamps[C(frame_id)] = frame_stamp;
-      lifecycle.record_write('c', "gnss");
-
-      static std::once_flag once_clk;
-      std::call_once(once_clk, [&] {
-        logger_->info("[gnss_ext] C({}) not in new_values — inserting; "
-                      "warm-start: bias={:.0f}m drift={:.2f}m/s "
-                      "(glim base class does not add clock variable)",
-                      frame_id, init_clk(0), init_clk(1));
-      });
-      if (clock_chain_state_ == ClockChainState::UNSEEDED || clock_chain_state_ == ClockChainState::RECOVERING) {
-        set_clock_chain_state_(ClockChainState::SEEDED, "clock_seeded", frame_stamp, false);
-      }
-    } else {
-      // Make sure the stamp is registered even if odometry added the value
-      new_stamps[C(frame_id)] = frame_stamp;
-      if (clock_chain_state_ == ClockChainState::UNSEEDED || clock_chain_state_ == ClockChainState::RECOVERING) {
-        set_clock_chain_state_(ClockChainState::SEEDED, "clock_observed", frame_stamp, false);
+    // Only actual PR/Doppler factors create a constellation clock. Configuring
+    // a constellation without data must neither create a state nor imply use.
+    std::set<char> active_constellations;
+    for (const auto& factor : gnss_factors) {
+      if (const auto pr = std::dynamic_pointer_cast<PseudorangeFactor>(factor)) {
+        active_constellations.insert(pr->constellation());
       }
     }
-
-    IapSharedState::instance().set_clock_ready(frame_id, frame_stamp);
-
-    // ── ClockBetweenFactor: connect C(prev) → C(curr) ───────────────────────
-    // Constant-drift random-walk model propagates clock information between
-    // consecutive GNSS-injected frames, preventing each epoch from having to
-    // solve the full ~113 km clock bias independently.
-    if (prev_gnss_frame_id_ >= 0) {
-      const double dt = frame_stamp - prev_gnss_frame_stamp_;
-      if (dt > 0.0 && dt < 2.0) {  // guard: only for reasonable gaps
-        const auto prev_clk_key = C(prev_gnss_frame_id_);
-        bool prev_clock_available = new_values.exists(prev_clk_key);
-        if (!prev_clock_available) {
-          try {
-            (void)smoother.calculateEstimate<gtsam::Vector2>(prev_clk_key);
-            prev_clock_available = true;
-          } catch (...) {
-            prev_clock_available = false;
+    if (active_constellations.count('G')) {
+      // ── Ensure C(frame_id) exists ─────────────────────────────────────────────
+      // glim's base OdometryEstimationIMU does not add C; due to dynamic symbol
+      // resolution glim's version may take precedence over IAP's override, leaving C
+      // absent from the smoother.  We always insert it here so GNSS factors are valid.
+      //
+      // CRITICAL: do NOT cold-start at [0,0] — the receiver clock bias at bag time is
+      // O(100-400 km).  iSAM2 cannot converge that far in one real-time step, leaving
+      // huge PR residuals (~237 km) permanently.  Instead, propagate the last post-opt
+      // clock estimate with the clock-walk model:  bias_next = bias + drift * dt.
+      if (!new_values.exists(C(frame_id))) {
+        if (!gnss_owns_clock_) {
+          lifecycle.record_missing('c', "gnss.owner_odometry_required");
+          if (clock_prev_missing_count_ == 0 || clock_prev_missing_count_ % 100 == 0) {
+            logger_->warn("[gnss_ext] C({}) missing while clock_owner_mode=odometry; skip GNSS factor injection for this frame", frame_id);
           }
-        }
-
-        if (prev_clock_available) {
-          auto clk_noise = ClockBetweenFactor::make_noise(dt, clk_between_params_);
-          new_factors.emplace_shared<ClockBetweenFactor>(
-              prev_clk_key, C(frame_id), dt, clk_noise);
-          // Keep prev clock variable alive for the between-factor
-          new_stamps[prev_clk_key] = frame_stamp;
-          if (clock_chain_state_ != ClockChainState::CHAIN_ACTIVE) {
-            set_clock_chain_state_(ClockChainState::CHAIN_ACTIVE, "clock_between_added", frame_stamp, false);
-          }
-        } else {
-          lifecycle.record_missing('c', "gnss.clock_between_prev");
           ++clock_prev_missing_count_;
-          if (clock_prev_missing_count_ == 1 || clock_prev_missing_count_ % 100 == 0) {
-            logger_->warn("[gnss_ext] skip ClockBetweenFactor: missing previous clock C({}) at frame {} (stamp={:.3f}) [count={}]",
-                          prev_gnss_frame_id_, frame_id, frame_stamp, clock_prev_missing_count_);
+          return;
+        }
+
+        // Warm-start: propagate last known clock state forward by dt
+        gtsam::Vector2 init_clk(0.0, 0.0);
+        const double prev_stamp = last_clk_stamp_.load();
+        if (prev_stamp > 0.0) {
+          const double dt = frame_stamp - prev_stamp;
+          if (dt > 0.0 && dt < 2.0) {  // guard against large gaps or backwards time
+            init_clk(0) = last_clk_bias_.load() + last_clk_drift_.load() * dt;
+            init_clk(1) = last_clk_drift_.load();
           }
-          prev_gnss_frame_id_ = -1;
-          prev_gnss_frame_stamp_ = 0.0;
-          set_clock_chain_state_(ClockChainState::SEEDED, "prev_clock_missing", frame_stamp, false);
+        }
+
+        new_values.insert(C(frame_id), init_clk);
+        new_stamps[C(frame_id)] = frame_stamp;
+        lifecycle.record_write('c', "gnss");
+
+        static std::once_flag once_clk;
+        std::call_once(once_clk, [&] {
+          logger_->info("[gnss_ext] C({}) not in new_values — inserting; "
+                        "warm-start: bias={:.0f}m drift={:.2f}m/s "
+                        "(glim base class does not add clock variable)",
+                        frame_id, init_clk(0), init_clk(1));
+        });
+        if (clock_chain_state_ == ClockChainState::UNSEEDED || clock_chain_state_ == ClockChainState::RECOVERING) {
+          set_clock_chain_state_(ClockChainState::SEEDED, "clock_seeded", frame_stamp, false);
+        }
+      } else {
+        // Make sure the stamp is registered even if odometry added the value
+        new_stamps[C(frame_id)] = frame_stamp;
+        if (clock_chain_state_ == ClockChainState::UNSEEDED || clock_chain_state_ == ClockChainState::RECOVERING) {
+          set_clock_chain_state_(ClockChainState::SEEDED, "clock_observed", frame_stamp, false);
         }
       }
+
+      IapSharedState::instance().set_clock_ready(frame_id, frame_stamp);
+
+      // ── ClockBetweenFactor: connect C(prev) → C(curr) ───────────────────────
+      // Constant-drift random-walk model propagates clock information between
+      // consecutive GNSS-injected frames, preventing each epoch from having to
+      // solve the full ~113 km clock bias independently.
+      if (prev_gnss_frame_id_ >= 0) {
+        const double dt = frame_stamp - prev_gnss_frame_stamp_;
+        if (dt > 0.0 && dt < 2.0) {  // guard: only for reasonable gaps
+          const auto prev_clk_key = C(prev_gnss_frame_id_);
+          bool prev_clock_available = new_values.exists(prev_clk_key);
+          if (!prev_clock_available) {
+            try {
+              prev_clock_available = smoother.calculateEstimate().exists(prev_clk_key);
+            } catch (...) {
+              prev_clock_available = false;
+            }
+          }
+
+          if (prev_clock_available) {
+            auto clk_noise = ClockBetweenFactor::make_noise(dt, clk_between_params_);
+            new_factors.emplace_shared<ClockBetweenFactor>(
+                prev_clk_key, C(frame_id), dt, clk_noise);
+            // Keep prev clock variable alive for the between-factor
+            new_stamps[prev_clk_key] = frame_stamp;
+            if (clock_chain_state_ != ClockChainState::CHAIN_ACTIVE) {
+              set_clock_chain_state_(ClockChainState::CHAIN_ACTIVE, "clock_between_added", frame_stamp, false);
+            }
+          } else {
+            lifecycle.record_missing('c', "gnss.clock_between_prev");
+            ++clock_prev_missing_count_;
+            if (clock_prev_missing_count_ == 1 || clock_prev_missing_count_ % 100 == 0) {
+              logger_->warn("[gnss_ext] skip ClockBetweenFactor: missing previous clock C({}) at frame {} (stamp={:.3f}) [count={}]",
+                            prev_gnss_frame_id_, frame_id, frame_stamp, clock_prev_missing_count_);
+            }
+            prev_gnss_frame_id_ = -1;
+            prev_gnss_frame_stamp_ = 0.0;
+            set_clock_chain_state_(ClockChainState::SEEDED, "prev_clock_missing", frame_stamp, false);
+          }
+        }
+      }
+      prev_gnss_frame_id_    = frame_id;
+      prev_gnss_frame_stamp_ = frame_stamp;
     }
-    prev_gnss_frame_id_    = frame_id;
-    prev_gnss_frame_stamp_ = frame_stamp;
+
+    for (const char system : active_constellations) {
+      if (system == 'G') continue;
+      auto& state = constellation_clocks_[system];
+      const auto key = gnss_clock_key(system, frame_id);
+      if (!new_values.exists(key)) {
+        gtsam::Vector2 initial = gtsam::Vector2::Zero();
+        const double elapsed = frame_stamp - state.optimized_stamp;
+        if (state.optimized_stamp > 0.0 && elapsed > 0.0 && elapsed < 2.0) {
+          initial = state.optimized;
+          initial(0) += elapsed * initial(1);
+        }
+        new_values.insert(key, initial);
+        lifecycle.record_write(gnss_clock_symbol(system), "gnss");
+      }
+      new_stamps[key] = frame_stamp;
+      const double dt = frame_stamp - state.previous_frame_stamp;
+      if (state.previous_frame_id >= 0 && dt > 0.0 && dt < 2.0) {
+        const auto previous = gnss_clock_key(system, state.previous_frame_id);
+        // calculateEstimate(key) on the fallback wrapper mutates the smoother
+        // on a missing key. Inspect the actual current Values without provoking
+        // recovery merely to test whether an old clock was marginalized.
+        if (new_values.exists(previous) || smoother.calculateEstimate().exists(previous)) {
+          new_factors.emplace_shared<ClockBetweenFactor>(
+              previous, key, dt, ClockBetweenFactor::make_noise(dt, clk_between_params_));
+          new_stamps[previous] = frame_stamp;
+        } else {
+          lifecycle.record_missing(gnss_clock_symbol(system), "gnss.clock_between_prev");
+        }
+      }
+      state.previous_frame_id = frame_id;
+      state.previous_frame_stamp = frame_stamp;
+    }
 
     // Store a snapshot for post-optimization residual evaluation
     // Both PseudorangeFactor and DopplerFactor now have 4 keys.
@@ -729,6 +787,7 @@ void GnssExtensionModule::on_smoother_update_(
       last_pr_factors_.clear();
       last_dop_factors_.clear();
       last_injected_frame_id_ = frame_id;
+      last_injected_frame_stamp_ = frame_stamp;
       last_injected_epoch_.reset();
       if (consumed.size() == 1U) {
         last_injected_epoch_ = consumed.front();
@@ -806,6 +865,7 @@ void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double st
   last_clk_bias_.store(0.0);
   last_clk_drift_.store(0.0);
   last_clk_stamp_.store(0.0);
+  constellation_clocks_.clear();
 
   {
     std::lock_guard<std::mutex> lk(factors_mutex_);
@@ -813,6 +873,7 @@ void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double st
     last_dop_factors_.clear();
     last_injected_epoch_.reset();
     last_injected_frame_id_ = -1;
+    last_injected_frame_stamp_ = 0.0;
   }
 
   IapSharedState::instance().clear_clock_ready();
@@ -906,6 +967,7 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
   std::optional<GnssEpoch> postopt_epoch;
   long frame_id;
+  double frame_stamp;
   {
     std::lock_guard<std::mutex> lk(factors_mutex_);
     if (last_pr_factors_.empty() && last_dop_factors_.empty()) return;
@@ -913,6 +975,7 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     dop_factors = last_dop_factors_;
     postopt_epoch = last_injected_epoch_;
     frame_id    = last_injected_frame_id_;
+    frame_stamp = last_injected_frame_stamp_;
     last_pr_factors_.clear();
     last_dop_factors_.clear();
     last_injected_epoch_.reset();
@@ -921,22 +984,26 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   // ── 1. Clock state ────────────────────────────────────────────────────────────
   double clk_bias = 0.0, clk_drift = 0.0;
   bool clk_ok = false;
-  try {
+  const bool uses_gps = std::any_of(pr_factors.begin(), pr_factors.end(), [](const auto& factor) {
+    const auto pr = std::dynamic_pointer_cast<PseudorangeFactor>(factor);
+    return pr && pr->constellation() == 'G';
+  });
+  if (uses_gps) try {
     using gtsam::symbol_shorthand::C;
-    const auto clk = smoother.calculateEstimate<gtsam::Vector2>(C(frame_id));
+    const auto clk = smoother.calculateEstimate().at<gtsam::Vector2>(C(frame_id));
     clk_bias  = clk(0);
     clk_drift = clk(1);
     clk_ok = true;
     // Store for warm-starting C in the next on_smoother_update_ call
     last_clk_bias_.store(clk_bias);
     last_clk_drift_.store(clk_drift);
-    last_clk_stamp_.store(last_frame_stamp_.load());
+    last_clk_stamp_.store(frame_stamp);
     if (clock_chain_state_ == ClockChainState::RECOVERING || clock_chain_state_ == ClockChainState::UNSEEDED) {
-      set_clock_chain_state_(ClockChainState::SEEDED, "post_opt_clock_available", last_frame_stamp_.load(), false);
+      set_clock_chain_state_(ClockChainState::SEEDED, "post_opt_clock_available", frame_stamp, false);
     }
   } catch (...) {}
 
-  if (!clk_ok) {
+  if (uses_gps && !clk_ok) {
     glim::KeyLifecycleMonitor::instance().record_missing('c', "gnss.post_opt");
     ++clock_curr_missing_count_;
     if (clock_curr_missing_count_ == 1 || clock_curr_missing_count_ % 100 == 0) {
@@ -971,6 +1038,13 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
 
   try {
     const auto all_vals = smoother.calculateEstimate();
+    for (auto& [system, clock] : constellation_clocks_) {
+      const auto key = gnss_clock_key(system, frame_id);
+      if (all_vals.exists(key)) {
+        clock.optimized = all_vals.at<gtsam::Vector2>(key);
+        clock.optimized_stamp = frame_stamp;
+      }
+    }
 
     for (const auto& f : pr_factors) {
       const auto nf = std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(f);
@@ -1065,11 +1139,63 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
 
   // ── 3. Write debug CSV ────────────────────────────────────────────────────────
   const uint64_t diag_n = ++factor_count_diag_;
-  const double stamp = last_frame_stamp_.load();
+  const double stamp = frame_stamp;
+
+  // This evidence is diagnostic, sampled at the existing summary cadence. Its
+  // covariance belongs to this state time; it never reuses a previous marginal
+  // as a fresh covariance or changes Advisory/FDE authorization.
+  if (clock_evidence_csv_.is_open() && postopt_epoch &&
+      (diag_n == 1 || diag_n % 50 == 0)) {
+    const auto began = std::chrono::steady_clock::now();
+    try {
+      std::set<char> active;
+      for (const auto& sat : postopt_epoch->sats) if (!sat.excluded) active.insert(sat.constellation);
+      const auto values = smoother.calculateEstimate();
+      for (const char system : active) {
+        const auto key = gnss_clock_key(system, frame_id);
+        if (!values.exists(key)) continue;
+        const auto mean = values.at<gtsam::Vector2>(key);
+        const bool has_reference = system != 'G' && active.count('G') && values.exists(C(frame_id));
+        const auto delta = has_reference ? (mean - values.at<gtsam::Vector2>(C(frame_id))).eval() :
+            gtsam::Vector2::Constant(std::numeric_limits<double>::quiet_NaN()).eval();
+        Eigen::Matrix2d covariance = Eigen::Matrix2d::Constant(std::numeric_limits<double>::quiet_NaN());
+        bool covariance_valid = false;
+        if (has_reference) {
+          try {
+            covariance = gnss_clock_difference_covariance(smoother.getLinearFactors(), C(frame_id), key);
+            covariance_valid = true;
+          } catch (const std::exception& error) {
+            logger_->warn("[gnss_ext] {}-GPS clock covariance unavailable at frame {}: {}", system, frame_id, error.what());
+          }
+        }
+        clock_evidence_csv_ << std::setprecision(17) << stamp << ',' << postopt_epoch->stamp << ','
+            << frame_id << ',' << postopt_epoch->source_identity << ',' << system << ','
+            << mean(0) << ',' << mean(1) << ',' << (has_reference ? "G" : "") << ',';
+        const auto value = [&](double v) { if (std::isfinite(v)) clock_evidence_csv_ << v; };
+        value(delta(0)); clock_evidence_csv_ << ',';
+        value(delta(1)); clock_evidence_csv_ << ',' << covariance_valid;
+        for (int row = 0; row < 2; ++row) for (int col = 0; col < 2; ++col) {
+          clock_evidence_csv_ << ','; value(covariance(row, col));
+        }
+        clock_evidence_csv_ << '\n';
+      }
+      clock_evidence_csv_.flush();
+    } catch (const std::exception& error) {
+      logger_->warn("[gnss_ext] clock evidence unavailable at frame {}: {}", frame_id, error.what());
+    }
+    timing_csv::append(stamp, "1.3_clock_covariance_evidence",
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+  }
 
   if (do_csv && !details.empty()) {
     std::lock_guard<std::mutex> csv_lk(debug_csv_mutex_);
     for (const auto& d : details) {
+      const auto clock = constellation_clocks_.find(d.constellation);
+      const bool system_clock_valid = d.constellation == 'G' ? clk_ok :
+          clock != constellation_clocks_.end() && clock->second.optimized_stamp == stamp;
+      const auto system_clock = d.constellation == 'G' ? gtsam::Vector2(clk_bias, clk_drift) :
+          system_clock_valid ? clock->second.optimized :
+          gtsam::Vector2::Constant(std::numeric_limits<double>::quiet_NaN()).eval();
       debug_csv_file_
         << diag_n << ","
         << std::fixed << std::setprecision(3) << stamp << ","
@@ -1082,8 +1208,8 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
         << std::setprecision(4) << d.residual << ","
         << std::setprecision(4) << d.sigma << ","
         << std::setprecision(4) << d.normalized << ","
-        << std::setprecision(2) << clk_bias << ","
-        << std::setprecision(4) << clk_drift << "\n";
+        << std::setprecision(2) << system_clock(0) << ","
+        << std::setprecision(4) << system_clock(1) << "\n";
     }
     debug_csv_file_.flush();
   }
@@ -1098,9 +1224,9 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
           pr_rms, n_pr_ok, dop_rms, n_dop_ok);
     } else {
       logger_->info(
-          "[gnss_ext] diag #{}: clock state unavailable "
+          "[gnss_ext] diag #{}: GPS clock {} "
           "| PR rms={:.2f}m ({} sats)  Dop rms={:.4f}m/s ({} sats)",
-          diag_n, pr_rms, n_pr_ok, dop_rms, n_dop_ok);
+          diag_n, uses_gps ? "unavailable" : "unused", pr_rms, n_pr_ok, dop_rms, n_dop_ok);
     }
   } else {
     if (clk_ok) {

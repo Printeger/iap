@@ -1070,7 +1070,7 @@ Actual-curve continuous risk retention and forest qualification remain in progre
 修正 C59/C60 GEO、北斗 TTR 与 AODE/AODC；所请求星座缺数据时严格选择失败。
 8 项生产接口回归：`ctest --test-dir ../../build/gnss_sim -R test_broadcast_ephemeris --output-on-failure`。
 字段、失效条件及 GAL/GLO 资格限制见 [GNSS 接口](docs/GNSS_SIM_NODE_INTERFACE.md)。
-这尚未取得历史统一时钟或真实联合 Advisory 资格，不能启动正式9＋9替代既有阻塞。
+历史统一时钟已实施；真实联合 Advisory 仍无资格，正式9＋9保持阻塞。
 
 
 历史 GPS＋北斗统一时钟机制入口（真实 Advisory 尚未取得资格）：
@@ -1089,3 +1089,11 @@ ros2 launch iap iap_sim.launch.py rinex_nav_file:=<绝对历史混合NAV路径> 
 唯一入口guidance目前默认OFF，ON须显式选择实验配置；尚未推广真实参数。
 生产CPU时钟/传感器进程回归：`ctest --test-dir ../../build/so3_quadrotor_simulator -R test_historical_clock --output-on-failure`。
 该测试使用小型合成传感器夹具，不替代GPU森林或正式9＋9。
+
+前端现在按实际使用星座分别维护偏差／漂移：GPS保留原状态，北斗由GNSS扩展
+拥有独立状态；GAL/GLO保留配置支持，本轮不授予数值资格。
+分星座残差见`export/glio/iap_gnss_factor_debug.csv`，可选星座间差值及含交叉相关的
+联合协方差见`export/glio/constellation_clock.csv`；采样诊断不授予Advisory准入。
+生产回归：`ctest --test-dir ../../build/iap -R '^test_araim$' --output-on-failure`。
+Monitor／FIM活动列、冻结模型与真实标定仍待完成。现场驱动在启动前比较安装产物
+与当前工作区构建的hash，包括非符号链接的`libiap.so`；不一致先构建并安装。

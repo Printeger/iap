@@ -919,8 +919,8 @@ acceptance; the original ON red is not discarded to improve success statistics.
 原 NAV → 唯一 broadcast loader（原 TOC/TOE、BDS TTR/AODE/AODC、整数资格）
 → 健康／已播发／原年龄内且所有请求星座存在 → 原观测发布与前端接收
 → 共享位置／差分速度模型 → 原 GNSS 因子／Monitor／Advisory。
-未取得资格的后续链保持基线：当前钟差仍单状态，历史统一 `/clock`、
-活动星座钟差列及真实联合贡献冻结／校准尚待实施。
+后续历史统一 `/clock`、前端分星座二维钟差已经实施；活动星座FIM/故障列
+及真实联合贡献冻结／校准仍待实施，尚未取得双源资格。
 独立RTKLIB在12:00 UTC起六历元取得444组同记录比较，最大位置差
 2.493e-7m、速度差2.702e-4m/s，metadata一致；8项生产接口回归通过。
 这不授予正式B、9+9或D六次资格。
@@ -951,5 +951,20 @@ flowchart LR
 原共享steady搜索／Curve预算、实际run生命周期及固定终点保持。
 自动化：43canonical契约、真实CPU进程时钟/odom/IMU/GNSS/first-hit LiDAR暂停、
 非法日期／self-clock／竞争clock、strict缺文件退出、两种归属失败优先；
-原planner时间回跳拒绝回归通过。真实完整图尚待干净提交后验证。
-分星座前端钟差、活动列FIM/故障、真实残差及联合资格仍未实施，正式B/D阻塞。
+原planner时间回跳拒绝回归通过。005ce84完整GPU图60秒诊断：历史传感器／
+GLIO／Monitor时间链正常，GPS/BDS伪距因子4408/11020；冻结5/6请求成功，
+首个启动失败保留。末次Monitor HPL/VPL=88.347/238.822m；尚无真实联合资格。
+活动列FIM/故障、真实残差标定及联合冻结资格仍未实施，正式B/D阻塞。
+
+### 当前 B 前端分星座钟差接口
+
+真实星历观测 → 同刻epoch选择 → 因子工厂按星座绑定Vector2 →
+GPS c沿用原所有权，BDS d/GAL h/GLO j仅由GNSS扩展按实际因子建立 →
+各自原ClockBetween模型／暖启动／gap／reset → post-opt原frame/stamp残差。
+日志按因子的实际钟差输出；星座间差值及协方差用当前线性图联合边缘化，
+保留相关交叉项，缺失不借旧值。协方差采样只作诊断，不授权PL或传播新鲜度。
+生产红例：改GPS偏差10m/漂移0.2m/s错误改变BDS残差；独立状态后绿。
+4项因子／epoch／相关协方差及全部95项ARAIM回归通过，干净现场待取得。
+生产扩展回调回归覆盖G/C/GC/无数据、两种GPS所有权、原odometry状态保留、
+独立跨帧暖启动／钟差链、GPS中断、原2秒gap及reset；首帧红例与跨帧绿例保留。
+Monitor/FIM仍单列基线，不能称整个双星座模型已完成。

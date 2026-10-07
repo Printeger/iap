@@ -292,8 +292,8 @@ This is a propagation/input repair, not formal Advisory qualification. The
 canonical graph now accepts an explicit historical NAV path with unique history
 clock and strict GPS+BDS; an empty path retains synthetic mechanism data. GAL/GLO retain configuration support but were not used in this
 numerical qualification; GLO's legacy missing-TTR-to-TOE substitution cannot
-prove broadcast availability. Separate receiver clock states, active-clock
-FIM/fault subsets, frozen time/extrinsic identity, actual residual calibration
+prove broadcast availability. Separate receiver clocks are now implemented;
+active-clock FIM/fault subsets, frozen time/extrinsic identity, actual residual calibration
 and the formal 9+9 remain pending.
 
 Primary field authority: [RINEX 3.04](https://files.igs.org/pub/data/format/rinex304.pdf),
@@ -309,3 +309,30 @@ Historical-mode static/range timers consume the node ROS clock, so pausing
 strict selection terminates the GNSS process with exit code 2 and stops the
 canonical graph; the owner records failed. This remains separate from visibility,
 GLIO factor usage, Monitor integrity and Advisory contribution qualification.
+
+## Per-constellation receiver clock seam
+
+The factor factory binds pseudorange and Doppler to a constellation-specific
+Vector2 `[bias_m, drift_mps]`: GPS `c(i)` retains its original ownership and
+odometry contract; BDS `d(i)`, GAL `h(i)` and GLO `j(i)` belong to the GNSS
+extension. Non-GPS states are inserted only for actual admitted factors. The
+same existing clock-walk noise and two-second gap guard apply independently;
+reset clears all constellation chains. Enabling a system without observations
+does not create or qualify a clock. GAL/GLO key support does not grant the
+historical numerical qualification reserved for this round's GPS+BDS.
+
+`export/glio/iap_gnss_factor_debug.csv` reports each factor's own clock, rather
+than labelling every constellation with GPS's clock. Optional
+`export/glio/constellation_clock.csv` samples optimized states and
+system-minus-GPS bias/drift at the existing diagnostic cadence. Its covariance
+uses a joint marginal of the current linearized graph and both cross blocks;
+separate marginal variances are not added. Missing references/covariances are
+explicitly unavailable. State acquisition and GNSS epoch stamps are retained;
+no covariance is propagated or granted fresh timing by this diagnostic.
+
+Production factor-key/residual independence and correlated covariance tests
+are in `test_araim` (`GnssHandlerEpochBindingTest`). Monitor and Advisory still
+require their active-clock-column repair and frozen model identity before this
+frontend change can qualify dual-source prediction. The preceding clean
+005ce84 historical diagnostic used the old common clock; its original report
+is `log/20261007T091820Z_056/export/analysis/historical_clock_live/report.md`.

@@ -275,3 +275,16 @@ shutdown does not create this failure. The shared `finalize_run` returns the
 chosen lifecycle and gives saved input failure priority over apparent successful
 launch exits or later interrupts; both launch and driver remain single-owner
 finalizers. Individual child failures and source hashes remain reviewable.
+
+GNSS clock evidence uses `export/glio/constellation_clock.csv`, registered by
+`metadata/manifests/gnss_coordinate_dynamics.json` v2. It names actual system,
+state/epoch/source identity, optimized bias/drift, system-minus-GPS difference
+and joint marginal difference covariance. The original covariance time remains
+the state time; unavailable reference/covariance fields stay empty. This sampled
+diagnostic does not qualify a frozen state or grant Advisory validity.
+
+The forest driver binds installed binaries, plugins and the core library to
+their workspace Release build hashes before starting processes. An ordinary
+installed copy is permitted only when its hash matches; a symlink alone is
+insufficient proof. Build-cache identities join command/config/input hashes in
+the subordinate runtime identity manifest.

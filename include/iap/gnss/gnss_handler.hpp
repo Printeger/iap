@@ -32,6 +32,9 @@ namespace iap {
  * `time_tolerance` seconds of `frame_stamp` and produces one PseudorangeFactor
  * + one DopplerFactor per non-excluded satellite. Older superseded epochs are
  * discarded; later epochs remain queued for a future state.
+ * Both factors bind the same constellation-specific receiver bias/drift key:
+ * GPS c(i), BeiDou d(i), Galileo h(i), GLONASS j(i). Only GPS c(i) participates
+ * in the existing odometry clock ownership contract.
  *
  * Satellite state (sat_pos, sat_vel) is stored in ECEF.  The receiver ECEF
  * position is reconstructed inside each factor as:

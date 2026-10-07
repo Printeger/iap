@@ -69,16 +69,32 @@ def main():
         if gpu.get('gpu_status') != 'READY':
             raise RuntimeError('GPU_NOT_READY: ' + json.dumps(gpu))
         executable = Path(get_package_prefix('ego_planner')) / 'lib/ego_planner/ego_planner_node'
+        build_root = REPO.parents[1] / 'build'
+        def verified_binary(package, installed, build_name):
+            built = build_root / package / build_name
+            cache = build_root / package / 'CMakeCache.txt'
+            if not cache.is_file() or 'CMAKE_BUILD_TYPE:STRING=Release' not in cache.read_text():
+                raise RuntimeError(f'RELEASE_BUILD_REQUIRED: {cache}')
+            if not built.is_file() or sha(installed) != sha(built):
+                raise RuntimeError(f'INSTALLED_BINARY_MISMATCH: {installed} != {built}; build and install before live')
+            result = binary_identity(installed.resolve())
+            result['workspace_release_binary'] = str(built)
+            result['workspace_release_sha256'] = sha(built)
+            result['build_cache_sha256'] = sha(cache)
+            return result
+        runtime_binary = verified_binary('ego_planner', executable, 'ego_planner_node')
         input_binaries = {}
         for package, binary in [('gnss_sim', 'gnss_sim_node'),
                                 ('so3_quadrotor_simulator', 'so3_quadrotor_simulator'),
                                 ('local_sensing', 'pcl_render_node'), ('iap', 'iap_rosnode')]:
             installed = Path(get_package_prefix(package)) / 'lib' / package / binary
-            input_binaries[package] = binary_identity(installed.resolve())
+            input_binaries[package] = verified_binary(package, installed, binary)
         for plugin in ['gnss_extension', 'integrity_extension',
                        'planner_local_map_extension', 'odometry_estimation_gpu', 'sim_extension']:
             installed = Path(get_package_prefix('iap')) / 'lib' / ('lib' + plugin + '.so')
-            input_binaries[plugin] = binary_identity(installed.resolve())
+            input_binaries[plugin] = verified_binary('iap', installed, 'lib' + plugin + '.so')
+        installed_core = Path(get_package_prefix('iap')) / 'lib/libiap.so'
+        input_binaries['iap_core'] = verified_binary('iap', installed_core, 'libiap.so')
         command = ['ros2', 'launch', 'iap', 'iap_sim.launch.py', f'run_dir:={run}',
                    'run_lifecycle_owner:=driver',
                    'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:=false',
@@ -89,7 +105,7 @@ def main():
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
         manifest(run, 'forest_runtime_identity', {'schema': 'iap_forest_runtime_identity_v1',
                  **identity, 'command': command, 'preflight': gpu,
-                 'runtime_binary': binary_identity(executable.resolve()),
+                 'runtime_binary': runtime_binary,
                  'input_binaries': input_binaries,
                  'environment': {k: os.environ[k] for k in ('IAP_RUN_DIR', 'ROS_LOG_DIR',
                                  'RMW_IMPLEMENTATION', 'FASTRTPS_DEFAULT_PROFILES_FILE')}}, owner=True)

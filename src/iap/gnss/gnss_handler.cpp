@@ -1,18 +1,41 @@
 // IAP-RQ-020: GnssHandler implementation
 
 #include <iap/gnss/gnss_handler.hpp>
+#include <iap/gnss/constellation_clock.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
+#include <gtsam/linear/GaussianFactorGraph.h>
+#include <Eigen/Cholesky>
 #include <algorithm>
 #include <cmath>
 
 using gtsam::symbol_shorthand::X;
 using gtsam::symbol_shorthand::V;
-using gtsam::symbol_shorthand::C;
 using gtsam::symbol_shorthand::E;  // ECEF origin of world frame  E(0)
 using gtsam::symbol_shorthand::R;  // world→ECEF rotation         R(0)
 
 namespace iap {
+
+Eigen::Matrix2d gnss_clock_difference_covariance(
+    const gtsam::GaussianFactorGraph& linear_graph,
+    gtsam::Key reference, gtsam::Key system) {
+  if (reference == system) throw std::invalid_argument("clock difference requires distinct states");
+  const auto marginal = linear_graph.marginal(gtsam::KeyVector{reference, system});
+  const auto information = marginal->hessian(gtsam::Ordering{reference, system}).first;
+  if (information.rows() != 4 || !information.allFinite()) {
+    throw std::runtime_error("clock joint information unavailable");
+  }
+  const Eigen::LDLT<Eigen::Matrix4d> factorization(information);
+  if (factorization.info() != Eigen::Success || factorization.vectorD().minCoeff() <= 0.0) {
+    throw std::runtime_error("clock joint information not positive definite");
+  }
+  const Eigen::Matrix4d covariance = factorization.solve(Eigen::Matrix4d::Identity());
+  Eigen::Matrix<double, 2, 4> difference;
+  difference << -Eigen::Matrix2d::Identity(), Eigen::Matrix2d::Identity();
+  const Eigen::Matrix2d result = difference * covariance * difference.transpose();
+  if (!result.allFinite()) throw std::runtime_error("clock difference covariance nonfinite");
+  return result;
+}
 
 GnssHandler::GnssHandler() : params_(Params{}) {}
 GnssHandler::GnssHandler(const Params& params) : params_(params) {}
@@ -102,12 +125,13 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
   for (const auto& epoch : matched) {
     for (const auto& sat : epoch.sats) {
       if (sat.excluded || sat.elevation < params_.min_elevation) continue;
+      const auto clock_key = gnss_clock_key(sat.constellation, frame_idx);
 
       // ── PseudorangeFactor ────────────────────────────────────────────────
-      // Keys: X(i), C(i), E(0), R(0)
+      // Keys: X(i), constellation receiver clock(i), E(0), R(0)
       const double sigma_pr = pr_sigma(sat.elevation, sat.kappa);
       graph.emplace_shared<PseudorangeFactor>(
-        X(frame_idx), C(frame_idx), E(0), R(0),
+        X(frame_idx), clock_key, E(0), R(0),
         sat.pr_meas,
         sat.sat_pos,
         sat.tgd,
@@ -120,10 +144,10 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
         sat.elevation);
 
       // ── DopplerFactor ──────────────────────────────────────────────────
-      // Keys: X(i), V(i), C(i), R(0)
+      // Keys: X(i), V(i), constellation receiver clock(i), R(0)
       const double sigma_dop = dop_sigma(sat.elevation);
       graph.emplace_shared<DopplerFactor>(
-        X(frame_idx), V(frame_idx), C(frame_idx), R(0),
+        X(frame_idx), V(frame_idx), clock_key, R(0),
         sat.dop_meas,
         sat.sat_pos,
         sat.sat_vel,

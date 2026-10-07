@@ -34,7 +34,9 @@ SOURCES += ["include/iap/gnss/gnss_types.hpp", "include/iap/gnss/gnss_epoch_wire
             "src/iap/gnss/gnss_extension.cpp", "src/iap/integrity/integrity_extension.cpp"]
 SOURCES += ["scripts/dev_predictor/advisory_validation.py", "scripts/dev_predictor/compare_advisory_error.py",
             "scripts/dev_predictor/advisory_coordinate_evidence.py", "scripts/dev_predictor/advisory_live_capture.py"]
-SOURCES += ["include/iap/gnss/broadcast_ephemeris.hpp"]
+SOURCES += ["include/iap/gnss/broadcast_ephemeris.hpp",
+            "include/iap/gnss/constellation_clock.hpp", "src/iap/gnss/gnss_handler.cpp",
+            "include/iap/gnss/gnss_handler.hpp", "include/iap/gnss/gnss_extension.hpp"]
 
 
 def git(*args):

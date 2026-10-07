@@ -25,12 +25,97 @@
 #include <iap/integrity/integrity_report_mapping.hpp>
 #include <iap/integrity/numerical_guard.hpp>
 #include <iap/gnss/gnss_handler.hpp>
+#include <iap/gnss/constellation_clock.hpp>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/nonlinear/PriorFactor.h>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/predictor/lidar_observability_fim.hpp>
 #include <iap/trunk/trunk_map.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
 using namespace iap;
+
+TEST(GnssHandlerEpochBindingTest, GpsAndBeiDouUseIndependentBiasAndDrift) {
+  GnssHandler handler;
+  GnssEpoch epoch;
+  epoch.stamp = 100.0;
+  for (const char system : {'G', 'C'}) {
+    SatObs sat;
+    sat.constellation = system;
+    sat.sat_id = system == 'G' ? 5 : 205;
+    sat.elevation = 1.0;
+    sat.sat_pos = Eigen::Vector3d(21000000, 14000000, 17000000);
+    epoch.sats.push_back(sat);
+  }
+  handler.insert_epoch(epoch);
+  const auto graph = handler.get_factors(7, 100.0, Eigen::Vector3d::Zero());
+  ASSERT_EQ(graph.size(), 4U);
+  EXPECT_EQ(graph[0]->keys()[1], gtsam::Symbol('c', 7));
+  EXPECT_EQ(graph[1]->keys()[2], gtsam::Symbol('c', 7));
+  EXPECT_EQ(graph[2]->keys()[1], gtsam::Symbol('d', 7));
+  EXPECT_EQ(graph[3]->keys()[2], gtsam::Symbol('d', 7));
+
+  gtsam::Values states;
+  states.insert(gtsam::Symbol('x', 7), gtsam::Pose3());
+  states.insert(gtsam::Symbol('v', 7), gtsam::Vector3::Zero().eval());
+  states.insert(gtsam::Symbol('e', 0), gtsam::Vector3::Zero().eval());
+  states.insert(gtsam::Symbol('r', 0), gtsam::Rot3());
+  states.insert(gtsam::Symbol('c', 7), gtsam::Vector2(12, 0.3));
+  states.insert(gtsam::Symbol('d', 7), gtsam::Vector2(45, 0.8));
+  std::vector<double> before;
+  for (const auto& factor : graph) {
+    const auto nf = std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(factor);
+    before.push_back(nf->unwhitenedError(states)[0]);
+  }
+  states.update(gtsam::Symbol('c', 7), gtsam::Vector2(22, 0.5));
+  const double expected_delta[] = {-10, -0.2, 0, 0};
+  for (std::size_t i = 0; i < graph.size(); ++i) {
+    const auto nf = std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(graph[i]);
+    EXPECT_NEAR(nf->unwhitenedError(states)[0] - before[i], expected_delta[i], 1e-8);
+  }
+}
+
+TEST(GnssHandlerEpochBindingTest, ClockDifferenceCovarianceRetainsCorrelation) {
+  const auto gps = gnss_clock_key('G', 7), bds = gnss_clock_key('C', 7);
+  gtsam::NonlinearFactorGraph graph;
+  graph.addPrior<gtsam::Vector2>(gps, gtsam::Vector2::Zero(),
+      gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector2(2.0, 0.2)));
+  graph.emplace_shared<gtsam::BetweenFactor<gtsam::Vector2>>(
+      gps, bds, gtsam::Vector2(20, 0.5),
+      gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector2(0.3, 0.05)));
+  gtsam::Values states;
+  states.insert(gps, gtsam::Vector2::Zero().eval());
+  states.insert(bds, gtsam::Vector2(20, 0.5));
+  const auto covariance = gnss_clock_difference_covariance(*graph.linearize(states), gps, bds);
+  EXPECT_NEAR(covariance(0, 0), 0.09, 1e-12);
+  EXPECT_NEAR(covariance(1, 1), 0.0025, 1e-12);
+  EXPECT_NEAR(covariance(0, 1), 0.0, 1e-12);
+  EXPECT_THROW(gnss_clock_difference_covariance(*graph.linearize(states), gps, gps),
+      std::invalid_argument);
+}
+
+TEST(GnssHandlerEpochBindingTest, OnlyUsedConstellationsCreateFactorKeys) {
+  GnssHandler handler;
+  GnssEpoch epoch;
+  epoch.stamp = 100.0;
+  for (const char system : {'G', 'C', 'E', 'R'}) {
+    SatObs sat;
+    sat.constellation = system;
+    sat.sat_id = static_cast<int>(system);
+    sat.elevation = 1.0;
+    sat.excluded = system == 'G';
+    epoch.sats.push_back(sat);
+  }
+  epoch.sats.back().elevation = 0.01;  // GLONASS below the unchanged mask.
+  handler.insert_epoch(epoch);
+  const auto graph = handler.get_factors(8, 100.0, Eigen::Vector3d::Zero());
+  ASSERT_EQ(graph.size(), 4U);
+  EXPECT_EQ(graph[0]->keys()[1], gnss_clock_key('C', 8));
+  EXPECT_EQ(graph[2]->keys()[1], gnss_clock_key('E', 8));
+  EXPECT_NE(gnss_clock_key('G', 8), gnss_clock_key('C', 8));
+  EXPECT_NE(gnss_clock_key('E', 8), gnss_clock_key('R', 8));
+  EXPECT_THROW(gnss_clock_key('?', 8), std::invalid_argument);
+}
 
 TEST(GnssHandlerEpochBindingTest, ConsumesOnlyNearestEpochAndRetainsLaterEpoch) {
   GnssHandler::Params params;
