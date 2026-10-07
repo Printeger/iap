@@ -807,6 +807,17 @@ read-only mechanism experiments. No ROS server publication or freshness renewal
 is available. Exit code zero describes dynamics, while the independent full
 physical verdict is separately retained in `result.json`.
 
+For already captured candidates, `--mode audit` applies the production geometric
+retention check at every stage with its owned guide. It runs no optimizer or
+online allowance; absent frozen PL stays `NOT_AVAILABLE` and execution is never
+authorized. The original attempt45/gen209 red diagnostic
+(`20261007T141714Z_204`) has `guide_fit` deviation 0.149697 m, `guide_bound`
+0.346292 m and first `optimized` 0.590059 m against the unchanged 0.136603 m
+corridor. The earliest observed route violation is fitting; boundary binding and
+optimization worsen it. The capture regression preserves that symptom under a
+coordinate translation. Initialization, exact boundary constraints and solver
+convergence remain hypotheses to resolve; A/C field qualification remains blocked.
+
 The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
 boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint
 P/V/A without updating adjacent interior controls reproduces that dynamic failure.

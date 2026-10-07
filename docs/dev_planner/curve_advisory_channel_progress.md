@@ -159,3 +159,16 @@ B5阻塞：raw整星座及联合故障、状态epoch／cov同步、外参旋转�
 v5真实冻结原输入复核：clock_v5_history_diag保持recording_version=5、
 legacy_common_clock、原reference1657108856.628；历史诊断身份及生产wrapper
 拒绝旧版本均保留。未改写原run记录，不借重编码变为v6资格。
+
+B5现场：干净dcd7462历史60秒run140712Z_090，GPS／北斗观测4736／11840，
+伪距因子4408／11020；v6冻结请求5/6、首个失败保留。末Monitor
+HPL/VPL101.240／237.451m，前进4.340m未到达；3条发布／3个命令ID。
+图文与hash在analysis/historical_advisory_clocks_live。链路可运行，原B资格缺口
+仍在，正式9＋9与6保持0。
+
+A/C取证补齐：生产`audit`重查真实attempt45/gen209每个候选阶段，保留原时刻、
+物理代数和stage-owned guide。run141714Z_204确认guide_fit／guide_bound／首轮
+optimized偏离0.149697／0.346292／0.590059m，界0.136603m；最早拟合已丢路，
+边界及优化进一步恶化。无PL补造、无在线预算或执行授权；geometry fixture在
+原坐标及平移坐标下捕捉同症状，2项重放测试通过。拟合／边界／求解语义尚待修复，
+不把新的红例诊断写成A/C完成。

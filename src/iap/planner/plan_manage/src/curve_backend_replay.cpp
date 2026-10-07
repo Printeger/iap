@@ -39,7 +39,7 @@ int main(int argc,char**argv) {
  try {
   rclcpp::init(argc,argv);
   const auto args=rclcpp::remove_ros_arguments(argc,argv);
-  if(args.size()!=3 && !(args.size()==4 && args[3]=="isolated-budget")) throw std::invalid_argument("usage: curve_backend_replay snapshot.json retime|refine|backend [isolated-budget] [--ros-args --params-file frozen.yaml]");
+  if(args.size()!=3 && !(args.size()==4 && args[3]=="isolated-budget")) throw std::invalid_argument("usage: curve_backend_replay snapshot.json retime|refine|backend|audit [isolated-budget] [--ros-args --params-file frozen.yaml]");
   if(!std::getenv("IAP_RUN_DIR")) throw std::invalid_argument("replay requires resolver-owned IAP_RUN_DIR");
   glim::RunLogManager::initialize("curve_backend_replay");
   auto* artifacts=glim::RunLogManager::get_if_initialized();
@@ -54,7 +54,7 @@ int main(int argc,char**argv) {
     trace<<"],\"knots_s\":[";for(int i=0;i<knots.size();++i) trace<<(i ? "," : "")<<knots[i];trace<<"]}";first_stage=false;
   };
   ptree input;boost::property_tree::read_json(args[1],input);
-  const auto mode=args[2]; if(mode!="retime" && mode!="refine" && mode!="backend") throw std::invalid_argument("invalid mode");
+  const auto mode=args[2]; if(mode!="retime" && mode!="refine" && mode!="backend" && mode!="audit") throw std::invalid_argument("invalid mode");
   GridMapFailureSnapshot snapshot;
   snapshot.origin=point(input.get_child("origin_m")); snapshot.max_boundary=point(input.get_child("max_boundary_m"));
   snapshot.dimensions=point(input.get_child("dimensions")).cast<int>(); snapshot.resolution_m=input.get<double>("resolution_m");
@@ -95,7 +95,8 @@ int main(int argc,char**argv) {
   ptree stage; bool found=false;
   for(const auto& child:input.get_child("curve_stages")) {
     const std::string name=child.second.get<std::string>("stage");
-    if((mode=="backend" && name=="guide_bound") || (mode!="backend" && name=="optimized_bound")) {stage=child.second;found=true;break;}
+    if(((mode=="backend" || mode=="audit") && name=="guide_bound") ||
+        ((mode=="retime" || mode=="refine") && name=="optimized_bound")) {stage=child.second;found=true;break;}
   }
   if(!found) throw std::invalid_argument("required authoritative stage absent");
   auto q=controls(stage.get_child("control_points_m")); double dt=stage.get<double>("interval_s");
@@ -119,6 +120,50 @@ int main(int argc,char**argv) {
     throw std::invalid_argument("captured stage target/guide mismatch; stage-owned guide required");
   // Establish control ownership before setGuidePath uses the control count.
   optimizer.initializeFromGuide(q);optimizer.setGuidePath(guide);optimizer.initializeFromGuide(q);optimizer.setLocalTargetPt(end);
+  if(mode=="audit") {
+    // Diagnose already captured stages without spending an online attempt's
+    // remaining allowance or running a solver. Frozen PL is not in this file:
+    // only the production geometric retention verdict has evidence here.
+    if(isolated) throw std::invalid_argument("audit does not execute an online budget");
+    optimizer.setPlanningBudget(nullptr);
+    std::vector<std::vector<Eigen::Vector3d>> captured_guides;
+    for(const auto& child:input.get_child("curve_stages")) {
+      const auto owned=child.second.get_child_optional("guide_m");
+      if(!owned) throw std::invalid_argument("audit requires each stage-owned guide");
+      std::vector<Eigen::Vector3d> captured;
+      for(const auto& p:*owned) captured.push_back(point(p.second));
+      if(captured.size()<2 ||
+          (captured.back()-point(child.second.get_child("target_p_m"))).norm()>1e-6)
+        throw std::invalid_argument("captured stage target/guide mismatch; stage-owned guide required");
+      captured_guides.push_back(std::move(captured));
+    }
+    std::ostringstream result;
+    result<<std::setprecision(17)<<"{\"schema\":\"iap_curve_stage_audit_v1\",\"identity\":\"CAPTURED_STAGE_GEOMETRY_DIAGNOSTIC\",\"mode\":\"audit\",\"planning_attempt_id\":"
+        <<input.get<uint64_t>("planning_attempt_id")<<",\"generation\":"<<snapshot.generation
+        <<",\"original_time_s\":"<<time<<",\"original_cloud_stamp_s\":"<<snapshot.cloud_stamp_s
+        <<",\"risk_evidence\":\"NOT_AVAILABLE\",\"execution_authorized\":false,\"curve_stages\":[";
+    bool first=true,all_checked=true,route_preserved=true;size_t stage_index=0;
+    for(const auto& child:input.get_child("curve_stages")) {
+      const auto& value=child.second;
+      optimizer.setGuidePath(captured_guides[stage_index]);
+      const auto audit=optimizer.assessGuideRetention(controls(value.get_child("control_points_m")),
+          value.get<double>("interval_s"),[](const Eigen::Vector3d&) {return GridPlanningRisk{};});
+      all_checked=all_checked && audit.checked;route_preserved=route_preserved && !audit.route_lost;
+      result<<(first ? "" : ",")<<"{\"stage\":"<<std::quoted(value.get<std::string>("stage"))
+          <<",\"stage_index\":"<<stage_index++<<",\"interval_s\":"<<value.get<double>("interval_s")
+          <<",\"captured_elapsed_s\":"<<value.get<double>("elapsed_s")
+          <<",\"captured_repairs\":"<<value.get<unsigned>("repairs")
+          <<",\"checked\":"<<(audit.checked ? "true" : "false")
+          <<",\"max_deviation_m\":"<<audit.max_deviation_m<<",\"corridor_m\":"<<audit.corridor_m
+          <<",\"route_lost\":"<<(audit.route_lost ? "true" : "false")<<'}';
+      first=false;
+    }
+    result<<"],\"all_stages_checked\":"<<(all_checked ? "true" : "false")
+        <<",\"all_stages_preserve_route\":"<<(route_preserved ? "true" : "false")<<"}\n";
+    std::ofstream audit_output(output);audit_output<<result.str();
+    audit_output.close();if(!audit_output) throw std::runtime_error("result write failed");
+    rclcpp::shutdown();return all_checked && route_preserved ? 0 : 1;
+  }
   ego_planner::EGOPlannerManager manager;
   const auto& assessment_context=ego_planner::CurveBackendReplayAccess::bind(manager,node,map,context,motion,time,budget);
   const auto assess=[&](Eigen::MatrixXd p,double interval) {return manager.assessTrajectory(UniformBspline(p,3,interval),0,time,false,0,std::numeric_limits<double>::infinity(),&assessment_context,false,&motion);};

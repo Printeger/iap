@@ -194,6 +194,16 @@ read-only mechanism experiments. No ROS server publication or freshness renewal
 is available. Exit code zero describes dynamics, while the independent full
 physical verdict is separately retained in `result.json`.
 
+`audit` evaluates the production geometric guide-retention check independently
+for every already captured stage and its owned guide. The result schema is
+`iap_curve_stage_audit_v1`, identity `CAPTURED_STAGE_GEOMETRY_DIAGNOSTIC`.
+Original attempt, physical generation and acquisition times remain unchanged.
+No solver, online budget, freshness update or execution authorization is involved.
+`risk_evidence=NOT_AVAILABLE` explicitly excludes reconstructed PL qualification.
+Exit zero requires all stages checked and route preserved; rejection is a
+completed diagnostic, not a failed artifact capture. The wrapper registers
+command, source, parameter, binary and frozen input hashes before execution.
+
 The observed attempt 12/gen 260 in run `20261007T094106Z_545` rejected four
 boundary-only stretches with ratios 2.469/1.374/1.258/1.195. Rebinding endpoint
 P/V/A without updating adjacent interior controls reproduces that dynamic failure.

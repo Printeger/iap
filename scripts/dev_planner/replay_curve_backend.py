@@ -19,9 +19,11 @@ def main():
     parser.add_argument("--parameters", type=Path, required=True,
                         help="explicit frozen ROS parameters YAML; no current-default substitution")
     parser.add_argument("--binary", type=Path, required=True)
-    parser.add_argument("--mode", choices=("retime", "refine", "backend"), default="backend")
+    parser.add_argument("--mode", choices=("retime", "refine", "backend", "audit"), default="backend")
     parser.add_argument("--isolated-budget", action="store_true", help="separate mechanism experiment; does not reproduce captured remaining resources")
     args = parser.parse_args()
+    if args.mode == "audit" and args.isolated_budget:
+        parser.error("audit diagnoses captured stages without running an online budget")
     data = json.loads(args.snapshot.read_text())
     if data["kind"] not in ("attempt_failure_curve", "attempt_failure"):
         raise ValueError("requires final candidate disposition")
@@ -54,15 +56,23 @@ def main():
         output = run / "export/planner/curve_replay/result.json"
         if output.exists():
             result["result_sha256"] = sha(output)
-            status = "completed"  # A reproduced rejection is a completed offline experiment.
             result["verdict"] = json.loads(output.read_text())
+            if process.returncode in (0, 1):
+                status = "completed"  # A reproduced rejection is a completed offline experiment.
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
         write_subordinate_manifest(run, "curve_backend_replay", result)
         finalize_run(run, lifecycle=status)
-    print(json.dumps({"run": str(run), "verdict": result.get("verdict", {}).get("dynamics_feasible"), "lifecycle": status}))
+    verdict = result.get("verdict", {})
+    summary = {"run": str(run), "lifecycle": status}
+    if args.mode == "audit":
+        summary.update(all_stages_checked=verdict.get("all_stages_checked"),
+                       all_stages_preserve_route=verdict.get("all_stages_preserve_route"))
+    else:
+        summary["verdict"] = verdict.get("dynamics_feasible")
+    print(json.dumps(summary))
     return 0 if status == "completed" else 1
 
 

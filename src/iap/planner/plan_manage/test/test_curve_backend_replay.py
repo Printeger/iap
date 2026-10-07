@@ -13,6 +13,79 @@ from run_directory import resolve_run_directory
 
 
 class CurveReplayTest(unittest.TestCase):
+    def test_real_route_loss_is_visible_before_final_check(self):
+        fixture = json.loads((Path(__file__).parent /
+                              "fixtures/curve_attempt45_gen209_geometry.json").read_text())
+        # Geometry evidence only. These free cells never replace the captured
+        # forest in a physical or execution replay.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parameters = root / "parameters.yaml"
+            parameters.write_text("/**:\n  ros__parameters:\n    optimization/order: 3\n")
+            for offset in (0., 12.):
+                data = json.loads(json.dumps(fixture))
+                data.update(kind="attempt_failure_curve", origin_m=[-20.+offset, -6., 0.],
+                            max_boundary_m=[10.+offset, 6., 6.], dimensions=[150, 60, 30],
+                            resolution_m=.1, virtual_ceiling_height_m=-1., inflation_radius_m=0.,
+                            frame_id="map", cloud_stamp_s=fixture["planning_time_s"]-.1,
+                            motion_quality=1, motion_allow_bridged=False,
+                            motion_stamp_s=fixture["planning_time_s"]-.1, motion_error_proxy_m=.01,
+                            motion_body_radius_m=.35, motion_tracking_reserve_m=.1,
+                            motion_budget_m=.55, motion_max_age_s=.5, environment_max_age_s=.5,
+                            cell_flags_file="cells.bin")
+                # The original corridor is 0.1366 m: keep its 0.1 m lattice.
+                data.update(resolution_m=.1, dimensions=[300, 120, 60])
+                (root / "cells.bin").write_bytes(bytes([4]) * (300 * 120 * 60))
+                for p in data["guide_m"]:
+                    p[0] += offset
+                for stage in data["curve_stages"]:
+                    stage["target_p_m"][0] += offset
+                    for key in ("guide_m", "control_points_m"):
+                        for p in stage.get(key, []):
+                            p[0] += offset
+                data["real_start_p_m"][0] += offset
+                snapshot = root / "snapshot.json"
+                snapshot.write_text(json.dumps(data))
+                previous = os.environ.get("IAP_RUN_ROOT")
+                os.environ["IAP_RUN_ROOT"] = temporary
+                try:
+                    run = resolve_run_directory(entrypoint="curve_backend_replay")
+                finally:
+                    if previous is None: os.environ.pop("IAP_RUN_ROOT", None)
+                    else: os.environ["IAP_RUN_ROOT"] = previous
+                process = subprocess.run([os.environ["IAP_CURVE_REPLAY_BIN"], str(snapshot), "audit",
+                                          "--ros-args", "--params-file", str(parameters)],
+                                         env={**os.environ, "IAP_RUN_DIR": str(run)},
+                                         capture_output=True, text=True, timeout=15)
+                self.assertEqual(process.returncode, 1, process.stderr + process.stdout)
+                result = json.loads((run / "export/planner/curve_replay/result.json").read_text())
+                self.assertTrue(result["all_stages_checked"])
+                self.assertFalse(result["all_stages_preserve_route"])
+                self.assertFalse(result["execution_authorized"])
+                self.assertEqual(result["risk_evidence"], "NOT_AVAILABLE")
+                self.assertEqual(result["original_time_s"], fixture["planning_time_s"])
+                stages = result["curve_stages"]
+                self.assertEqual([s["stage"] for s in stages], [s["stage"] for s in fixture["curve_stages"]])
+                self.assertEqual(len(stages), 7)
+                for stage, expected in zip(stages[:4], (.14971, .34638, .34638, .59006)):
+                    self.assertTrue(stage["route_lost"])
+                    self.assertAlmostEqual(stage["max_deviation_m"], expected, delta=.0001)
+                self.assertLess(stages[0]["max_deviation_m"], stages[1]["max_deviation_m"])
+                self.assertLess(stages[1]["max_deviation_m"], stages[3]["max_deviation_m"])
+            del data["curve_stages"][1]["guide_m"]
+            snapshot.write_text(json.dumps(data))
+            existing = set(root.iterdir())
+            process = subprocess.run([sys.executable, str(REPO / "scripts/dev_planner/replay_curve_backend.py"),
+                                      str(snapshot), "--mode", "audit", "--parameters", str(parameters),
+                                      "--binary", os.environ["IAP_CURVE_REPLAY_BIN"]],
+                                     env={**os.environ, "IAP_RUN_ROOT": temporary},
+                                     capture_output=True, text=True, timeout=15)
+            self.assertEqual(process.returncode, 1, process.stderr + process.stdout)
+            run, = set(root.iterdir()) - existing
+            manifest = json.loads((run / "metadata/run_manifest.json").read_text())
+            self.assertEqual(manifest["lifecycle"], "failed")
+            self.assertFalse((run / "export/planner/curve_replay/result.json").exists())
+
     def test_captured_boundary_neighbourhood_requires_refine(self):
         fixture = json.loads((Path(__file__).parent / "fixtures/curve_attempt12_gen260.json").read_text())
         stage = fixture["captured_stage"]

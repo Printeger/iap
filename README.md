@@ -1048,6 +1048,14 @@ Budget-interrupted checks report `incomplete` with checked extent. Pre-guide
 initialization, prior-server connection and missed commit windows require live
 evidence. The real forest replay still fails; phase A remains unqualified.
 
+Use `--mode audit` to run the production geometric guide-retention check on
+every captured Curve stage. It retains original times and candidate/guide
+identity, runs no optimizer and spends no online allowance. Its exit code is
+zero only when every stage is checked and preserves the route. Missing frozen
+PL remains `NOT_AVAILABLE`; this diagnostic grants no physical, risk or execution
+qualification. The original attempt45/gen209 first loses the route at `guide_fit`,
+then deviates further after boundary binding and optimization.
+
 Local goals now span forward/left/right within the original pool (at most 16),
 with an eligible final task endpoint first. Every local round performs the same
 guide search with guidance OFF/ON. The guide determines endpoint/tangent and
