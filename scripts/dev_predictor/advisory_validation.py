@@ -44,7 +44,8 @@ SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp",
             "include/iap/integrity/araim.hpp", "include/iap/integrity/araim_types.hpp",
             "src/iap/integrity/integrity_monitor.cpp"]
 SOURCES += ["src/iap/odometry/odometry_estimation_gpu.cpp"]
-SOURCES += ["srv/GetGridMapPredictionInput.srv"]
+SOURCES += ["srv/GetGridMapPredictionInput.srv",
+            "scripts/dev_predictor/fusion_scientific_audit.py"]
 SOURCES += [str(p.relative_to(REPO)) for directory in
             (REPO/"include/iap/odometry/gpu_evidence",REPO/"src/iap/odometry/gpu_evidence")
             for p in sorted(directory.glob("*")) if p.is_file()]

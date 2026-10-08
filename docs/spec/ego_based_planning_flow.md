@@ -1944,3 +1944,16 @@ execution; flow/server/command/truth evidence must establish those steps.
 Focused actual writer regression verifies that a successful capture cannot
 replace terminal failure evidence. Native replay tests verify subset labelling
 and reject duplicate/out-of-range indices; full production replay is unchanged.
+
+
+The scientific fusion audit starts from the actually activated ID5 capture
+(attempt12/generation178/risk166 in `20261008T152504Z_258`). The offline
+`advisory_validation replay_audit LABEL PAYLOAD` command preserves the original
+reference time and full physical input, exports the final nominal GNSS rows and
+sigmas plus the derived LiDAR primitives, and runs source/noise/geometry
+ablations. It never changes route weights or grants motion authorization.
+Source/build/input hashes and the installed baseline executable and core library
+are retained in `20261008T162301Z_891`; actual error, map correlation and fused
+fault qualification are separate pending stages. Baseline duplicate tests give
+identical information for 1/2/4 copies and <0.03% PL change across representation
+densities. These are mechanism evidence, not independent-error qualification.

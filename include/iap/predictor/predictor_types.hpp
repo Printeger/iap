@@ -248,6 +248,11 @@ struct GnssAdvisoryResult {
   std::vector<int> visible_sat_ids;
   std::vector<int> used_sat_ids;
   std::vector<int> excluded_sat_ids;
+  // Exact rows and final sigmas used by the nominal information calculation,
+  // after visibility, FDE, canopy floor and measurement_noise_scale.
+  std::vector<Eigen::Vector3d> information_los_map;
+  std::vector<double> information_sigma_m;
+  std::vector<char> information_constellations;
 
   // R^{3x3} position-only map/ENU information after eliminating receiver
   // all actually used constellation clocks from the dynamic GNSS normal matrix.

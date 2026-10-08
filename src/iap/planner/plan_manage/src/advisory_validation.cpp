@@ -159,6 +159,12 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o << ",\"excluded_prns\": [";
   for(size_t i=0;i<s.current.excluded_prns.size();++i) {if(i)o<<',';o<<s.current.excluded_prns[i];} o<<']';
   o << ",\"lidar_sigma\":";number(o,in.params.lidar.fim_params.fim_range_sigma_base);
+  o << ",\"lidar_radius_m\":";number(o,in.params.lidar.fim_params.fim_radius_m);
+  o << ",\"lidar_support_voxel_m\":";number(o,in.params.lidar.fim_params.fim_support_voxel_m);
+  o << ",\"lidar_weight_scale\":";number(o,in.params.lidar.fim_params.fim_weight_scale);
+  o << ",\"gnss_noise_scale\":";number(o,in.params.gnss.measurement_noise_scale);
+  o << ",\"K_H_adv\":";number(o,in.params.fusion.K_H_adv);
+  o << ",\"K_V_adv\":";number(o,in.params.fusion.K_V_adv);
   o << ",\"conservative_max_with_gnss\":" << (in.params.fusion.conservative_max_with_gnss?"true":"false");
   o << ",\"parameter_authority\":\"complete serialized PredictorParams in input.bin\",\"primitive_derivation\":\"make_lidar_fim_primitives(default generation params), frozen raw centers\"";
   const auto& c=s.coordinates;
@@ -242,6 +248,18 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
      <<",\"paired_observation_codec_equal\":"<<(pair_phase==2&&source.occupancy?"true":"null")
      <<",\"support_rule\":\""<<(weak_normals?"derive default PCA then retain abs(normal_w.x)<0.1":"default production derivation")<<"\"}\n";}
   std::ofstream csv(dir/"points.csv"), matrices(dir/"matrices.jsonl");
+  std::ofstream observations(dir/"gnss_information_rows.jsonl");
+  if (in.occupancy && in.occupancy->raw_occupied_voxel_centers) {
+    const auto primitives=iap::make_lidar_fim_primitives(*in.occupancy->raw_occupied_voxel_centers);
+    std::ofstream raw(dir/"lidar_primitives.csv");
+    raw<<"x,y,z,nx,ny,nz,weight,confidence,support_count\n";
+    for (const auto& primitive:*primitives) {
+      for (double value:primitive.center_w) {csvNumber(raw,value);raw<<',';}
+      for (double value:primitive.normal_w) {csvNumber(raw,value);raw<<',';}
+      csvNumber(raw,primitive.weight);raw<<',';csvNumber(raw,primitive.normal_confidence);
+      raw<<','<<primitive.support_count<<'\n';
+    }
+  }
   std::string timing_label=campaign_namespace+label;
   std::replace(timing_label.begin(),timing_label.end(),'/','_');
   std::ofstream timing(log.profiling_path("advisory_validation_"+timing_label+".csv"));
@@ -323,6 +341,16 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
       if(!repeat_equal || !batch_equal || !wrapper_equal || !codec_equal) throw std::runtime_error("replay equivalence failed: "+label);
     }
     const auto& f=result.fused;
+    observations<<"{\"id\":"<<id<<",\"rows\":[";
+    for(size_t row=0;row<result.gnss.information_los_map.size();++row) {
+      if(row) observations<<',';
+      observations<<"{\"sat_id\":"<<result.gnss.used_sat_ids.at(row)
+          <<",\"constellation\":"<<std::quoted(std::string(1,result.gnss.information_constellations.at(row)))
+          <<",\"los_map\":";array(observations,result.gnss.information_los_map[row]);
+      observations<<",\"final_sigma_m\":";number(observations,result.gnss.information_sigma_m.at(row));
+      observations<<'}';
+    }
+    observations<<"]}\n";
     const bool valid=physical_ok && context.predict && wrapped.status==GridRiskStatus::VALID && !weak_normals;
     csv<<id<<','<<identity<<','<<label<<','<<std::setprecision(17)<<center.x()<<','<<center.y()<<','<<center.z()<<','<<physical.voxel_index.x()<<','<<physical.voxel_index.y()<<','<<physical.voxel_index.z()<<','<<(in.occupancy?in.occupancy->generation:0)<<','<<in.reference_time_s<<',';
     for(double v:{in.occupancy?in.occupancy->cloud_stamp_s:NAN,in.integrity.pose_stamp,in.integrity.current.stamp,in.integrity.has_epoch?in.integrity.gnss_epoch.stamp:NAN}) {csvNumber(csv,v);csv<<',';}
@@ -502,7 +530,7 @@ void samplingDiagnostics(const std::string& label,glim::RunLogManager& log) {
 
 int main(int argc,char** argv) {
   try {
-    if(argc<3) throw std::invalid_argument("advisory_validation fixture|fixture_ab|replay|replay_ab LABEL [PAYLOAD] [BUDGET_S]");
+    if(argc<3) throw std::invalid_argument("advisory_validation fixture|fixture_ab|replay|replay_ab|replay_audit LABEL [PAYLOAD] [BUDGET_S]");
     if(!std::getenv("IAP_RUN_DIR")) throw std::runtime_error("IAP_RUN_DIR must be allocated by the Python owner");
     const std::string mode=argv[1],label=argv[2];
     if(label.empty() || label.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos)
@@ -511,7 +539,7 @@ int main(int argc,char** argv) {
     if(mode=="diagnostics") {samplingDiagnostics(label,log);return 0;}
     Input in; double budget=120.;
     if(mode=="fixture" || mode=="fixture_ab") in=fixture();
-    else if((mode=="replay" || mode=="replay_ab") && argc>=4) {
+    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit") && argc>=4) {
       std::ifstream file(argv[3],std::ios::binary|std::ios::ate);
       if(!file || file.tellg()<=0 || file.tellg()>256*1024*1024) throw std::runtime_error("invalid payload file");
       const size_t size=file.tellg();file.seekg(0);std::vector<uint8_t> data(size);
@@ -528,6 +556,17 @@ int main(int argc,char** argv) {
         pair_phase=enabled?1:2;
         campaign_namespace=label+(enabled?"_on/":"_off/");
         campaign(variant,identity,budget,log);
+      }
+    }
+    else if(mode=="replay_audit") {
+      campaign_namespace=label+"/";
+      const auto identity=in.recording_codec_version<8?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";
+      campaign(in,identity,budget,log);
+      evaluate(in,"receiver",identity,false,budget,log);
+      for(const auto mode:{iap::PredictorSourceMode::GnssOnly,iap::PredictorSourceMode::LidarOnly}) {
+        auto source=in;source.params.source_mode=mode;
+        evaluate(source,mode==iap::PredictorSourceMode::GnssOnly?"scan_gnss":"scan_lidar",
+            "REAL_INPUT_DIAGNOSTIC",true,budget,log);
       }
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}

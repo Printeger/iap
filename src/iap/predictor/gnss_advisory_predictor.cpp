@@ -335,6 +335,9 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
         std::cos(sat.elevation)*std::cos(sat.azimuth), std::sin(sat.elevation));
     positions.row(row) = (epoch.R_query_enu * direction).transpose();
     const double sigma = std::max(sat.pr_sigma, 0.01);
+    out.information_los_map.push_back(positions.row(row).transpose());
+    out.information_sigma_m.push_back(sigma);
+    out.information_constellations.push_back(sat.constellation);
     weights[row] = 1/(sigma*sigma);
     systems.push_back(gnss_constellation_id(sat.constellation));
   }
