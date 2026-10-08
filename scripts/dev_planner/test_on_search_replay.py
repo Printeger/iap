@@ -123,6 +123,23 @@ class OnSearchReplayTest(unittest.TestCase):
             self.assertGreater(reports['sparse']['missing_unique_voxels'],0)
             self.assertGreater(reports['sparse']['risk_cost_m'],0)
             self.assertEqual(reports['off']['risk_cost_m'],0)
+            # The same physical input can fail its preference connector while
+            # the explicit original fallback still charges the warning cost.
+            risk.write_text('address,hpl_m,vpl_m,status,version,source_flags\n'+
+                ''.join(f'{i},1,1,1,1,0\n' for i in range(fixture.flags.size)))
+            for enabled in (False, True):
+                check=subprocess.run([str(_backend_path()),str(fixture.directory/'cells.bin'),
+                    '--planning-search','sparse',str(risk)], input=replay_input(fixture.meta,params,1.),
+                    text=True,capture_output=True,timeout=5,
+                    env={**os.environ,'IAP_REPLAY_ADVISORY_FALLBACK':'1' if enabled else '0'})
+                self.assertEqual(check.returncode,0,check.stderr)
+                value=json.loads(check.stdout)
+                self.assertEqual(value['guide_found'],enabled)
+                self.assertEqual(value['advisory_fallback'],enabled)
+                if enabled:
+                    self.assertTrue(value['diagnostic_only'])
+                    self.assertAlmostEqual(value['risk_cost_m'],2*value['length_m'])
+            risk.write_text('address,hpl_m,vpl_m,status,version,source_flags\n')
             parameters=fixture.directory/'parameters.json';parameters.write_text(json.dumps(params))
             with patch.dict(os.environ,{'IAP_RUN_ROOT':str(fixture.directory/'runs')}):
                 run=resolve_run_directory(entrypoint='search_adopter_test')

@@ -93,7 +93,10 @@ def main():
     parser.add_argument('--require-guide',action='store_true',help='fail the regression gate if either production search has no guide')
     parser.add_argument('--diagnose',action='store_true',help='three cold measurements, same-cache warm control and offline extended search; never online authorization')
     parser.add_argument('--diagnostic-goal-indices', help='Offline subset of captured terminals; full endpoint clearance context retained')
+    parser.add_argument('--advisory-fallback',action='store_true',help='Offline existing high-cost fallback; never an online guide gate')
     args=parser.parse_args()
+    if args.advisory_fallback and (args.require_guide or args.diagnose or not args.payload):
+        raise ValueError('fallback is an offline complete-input witness, not an online gate')
     if args.diagnostic_goal_indices and (args.require_guide or args.diagnose):
         raise ValueError('goal subsets are offline witnesses and cannot grant online capability')
     if not 0 < args.budget_s <= 30:raise ValueError('replay budget must be positive and at most 30 s')
@@ -114,7 +117,7 @@ def main():
         'budget_s':args.budget_s,'parameters_sha256':sha(args.parameters),
         'input_sha256':{f.name:sha(f) for f in args.snapshot.iterdir() if f.is_file()},
         'binary':binary_identity(args.binary.resolve()),'full_prediction_replay':False,
-        'diagnostic_goal_indices':args.diagnostic_goal_indices}
+        'diagnostic_goal_indices':args.diagnostic_goal_indices,'advisory_fallback':args.advisory_fallback}
     if args.payload: result.update(payload_sha256=sha(args.payload),capture_authority=capture)
     result['measurements']=[]
     status='failed'
@@ -130,7 +133,8 @@ def main():
             command=[str(args.binary.resolve()),str((args.snapshot/'cells.bin').resolve()),'--planning-search',mode,str(risk.resolve())]
             if args.diagnostic_goal_indices:command.append(args.diagnostic_goal_indices)
             completed=subprocess.run(command,input=replay_input(m,params,budget),text=True,capture_output=True,timeout=budget+35,
-                env={**os.environ,'IAP_REPLAY_PROFILE':'1' if measurement_profile(m,label) else '0'})
+                env={**os.environ,'IAP_REPLAY_PROFILE':'1' if measurement_profile(m,label) else '0',
+                     'IAP_REPLAY_ADVISORY_FALLBACK':'1' if args.advisory_fallback else '0'})
             name=label+'_'+str(repetition) if args.diagnose else label
             (out/(name+'.stderr.log')).write_text(completed.stderr)
             if completed.returncode: raise RuntimeError(f"{mode} replay exit {completed.returncode}: {completed.stderr}")
@@ -139,7 +143,7 @@ def main():
             if mode=='warm':verdict['scope']='SAME_FROZEN_GRIDMAP_CACHE_DIAGNOSTIC'
             verdict.update(label=label,repetition=repetition,search_budget_s=budget,
                            captured_profiling_enabled=bool(m.get('search_performance_diagnostics',False)),
-                           online_capability_evidence=not args.diagnostic_goal_indices and label in ('off','full') and budget==1.)
+                           online_capability_evidence=not args.advisory_fallback and not args.diagnostic_goal_indices and label in ('off','full') and budget==1.)
             (out/(name+'.json')).write_text(json.dumps(verdict,indent=2)+'\n')
             result['measurements'].append(verdict)
             if repetition==0:result[label]=verdict

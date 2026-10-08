@@ -283,6 +283,8 @@ void pointJson(std::ostream& out, const Point& p) {
 // Missing saved PL is UNCOMPUTED; this mode never fabricates a low-risk field.
 void planningSearch(const Input& in, const std::string& mode, const char* risk_path, const char* goal_indices = nullptr) {
   const bool profile=!(std::getenv("IAP_REPLAY_PROFILE") && std::string(std::getenv("IAP_REPLAY_PROFILE"))=="0");
+  const bool fallback=std::getenv("IAP_REPLAY_ADVISORY_FALLBACK") &&
+      std::string(std::getenv("IAP_REPLAY_ADVISORY_FALLBACK"))=="1";
   double reserve, taper; size_t count;
   if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || !count || count > 100000)
     throw std::invalid_argument("invalid planning goal set");
@@ -380,7 +382,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   };
   AStar search; search.initGridMap(map,in.pool); search.setFrozenEpoch(epoch);
   search.setTaskGoal(task_goal); search.setPerformanceDiagnostics(profile);
-  search.setPlanningQuery(query,false); search.setAdvisoryQuery(advisory);
+  search.setPlanningQuery(query,fallback); search.setAdvisoryQuery(advisory);
   double warm_s=0.;bool warm_found=false;
   if(mode=="warm") {
     const auto began=Clock::now();
@@ -417,7 +419,8 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   std::cout<<",\"incumbent_at_finish\":"<<(!path.empty()?"true":"false")
     <<",\"warmup_s\":"<<warm_s<<",\"warmup_found\":"<<(warm_found?"true":"false")
     <<",\"warmup_predictor_calls\":"<<before_calls
-    <<",\"diagnostic_only\":"<<(mode=="warm" || goal_indices?"true":"false")
+    <<",\"diagnostic_only\":"<<(mode=="warm" || goal_indices || fallback?"true":"false")
+    <<",\"advisory_fallback\":"<<(fallback?"true":"false")
     <<",\"diagnostic_goal_subset\":"<<(goal_indices?"true":"false")
     <<",\"edge_checks\":"<<r.edge_checks<<",\"segment_integrals\":"<<r.segment_integrals
     <<",\"physical_queries\":"<<r.query_calls<<",\"sample_cache_hits\":"<<r.cache_hits
@@ -439,12 +442,12 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   std::cout<<"]}\n";
 }
 
-void fixedRouteCheck(const Input& in,const char* payload_path,const char* output_path) {
+void fixedRouteCheck(const Input& in,const char* payload_path,const char* output_path,bool audit_cost=false) {
   double reserve,taper;size_t count;
   if(!(std::cin>>reserve>>taper>>count) || reserve<0 || taper<=0 || !count || count>100000)
     throw std::invalid_argument("invalid original clearance context");
   std::vector<Point> terminals;for(size_t i=0;i<count;++i) terminals.push_back(readPoint());
-  readPoint(); // Original mission endpoint, never changed by this checker.
+  const Point task_goal=readPoint(); // Original mission endpoint, never changed by this checker.
   GridPlanningRiskPolicy policy;
   if(!(std::cin>>policy.hpl_budget_m>>policy.vpl_budget_m>>policy.reserve_h_m>>
        policy.reserve_v_m>>policy.unknown_multiplier>>policy.stale_soft_seconds))
@@ -466,6 +469,27 @@ void fixedRouteCheck(const Input& in,const char* payload_path,const char* output
     throw std::invalid_argument("fixed route payload/map/time identity mismatch");
   if(in.control_points.size()<2) throw std::invalid_argument("fixed route needs at least two points");
   const auto physical=map->preparePlanningQuery(in.planning_time_s,in.motion,input.occupancy);
+  GridFrozenRiskQuery risk;
+  if(audit_cost) {
+    std::string reason;
+    auto prediction=ego_planner::makeRiskPrediction(input,{},&reason);
+    if(!reason.empty())throw std::invalid_argument("route cost prediction unavailable: "+reason);
+    const auto version=map->bindRiskContext(std::move(prediction));
+    risk=map->capturePlanningRiskQuery(version,in.planning_time_s,policy,nullptr,epoch->generation,false);
+  }
+  size_t model_unknown=0;std::map<int,size_t> classes;
+  const auto query=[&](const Point& p) {
+    auto context=physical;
+    double distance=(p-in.start).norm();
+    for(const auto& terminal:terminals) distance=std::min(distance,(p-terminal).norm());
+    context.required_clearance_m+=reserve*std::clamp(distance/taper,0.,1.);
+    auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,false);
+    if(audit_cost && cell.executable()) {
+      cell.advisory=risk(p);++classes[int(cell.advisory.classification)];
+      if(cell.advisory.query_status!=GridRiskStatus::VALID)++model_unknown;
+    }
+    return cell;
+  };
   std::map<std::string,size_t> reasons;
   size_t checked=0;bool valid=true;Point first=Point::Constant(NAN);std::string first_reason;
   for(size_t edge=1;edge<in.control_points.size();++edge) {
@@ -473,16 +497,22 @@ void fixedRouteCheck(const Input& in,const char* payload_path,const char* output
     const int steps=std::max(1,int(std::ceil((b-a).norm()/.01)));
     for(int i=0;i<=steps;++i) {
       const Point p=a+(b-a)*(double(i)/steps);
-      auto context=physical;
-      double distance=(p-in.start).norm();
-      for(const auto& terminal:terminals) distance=std::min(distance,(p-terminal).norm());
-      context.required_clearance_m+=reserve*std::clamp(distance/taper,0.,1.);
-      const auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,false);
+      const auto cell=query(p);
       ++checked;++reasons[gridExecutionReasonName(cell.execution_reason)];
       if(!cell.executable()) {
         if(valid) {first=p;first_reason=gridExecutionReasonName(cell.execution_reason);}
         valid=false;
       }
+    }
+  }
+  double length=0.,integral=0.;bool cost_valid=valid;
+  if(audit_cost) {
+    AStar checker;checker.setSearchMap(map);checker.setFrozenEpoch(epoch);
+    checker.setPlanningQuery(query,true); // Original explicit high-cost fallback, diagnostics only.
+    for(size_t i=1;i<in.control_points.size();++i) {
+      const auto a=in.control_points[i-1],b=in.control_points[i];
+      length+=(b-a).norm();const auto cost=checker.diagnosticSegmentCost(a,b);
+      if(cost)integral+=*cost;else cost_valid=false;
     }
   }
   if(std::filesystem::exists(output_path)) throw std::runtime_error("fixed route evidence exists");
@@ -492,6 +522,17 @@ void fixedRouteCheck(const Input& in,const char* payload_path,const char* output
       <<",\"checked\":"<<checked<<",\"sample_spacing_m\":0.01,\"trajectory_checked\":false,\"execution_authorized\":false"
       <<",\"first_rejection_reason\":"<<std::quoted(first_reason)<<",\"first_rejection_position_m\":";
   if(valid) out<<"null";else pointJson(out,first);
+  if(audit_cost) {
+    const double terminal=(in.control_points.back()-task_goal).norm();
+    out<<",\"cost_comparable\":"<<(cost_valid?"true":"false")<<",\"advisory_fallback\":true,\"length_m\":"<<std::setprecision(17)<<length
+      <<",\"model_unknown_samples\":"<<model_unknown<<",\"risk_cost_m\":";
+    if(cost_valid)out<<integral-length;else out<<"null";
+    out<<",\"terminal_cost_m\":"<<terminal<<",\"total_cost_m\":";
+    if(cost_valid)out<<integral+terminal;else out<<"null";
+    out<<",\"classifications\":{";bool comma=false;
+    for(const auto& [c,n]:classes){if(comma)out<<',';comma=true;out<<std::quoted(std::to_string(c))<<':'<<n;}
+    out<<'}';
+  }
   out<<",\"reasons\":{";bool comma=false;
   for(const auto& [reason,n]:reasons) {if(comma)out<<',';comma=true;out<<std::quoted(reason)<<':'<<n;}
   out<<"}}\n";
@@ -657,6 +698,7 @@ int main(int argc, char** argv) {
     if (argc < 2 || argc > 6) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
     if(argc==5 && std::string(argv[2])=="--route-check") {fixedRouteCheck(in,argv[3],argv[4]);return 0;}
+    if(argc==5 && std::string(argv[2])=="--route-cost") {fixedRouteCheck(in,argv[3],argv[4],true);return 0;}
     if((argc==5 || argc==6) && std::string(argv[2])=="--planning-search") {planningSearch(in,argv[3],argv[4],argc==6?argv[5]:nullptr);return 0;}
     if (argc==4 && std::string(argv[2])=="--attribution") { attribution(in,argv[3]); return 0; }
     if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc >= 5 && std::string(argv[4]) == "1", argc >= 6 && std::string(argv[5]) == "1"); return 0; }

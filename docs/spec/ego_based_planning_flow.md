@@ -2016,3 +2016,31 @@ Current Monitor FDE are distinct from joint fused bounds. LiDAR/systematic/map
 and common faults, real marginal noises and missed-detection/risk allocation
 remain unqualified; no empirical bound, 9+9 PASS or default promotion is granted.
 Audit exports make source admission and diagnostic-only epsilon explicit.
+
+Scientific F first replays the unchanged 1 s preference gate. The corrected ID5
+model crosses the original Advisory reserve and rejects the start connector;
+physical OFF still supplies a guide. This failure is retained. The existing
+explicit high-cost fallback is available only as a labelled offline witness
+in replay (`--advisory-fallback`, incompatible with `--require-guide`). It does
+not authorize execution or change weights. Native `--route-cost` reuses the
+original physical route query and AStar segment quadrature. `replay_points`
+exports arbitrary frozen spatial probes and each source's complete matrices.
+`recheck_fusion_route.py` binds the original ID5 guides and actual released
+B-spline to the unchanged policy, preserving both controls and knots. The
+sampled curve is a cost diagnostic, not a replacement continuous physical,
+dynamic, braking, retention or publication check. Full-branch and formal
+promotion qualifications remain withheld.
+
+The corrected local fallback witnesses retain the positive-y canopy endpoint:
+left length/risk/terminal/total = 3.448780/2.464612/30.663129/36.576521;
+right = 3.861288/2.768227/30.698982/37.328498. Both local searches prove their
+bounded lattice optimum, not full branch fairness. The unchanged old guides
+also retain the same ordering when re-costed. The archived actual curve remains
+within its original guide corridor (~0.040 m), but deviates ~0.189 m from the
+new guide, beyond the original ~0.137 m allowance: it cannot be reused as a
+new-model validated curve. Sampling dt 0.02/0.01/0.005 s gives 0.008215 m
+spread in its re-costed risk term; these costs are diagnostics. First-attempt
+ON fails, the explicit fallback finds a guide in 0.9284 s with preparation
+0.0923 s, but a complete 1.5 s guide/backend/publication pass is not inferred.
+Full IAP CTest 32/32 and 15 focused Python references pass before bounded ON
+field observation. No route weights or reserve thresholds are changed.

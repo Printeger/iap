@@ -221,7 +221,7 @@ void describe(const Input& in,const std::filesystem::path& path) {
 
 void evaluate(const Input& source,const std::string& label,const std::string& identity,
               bool scan,double budget_s,glim::RunLogManager& log,bool weak_normals=false,
-              const std::string& request_failure={}) {
+              const std::string& request_failure={},const std::vector<Point>* explicit_points=nullptr) {
   const auto dir=log.export_path("advisory/validation/"+campaign_namespace+label+"/points.csv").parent_path();
   std::filesystem::create_directories(dir);
   if(std::filesystem::exists(dir/"points.csv")) throw std::runtime_error("refusing to overwrite experiment: "+label);
@@ -293,7 +293,8 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
   if(preparation>budget_s) input_reason="preparation_budget_exceeded";
   std::vector<Point> points;
   Point p=in.integrity.p_wb;
-  if(scan && in.occupancy && p.allFinite() && (p-in.occupancy->lattice_origin).cwiseAbs().maxCoeff()<1e6) {
+  if(explicit_points) points=*explicit_points;
+  else if(scan && in.occupancy && p.allFinite() && (p-in.occupancy->lattice_origin).cwiseAbs().maxCoeff()<1e6) {
     std::set<std::array<int,3>> seen;
     for(int x=0;x<10;++x) for(int y=0;y<10;++y) {
       const auto& e=*in.occupancy;
@@ -584,7 +585,7 @@ int main(int argc,char** argv) {
     if(mode=="diagnostics") {samplingDiagnostics(label,log);return 0;}
     Input in; double budget=120.;
     if(mode=="fixture" || mode=="fixture_ab") in=fixture();
-    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit") && argc>=4) {
+    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit" || mode=="replay_points") && argc>=4) {
       std::ifstream file(argv[3],std::ios::binary|std::ios::ate);
       if(!file || file.tellg()<=0 || file.tellg()>256*1024*1024) throw std::runtime_error("invalid payload file");
       const size_t size=file.tellg();file.seekg(0);std::vector<uint8_t> data(size);
@@ -602,6 +603,20 @@ int main(int argc,char** argv) {
         campaign_namespace=label+(enabled?"_on/":"_off/");
         campaign(variant,identity,budget,log);
       }
+    }
+    else if(mode=="replay_points") {
+      if(argc!=7) throw std::invalid_argument("replay_points LABEL PAYLOAD BUDGET POINTS SOURCE");
+      std::ifstream file(argv[5]);std::vector<Point> points;Point p;
+      while(file>>p.x()) {
+        if(!(file>>p.y()>>p.z()) || !p.allFinite() || points.size()>=100000) throw std::invalid_argument("invalid explicit points");
+        points.push_back(p);
+      }
+      if(points.empty() || !file.eof()) throw std::invalid_argument("missing/invalid explicit points");
+      const std::string source=argv[6];
+      if(source=="gnss")in.params.source_mode=iap::PredictorSourceMode::GnssOnly;
+      else if(source=="lidar")in.params.source_mode=iap::PredictorSourceMode::LidarOnly;
+      else if(source!="fusion")throw std::invalid_argument("invalid explicit-point source mode");
+      evaluate(in,label,"REAL_INPUT_DIAGNOSTIC",false,budget,log,false,{},&points);
     }
     else if(mode=="replay_audit") {
       campaign_namespace=label+"/";
