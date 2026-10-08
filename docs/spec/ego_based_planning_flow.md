@@ -1989,3 +1989,18 @@ representation-density fixtures remain explicitly synthetic. Independent
 numerical references verify the Cauchy bound, attitude conditioning loss and
 unbounded map-alignment gauge. An incomplete GNSS fault set still retains
 its usable nominal PSD constraint, without granting standalone fault PL.
+
+Scientific audit D provides unattended native `--route-check` and original
+state-time error replay tools. The route checker uses the same frozen GridMap,
+motion context, original full terminal clearance taper, ceiling and inflation;
+it grants geometry evidence only, never trajectory/execution authorization.
+The two local sides pass 2037 samples; the route retaining the original task
+endpoint fails on clearance, physical obstacles and unobserved environment.
+The original complete request denominator yields 14 state-time truth pairs
+out of 15 requests, H/V p95 0.080959/0.309157 m. Recorder GLIO is already in
+planner-map coordinates; applying world-to-map again is rejected. All 14
+reference-to-state gaps exceed the original 50 ms criterion. The captured
+postopt position covariance is independently projected with local translation
+rotation, and CV diagnostics preserve p-v cross terms but lack process noise;
+they never grant propagation or coverage. Formal calibration/heldout remain
+0/9 and 0/9. No archived timestamp or eligibility threshold changes.

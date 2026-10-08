@@ -106,7 +106,7 @@ def audit(meta):
             'antenna_offset_map':(T_mw[:3,:3]@T_wi[:3,:3]@lever).tolist(),
             'T_map_lidar':(T_mw@T_wi@np.linalg.inv(T_li)).tolist(),
             'PL_axes':'map XY horizontal; map Z vertical; GNSS raw/anchored remain legacy ENU diagnostics',
-            'conditioning':'FGO rotation and attitude treated as fixed; their uncertainty is not propagated',
+            'conditioning':'World/ENU/map alignment is conditioned; pose attitude handling follows the bound model. No captured state propagation is inferred.',
             'truth_used_by_predictor':False}
 
 

@@ -1,6 +1,7 @@
 #include <path_searching/dyn_a_star.h>
 #include <plan_env/grid_map.h>
 #include <ego_planner/prediction_input.h>
+#include <ego_planner/risk_display.h>
 
 #include <algorithm>
 #include <chrono>
@@ -9,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -437,6 +439,64 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   std::cout<<"]}\n";
 }
 
+void fixedRouteCheck(const Input& in,const char* payload_path,const char* output_path) {
+  double reserve,taper;size_t count;
+  if(!(std::cin>>reserve>>taper>>count) || reserve<0 || taper<=0 || !count || count>100000)
+    throw std::invalid_argument("invalid original clearance context");
+  std::vector<Point> terminals;for(size_t i=0;i<count;++i) terminals.push_back(readPoint());
+  readPoint(); // Original mission endpoint, never changed by this checker.
+  GridPlanningRiskPolicy policy;
+  if(!(std::cin>>policy.hpl_budget_m>>policy.vpl_budget_m>>policy.reserve_h_m>>
+       policy.reserve_v_m>>policy.unknown_multiplier>>policy.stale_soft_seconds))
+    throw std::invalid_argument("missing original risk policy");
+  auto snapshot=in.snapshot;
+  if(!(std::cin>>snapshot.virtual_ceiling_height_m>>snapshot.inflation_radius_m))
+    throw std::invalid_argument("missing original ceiling/inflation");
+  std::ifstream payload(payload_path,std::ios::binary);
+  const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(payload)),{});
+  const auto input=ego_planner::decodePredictionInput(bytes);
+  auto map=GridMap::fromFailureSnapshot(snapshot);
+  const auto epoch=map->captureFrozenOccupancyEpoch();
+  if(!input.occupancy || input.reference_time_s!=in.planning_time_s ||
+      input.occupancy->generation!=epoch->generation || input.occupancy->frame_id!=epoch->frame_id ||
+      input.occupancy->lattice_origin!=epoch->lattice_origin || input.occupancy->extent_m!=epoch->extent_m ||
+      input.occupancy->resolution_m!=epoch->resolution_m || input.occupancy->cloud_stamp_s!=epoch->cloud_stamp_s ||
+      input.occupancy->virtual_ceiling_height_m!=epoch->virtual_ceiling_height_m ||
+      input.occupancy->map_inflation_m!=epoch->map_inflation_m || input.occupancy->cells->flags!=epoch->cells->flags)
+    throw std::invalid_argument("fixed route payload/map/time identity mismatch");
+  if(in.control_points.size()<2) throw std::invalid_argument("fixed route needs at least two points");
+  const auto physical=map->preparePlanningQuery(in.planning_time_s,in.motion,input.occupancy);
+  std::map<std::string,size_t> reasons;
+  size_t checked=0;bool valid=true;Point first=Point::Constant(NAN);std::string first_reason;
+  for(size_t edge=1;edge<in.control_points.size();++edge) {
+    const Point a=in.control_points[edge-1],b=in.control_points[edge];
+    const int steps=std::max(1,int(std::ceil((b-a).norm()/.01)));
+    for(int i=0;i<=steps;++i) {
+      const Point p=a+(b-a)*(double(i)/steps);
+      auto context=physical;
+      double distance=(p-in.start).norm();
+      for(const auto& terminal:terminals) distance=std::min(distance,(p-terminal).norm());
+      context.required_clearance_m+=reserve*std::clamp(distance/taper,0.,1.);
+      const auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,false);
+      ++checked;++reasons[gridExecutionReasonName(cell.execution_reason)];
+      if(!cell.executable()) {
+        if(valid) {first=p;first_reason=gridExecutionReasonName(cell.execution_reason);}
+        valid=false;
+      }
+    }
+  }
+  if(std::filesystem::exists(output_path)) throw std::runtime_error("fixed route evidence exists");
+  std::ofstream out(output_path);
+  out<<"{\"identity\":\"REAL_REPLAY\",\"scope\":\"EXPERIMENTAL_ROUTE_PHYSICAL_PREREQUISITE\",\"physical_valid\":"
+      <<(valid?"true":"false")<<",\"prediction_input_identity\":"<<ego_planner::predictionInputIdentity(input)
+      <<",\"checked\":"<<checked<<",\"sample_spacing_m\":0.01,\"trajectory_checked\":false,\"execution_authorized\":false"
+      <<",\"first_rejection_reason\":"<<std::quoted(first_reason)<<",\"first_rejection_position_m\":";
+  if(valid) out<<"null";else pointJson(out,first);
+  out<<",\"reasons\":{";bool comma=false;
+  for(const auto& [reason,n]:reasons) {if(comma)out<<',';comma=true;out<<std::quoted(reason)<<':'<<n;}
+  out<<"}}\n";
+}
+
 void attribution(const Input& in, const std::filesystem::path& destination) {
   double reserve, taper; size_t count;
   if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || count > 100000)
@@ -596,6 +656,7 @@ int main(int argc, char** argv) {
   try {
     if (argc < 2 || argc > 6) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
+    if(argc==5 && std::string(argv[2])=="--route-check") {fixedRouteCheck(in,argv[3],argv[4]);return 0;}
     if((argc==5 || argc==6) && std::string(argv[2])=="--planning-search") {planningSearch(in,argv[3],argv[4],argc==6?argv[5]:nullptr);return 0;}
     if (argc==4 && std::string(argv[2])=="--attribution") { attribution(in,argv[3]); return 0; }
     if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc >= 5 && std::string(argv[4]) == "1", argc >= 6 && std::string(argv[5]) == "1"); return 0; }

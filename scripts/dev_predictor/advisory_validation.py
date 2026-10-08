@@ -45,7 +45,10 @@ SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp",
             "src/iap/integrity/integrity_monitor.cpp"]
 SOURCES += ["src/iap/odometry/odometry_estimation_gpu.cpp"]
 SOURCES += ["srv/GetGridMapPredictionInput.srv",
-            "scripts/dev_predictor/fusion_scientific_audit.py"]
+            "scripts/dev_predictor/fusion_scientific_audit.py",
+            "scripts/dev_predictor/fusion_actual_error_audit.py",
+            "scripts/dev_predictor/check_fusion_fixed_route.py",
+            "src/iap/planner/plan_manage/src/failure_map_replay.cpp"]
 SOURCES += [str(p.relative_to(REPO)) for directory in
             (REPO/"include/iap/odometry/gpu_evidence",REPO/"src/iap/odometry/gpu_evidence")
             for p in sorted(directory.glob("*")) if p.is_file()]
