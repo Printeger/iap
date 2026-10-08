@@ -56,6 +56,8 @@ struct GnssAdvisoryFimResult : FimDiagnostic {
 };
 
 struct LidarAdvisoryFimResult : FimDiagnostic {
+  // [map translation, map left rotation], with rotation still a nuisance.
+  Eigen::Matrix<double,6,6> joint_pose_information = Eigen::Matrix<double,6,6>::Zero();
   int n_support_groups = 0;
   int n_primitives = 0;
   int n_valid_normals = 0;

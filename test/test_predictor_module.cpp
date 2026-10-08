@@ -1055,13 +1055,15 @@ TEST(PredictorModuleTest, GnssOpenSkyProducesFinitePlAndFim) {
   EXPECT_GT(result.vpl, 0.0);
   EXPECT_TRUE(result.fim_valid);
   EXPECT_EQ(result.information_state,
-            iap::PredictorInformationState::Position3MapEnu);
+            iap::PredictorInformationState::Pose6Map);
   EXPECT_TRUE(result.lambda_gnss.allFinite());
   EXPECT_EQ(result.lambda_gnss.rows(), 3);
   EXPECT_EQ(result.lambda_gnss.cols(), 3);
   EXPECT_GT(result.lambda_trace, 0.0);
+  EXPECT_TRUE((result.joint_pose_information.topLeftCorner<3,3>().isApprox(result.lambda_gnss,1e-12)));
   EXPECT_EQ(result.n_used, 8);
 }
+
 
 TEST(PredictorModuleTest, GnssMissingEpochIsExplicitFallback) {
   iap::GnssAdvisoryPredictor predictor(make_params().gnss);
@@ -3178,13 +3180,15 @@ TEST(PredictorModuleTest, LidarRichPrimitivesProducesValidFim) {
   EXPECT_TRUE(result.available);
   EXPECT_TRUE(result.fim_valid);
   EXPECT_EQ(result.information_state,
-            iap::PredictorInformationState::Position3MapEnu);
+            iap::PredictorInformationState::Pose6Map);
   EXPECT_TRUE(result.lambda_lidar.allFinite());
   EXPECT_EQ(result.lambda_lidar.rows(), 3);
   EXPECT_EQ(result.lambda_lidar.cols(), 3);
   EXPECT_GT(result.lambda_trace, 0.0);
+  EXPECT_TRUE((result.joint_pose_information.topLeftCorner<3,3>().isApprox(result.lambda_lidar,1e-12)));
   EXPECT_GT(result.n_primitives, 0);
 }
+
 
 TEST(PredictorModuleTest, LidarValidFimSkipsLegacyMapScan) {
   auto params = make_params();
@@ -3262,10 +3266,14 @@ TEST(PredictorModuleTest, ModuleFusesGnssAndLidarWithoutGridFields) {
   EXPECT_TRUE(result.fused.prior_valid);
   EXPECT_EQ(result.fused.information_state,
             iap::PredictorInformationState::Position3MapEnu);
-  const Eigen::Matrix3d expected_lambda =
-      result.fused.lambda_prior + result.fused.lambda_gnss +
-      result.fused.lambda_lidar;
-  EXPECT_TRUE(result.fused.lambda_pred.isApprox(expected_lambda, 1.0e-9));
+  Eigen::Matrix<double,6,6> expected_joint =
+      (result.gnss.joint_pose_information+result.lidar.joint_pose_information)/2.;
+  expected_joint.topLeftCorner<3,3>()+=result.fused.lambda_prior;
+  EXPECT_TRUE(result.fused.joint_pose_information.isApprox(expected_joint,1e-12));
+  EXPECT_DOUBLE_EQ(result.fused.cross_source_noise_inflation,2.);
+  // Independent full-system inverse, rather than adding conditional blocks.
+  const Eigen::Matrix<double,6,6> full_covariance=expected_joint.inverse();
+  EXPECT_TRUE((result.fused.sigma_pos.isApprox(full_covariance.topLeftCorner<3,3>(),1e-9)));
   EXPECT_TRUE(std::isfinite(result.fused.hpl));
   EXPECT_TRUE(std::isfinite(result.fused.vpl));
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_VALID));
@@ -4479,7 +4487,7 @@ TEST(AdvisoryNumerics, ComplementaryRankDeficientSourcesSolveJointly) {
   EXPECT_TRUE(result.gnss_used); EXPECT_TRUE(result.lidar_used);
   EXPECT_FALSE(std::isfinite(result.gnss_information_hpl));
   EXPECT_FALSE(std::isfinite(result.lidar_only_hpl));
-  EXPECT_NEAR(result.hpl,5./std::sqrt(1.+1e-6),1e-12);
+  EXPECT_NEAR(result.hpl,5.,1e-12); // epsilon is never information.
 }
 TEST(AdvisoryNumerics, RankFailureAndEpsilonDominanceNeverProduceOfficialPL) {
   iap::FusionAdvisoryPredictor predictor;
@@ -4628,4 +4636,31 @@ TEST(AdvisoryCoordinateContract, BatchCacheTracksPosteriorAnchorAndProjectedGeom
   b.snapshot.p_wb.x()=.1;
   EXPECT_EQ(predictor.admission(b).gnss_reason,"gnss_coordinate_identity_mismatch");
   EXPECT_TRUE(predictor.admission(b).lidar_allowed);
+}
+
+TEST(AdvisoryJointPose, SharedRotationGaugeCannotBecomePositionPrecision) {
+  iap::LidarAdvisoryPredictorParams params;
+  params.enable_legacy_observability=false;
+  params.fim_params.fim_min_voxels=1;
+  auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  for(int axis=0;axis<3;++axis) {
+    iap::LidarFimPrimitive p;
+    p.center_w=Eigen::Vector3d(1.,2.,3.);
+    p.normal_w=Eigen::Vector3d::Unit(axis);
+    primitives->push_back(p);
+  }
+  iap::LidarAdvisoryPredictor lidar(params);
+  lidar.set_lidar_fim_primitives(primitives);
+  const auto snapshot=make_snapshot(false,false);
+  const auto source=lidar.query(Eigen::Vector3d::Zero(),snapshot);
+  ASSERT_TRUE(source.valid);
+  const auto fused=iap::FusionAdvisoryPredictor().query(snapshot,{},source);
+  // Three co-located plane rows constrain p+theta cross c, not all of p.
+  EXPECT_FALSE(fused.valid);
+  EXPECT_EQ(fused.numerical_status,iap::AdvisoryNumericalStatus::RANK_DEFICIENT);
+  EXPECT_FALSE(std::isfinite(fused.hpl));
+  // At the support center rotation has no first-order position coupling.
+  const auto centered=lidar.query(Eigen::Vector3d(1.,2.,3.),snapshot);
+  const auto observed=iap::FusionAdvisoryPredictor().query(snapshot,{},centered);
+  EXPECT_TRUE(observed.valid);
 }

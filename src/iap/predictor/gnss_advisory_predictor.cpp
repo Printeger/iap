@@ -320,7 +320,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
   const auto visible_set = visible_geometry(epoch, visibility, satellite_mask, params_.measurement_noise_scale);
   copy_geometry_set_diagnostics(visible_set, out);
   const auto& geom = visible_set.geom;
-  if (out.n_used < params_.geometry_params.min_sats) {
+  if (out.n_used == 0) {
     out.fim_valid = false;
     out.fim_fallback_reason = "too_few_sats";
     return out;
@@ -384,6 +384,15 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
   diag.valid = true;
   diag.fallback_reason.clear();
   copy_fim_diagnostics(diag, out);
+  const auto& lever=epoch.antenna_offset_query;
+  Eigen::Matrix3d cross;
+  cross<<0.,-lever.z(),lever.y(),lever.z(),0.,-lever.x(),-lever.y(),lever.x(),0.;
+  Eigen::Matrix<double,3,6> antenna;
+  antenna.leftCols<3>().setIdentity();antenna.rightCols<3>()=-cross;
+  // Clock columns are exclusive to GNSS; eliminating them here commutes with
+  // joining LiDAR. Attitude is shared and must remain until the joint solve.
+  out.joint_pose_information=antenna.transpose()*out.lambda_gnss*antenna;
+  out.information_state=PredictorInformationState::Pose6Map;
   return out;
 }
 
@@ -431,7 +440,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     out.support_authority = visibility.support_authority;
     out.support_status = visibility.support_status;
     copy_geometry_set_diagnostics(visible_set, out);
-    return out;
+    return compute_advisory_fim(query_position, snapshot.gnss_epoch, visibility, out, satellite_mask);
   }
 
   const GnssGeometryPlResult pl = geometry_predictor_.predict(geom);

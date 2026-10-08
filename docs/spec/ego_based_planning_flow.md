@@ -1957,3 +1957,26 @@ are retained in `20261008T162301Z_891`; actual error, map correlation and fused
 fault qualification are separate pending stages. Baseline duplicate tests give
 identical information for 1/2/4 copies and <0.03% PL change across representation
 densities. These are mechanism evidence, not independent-error qualification.
+
+
+The Predictor now joins canonical GNSS/LiDAR 6D pose information before
+marginalizing the shared attitude. GNSS clocks remain source-exclusive, map
+and external alignment uncertainties remain explicitly conditioned and
+unqualified. Unknown cross-source residual correlation receives the Cauchy
+covariance inflation described in `advisory_joint_model.md`, not information
+normalization. Epsilon does not contribute to an accepted covariance. The
+original risk weights, grid layers, input ownership, physical/dynamic/curve
+and publication checks and disabled posterior prior are retained. Joint-pose
+red/green and frozen-input independent SVD checks are required before field
+capture. Formal 9+9 and complete fusion fault qualification remain pending.
+
+
+The legacy `FuturePLFieldPredictor` had two incompatible contracts: its FIM-add
+path created official PL from epsilon with no observations, while its tests
+also expected raw GNSS bounds from a single constellation despite the active
+whole-constellation hypothesis. Its FIM-add path now delegates to the existing
+Fusion predictor. The missing-source assertion is strengthened to reject finite
+PL and require the explicit missing epoch reason; finite regularized precision
+is no longer its expected behavior. The ordinary raw-bound fixture uses two
+observable constellations, while single-constellation failure remains covered
+by the dedicated GNSS fault tests. No failure assertion is removed.

@@ -297,6 +297,9 @@ LidarFimPrimitiveIndex::LidarFimPrimitiveIndex(
     Eigen::Index family;n.cwiseAbs().maxCoeff(&family);
     keys[i]={int64_t(cell.x()),int64_t(cell.y()),int64_t(cell.z()),int64_t(family)};
     groups.emplace(keys[i],0);prepared.valid=true;prepared.normal_outer=n*n.transpose();
+    Eigen::Matrix<double,6,1> row;
+    row.head<3>()=n;row.tail<3>()=primitive.center_w.cross(n);
+    prepared.pose_outer_at_origin=row*row.transpose();
   }
   for(auto& [key,id]:groups) id=advisory_group_count_++;
   for(size_t i=0;i<advisory_primitives_.size();++i)
@@ -556,14 +559,14 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   // Preserve the averaged normal outer product (including weaker directions),
   // rather than accumulating repeated samples as independent evidence.
   using SupportKey=std::array<int64_t,4>;
-  struct Support { Eigen::Matrix3d information=Eigen::Matrix3d::Zero(); size_t count=0; };
+  struct Support { Eigen::Matrix<double,6,6> information=Eigen::Matrix<double,6,6>::Zero(); size_t count=0; };
   std::map<SupportKey,Support> supports;
   const auto prepared=index && candidate_indices ? index->advisoryPrimitives(params.fim_support_voxel_m) : nullptr;
   const auto* ordered_indices=candidate_indices;
   Support indexed_support;size_t indexed_group=0;
   const auto flush_indexed_support=[&]() {
     if(indexed_support.count) {
-      out.lambda+=indexed_support.information/double(indexed_support.count);
+      out.joint_pose_information+=indexed_support.information/double(indexed_support.count);
       ++out.n_support_groups;
       indexed_support=Support{};
     }
@@ -586,7 +589,7 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
       if(!value.valid) return;
       const double pi_range=std::exp(-dist2/std::max(2.*radius2,1e-9));
       if(indexed_group!=value.group) {flush_indexed_support();indexed_group=value.group;}
-      indexed_support.information+=weight_scale*pi_range*value.confidence*value.weight*inv_sigma2*value.normal_outer;
+      indexed_support.information+=weight_scale*pi_range*value.confidence*value.weight*inv_sigma2*value.pose_outer_at_origin;
       ++indexed_support.count;
       ++valid_normals;return;
     }
@@ -612,7 +615,9 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     if ((cell.abs()>double(std::numeric_limits<int64_t>::max()/2)).any()) return;
     Eigen::Index family; n.cwiseAbs().maxCoeff(&family);
     auto& support=supports[{int64_t(cell.x()),int64_t(cell.y()),int64_t(cell.z()),int64_t(family)}];
-    support.information += weight_scale*pi_range*confidence*primitive_weight*inv_sigma2*(n*n.transpose());
+    Eigen::Matrix<double,6,1> row;
+    row.head<3>()=n;row.tail<3>()=primitive.center_w.cross(n);
+    support.information += weight_scale*pi_range*confidence*primitive_weight*inv_sigma2*(row*row.transpose());
     ++support.count;
     ++valid_normals;
   };
@@ -629,11 +634,19 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     }
   }
 
-  for (const auto& [key,support]:supports) out.lambda += support.information/double(support.count);
+  for (const auto& [key,support]:supports) out.joint_pose_information += support.information/double(support.count);
   if(!prepared) out.n_support_groups=static_cast<int>(supports.size());
   if(prepared) {
     flush_indexed_support();
   }
+  // Translate the rotation pivot once per query. Fixed moments/index/grouping
+  // remain owned by this frozen source, not recomputed for every primitive.
+  Eigen::Matrix<double,6,6> pivot=Eigen::Matrix<double,6,6>::Identity();
+  Eigen::Matrix3d cross;
+  cross<<0.,-p_w.z(),p_w.y(),p_w.z(),0.,-p_w.x(),-p_w.y(),p_w.x(),0.;
+  pivot.bottomLeftCorner<3,3>()=-cross;
+  out.joint_pose_information=(pivot*out.joint_pose_information*pivot.transpose()).eval();
+  out.lambda=out.joint_pose_information.topLeftCorner<3,3>();
   out.n_primitives = nearby;
   out.n_valid_normals = valid_normals;
   if (out.n_support_groups < min_voxels) {

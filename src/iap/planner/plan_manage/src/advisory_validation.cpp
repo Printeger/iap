@@ -48,6 +48,13 @@ void matrix(std::ostream& out, const char* name, const Eigen::Matrix3d& m, bool 
   array(out,eig.eigenvectors().col(std::string(name)=="covariance"?2:0));
   out << '}';
 }
+void poseMatrix(std::ostream& out,const char* name,const Eigen::Matrix<double,6,6>& m,bool evaluated) {
+  out<<",\""<<name<<"\":";
+  if(!evaluated) {out<<"null";return;}
+  out<<"{\"row_major\":";array(out,m);
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,6,6>> eig(m);
+  out<<",\"eigenvalues\":";array(out,eig.eigenvalues());out<<'}';
+}
 void csvString(std::ostream& out, const std::string& s) {
   out << '"'; for (char c:s) { if(c=='"') out << '"'; out << c; } out << '"';
 }
@@ -371,6 +378,11 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     matrix(matrices,"prior",f.lambda_prior,called);matrix(matrices,"gnss",f.lambda_gnss,called);
     matrix(matrices,"lidar",f.lambda_lidar,called);matrix(matrices,"fused_information",f.lambda_pred,called);
     matrix(matrices,"covariance",f.sigma_pos,called && result.valid);
+    poseMatrix(matrices,"joint_pose_information",f.joint_pose_information,called);
+    poseMatrix(matrices,"gnss_pose_information",result.gnss.joint_pose_information,called);
+    poseMatrix(matrices,"lidar_pose_information",result.lidar.joint_pose_information,called);
+    matrices<<",\"cross_source_noise_inflation\":";number(matrices,f.cross_source_noise_inflation);
+    matrices<<",\"qualification\":"<<std::quoted(f.qualification);
     matrices<<",\"weak_direction_prior_fraction\":";
     if(result.valid) {
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(f.lambda_pred);

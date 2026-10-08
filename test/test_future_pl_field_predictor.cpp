@@ -20,7 +20,7 @@ iap::GnssEpoch make_epoch(const int n_sats) {
   for (int i = 0; i < n_sats; ++i) {
     iap::SatObs sat;
     sat.sat_id = 200 + i;
-    sat.constellation = 'G';
+    sat.constellation = i < n_sats/2 ? 'G' : 'C';
     sat.elevation = 0.45 + 0.10 * static_cast<double>(i % 4);
     sat.azimuth = 2.0 * M_PI * static_cast<double>(i) /
                   static_cast<double>(std::max(1, n_sats));
@@ -57,7 +57,7 @@ iap::IntegritySnapshot make_snapshot(const bool with_epoch) {
   snapshot.current = make_current();
   snapshot.has_epoch = with_epoch;
   if (with_epoch) {
-    snapshot.gnss_epoch = make_epoch(8);
+    snapshot.gnss_epoch = make_epoch(12);
   }
   return snapshot;
 }
@@ -275,7 +275,7 @@ TEST(FuturePLFieldPredictorTest, MissingLidarMapKeepsOfficialGnssOnlyFinite) {
   EXPECT_EQ(stats.lidar_conservative_violation_count, 0);
 }
 
-TEST(FuturePLFieldPredictorTest, AdvisoryFimRegularizesMissingSources) {
+TEST(FuturePLFieldPredictorTest, AdvisoryFimMissingSourcesCannotAcquirePrecisionFromEpsilon) {
   auto params = make_params();
   params.use_grid = false;
   params.use_advisory_fim_add = true;
@@ -287,15 +287,17 @@ TEST(FuturePLFieldPredictorTest, AdvisoryFimRegularizesMissingSources) {
 
   const auto result = predictor.query(Eigen::Vector3d::Zero(), 101.0);
 
-  ASSERT_TRUE(result.valid);
-  EXPECT_TRUE(result.fim_epsilon_applied);
-  EXPECT_TRUE(result.fim_degeneracy_regularized);
-  EXPECT_TRUE(result.fim_regularized);
+  ASSERT_FALSE(result.valid);
+  EXPECT_TRUE(result.fallback);
+  EXPECT_NE(result.fim_fallback_reason.find("no_gnss_epoch"),std::string::npos);
+  EXPECT_FALSE(result.fim_epsilon_applied);
+  EXPECT_FALSE(result.fim_degeneracy_regularized);
+  EXPECT_FALSE(result.fim_regularized);
   EXPECT_FALSE(result.gnss_fim_valid);
   EXPECT_EQ(result.advisory_fusion_mode, iap::AdvisoryFusionMode::FimAdd);
   EXPECT_STREQ(iap::to_string(result.advisory_fusion_mode), "fim_add");
-  EXPECT_TRUE(std::isfinite(result.hpl));
-  EXPECT_TRUE(std::isfinite(result.vpl));
+  EXPECT_FALSE(std::isfinite(result.hpl));
+  EXPECT_FALSE(std::isfinite(result.vpl));
 }
 
 TEST(FuturePLFieldPredictorTest, AdvisoryFimSeparatesRoutineEpsilonFromDegeneracy) {

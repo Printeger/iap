@@ -61,3 +61,51 @@ registered. Existing labels are refused. Modified input variants are labelled
 `--require-pose` checks the joint pose model against measurement-space SVD
 nuisance projection implemented independently in NumPy. A red result is retained
 without granting a qualification. No predicted grid or scene label is truth.
+
+
+## Minimal pose repair and executable benchmark
+
+Common variable is `x=[delta p_map, delta theta_map]` at the frozen query
+position and saved attitude. GNSS rows are `[u^T, -u^T [lever_map]x, 1_system]`;
+LiDAR rows are `[n^T, ((center-query) cross n)^T]`. These use the same small
+left rotation. The GNSS-only clock columns are disjoint from LiDAR and can be
+eliminated before joining sources. Shared attitude must be eliminated after
+joining. Its unobserved directions receive no prior or epsilon. A PSD range
+test and nuisance pseudoinverse preserve unobservable position directions.
+Source `lambda_*` values remain inspectable conditional p-p blocks; official
+fusion `lambda_pred` is the joint position Schur complement. Position covariance
+is the exact inverse of admitted information. Epsilon is diagnostic/admission
+only and does not improve an admitted covariance.
+
+Canonical pose-source fusion uses `R <= 2 blockdiag(R_g,R_l)` as a conservative
+Cauchy bound for unknown cross-source residual covariance with the declared
+marginal noises. Thus joint measurement information is `(H_g+H_l)/2` when both
+sources participate; a single source retains its declared information. This is
+not source trace normalization or a 50/50 information share. A weak source can
+contribute almost nothing. It bounds neither incorrect marginal noise nor
+unknown systematic/map error. The historical explicit 3D position-information
+API retains its independent-constraint algebra; production pose sources never
+use that compatibility interpretation.
+
+Numeric benchmark: three normals eX/eY/eZ at c=(1,2,3), query p=0, unit weights,
+produce a full conditional position block but a rank-one position marginal.
+Finite official HPL/VPL must be rejected. At query p=c the rotation columns
+vanish; unobserved attitude alone must not invalidate observable position.
+This red/green regression runs through the real LiDAR and Fusion predictors.
+Independent SVD projects the raw measurement nuisance columns including clocks,
+checking the result without using the production Schur routine.
+
+Fixed primitive outer moments, support grouping and order are prepared once in
+the existing immutable index. Query-dependent range weights remain unchanged;
+one congruence moves the rotation pivot per query. No additional grid/cache,
+optimizer, planner route hint or dynamic FGO is introduced.
+
+Map surfaces, world/ENU alignment and configured extrinsics remain conditioned
+constants because their independent uncertainties are not captured with these
+primitive supports. Unbounded common map translation creates a gauge: LiDAR
+alone supplies no absolute-position bound. There is no fabricated map prior,
+attitude posterior or lever-arm calibration variance. The output qualification
+is `CONDITIONAL_GEOMETRY_UNCALIBRATED`; finite numeric status is not a covariance
+of total real error, an empirical bound or a fused integrity PL. Those require
+same-state-time truth pairing, calibrated marginal noises, independent map/align
+uncertainty evidence and covered fault hypotheses with allocated risk.

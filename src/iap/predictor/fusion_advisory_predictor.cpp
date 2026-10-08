@@ -47,6 +47,49 @@ bool valid_position_information(const Eigen::Matrix3d& lambda,
   return true;
 }
 
+using PoseInformation=Eigen::Matrix<double,6,6>;
+
+bool source_pose_information(PredictorInformationState state,
+                             const Eigen::Matrix3d& position,
+                             const PoseInformation& pose,
+                             PoseInformation* output) {
+  output->setZero();
+  if(state==PredictorInformationState::Position3MapEnu) {
+    output->topLeftCorner<3,3>()=position;
+    return true;
+  }
+  if(state!=PredictorInformationState::Pose6Map || !pose.allFinite()) return false;
+  const double tolerance=1e-9+1e-10*pose.cwiseAbs().maxCoeff();
+  if((pose-pose.transpose()).cwiseAbs().maxCoeff()>tolerance ||
+     (pose.topLeftCorner<3,3>()-position).cwiseAbs().maxCoeff()>tolerance) return false;
+  Eigen::SelfAdjointEigenSolver<PoseInformation> eigen(pose,Eigen::EigenvaluesOnly);
+  if(eigen.info()!=Eigen::Success || eigen.eigenvalues().minCoeff() < -tolerance) return false;
+  *output=0.5*(pose+pose.transpose());
+  return true;
+}
+
+bool marginal_position_information(const PoseInformation& joint,
+                                   Eigen::Matrix3d* position) {
+  const Eigen::Matrix3d nuisance=joint.bottomRightCorner<3,3>();
+  const Eigen::Matrix3d cross=joint.topRightCorner<3,3>();
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(nuisance);
+  if(eigen.info()!=Eigen::Success) return false;
+  const double tolerance=64*std::numeric_limits<double>::epsilon()*
+      std::max(0.,eigen.eigenvalues().maxCoeff());
+  Eigen::Vector3d inverse=Eigen::Vector3d::Zero();
+  for(int i=0;i<3;++i) {
+    if(eigen.eigenvalues()[i]>tolerance) inverse[i]=1./eigen.eigenvalues()[i];
+    else if((cross*eigen.eigenvectors().col(i)).norm()>
+            1e-8*std::max(1.,joint.cwiseAbs().maxCoeff())) return false;
+  }
+  // An unobserved nuisance has no prior, including no epsilon prior. Its null
+  // direction is harmless only when uncoupled from position (PSD range test).
+  const Eigen::Matrix3d pseudo=eigen.eigenvectors()*inverse.asDiagonal()*eigen.eigenvectors().transpose();
+  *position=joint.topLeftCorner<3,3>()-cross*pseudo*cross.transpose();
+  *position=0.5*(*position+position->transpose()).eval();
+  return position->allFinite();
+}
+
 bool information_to_pl(const Eigen::Matrix3d& lambda,
                        const FusionAdvisoryPredictorParams& params,
                        double* hpl,
@@ -63,7 +106,7 @@ bool information_to_pl(const Eigen::Matrix3d& lambda,
   const double minimum = eig.eigenvalues().minCoeff();
   if (minimum <= 0 || eps/(minimum+eps) > params.max_regularization_fraction) return false;
   Eigen::LDLT<Eigen::Matrix3d> ldlt(
-      symmetric + eps * Eigen::Matrix3d::Identity());
+      symmetric);
   if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) {
     return false;
   }
@@ -107,6 +150,7 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
     const LidarAdvisoryResult& lidar) const {
   FusionAdvisoryResult out;
   std::vector<std::string> reasons;
+  PoseInformation gnss_pose=PoseInformation::Zero(),lidar_pose=PoseInformation::Zero();
 
   if (snapshot.has_lambda_base &&
       valid_position_information(snapshot.lambda_base_pos,
@@ -119,8 +163,8 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   }
 
   if (gnss.fim_valid &&
-      gnss.information_state == PredictorInformationState::Position3MapEnu &&
-      valid_position_information(gnss.lambda_gnss, &out.lambda_gnss)) {
+      valid_position_information(gnss.lambda_gnss, &out.lambda_gnss) &&
+      source_pose_information(gnss.information_state,out.lambda_gnss,gnss.joint_pose_information,&gnss_pose)) {
     out.gnss_used = true;
   } else if (gnss.fim_valid) {
     reasons.push_back("gnss:invalid_gnss_position_information");
@@ -131,8 +175,8 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   }
 
   if (lidar.valid &&
-      lidar.information_state == PredictorInformationState::Position3MapEnu &&
-      valid_position_information(lidar.lambda_lidar, &out.lambda_lidar)) {
+      valid_position_information(lidar.lambda_lidar, &out.lambda_lidar) &&
+      source_pose_information(lidar.information_state,out.lambda_lidar,lidar.joint_pose_information,&lidar_pose)) {
     out.lidar_used = true;
   } else if (lidar.valid) {
     reasons.push_back("lidar:invalid_lidar_position_information");
@@ -152,22 +196,40 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
     }
     return out;
   }
+  if(!out.gnss_used) out.lambda_gnss.setZero();
+  if(!out.lidar_used) out.lambda_lidar.setZero();
 
-  out.lambda_pred = out.lambda_prior + out.lambda_gnss + out.lambda_lidar;
+  const bool shared_pose=gnss.information_state==PredictorInformationState::Pose6Map ||
+      lidar.information_state==PredictorInformationState::Pose6Map;
+  out.cross_source_noise_inflation=shared_pose && out.gnss_used && out.lidar_used ? 2. : 1.;
+  // Cauchy-Schwarz gives R <= 2 diag(R_g,R_l) for arbitrary cross-source
+  // covariance with the declared marginal noises. This is a covariance bound,
+  // not trace normalization or equal source weighting. Unknown map/bias errors
+  // and within-source noise miscalibration remain explicitly unqualified.
+  out.joint_pose_information=(gnss_pose+lidar_pose)/out.cross_source_noise_inflation;
+  out.joint_pose_information.topLeftCorner<3,3>()+=out.lambda_prior;
+  if(!marginal_position_information(out.joint_pose_information,&out.lambda_pred)) {
+    out.numerical_status=AdvisoryNumericalStatus::INVALID_INFORMATION;
+    out.fallback_reason="invalid_shared_pose_information";
+    return out;
+  }
   out.lambda_pred = 0.5 * (out.lambda_pred + out.lambda_pred.transpose());
   out.lambda_prior_trace = out.lambda_prior.trace();
   out.lambda_gnss_trace = out.lambda_gnss.trace();
   out.lambda_lidar_trace = out.lambda_lidar.trace();
   if (out.gnss_used) {
-    information_to_pl(out.lambda_gnss, params_, &out.gnss_information_hpl, &out.gnss_information_vpl);
+    Eigen::Matrix3d marginal;
+    if(marginal_position_information(gnss_pose,&marginal))
+      information_to_pl(marginal, params_, &out.gnss_information_hpl, &out.gnss_information_vpl);
   }
   if (out.prior_valid) {
     information_to_pl(out.lambda_prior, params_, &out.prior_only_hpl,
                       &out.prior_only_vpl);
   }
   if (out.lidar_used) {
-    information_to_pl(out.lambda_lidar, params_, &out.lidar_only_hpl,
-                      &out.lidar_only_vpl);
+    Eigen::Matrix3d marginal;
+    if(marginal_position_information(lidar_pose,&marginal))
+      information_to_pl(marginal, params_, &out.lidar_only_hpl,&out.lidar_only_vpl);
   }
 
   FimDiagnostic diag;
@@ -251,6 +313,24 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   }
   out.hpl = out.regularized_diagnostic_hpl;
   out.vpl = out.regularized_diagnostic_vpl;
+  // Epsilon establishes a diagnostic inverse and an admission ceiling only.
+  // An admitted covariance uses the actual observable information unchanged.
+  ldlt.compute(out.lambda_pred);
+  if(ldlt.info()!=Eigen::Success || !ldlt.isPositive()) {
+    out.numerical_status=AdvisoryNumericalStatus::INVALID_INFORMATION;
+    out.fallback_reason="invalid_observed_position_solve";
+    return out;
+  }
+  out.sigma_pos=ldlt.solve(Eigen::Matrix3d::Identity());
+  eig_h.compute(out.sigma_pos.topLeftCorner<2,2>(),Eigen::EigenvaluesOnly);
+  if(!out.sigma_pos.allFinite() || eig_h.info()!=Eigen::Success || out.sigma_pos(2,2)<0.) {
+    out.fallback_reason="invalid_observed_position_covariance";
+    return out;
+  }
+  out.sigma_h=std::sqrt(std::max(0.,eig_h.eigenvalues().maxCoeff()));
+  out.sigma_v=std::sqrt(std::max(0.,out.sigma_pos(2,2)));
+  out.hpl=k_h*out.sigma_h+params_.b_H_pred+params_.s_H_pred;
+  out.vpl=k_v*out.sigma_v+params_.b_V_pred+params_.s_V_pred;
   out.pre_conservative_hpl = out.hpl;
   out.pre_conservative_vpl = out.vpl;
 

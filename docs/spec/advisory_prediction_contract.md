@@ -12,10 +12,14 @@ explicit source modes never switch source. Callers preserve monitor fields and
 project the module result into the existing GridMap statuses. Physical map
 filtering and actual motion/publication checks remain separate authorities.
 
-A source PSD matrix can participate without a standalone PL. The unregularized
-joint 3D map/ENU position information must have observable rank. Epsilon's weak
+A source PSD matrix can participate without a standalone PL. The canonical source interface carries joint map position/left-attitude information.
+Fusion joins the sources before marginalizing shared attitude; source-exclusive
+GNSS clocks can be removed first. The unregularized resulting 3D position
+information must have observable rank. Source conditional p-p blocks are not
+individual position marginals. See [joint model](advisory_joint_model.md). Epsilon's weak
 direction contribution must be at most 1%; a dominated or rank deficient solve
-has no official HPL/VPL. Its finite inverse is exported only as a diagnostic.
+has no official HPL/VPL. Its finite regularized inverse is exported only as a diagnostic. Accepted position
+covariance inverts the original information, without epsilon precision.
 Source and joint information PL use K_H sqrt(max_eigenvalue(C_xy)) and
 K_V sqrt(C_zz), plus the named bias/reserve. GNSS raw hypothesis PL and anchored
 monitor PL are distinct diagnostic quantities, never reconstructed into FIM.
@@ -312,3 +316,15 @@ ENU H/V验证。有限VALID只表示当前接口返回；1e9、无效和非有�
 bd580c91原运行诊断：28冻结位置配对、2800空间请求仅7体素后来到达，2693未到达、
 100地图外；本轮配对truth时间差均为0，但传播、物理方向和噪声资格仍未通过。
 [逐请求、图表与hash索引](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/prediction_error_report.md)。
+
+
+Canonical joint-pose output is `CONDITIONAL_GEOMETRY_UNCALIBRATED`. Shared
+attitude is marginalized without an imported posterior; map, global alignment
+and external calibration uncertainties have no qualified independent input
+and remain conditioned. Unknown cross-source residual correlation uses a
+Cauchy covariance upper bound with the declared marginal noises. It does not
+bound unknown map/bias faults or grant empirical coverage. Raw/anchored GNSS
+fault bounds remain diagnostics separate from the joint nominal geometry.
+An inadequate standalone GNSS fault set can still contribute a PSD nominal
+constraint to the joint pose solve. No fused integrity qualification, calibrated
+parameter promotion or default-stop reinterpretation follows from validity.

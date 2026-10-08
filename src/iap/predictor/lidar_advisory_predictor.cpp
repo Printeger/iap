@@ -75,6 +75,8 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
                                             snapshot.current);
   out.fim_valid = fim.valid;
   out.lambda_lidar = fim.lambda;
+  out.joint_pose_information = fim.joint_pose_information;
+  out.information_state = PredictorInformationState::Pose6Map;
   out.n_primitives = fim.n_primitives;
   out.n_valid_normals = fim.n_valid_normals;
   out.n_support_groups = fim.n_support_groups;
@@ -106,6 +108,7 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
       out.fallback = false;
       out.fallback_reason.clear();
       out.lambda_lidar = legacy.delta_lambda;
+      out.information_state = PredictorInformationState::Position3MapEnu;
       out.n_primitives = legacy.n_primitives;
       out.condition = legacy.condition;
       FimDiagnostic diag;

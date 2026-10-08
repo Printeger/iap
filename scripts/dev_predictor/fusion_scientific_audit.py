@@ -116,7 +116,7 @@ def inspect(dataset, require_pose=False):
             old = prior + (independent_gnss if used_gnss else 0) + (conditional_lidar if used_lidar else 0)
             joint = np.vstack((jg if used_gnss else np.zeros((0, jg.shape[1])),
                                np.pad(jl if used_lidar else np.zeros((0, 6)), ((0, 0), (0, jg.shape[1]-6)))))
-            corrected = position_reference(joint)
+            corrected = position_reference(joint) / mat.get('cross_source_noise_inflation', 1.)
             if prior is not None:
                 corrected += prior
             expected = corrected if require_pose else old

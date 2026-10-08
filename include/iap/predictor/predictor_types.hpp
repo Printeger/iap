@@ -181,6 +181,9 @@ enum class PredictorInformationState {
   // map/ENU frame. GNSS clock and any LiDAR pose states must be eliminated
   // before writing lambda_* into Predictor results.
   Position3MapEnu = 0,
+  // Shared position and attitude; lambda_* is the conditional p-p block.
+  // Fusion must combine joint matrices BEFORE eliminating attitude.
+  Pose6Map = 1,
 };
 
 struct GnssAdvisoryResult {
@@ -257,6 +260,7 @@ struct GnssAdvisoryResult {
   // R^{3x3} position-only map/ENU information after eliminating receiver
   // all actually used constellation clocks from the dynamic GNSS normal matrix.
   Eigen::Matrix3d lambda_gnss = Eigen::Matrix3d::Zero();
+  Eigen::Matrix<double,6,6> joint_pose_information = Eigen::Matrix<double,6,6>::Zero();
   bool fim_valid = false;
   bool fim_regularized = false;
   double lambda_trace = 0.0;
@@ -277,6 +281,7 @@ struct LidarAdvisoryResult {
   // R^{3x3} position-only map/ENU LiDAR advisory information. A future 6D
   // pose FIM source must be projected or marginalized to this state first.
   Eigen::Matrix3d lambda_lidar = Eigen::Matrix3d::Zero();
+  Eigen::Matrix<double,6,6> joint_pose_information = Eigen::Matrix<double,6,6>::Zero();
   Eigen::Matrix3d legacy_delta_lambda = Eigen::Matrix3d::Zero();
 
   bool fim_valid = false;
@@ -340,6 +345,11 @@ struct FusionAdvisoryResult {
   Eigen::Matrix3d lambda_lidar = Eigen::Matrix3d::Zero();
   Eigen::Matrix3d lambda_pred = Eigen::Matrix3d::Zero();
   Eigen::Matrix3d sigma_pos = Eigen::Matrix3d::Identity();
+  Eigen::Matrix<double,6,6> joint_pose_information = Eigen::Matrix<double,6,6>::Zero();
+  // Cauchy bound on unknown cross-source residual correlation: R <= m diag(R_i).
+  // It neither normalizes source information nor bounds unknown map errors.
+  double cross_source_noise_inflation = 1.0;
+  std::string qualification = "CONDITIONAL_GEOMETRY_UNCALIBRATED";
 
   bool prior_valid = false;
   bool gnss_used = false;

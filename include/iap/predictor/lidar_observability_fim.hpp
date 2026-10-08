@@ -75,6 +75,7 @@ class LidarFimPrimitiveIndex {
   struct AdvisoryPrimitive {
     bool valid=false;
     Eigen::Matrix3d normal_outer=Eigen::Matrix3d::Zero();
+    Eigen::Matrix<double,6,6> pose_outer_at_origin=Eigen::Matrix<double,6,6>::Zero();
     double confidence=0., weight=1.;
     std::size_t group=0;
   };

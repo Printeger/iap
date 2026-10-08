@@ -1,4 +1,5 @@
 #include <iap/planner/future_pl_field_predictor.hpp>
+#include <iap/predictor/fusion_advisory_predictor.hpp>
 #include <iap/util/timing_csv.hpp>
 
 #include <Eigen/Eigenvalues>
@@ -374,84 +375,40 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
       out.lidar_fallback_reason = "lidar_fim_disabled";
     }
 
-    if (fim.prior.valid) {
-      fim.lambda += fim.prior.lambda;
-    }
-    if (fim.gnss.valid) {
-      fim.lambda += fim.gnss.lambda;
-    }
-    if (fim.lidar.valid) {
-      fim.lambda += fim.lidar.lambda;
-    }
-    fim.lambda = 0.5 * (fim.lambda + fim.lambda.transpose());
-    fill_fim_diagnostics(fim);
-
-    const double eps =
-        std::isfinite(params_.fim_epsilon) && params_.fim_epsilon > 0.0
-            ? params_.fim_epsilon
-            : 1.0e-6;
-    fim.epsilon_applied = eps > 0.0;
-    fim.degeneracy_regularized =
-        fim.prior.regularized || fim.gnss.regularized ||
-        fim.lidar.regularized || !std::isfinite(fim.min_eig) ||
-        fim.min_eig <= 0.0;
-    fim.regularized = fim.degeneracy_regularized;
-    const Eigen::Matrix3d regularized_lambda =
-        fim.lambda + eps * Eigen::Matrix3d::Identity();
-    Eigen::LDLT<Eigen::Matrix3d> ldlt(regularized_lambda);
-    if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) {
-      fim.valid = false;
-      fim.fallback_reason = "singular_advisory_fim";
-      copy_fim_debug(fim, out);
-      keep_gnss_only(out);
-      return out;
-    }
-    fim.sigma_pos = ldlt.solve(Eigen::Matrix3d::Identity());
-    if (!fim.sigma_pos.allFinite()) {
-      fim.valid = false;
-      fim.fallback_reason = "invalid_advisory_covariance";
-      copy_fim_debug(fim, out);
-      keep_gnss_only(out);
-      return out;
-    }
-
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eig_h(
-        fim.sigma_pos.block<2, 2>(0, 0), Eigen::EigenvaluesOnly);
-    if (eig_h.info() != Eigen::Success || fim.sigma_pos(2, 2) < 0.0) {
-      fim.valid = false;
-      fim.fallback_reason = "invalid_advisory_covariance";
-      copy_fim_debug(fim, out);
-      keep_gnss_only(out);
-      return out;
-    }
-
-    fim.valid = true;
-    fim.fallback_reason.clear();
-    const double k_h =
-        std::isfinite(params_.K_H_adv) && params_.K_H_adv > 0.0
-            ? params_.K_H_adv
-            : 5.0;
-    const double k_v =
-        std::isfinite(params_.K_V_adv) && params_.K_V_adv > 0.0
-            ? params_.K_V_adv
-            : 5.0;
-    fim.hpl_adv =
-        k_h * std::sqrt(std::max(0.0, eig_h.eigenvalues().maxCoeff())) +
-        params_.b_H_pred + params_.s_H_pred;
-    fim.vpl_adv = k_v * std::sqrt(std::max(0.0, fim.sigma_pos(2, 2))) +
-                  params_.b_V_pred + params_.s_V_pred;
-
-    out.valid = std::isfinite(fim.hpl_adv) && std::isfinite(fim.vpl_adv);
-    out.fallback = !out.valid;
-    out.fallback_reason = out.valid ? std::string{} : "invalid_advisory_pl";
-    out.hpl = fim.hpl_adv;
-    out.vpl = fim.vpl_adv;
-    out.pl_scalar = std::max(out.hpl, out.vpl);
-    out.fused_hpl = out.hpl;
-    out.fused_vpl = out.vpl;
-    out.sigma_h = std::sqrt(std::max(0.0, eig_h.eigenvalues().maxCoeff()));
-    out.sigma_v = std::sqrt(std::max(0.0, fim.sigma_pos(2, 2)));
-    copy_fim_debug(fim, out);
+    // The compatibility field consumes the same observation-supported solve
+    // as the production Predictor. A diagnostic epsilon inverse is never PL.
+    FusionAdvisoryPredictorParams fusion_params;
+    fusion_params.fim_epsilon=params_.fim_epsilon;
+    fusion_params.K_H_adv=params_.K_H_adv;fusion_params.K_V_adv=params_.K_V_adv;
+    fusion_params.b_H_pred=params_.b_H_pred;fusion_params.b_V_pred=params_.b_V_pred;
+    fusion_params.s_H_pred=params_.s_H_pred;fusion_params.s_V_pred=params_.s_V_pred;
+    GnssAdvisoryResult gnss;
+    gnss.fim_valid=fim.gnss.valid;gnss.lambda_gnss=fim.gnss.lambda;
+    gnss.fallback_reason=fim.gnss.fallback_reason;
+    gnss.information_state=PredictorInformationState::Pose6Map;
+    const auto& lever=snapshot.gnss_epoch.antenna_offset_query;
+    Eigen::Matrix3d cross;
+    cross<<0.,-lever.z(),lever.y(),lever.z(),0.,-lever.x(),-lever.y(),lever.x(),0.;
+    Eigen::Matrix<double,3,6> antenna;
+    antenna.leftCols<3>().setIdentity();antenna.rightCols<3>()=-cross;
+    gnss.joint_pose_information=antenna.transpose()*gnss.lambda_gnss*antenna;
+    LidarAdvisoryResult lidar;
+    lidar.valid=fim.lidar.valid;lidar.lambda_lidar=fim.lidar.lambda;
+    lidar.fallback_reason=fim.lidar.fallback_reason;
+    lidar.information_state=PredictorInformationState::Pose6Map;
+    lidar.joint_pose_information=fim.lidar.joint_pose_information;
+    const auto fused=FusionAdvisoryPredictor(fusion_params).query(snapshot,gnss,lidar);
+    fim.lambda=fused.lambda_pred;fim.sigma_pos=fused.sigma_pos;
+    fim.valid=fused.valid;fim.hpl_adv=fused.hpl;fim.vpl_adv=fused.vpl;
+    fim.epsilon_applied=fused.epsilon_applied;
+    fim.degeneracy_regularized=fused.degeneracy_regularized;
+    fim.fallback_reason=fused.valid ? std::string{} : fused.fallback_reason;
+    fill_fim_diagnostics(fim);copy_fim_debug(fim,out);
+    out.valid=fused.valid;out.fallback=!fused.valid;
+    out.fallback_reason=fim.fallback_reason;
+    out.hpl=fused.hpl;out.vpl=fused.vpl;out.pl_scalar=fused.pl_scalar;
+    out.fused_hpl=out.hpl;out.fused_vpl=out.vpl;
+    out.sigma_h=fused.sigma_h;out.sigma_v=fused.sigma_v;
     return out;
   }
 
