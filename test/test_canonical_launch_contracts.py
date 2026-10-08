@@ -579,6 +579,38 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             result = json.loads((run / "metadata/manifests/forest_process_result.json").read_text())
             self.assertIn("missing installation", result["error"])
 
+    def test_live_capture_sigint_finalizes_registered_evidence(self):
+        import signal
+        import subprocess
+        import time
+        runs = self._load_launch("_includes/run_directory.py")
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+            run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2")
+            (run / "metadata/manifests/full_stack.json").write_text(json.dumps(
+                {"clock_contract": "historical_clock_2022-07-06T12:00:00Z"}))
+            env = dict(os.environ, IAP_RUN_DIR=str(run), ROS_DOMAIN_ID="144")
+            process = subprocess.Popen([sys.executable, str(REPO / "scripts/dev_predictor/advisory_live_capture.py"),
+                                        "--duration", "30", "--label", "interrupt"], env=env,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            target = run / "export/planner/advisory_validation/interrupt_events.jsonl"
+            try:
+                deadline = time.monotonic() + 10
+                while not target.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.05)
+                if not target.exists():
+                    output, _ = process.communicate(timeout=2)
+                    self.fail(output)
+                time.sleep(.2)
+                process.send_signal(signal.SIGINT)
+                output, _ = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 0, output)
+                metadata = json.loads((run / "metadata/manifests/advisory_capture_interrupt.json").read_text())
+                self.assertIn(str(target.relative_to(run)), metadata["artifacts_sha256"])
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+
     def test_each_canonical_entrypoint_has_one_owner_and_propagates_both_run_envs(self):
         for filename in (
             "glio.launch.py",

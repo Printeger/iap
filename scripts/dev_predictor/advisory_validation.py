@@ -235,6 +235,7 @@ def record(run, args):
     import rclpy
     from iap.srv import GetGridMapPredictionInput
     from nav_msgs.msg import Odometry
+    from rclpy.executors import ExternalShutdownException
     rclpy.init(args=[])
     from rclpy.parameter import Parameter
     node = rclpy.create_node("advisory_validation_recorder", parameter_overrides=[
@@ -284,8 +285,10 @@ def record(run, args):
                 while time.monotonic() < end:
                     rclpy.spin_once(node, timeout_sec=min(.1, end - time.monotonic()))
             del subscriptions
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass  # Intentional owned stop still closes and registers evidence.
     finally:
-        node.destroy_node(); rclpy.shutdown()
+        node.destroy_node(); rclpy.try_shutdown()
         request_manifest=artifact(run,"export/advisory/validation/recordings/"+args.label+"_requests_manifest.json")
         json_write(request_manifest,{"identity":"LIVE_MEASUREMENT","run_id":run.name,"request_ids":request_ids,
                    "requests_csv":str(requests.relative_to(run)),"requests_csv_sha256":sha(requests)})

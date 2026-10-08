@@ -13,6 +13,7 @@ from rosidl_runtime_py.utilities import get_message
 from advisory_validation import adopt_run_directory, artifact, json_write, manifest, sha, safe_label
 from run_directory import canonical_run_uses_sim_time
 from rclpy.parameter import Parameter
+from rclpy.executors import ExternalShutdownException
 
 
 def plain(value):
@@ -69,8 +70,10 @@ def main():
                                  lambda msg,t=topic:receive(t,msg),qos)
                     next_discovery=time.monotonic()+1.
                 rclpy.spin_once(node,timeout_sec=.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass  # Owned driver stop; finalize complete evidence below.
     finally:
-        node.destroy_node();rclpy.shutdown()
+        node.destroy_node();rclpy.try_shutdown()
         manifest(run,'advisory_capture_'+args.label,{'identity':'LIVE_MEASUREMENT','source':primary['source'],
              'counts':dict(counts),'duration_s':time.monotonic()-started,'artifacts_sha256':{str(target.relative_to(run)):sha(target)}})
     print(json.dumps({'path':str(target),'counts':dict(counts)}))

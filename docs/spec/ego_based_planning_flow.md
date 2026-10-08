@@ -1741,3 +1741,12 @@ all four feedback timing cases passed. The full IAP CTest suite ran 32 checks:
 31 passed; legacy `test_future_pl_field_predictor` has six invalid-result
 assertions (including GNSS-only paths), retained as a reported unresolved test
 limitation rather than counted as passing.
+
+OFF reference `20261008T084814Z_392` reached the unchanged FSM arrival rule
+at ROS 1657108978.877 (executing ID 59), after traversing all four forks. Core
+launch processes shut down cleanly; both read-only helpers failed during the
+intentional SIGINT with a repeated ROS shutdown, leaving their final manifests
+unwritten. Its lifecycle remains failed and cannot be silently repaired. The
+helper stop regression is red for that failure and green with interrupt handling
+and idempotent `try_shutdown`; all data files close before registration. This
+changes capture lifecycle only, not flight authorization or task arrival.
