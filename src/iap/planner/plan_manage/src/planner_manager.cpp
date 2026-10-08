@@ -1393,8 +1393,10 @@ namespace ego_planner
       const Eigen::Vector3d& acceleration)
   {
     if (!position.allFinite() || !velocity.allFinite() ||
-        !acceleration.allFinite() || pp_.max_acc_ <= 0.0)
+        !acceleration.allFinite() || pp_.max_acc_ <= 0.0) {
+      RCLCPP_WARN(node_->get_logger(),"Checked brake rejected: reason=INVALID_INPUT_OR_ACCELERATION trajectory=%d",local_data_.traj_id_);
       return false;
+    }
     const double now = node_->now().seconds();
     const auto risk_version = beginRiskQuery();
     for (int attempt = 0; attempt < 3; ++attempt) {
@@ -1417,10 +1419,19 @@ namespace ego_planner
       candidate.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_,
                                   pp_.feasibility_tolerance_);
       double ratio = 1.0;
-      if (!candidate.checkFeasibility(ratio, false)) continue;
+      if (!candidate.checkFeasibility(ratio, false)) {
+        RCLCPP_WARN(node_->get_logger(),"Checked brake rejected: attempt=%d reason=DYNAMICS ratio=%.6f trajectory=%d",attempt,ratio,local_data_.traj_id_);
+        continue;
+      }
       const auto assessment = assessTrajectory(candidate, risk_version,
                                                now, true);
-      if (!assessment.executable()) continue;
+      if (!assessment.executable()) {
+        RCLCPP_WARN(node_->get_logger(),
+            "Checked brake rejected: attempt=%d reason=%s trajectory=%d generation=%lu evaluation_ros_time_s=%.9f violation_t=%.6f",
+            attempt,gridExecutionReasonName(assessment.execution_reason),local_data_.traj_id_,
+            assessment.evaluated_generation,assessment.evaluation_time_s,assessment.first_execution_time_s);
+        continue;
+      }
       updateTrajInfo(candidate, node_->now());
       RCLCPP_WARN(node_->get_logger(),
                   "Checked continuous braking trajectory committed");

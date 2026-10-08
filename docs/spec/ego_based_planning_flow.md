@@ -1676,7 +1676,47 @@ Final local-only LiDAR grouping replay and original saved-PL diagnostic were
 rerun after the final Release build. Original OFF still returns a guide; sparse
 replay explicitly reports 4,487 missing unique voxels and zero Predictor calls,
 so it remains a partial diagnostic rather than a historical complete ON replay.
-The first legal Curve delivery and live handover stages remain pending. Formal
+The clean `d208ccb4` 30-second ON reference `20261008T082632Z_283` delivered
+its first actual Curve on attempt 2 within 1.3007 s (search 0.9541 s). Production
+dynamics, same-guide retention and latest publication checks preceded ID 1;
+the recorded Bspline and actual command stream both carry ID 1. Later attempts
+include 9 Search / 2 Release / 1 Budget rejections and remain failures. This is
+first-route delivery evidence, not continuous-task acceptance. The fixed
+complete-payload offline search and this live Curve have separate identities;
+the old historical full Predictor input remains absent.
+
+Safety supervision now consumes command feedback after physical assessment and
+again after tracking/swarm checks, before withdrawal/recovery. If activation or withdrawal acknowledgment
+changes the active/pending identity pair, the same callback captures and checks that
+actual curve's remaining interval. One serialized FSM callback can see at most
+one pending transition; it makes at most two identity-bound checks. A failure to
+stabilize issues no withdrawal/replacement. Missing feedback does not promote a
+queued trajectory based on scheduled time. Actual late activation feedback
+promotes the candidate even after a withdrawal request; the candidate is then
+checked as active. The server still cancels only matching pending IDs.
+
+With existing opt-in `planning/capture_failure_map`, the authoritative receive
+callback and consumption/safety/withdrawal seams record a registered
+`profiling/planner_execution_<pid>.csv` with command/trajectory IDs, ROS time,
+steady time, effective time, active and assessment IDs. Receipt never reads FSM
+mutable state; the diagnostic stream is mutex-protected. Server receipt and
+actual activation logs include ROS and monotonic times, including immediate
+activation. Each checked-brake candidate rejection names dynamics or the
+original physical/current execution reason; no rejected curve is forced out.
+`--stop-after-task` stops only owned reference-run jobs after the unchanged FSM
+arrival rule records `task_reached`, and does not turn process health into a
+mission PASS. OFF baseline remains pending until that actual rule and execution
+identity checks are demonstrated.
+
+The in-check activation regression failed before post-check consumption and
+passed after the fix. The other timing cases exercise feedback already buffered
+and no feedback followed by actual late activation. A fourth regression
+checks withdrawal acknowledgment during assessment: the pending replacement
+is safe but the predecessor tail is unknown, so clearing pending must trigger
+a full predecessor check and refuse that tail. This is an interface timing
+regression, not a claimed observation in the forest reference run. Real server callback checks
+cover a foreign cancel ID and a matching cancel after activation; both preserve
+the correct execution identity. Formal risk qualification remains pending. Formal
 experiments remain 0/9 calibration, 0/9 held-out and 0/6 mission runs. Mission
 comparison uses three OFF/ON seed pairs (2101–2103), with actual executed curve
 arc integral of max(HPL/HAL,VPL/VAL); unknown coverage and failures remain in the
@@ -1688,10 +1728,16 @@ production search replay missing-PL test, complete EgoBaseline suite, failure
 map tools, Advisory transport/replay tests, scheduled server execution, server
 time tests and full-stack feedback checks passed. Offline original-map
 production OFF returned a guide; saved-PL diagnosis reported missing coverage.
-Artifacts are under `log/20261008T074231Z_810`; no live Curve result is claimed
-here. Release rebuild of all six planner/IAP packages passed. Predictor/LiDAR,
+Artifacts are under `log/20261008T074231Z_810`; the first live Curve observation
+is recorded separately above. Release rebuild of all six planner/IAP packages passed. Predictor/LiDAR,
 A*, frozen-risk, occupancy/window/startup and planner functional checks passed.
 The broad CTest run also exposes existing package-wide flake8, uncrustify and
 lint_cmake failures; those formatting checks are not represented as passing.
 An overlapping library rebuild invalidated three early test invocations;
 only their subsequent stable-binary reruns count as functional evidence.
+
+The reviewed handover regression build and six functional planner checks passed;
+all four feedback timing cases passed. The full IAP CTest suite ran 32 checks:
+31 passed; legacy `test_future_pl_field_predictor` has six invalid-result
+assertions (including GNSS-only paths), retained as a reported unresolved test
+limitation rather than counted as passing.

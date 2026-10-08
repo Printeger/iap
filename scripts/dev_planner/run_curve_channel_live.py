@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Canonical forest reference run with owned processes and complete read-only capture."""
 import argparse
+import csv
 import json
 import math
 import os
@@ -56,6 +57,13 @@ def finalized_planning_inputs(run, require_search=False):
     return inputs
 
 
+def task_reached(run):
+    for path in (run/'profiling').glob('planner_execution_*.csv'):
+        with path.open() as stream:
+            if any(row.get('event')=='task_reached' for row in csv.DictReader(stream)): return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--duration', type=float, default=300)
@@ -63,6 +71,7 @@ def main():
     parser.add_argument('--guidance',choices=('false','true'),default='false')
     parser.add_argument('--stop-after-planning-input',action='store_true',help='bounded first-input capture; stop owned launch when input.bin is saved')
     parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
+    parser.add_argument('--stop-after-task',action='store_true',help='stop owned jobs when the original FSM records task_reached')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     args = parser.parse_args()
     if args.stop_after_planning_input: args.duration=30.
@@ -156,7 +165,7 @@ def main():
         captured_input=False
         while jobs['launch'].poll() is None:
             captured_input=bool(args.stop_after_planning_input and finalized_planning_inputs(run,require_search=True))
-            if args.stop_after_planning_input and (captured_input or time.monotonic()-launch_started>=30.):
+            if (args.stop_after_task and task_reached(run)) or (args.stop_after_planning_input and (captured_input or time.monotonic()-launch_started>=30.)):
                 for name in ('launch','capture','record'):
                     if jobs[name].poll() is None:
                         intentional_stops.add(name); stop(jobs[name])
@@ -211,6 +220,7 @@ def main():
                  'elapsed_s': time.monotonic() - started,
                  'exit_codes': {n: p.returncode for n, p in jobs.items()},
                  'intentional_stops':sorted(intentional_stops),
+                 'task_reached_observed':task_reached(run),
                  'health_sha256': sha(health_path),
                  'logs_sha256': {str(p.relative_to(run)): sha(p)
                                 for p in run.joinpath('runtime').glob('*.log')},

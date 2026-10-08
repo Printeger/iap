@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 #include <atomic>
+#include <fstream>
+#include <mutex>
 #include <quadrotor_msgs/msg/position_command.hpp>
 #include <iostream>
 #include "nav_msgs/msg/path.hpp"
@@ -152,6 +154,13 @@ namespace ego_planner
     void odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg);
     void applyLatestOdometry();
     void applyLatestCommandFeedback();
+    void executingCommandCallback(quadrotor_msgs::msg::PositionCommand::ConstSharedPtr command);
+    void recordExecutionEvent(const char* event,int trajectory_id,
+        double effective_time_s=NAN,double command_time_s=NAN,
+        int active_id=-1,int assessment_id=-1);
+    std::ofstream execution_events_;
+    std::mutex execution_events_mutex_;
+    quadrotor_msgs::msg::PositionCommand::ConstSharedPtr applied_command_;
     void swarmTrajsCallback(const std::shared_ptr<const traj_utils::msg::MultiBsplines> &msg);
     void BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg);
 

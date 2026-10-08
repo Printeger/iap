@@ -41,11 +41,19 @@ TEST(TrajectoryServerTime, ActivationEvaluationAndStampUseOneCapturedTime) {
   EXPECT_TRUE(pending_traj);
   EXPECT_TRUE(std::isfinite(cmd.yaw));
   EXPECT_TRUE(std::isfinite(cmd.yaw_dot));
+  auto cancellation=std::make_shared<traj_utils::msg::Bspline>();
+  cancellation->start_mode=traj_utils::msg::Bspline::CANCEL_PENDING;
+  cancellation->traj_id=999;bsplineCallback(cancellation);
+  ASSERT_TRUE(pending_traj);EXPECT_EQ(pending_traj->id,2);
   cmdCallbackAt(rclcpp::Time(103000000000LL,RCL_ROS_TIME));
   EXPECT_EQ(cmd.trajectory_id,2);
   EXPECT_FALSE(pending_traj);
   EXPECT_EQ(rclcpp::Time(cmd.header.stamp).nanoseconds(),103000000000LL);
   EXPECT_NEAR(cmd.position.x,3.,1e-12);
   EXPECT_TRUE(std::isfinite(cmd.yaw_dot));
+  cancellation->traj_id=2;bsplineCallback(cancellation);
+  EXPECT_EQ(traj_id_,2);EXPECT_FALSE(pending_traj);
+  cmdCallbackAt(rclcpp::Time(103100000000LL,RCL_ROS_TIME));
+  EXPECT_EQ(cmd.trajectory_id,2); // A late cancellation cannot reverse activation.
   pending_traj.reset();pos_cmd_pub.reset();trajectory_curve_pub.reset();server_node.reset();
 }

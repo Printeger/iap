@@ -759,6 +759,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
         ? view.physical.motion_reason : GridExecutionReason::ENVIRONMENT_STALE;
     failed.evaluation_time_s=view.time_s;
     failed.evaluated_motion=view.motion;
+    failed.trajectory_id=local_data_.traj_id_;
     failed.first_execution_time_s=std::max(0.,failed.evaluation_time_s-local_data_.start_time_.seconds());
     return failed;
   }

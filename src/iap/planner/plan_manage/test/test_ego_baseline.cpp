@@ -128,8 +128,7 @@ struct EGOReplanFSMTestAccess {
     auto command=std::make_shared<quadrotor_msgs::msg::PositionCommand>();
     command->trajectory_id=id;
     command->header.stamp=rclcpp::Time(static_cast<int64_t>(stamp*1e9));
-    std::atomic_store(&fsm.pending_command_,
-        std::shared_ptr<const quadrotor_msgs::msg::PositionCommand>(command));
+    fsm.executingCommandCallback(command);
   }
   static void predecessorCommand(EGOReplanFSM& fsm,int id,double stamp) {
     queueCommand(fsm,id,stamp);
@@ -304,6 +303,7 @@ struct EGOPlannerManagerTestAccess {
     };
     return manager.captureExecutionView(points,manager.node_->now().seconds(),false).physical;
   }
+  static nav_msgs::msg::Odometry::ConstSharedPtr odom(EGOPlannerManager& manager) {return std::atomic_load(&manager.risk_odom_);}
   static void setMotionStamp(EGOPlannerManager& manager, double stamp) {
     manager.current_integrity_.stamp=stamp;
   }
@@ -1457,7 +1457,7 @@ TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredece
   EXPECT_GT(manager.local_data_.traj_id_,withdrawn_id);
 }
 
-TEST(EgoBaseline, SafetyConsumesActivatedCommandBeforePendingWithdrawal) {
+void checkSafetyFeedbackTiming(int timing) {
   auto node=makeNode();
   ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
   ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
@@ -1474,7 +1474,7 @@ TEST(EgoBaseline, SafetyConsumesActivatedCommandBeforePendingWithdrawal) {
   manager.setPlanningConnection(rclcpp::Time(101600000000LL,node->get_clock()->get_clock_type()),predecessor.traj_id_);
   ASSERT_TRUE(manager.reboundReplan(predecessor.position_traj_.evaluateDeBoorT(1.6),
       predecessor.velocity_traj_.evaluateDeBoorT(1.6),predecessor.acceleration_traj_.evaluateDeBoorT(1.6),
-      end,zero,false,false));
+      (timing==3 ? Eigen::Vector3d(predecessor.position_traj_.evaluateDeBoorT(2.8)) : end),zero,false,false));
   auto activated=manager.publicationTrajectory();
   manager.endPlanningView();
   ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),101700000000LL),RCL_RET_OK);
@@ -1492,20 +1492,60 @@ TEST(EgoBaseline, SafetyConsumesActivatedCommandBeforePendingWithdrawal) {
   ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
   // Actual post-start feedback is buffered before the safety timer. No exec
   // timer has consumed it yet, as in live 225155Z_510 trajectories 42 and 45.
-  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,activated.traj_id_,101.7);
+  bool delivered=false;
+  if(timing==0) ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,activated.traj_id_,101.7);
+  if(timing==1 || timing==3) {
+    if(timing==3) {
+      // A peer conflict can re-enter REPLAN_TRAJ while a withdrawal is awaiting
+      // acknowledgment. Its predecessor must then be checked through its end.
+      ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),101550000000LL),RCL_RET_OK);
+      ASSERT_TRUE(manager.requestPendingWithdrawal());
+    }
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),101550000000LL),RCL_RET_OK);
+    manager.setLatestOdometryProvider([&]() {
+      if(!delivered) {
+        delivered=true;
+        EXPECT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),101700000000LL),RCL_RET_OK);
+        ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,timing==3 ? predecessor.traj_id_ : activated.traj_id_,101.7);
+      }
+      return ego_planner::EGOPlannerManagerTestAccess::odom(manager);
+    });
+  }
+  if(timing==2) {
+    // Scheduled time alone cannot promote the candidate. No command has arrived.
+    EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,101.7));
+    EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+    EXPECT_TRUE(manager.hasPendingTrajectory());
+    for(int i=0;i<20;++i) {rclcpp::spin_some(node);std::this_thread::sleep_for(std::chrono::milliseconds(2));}
+    ASSERT_EQ(messages.size(),1u);
+    EXPECT_EQ(messages[0].start_mode,traj_utils::msg::Bspline::CANCEL_PENDING);
+    EXPECT_EQ(messages[0].traj_id,activated.traj_id_);
+    messages.clear();
+    // A late command acknowledges that the server actually switched. The
+    // ignored cancellation cannot restore the predecessor locally.
+    ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,activated.traj_id_,101.7);
+  }
   EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,101.7));
+  if(timing==1 || timing==3) {EXPECT_TRUE(delivered);}
+  const int expected_id=timing==3 ? predecessor.traj_id_ : activated.traj_id_;
   EXPECT_FALSE(manager.hasPendingTrajectory());
-  EXPECT_EQ(manager.local_data_.traj_id_,activated.traj_id_);
+  EXPECT_EQ(manager.local_data_.traj_id_,expected_id);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
   const auto assessment=manager.assessRemainingTrajectory(101.7);
   EXPECT_FALSE(assessment.executable()); // physical unknown is still refused
-  EXPECT_EQ(assessment.trajectory_id,activated.traj_id_);
+  EXPECT_EQ(assessment.trajectory_id,expected_id);
   for(int i=0;i<20;++i) {
     rclcpp::spin_some(node);
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
   EXPECT_TRUE(messages.empty()); // active curve is not a queued withdrawal
 }
+
+TEST(EgoBaseline, SafetyConsumesActivatedCommandBeforePendingWithdrawal) {checkSafetyFeedbackTiming(0);}
+TEST(EgoBaseline, SafetyConsumesActivationDuringRemainingCheckBeforeWithdrawal) {checkSafetyFeedbackTiming(1);}
+TEST(EgoBaseline, MissingActivationFeedbackKeepsPendingUntilActualLateCommand) {checkSafetyFeedbackTiming(2);}
+
+TEST(EgoBaseline, SafetyRechecksPredecessorTailAfterWithdrawalAcknowledgmentDuringCheck) {checkSafetyFeedbackTiming(3);}
 
 TEST(EgoBaseline, FullEpochMatchesExactQueriesAndSurvivesRemoteGenerations) {
   auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);

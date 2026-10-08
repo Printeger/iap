@@ -1,5 +1,8 @@
 
 #include <ego_planner/ego_replan_fsm.h>
+#include <iap/util/run_log_manager.hpp>
+#include <iomanip>
+#include <unistd.h>
 
 namespace ego_planner
 {
@@ -63,6 +66,15 @@ namespace ego_planner
     planner_manager_->deliverTrajToOptimizer(); // store trajectories
     planner_manager_->setDroneIdtoOpt();
 
+    if(node_->get_parameter("planning/capture_failure_map").as_bool()) {
+      if(const auto* log=glim::RunLogManager::get_if_initialized()) {
+        const auto name="planner_execution_"+std::to_string(getpid());
+        execution_events_.open(log->profiling_path(name+".csv"));
+        execution_events_<<"event,trajectory_id,ros_time_s,steady_time_s,effective_time_s,command_time_s,active_id,assessment_id\n";
+        std::ofstream registration(log->metadata_path("manifests/"+name+".json"));
+        registration<<"{\"schema\":\"iap_execution_events_v1\",\"artifacts\":[\"profiling/"<<name<<".csv\"]}\n";
+      }
+    }
     /* callback*/
     exec_timer_ = node_->create_wall_timer(std::chrono::milliseconds(10),
                                            std::bind(&EGOReplanFSM::execFSMCallback, this));
@@ -85,7 +97,7 @@ namespace ego_planner
         node_->create_subscription<quadrotor_msgs::msg::PositionCommand>(
             "/position_cmd", rclcpp::QoS(1),
             [this](quadrotor_msgs::msg::PositionCommand::ConstSharedPtr msg) {
-              std::atomic_store(&pending_command_,msg);
+              executingCommandCallback(msg);
             }, odom_options);
     // std::bind(&EGOReplanFSM::odometryCallback, this, std::placeholders::_1));
 
@@ -487,11 +499,37 @@ namespace ego_planner
     cout << "[FSM]: state: " + state_str[int(exec_state_)] << endl;
   }
 
+  void EGOReplanFSM::recordExecutionEvent(const char* event,int id,
+      double effective,double command_time,int active,int assessment) {
+    // Receipt callback and FSM timers share only this diagnostic stream. They
+    // never read each other's mutable execution state for an event row.
+    const double ros=node_->now().seconds();
+    const double steady=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    std::lock_guard<std::mutex> lock(execution_events_mutex_);
+    if(execution_events_) execution_events_<<std::setprecision(17)<<event<<','<<id<<','<<ros<<','<<steady
+        <<','<<effective<<','<<command_time<<','<<active<<','<<assessment<<'\n';
+    if(std::string(event)=="task_reached") execution_events_.flush();
+  }
+
+  void EGOReplanFSM::executingCommandCallback(quadrotor_msgs::msg::PositionCommand::ConstSharedPtr command) {
+    recordExecutionEvent("feedback_received",command->trajectory_id,NAN,rclcpp::Time(command->header.stamp).seconds());
+    std::atomic_store(&pending_command_,std::move(command));
+  }
+
   void EGOReplanFSM::applyLatestCommandFeedback()
   {
     const auto command=std::atomic_load(&pending_command_);
-    if(command) planner_manager_->observeExecutingTrajectory(command->trajectory_id,
-        rclcpp::Time(command->header.stamp).seconds());
+    if(command) {
+      planner_manager_->observeExecutingTrajectory(command->trajectory_id,
+          rclcpp::Time(command->header.stamp).seconds());
+      if(command!=applied_command_) {
+        applied_command_=command;
+        recordExecutionEvent("feedback_consumed",command->trajectory_id,
+            planner_manager_->local_data_.traj_id_==command->trajectory_id
+                ? planner_manager_->local_data_.start_time_.seconds() : NAN,
+            rclcpp::Time(command->header.stamp).seconds(),planner_manager_->local_data_.traj_id_);
+      }
+    }
   }
 
   void EGOReplanFSM::execFSMCallback()
@@ -625,6 +663,7 @@ namespace ego_planner
         if (t_cur > info->duration_ - 1e-2 &&
             (odom_pos_-end_pt_).norm()<tracking_error_limit_m_ && odom_vel_.norm()<.1)
         {
+          recordExecutionEvent("task_reached",info->traj_id_,info->start_time_.seconds(),NAN,info->traj_id_);
           have_target_ = false;
           have_trigger_ = false;
 
@@ -693,6 +732,7 @@ namespace ego_planner
 
   bool EGOReplanFSM::planFromCurrentTraj()
   {
+    applyLatestCommandFeedback();
 
     if(planner_manager_->hasPendingTrajectory()) return false;
     auto& info=planner_manager_->local_data_;
@@ -720,121 +760,147 @@ namespace ego_planner
     // geometry; elapsed scheduled time alone never confirms activation.
     applyLatestCommandFeedback();
     applyLatestOdometry();
-    auto& info = planner_manager_->local_data_;
-    // A failed rolling replan must not silence supervision of the trajectory
-    // still being executed. In particular, its first violation may move from
-    // the replan window into the emergency window while REPLAN_TRAJ retries.
-    if ((exec_state_ != EXEC_TRAJ && exec_state_ != REPLAN_TRAJ) ||
-        info.start_time_.seconds() < 1e-5)
-      return;
-    double now = node_->now().seconds();
-    double elapsed = std::max(0.0, now - info.start_time_.seconds());
-    if (elapsed >= info.duration_) return;
-    auto assessment = planner_manager_->assessRemainingTrajectory(now);
-    now=assessment.evaluation_time_s;
-    elapsed=std::max(0.0,now-info.start_time_.seconds());
-    applyLatestOdometry();
-    // Compare the command curve and GLIO at the same measurement time.
-    const double measured_elapsed = std::clamp(
-        applied_odom_stamp_s_ - info.start_time_.seconds(), 0.0,
-        info.duration_);
-    const auto expected = info.position_traj_.evaluateDeBoorT(
-        measured_elapsed);
-    const double active_tracking_error=(expected-odom_pos_).norm();
-    if(active_tracking_error>tracking_error_limit_m_) {
-      if(assessment.trajectory_id==info.traj_id_) {
-        assessment.execution_reason=GridExecutionReason::TRACKING_ERROR;
-        assessment.first_execution_time_s=measured_elapsed;
-        assessment.first_execution_position=expected;
-        if(const auto cell=planner_manager_->queryAssessmentCell(assessment,expected))
-          assessment.first_execution_cell=*cell;
-      } else {
-        // A pending physical rejection already requires withdrawal/recovery.
-        // Keep its curve/time ownership; the active tracking observation is
-        // still saved separately in the stop state's reference/error fields.
-        RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
-            "Active trajectory %d tracking error %.3fm also observed; retaining failure owned by trajectory %d",
-            info.traj_id_,active_tracking_error,assessment.trajectory_id);
-      }
-    }
-    const auto capture_remaining = [&](const std::string& kind,
-                                       const GridExecutionReason reason) {
-      const double odom_age = std::isfinite(applied_odom_stamp_s_)
-          ? now - applied_odom_stamp_s_ : -1.0;
-      const auto map_cell = planner_manager_->queryLocalTargetCell(
-          odom_pos_, now);
-      const double map_age = std::isfinite(map_cell.cloud_stamp_s)
-          ? now - map_cell.cloud_stamp_s : -1.0;
-      const auto command=std::atomic_load(&pending_command_);
-      planner_manager_->captureRemainingFailure(kind, expected, odom_pos_,
-          (expected - odom_pos_).norm(), info.traj_id_,
-          command ? rclcpp::Time(command->header.stamp).seconds() : -std::numeric_limits<double>::infinity(),
-          odom_age, map_age, reason, &assessment);
-    };
-
-    // Swarm separation retains its physical execution meaning.
-    const double swarm_clearance = planner_manager_->getSwarmClearance();
-    for (double t = elapsed; t < info.duration_ && assessment.executable();
-         t += 0.02) {
-      const auto p = info.position_traj_.evaluateDeBoorT(t);
-      for (const auto& peer : planner_manager_->swarm_trajs_buf_) {
-        if (peer.drone_id < 0 || peer.drone_id == planner_manager_->pp_.drone_id)
-          continue;
-        const double peer_t = now - peer.start_time_.seconds() + t - elapsed;
-        if (peer_t < 0.0 || peer_t > peer.duration_) continue;
-        auto peer_curve = peer.position_traj_;
-        if ((p - peer_curve.evaluateDeBoorT(peer_t)).norm() < swarm_clearance) {
-          assessment.execution_reason = GridExecutionReason::PHYSICAL_OBSTACLE;
-          assessment.first_execution_time_s = t;
-          break;
+    // A pending activation or withdrawal acknowledgment changes the interval
+    // being checked. One pending transition can occur in this serialized callback.
+    for(int identity_check=0;identity_check<2;++identity_check) {
+      auto& info = planner_manager_->local_data_;
+      const int checked_active_id=info.traj_id_;
+      const int checked_pending_id=planner_manager_->hasPendingTrajectory()
+          ? planner_manager_->publicationTrajectory().traj_id_ : -1;
+      const auto identity_changed=[&]() {
+        const int pending_id=planner_manager_->hasPendingTrajectory()
+            ? planner_manager_->publicationTrajectory().traj_id_ : -1;
+        return info.traj_id_!=checked_active_id || pending_id!=checked_pending_id;
+      };
+      // A failed rolling replan must not silence supervision of the trajectory
+      // still being executed. In particular, its first violation may move from
+      // the replan window into the emergency window while REPLAN_TRAJ retries.
+      if ((exec_state_ != EXEC_TRAJ && exec_state_ != REPLAN_TRAJ) ||
+          info.start_time_.seconds() < 1e-5)
+        return;
+      double now = node_->now().seconds();
+      double elapsed = std::max(0.0, now - info.start_time_.seconds());
+      if (elapsed >= info.duration_) return;
+      const auto scheduled=planner_manager_->publicationTrajectory();
+      recordExecutionEvent("physical_check_begin",scheduled.traj_id_,scheduled.start_time_.seconds(),NAN,checked_active_id);
+      auto assessment = planner_manager_->assessRemainingTrajectory(now);
+      recordExecutionEvent("physical_check_end",scheduled.traj_id_,scheduled.start_time_.seconds(),NAN,checked_active_id,assessment.trajectory_id);
+      applyLatestCommandFeedback();
+      if(identity_changed()) continue;
+      now=assessment.evaluation_time_s;
+      elapsed=std::max(0.0,now-info.start_time_.seconds());
+      applyLatestOdometry();
+      // Compare the command curve and GLIO at the same measurement time.
+      const double measured_elapsed = std::clamp(
+          applied_odom_stamp_s_ - info.start_time_.seconds(), 0.0,
+          info.duration_);
+      const auto expected = info.position_traj_.evaluateDeBoorT(
+          measured_elapsed);
+      const double active_tracking_error=(expected-odom_pos_).norm();
+      if(active_tracking_error>tracking_error_limit_m_) {
+        if(assessment.trajectory_id==info.traj_id_) {
+          assessment.execution_reason=GridExecutionReason::TRACKING_ERROR;
+          assessment.first_execution_time_s=measured_elapsed;
+          assessment.first_execution_position=expected;
+          if(const auto cell=planner_manager_->queryAssessmentCell(assessment,expected))
+            assessment.first_execution_cell=*cell;
+        } else {
+          // A pending physical rejection already requires withdrawal/recovery.
+          // Keep its curve/time ownership; the active tracking observation is
+          // still saved separately in the stop state's reference/error fields.
+          RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+              "Active trajectory %d tracking error %.3fm also observed; retaining failure owned by trajectory %d",
+              info.traj_id_,active_tracking_error,assessment.trajectory_id);
         }
       }
-    }
+      const auto capture_remaining = [&](const std::string& kind,
+                                         const GridExecutionReason reason) {
+        const double odom_age = std::isfinite(applied_odom_stamp_s_)
+            ? now - applied_odom_stamp_s_ : -1.0;
+        const auto map_cell = planner_manager_->queryLocalTargetCell(
+            odom_pos_, now);
+        const double map_age = std::isfinite(map_cell.cloud_stamp_s)
+            ? now - map_cell.cloud_stamp_s : -1.0;
+        const auto command=std::atomic_load(&pending_command_);
+        planner_manager_->captureRemainingFailure(kind, expected, odom_pos_,
+            (expected - odom_pos_).norm(), info.traj_id_,
+            command ? rclcpp::Time(command->header.stamp).seconds() : -std::numeric_limits<double>::infinity(),
+            odom_age, map_age, reason, &assessment);
+      };
 
-    if (!assessment.executable()) {
-      if(const auto pending_id=planner_manager_->requestPendingWithdrawal()) {
-        // Withdraw at the revocation seam, before evidence export or checked
-        // brake construction. The server retains the active predecessor.
-        traj_utils::msg::Bspline withdrawal;
-        withdrawal.start_mode=traj_utils::msg::Bspline::CANCEL_PENDING;
-        withdrawal.traj_id=*pending_id;
-        bspline_pub_->publish(withdrawal);
+      // Swarm separation retains its physical execution meaning.
+      const double swarm_clearance = planner_manager_->getSwarmClearance();
+      for (double t = elapsed; t < info.duration_ && assessment.executable();
+           t += 0.02) {
+        const auto p = info.position_traj_.evaluateDeBoorT(t);
+        for (const auto& peer : planner_manager_->swarm_trajs_buf_) {
+          if (peer.drone_id < 0 || peer.drone_id == planner_manager_->pp_.drone_id)
+            continue;
+          const double peer_t = now - peer.start_time_.seconds() + t - elapsed;
+          if (peer_t < 0.0 || peer_t > peer.duration_) continue;
+          auto peer_curve = peer.position_traj_;
+          if ((p - peer_curve.evaluateDeBoorT(peer_t)).norm() < swarm_clearance) {
+            assessment.execution_reason = GridExecutionReason::PHYSICAL_OBSTACLE;
+            assessment.first_execution_time_s = t;
+            break;
+          }
+        }
       }
-      capture_remaining(assessment.execution_reason ==
-          GridExecutionReason::TRACKING_ERROR ? "tracking_error" :
-          "remaining_failure", assessment.execution_reason);
-      const double lead = assessment.first_execution_time_s - elapsed;
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-                           "Remaining trajectory %s, lead=%.2fs",
-                           gridExecutionReasonName(assessment.execution_reason), lead);
-      if(planner_manager_->hasPendingTrajectory()) {
-        // Withdrawal grants no recovery curve. The existing checked braking
-        // path still supervises and replaces the active predecessor.
-        flag_escape_emergency_=true;
-        changeFSMExecState(EMERGENCY_STOP, "pending execution conditions revoked");
-      } else if (lead > emergency_time_) {
-        changeFSMExecState(REPLAN_TRAJ, "SAFETY");
-      } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
-                      ? planFromGlobalTraj()
-                      : planFromCurrentTraj())) {
-        changeFSMExecState(EXEC_TRAJ, "SAFETY");
-        publishSwarmTrajs(false);
-      } else {
-        capture_remaining("remaining_stop", assessment.execution_reason);
-        changeFSMExecState(EMERGENCY_STOP, "SAFETY");
+
+      // Swarm/tracking checks may also span an activation. Consume again before
+      // withdrawal or recovery; elapsed effective time is never activation proof.
+      applyLatestCommandFeedback();
+      if(identity_changed()) continue;
+      if (!assessment.executable()) {
+        if(const auto pending_id=planner_manager_->requestPendingWithdrawal()) {
+          // Withdraw at the revocation seam, before evidence export or checked
+          // brake construction. The server retains the active predecessor.
+          traj_utils::msg::Bspline withdrawal;
+          withdrawal.start_mode=traj_utils::msg::Bspline::CANCEL_PENDING;
+          withdrawal.traj_id=*pending_id;
+          recordExecutionEvent("withdrawal_sent",*pending_id,
+              planner_manager_->publicationTrajectory().start_time_.seconds(),NAN,info.traj_id_,assessment.trajectory_id);
+          bspline_pub_->publish(withdrawal);
+        }
+        capture_remaining(assessment.execution_reason ==
+            GridExecutionReason::TRACKING_ERROR ? "tracking_error" :
+            "remaining_failure", assessment.execution_reason);
+        const double lead = assessment.first_execution_time_s - elapsed;
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                             "Remaining trajectory %s, lead=%.2fs",
+                             gridExecutionReasonName(assessment.execution_reason), lead);
+        if(planner_manager_->hasPendingTrajectory()) {
+          // Withdrawal grants no recovery curve. The existing checked braking
+          // path still supervises and replaces the active predecessor.
+          flag_escape_emergency_=true;
+          changeFSMExecState(EMERGENCY_STOP, "pending execution conditions revoked");
+        } else if (lead > emergency_time_) {
+          changeFSMExecState(REPLAN_TRAJ, "SAFETY");
+        } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
+                        ? planFromGlobalTraj()
+                        : planFromCurrentTraj())) {
+          changeFSMExecState(EXEC_TRAJ, "SAFETY");
+          publishSwarmTrajs(false);
+        } else {
+          capture_remaining("remaining_stop", assessment.execution_reason);
+          changeFSMExecState(EMERGENCY_STOP, "SAFETY");
+        }
+        return;
+      }
+      // Advisory warnings request an early revision. Missing or brief stale PL
+      // does not enter the emergency path.
+      if (planner_manager_->advisoryGuidanceEnabled() && assessment.advisory_avoid_samples != 0 &&
+          now - last_advisory_replan_time_s_ > 1.0) {
+        last_advisory_replan_time_s_ = now;
+        RCLCPP_INFO(node_->get_logger(),
+                    "Advisory warning ahead at trajectory t=%.2fs; request replan",
+                    assessment.first_advisory_time_s);
+        changeFSMExecState(REPLAN_TRAJ, "ADVISORY");
       }
       return;
     }
-    // Advisory warnings request an early revision. Missing or brief stale PL
-    // does not enter the emergency path.
-    if (planner_manager_->advisoryGuidanceEnabled() && assessment.advisory_avoid_samples != 0 &&
-        now - last_advisory_replan_time_s_ > 1.0) {
-      last_advisory_replan_time_s_ = now;
-      RCLCPP_INFO(node_->get_logger(),
-                  "Advisory warning ahead at trajectory t=%.2fs; request replan",
-                  assessment.first_advisory_time_s);
-      changeFSMExecState(REPLAN_TRAJ, "ADVISORY");
-    }
+    RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+        "Execution identity changed during both physical checks; no withdrawal or replacement issued");
   }
 
   bool EGOReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
@@ -1073,6 +1139,7 @@ namespace ego_planner
 
   bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)
   {
+    applyLatestCommandFeedback();
 
     if (!planner_manager_->planCheckedBrake(stop_pos, odom_vel_,
                                             Eigen::Vector3d::Zero())) {
