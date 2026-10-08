@@ -74,6 +74,14 @@ def verify_planning_capture(snapshot, payload, meta):
     return entry
 
 
+def measurement_profile(meta, label):
+    # The online gate must use the captured instrumentation configuration.
+    # Instrumented controls are separate evidence, with their overhead retained.
+    if label.startswith('profiled_'): return True
+    if label=='extended_unprofiled': return False
+    return bool(meta.get('search_performance_diagnostics',False))
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('snapshot',type=Path)
@@ -84,7 +92,10 @@ def main():
     parser.add_argument('--label',default='original_search')
     parser.add_argument('--require-guide',action='store_true',help='fail the regression gate if either production search has no guide')
     parser.add_argument('--diagnose',action='store_true',help='three cold measurements, same-cache warm control and offline extended search; never online authorization')
+    parser.add_argument('--diagnostic-goal-indices', help='Offline subset of captured terminals; full endpoint clearance context retained')
     args=parser.parse_args()
+    if args.diagnostic_goal_indices and (args.require_guide or args.diagnose):
+        raise ValueError('goal subsets are offline witnesses and cannot grant online capability')
     if not 0 < args.budget_s <= 30:raise ValueError('replay budget must be positive and at most 30 s')
     if args.require_guide and args.budget_s!=1.:
         raise ValueError('--require-guide uses the original 1 s search budget; extended diagnostics cannot grant online capability')
@@ -102,7 +113,8 @@ def main():
     result={'source_run':m['run_id'],'planning_attempt_id':m['planning_attempt_id'],
         'budget_s':args.budget_s,'parameters_sha256':sha(args.parameters),
         'input_sha256':{f.name:sha(f) for f in args.snapshot.iterdir() if f.is_file()},
-        'binary':binary_identity(args.binary.resolve()),'full_prediction_replay':False}
+        'binary':binary_identity(args.binary.resolve()),'full_prediction_replay':False,
+        'diagnostic_goal_indices':args.diagnostic_goal_indices}
     if args.payload: result.update(payload_sha256=sha(args.payload),capture_authority=capture)
     result['measurements']=[]
     status='failed'
@@ -110,13 +122,15 @@ def main():
         (out/'replay_input.txt').write_text(data)
         groups=[(mode,mode,args.budget_s) for mode in ('off','full' if args.payload else 'sparse')]
         if args.diagnose:groups += [('warm','warm',args.budget_s),('extended','full',15.),('extended_unprofiled','full',15.)]
+        if args.diagnose:groups += [('profiled_off','off',args.budget_s),('profiled_full','full',args.budget_s),('profiled_extended','full',15.)]
         for label,mode,budget in groups:
           for repetition in range(3 if args.diagnose and label in ('off','full','warm') else 1):
             risk=args.payload if mode=='full' else args.snapshot/'queried_risk.csv'
             if mode=='warm':risk=args.payload
             command=[str(args.binary.resolve()),str((args.snapshot/'cells.bin').resolve()),'--planning-search',mode,str(risk.resolve())]
+            if args.diagnostic_goal_indices:command.append(args.diagnostic_goal_indices)
             completed=subprocess.run(command,input=replay_input(m,params,budget),text=True,capture_output=True,timeout=budget+35,
-                env={**os.environ,'IAP_REPLAY_PROFILE':'0' if label=='extended_unprofiled' else '1'})
+                env={**os.environ,'IAP_REPLAY_PROFILE':'1' if measurement_profile(m,label) else '0'})
             name=label+'_'+str(repetition) if args.diagnose else label
             (out/(name+'.stderr.log')).write_text(completed.stderr)
             if completed.returncode: raise RuntimeError(f"{mode} replay exit {completed.returncode}: {completed.stderr}")
@@ -124,7 +138,8 @@ def main():
             verdict['scope']='REAL_FROZEN' if mode=='full' else 'PHYSICAL_OFF' if mode=='off' else 'SAVED_PL_PARTIAL_DIAGNOSTIC'
             if mode=='warm':verdict['scope']='SAME_FROZEN_GRIDMAP_CACHE_DIAGNOSTIC'
             verdict.update(label=label,repetition=repetition,search_budget_s=budget,
-                           online_capability_evidence=label in ('off','full') and budget==1.)
+                           captured_profiling_enabled=bool(m.get('search_performance_diagnostics',False)),
+                           online_capability_evidence=not args.diagnostic_goal_indices and label in ('off','full') and budget==1.)
             (out/(name+'.json')).write_text(json.dumps(verdict,indent=2)+'\n')
             result['measurements'].append(verdict)
             if repetition==0:result[label]=verdict

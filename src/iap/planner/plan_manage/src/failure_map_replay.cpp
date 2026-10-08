@@ -279,12 +279,27 @@ void pointJson(std::ostream& out, const Point& p) {
 
 // Production multi-terminal search, unlike component attribution (Dijkstra).
 // Missing saved PL is UNCOMPUTED; this mode never fabricates a low-risk field.
-void planningSearch(const Input& in, const std::string& mode, const char* risk_path) {
+void planningSearch(const Input& in, const std::string& mode, const char* risk_path, const char* goal_indices = nullptr) {
   const bool profile=!(std::getenv("IAP_REPLAY_PROFILE") && std::string(std::getenv("IAP_REPLAY_PROFILE"))=="0");
   double reserve, taper; size_t count;
   if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || !count || count > 100000)
     throw std::invalid_argument("invalid planning goal set");
   std::vector<Point> goals; for(size_t i=0;i<count;++i) goals.push_back(readPoint());
+  // Offline counterfactual witnesses select only captured production terminals.
+  // Physical clearance taper below still uses ALL original endpoints.
+  std::vector<Point> search_goals=goals;
+  std::vector<size_t> selected_indices;
+  if(goal_indices) {
+    search_goals.clear();std::istringstream list(goal_indices);std::string token;
+    while(std::getline(list,token,',')) {
+      size_t consumed=0;const auto index=std::stoul(token,&consumed);
+      if(consumed!=token.size() || index>=goals.size() ||
+          std::find(selected_indices.begin(),selected_indices.end(),index)!=selected_indices.end())
+        throw std::invalid_argument("invalid diagnostic goal index");
+      selected_indices.push_back(index);search_goals.push_back(goals[index]);
+    }
+    if(search_goals.empty())throw std::invalid_argument("empty diagnostic goal subset");
+  }
   const Point task_goal=readPoint();
   GridPlanningRiskPolicy policy;
   if (!(std::cin >> policy.hpl_budget_m >> policy.vpl_budget_m >> policy.reserve_h_m >>
@@ -367,7 +382,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   double warm_s=0.;bool warm_found=false;
   if(mode=="warm") {
     const auto began=Clock::now();
-    warm_found=search.AstarSearchGoals(in.step_m,in.start,goals,30.,in.center);
+    warm_found=search.AstarSearchGoals(in.step_m,in.start,search_goals,30.,in.center);
     warm_s=std::chrono::duration<double>(Clock::now()-began).count();
   }
   const auto before_risk=*frozen.statistics;
@@ -375,7 +390,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   const auto gnss_before=prediction_stats->gnss_advisory_duration_ns;
   const auto lidar_before=prediction_stats->lidar_advisory_duration_ns;
   const auto fusion_before=prediction_stats->fusion_advisory_duration_ns;
-  const bool found=search.AstarSearchGoals(in.step_m,in.start,goals,in.budget_s,in.center);
+  const bool found=search.AstarSearchGoals(in.step_m,in.start,search_goals,in.budget_s,in.center);
   const auto& r=search.lastResult();
   const auto path=search.getPath();
   const auto measured=[&](double seconds) {
@@ -400,7 +415,8 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   std::cout<<",\"incumbent_at_finish\":"<<(!path.empty()?"true":"false")
     <<",\"warmup_s\":"<<warm_s<<",\"warmup_found\":"<<(warm_found?"true":"false")
     <<",\"warmup_predictor_calls\":"<<before_calls
-    <<",\"diagnostic_only\":"<<(mode=="warm"?"true":"false")
+    <<",\"diagnostic_only\":"<<(mode=="warm" || goal_indices?"true":"false")
+    <<",\"diagnostic_goal_subset\":"<<(goal_indices?"true":"false")
     <<",\"edge_checks\":"<<r.edge_checks<<",\"segment_integrals\":"<<r.segment_integrals
     <<",\"physical_queries\":"<<r.query_calls<<",\"sample_cache_hits\":"<<r.cache_hits
     <<",\"advisory_refreshes\":"<<r.advisory_refresh_calls<<",\"risk_integration_calls\":"<<r.risk_integration_calls
@@ -580,7 +596,7 @@ int main(int argc, char** argv) {
   try {
     if (argc < 2 || argc > 6) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
-    if(argc==5 && std::string(argv[2])=="--planning-search") {planningSearch(in,argv[3],argv[4]);return 0;}
+    if((argc==5 || argc==6) && std::string(argv[2])=="--planning-search") {planningSearch(in,argv[3],argv[4],argc==6?argv[5]:nullptr);return 0;}
     if (argc==4 && std::string(argv[2])=="--attribution") { attribution(in,argv[3]); return 0; }
     if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc >= 5 && std::string(argv[4]) == "1", argc >= 6 && std::string(argv[5]) == "1"); return 0; }
     const auto began = Clock::now();

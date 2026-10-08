@@ -119,7 +119,7 @@ namespace ego_planner
     const auto search_value = search ? std::optional<AStar::Result>(*search) : std::nullopt;
     const auto context_value = context ? std::optional<BsplineOptimizer::SearchFailureContext>(*context) : std::nullopt;
     const auto curve_value = trajectory ? std::optional<UniformBspline>(*trajectory) : std::nullopt;
-    const bool candidate_trace=kind=="attempt_failure" || kind=="attempt_failure_curve" || kind=="candidate";
+    const bool candidate_trace=kind=="attempt_failure" || kind=="attempt_failure_curve" || kind=="candidate" || kind.rfind("committed_",0)==0;
     const auto stages=candidate_trace ? curve_stages_ : std::vector<CurveStageEvidence>{};
     const unsigned dropped_stages=candidate_trace ? dropped_curve_stages_ : 0;
     const double velocity_limit=pp_.max_vel_,acceleration_limit=pp_.max_acc_;
@@ -1301,6 +1301,15 @@ namespace ego_planner
     }
     if(!committed) return fail(PlanFailure::Release);
     continous_failures_count_=0;
+    // Opt-in evidence uses the existing frozen capture/writer. A committed
+    // candidate is not proof of publication or server activation. Bound disk
+    // capture without introducing another candidate owner or route prior.
+    if(capture_failure_map_) {
+      const auto saved=std::count_if(captured_failure_kinds_.begin(),captured_failure_kinds_.end(),
+          [](const std::string& kind) {return kind.rfind("committed_",0)==0;});
+      if(saved<32) captureFailureMap("committed_"+std::to_string(planning_attempt_id_),
+          start_pt,selected.position,start_cell,&optimizer.a_star_->lastResult(),nullptr,&curve);
+    }
     visualization_->displayInitPathList(points,.2,0);
     return true;
   }

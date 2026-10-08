@@ -1905,3 +1905,26 @@ separate evidence: isolated replay does not establish its precise live cause.
 Instrumentation overhead and that narrow attempt4 margin are not guarantees
 of continuous real-time service. These are search mechanism results only;
 field continuation and PL metre qualification require their own evidence.
+
+
+Frozen-search replay's online gate uses the captured
+`search_performance_diagnostics` value (false if absent), with explicit
+`profiled_*` controls and an unprofiled extended diagnostic kept separate.
+Unknown optional timing fields remain null when profiling is disabled. The
+offline `--diagnostic-goal-indices` selects only original captured endpoints;
+physical reserve taper retains the entire original endpoint set. It cannot
+be combined with the online `--require-guide` gate or diagnose repetitions.
+It supplies local reachability/cost witnesses, never production route hints
+or proof of optimal full-branch selection.
+
+With `capture_failure_map` enabled, the existing manager writer saves the
+first 32 successful manager candidates as `committed_<attempt_id>`, preserving
+the same PlanningView map/input/terminals/guide and attempt-owned curve stages.
+Its latest release assessment may bind a newer physical epoch, which remains
+separately identified. These exports do not replace the last rejected
+`terminal_final` attempt. Failed/dropped asynchronous exports retain existing
+writer diagnostics. A manager commit is not publication, activation or actual
+execution; flow/server/command/truth evidence must establish those steps.
+Focused actual writer regression verifies that a successful capture cannot
+replace terminal failure evidence. Native replay tests verify subset labelling
+and reject duplicate/out-of-range indices; full production replay is unchanged.

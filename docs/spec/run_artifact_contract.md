@@ -171,8 +171,15 @@ like a new run.
 ### Curve capture and forest driver authority (2026-10-07)
 
 A candidate geometry revision invalidates its previous final assessment before any
-optimizer or retiming early return. Only `candidate` and `attempt_failure` attach
-that attempt's backend stages. Execution supervision has its own supplied assessment;
+optimizer or retiming early return. Attempt-owned `candidate`, `attempt_failure`,
+`attempt_failure_curve` and opt-in `committed_<attempt_id>` attach that attempt's
+backend stages. With `capture_failure_map` enabled, the existing asynchronous
+writer also captures up to 32 committed candidates, each binding the original
+frozen map, prediction input, full production terminal set, selected guide,
+curve stages and final assessment. Commit means manager candidate acceptance;
+publication, server activation and executed command identity require separate
+feedback evidence. These successful captures never replace `terminal_final`
+while a PlanningView is active. Execution supervision has its own supplied assessment;
 its candidate `final_check_state` is `not_applicable`.
 
 The forest measurement driver preallocates one canonical run and passes the private

@@ -782,6 +782,8 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   latest_cell=manager.queryPlanningViewCell(Eigen::Vector3d(-1,0,1));
   ego_planner::EGOPlannerManagerTestAccess::capture(manager,"attempt_failure",latest_cell);
   ego_planner::EGOPlannerManagerTestAccess::capture(manager,"candidate",latest_cell);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"committed_1",latest_cell);
+  EXPECT_TRUE(std::filesystem::exists(root/"committed_1/snapshot.json"));
   ego_planner::EGOPlannerManagerTestAccess::finalEvidence(manager);
   manager.endPlanningView();
   std::ifstream final_metadata(root / "terminal_final/snapshot.json");

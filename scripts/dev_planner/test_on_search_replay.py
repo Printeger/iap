@@ -10,13 +10,22 @@ import tempfile
 import sys
 import test_failure_map_tools as fixtures
 from analyze_failure_map import _backend_path
-from replay_on_search import replay_input, verify_planning_capture
+from replay_on_search import replay_input, verify_planning_capture, measurement_profile
 from run_curve_channel_live import finalized_planning_inputs
 from advisory_validation import sha, resolve_run_directory, finalize_run
 from unittest.mock import patch
 
 
 class OnSearchReplayTest(unittest.TestCase):
+    def test_online_gate_preserves_captured_profiling_and_separates_timed_controls(self):
+        for captured in (False,True):
+            meta={'search_performance_diagnostics':captured}
+            for label in ('off','full','warm','extended'):
+                self.assertEqual(measurement_profile(meta,label),captured)
+            for label in ('profiled_off','profiled_full','profiled_extended'):
+                self.assertTrue(measurement_profile(meta,label))
+            self.assertFalse(measurement_profile(meta,'extended_unprofiled'))
+
     def test_native_writer_identity_is_not_fabricated_as_driver_ledger(self):
         with tempfile.TemporaryDirectory() as temporary:
             run=Path(temporary);snapshot=run/'export/planner/failure_map/terminal_final';snapshot.mkdir(parents=True)
@@ -98,6 +107,19 @@ class OnSearchReplayTest(unittest.TestCase):
                 reports[mode]=json.loads(result.stdout)
                 self.assertTrue(reports[mode]['guide_found'])
                 self.assertEqual(reports[mode]['predictor_calls'],0)
+            subset=subprocess.run([str(_backend_path()),str(fixture.directory/'cells.bin'),
+                '--planning-search','off',str(risk),'0'],input=replay_input(fixture.meta,params,1.),
+                text=True,capture_output=True,timeout=5)
+            self.assertEqual(subset.returncode,0,subset.stderr)
+            witness=json.loads(subset.stdout)
+            self.assertTrue(witness['diagnostic_goal_subset'])
+            self.assertTrue(witness['diagnostic_only'])
+            self.assertEqual(len(witness['goals']),1)
+            for invalid in ('0,0','2','x'):
+                rejected=subprocess.run([str(_backend_path()),str(fixture.directory/'cells.bin'),
+                    '--planning-search','off',str(risk),invalid],input=replay_input(fixture.meta,params,1.),
+                    text=True,capture_output=True,timeout=5)
+                self.assertNotEqual(rejected.returncode,0)
             self.assertGreater(reports['sparse']['missing_unique_voxels'],0)
             self.assertGreater(reports['sparse']['risk_cost_m'],0)
             self.assertEqual(reports['off']['risk_cost_m'],0)
