@@ -55,6 +55,10 @@ public:
 		END_OUT_OF_MAP, NO_VALID_REPAIR_ENTRY, NO_VALID_REPAIR_EXIT
 	};
 	struct Result {
+		struct GoalEvidence { bool checked=false, eligible=false, reached=false; Eigen::Vector3d lattice=Eigen::Vector3d::Constant(NAN); Failure failure=Failure::NONE; };
+		std::vector<GoalEvidence> goals; // Opt-in diagnostics; never affects search ordering.
+		double endpoint_prepare_s=0., first_complete_path_s=NAN, heuristic_s=0., queue_s=0.;
+		size_t edge_checks=0, segment_integrals=0;
 		Failure failure = Failure::NONE;
 		Eigen::Vector3d requested_start = Eigen::Vector3d::Zero();
 		Eigen::Vector3d requested_end = Eigen::Vector3d::Zero();

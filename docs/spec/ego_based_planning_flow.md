@@ -1823,3 +1823,36 @@ The production search replay follows the same adopter rule: an inherited run
 receives only its subordinate result; the outer owner alone registers it in the
 primary manifest. Its subprocess regression verifies the primary bytes remain
 unchanged while both OFF/sparse searches and the result manifest complete.
+
+First-fork failure diagnosis uses the original attempt61/generation612/risk586
+payload from `20261008T094546Z_428`, full 16 terminals, real start and fitting
+reserve. Direct launches lack the driver capture ledger and historical binary/
+payload digest; replay explicitly retains this provenance limitation and checks
+the native writer's snapshot/payload/attempt/risk identity plus decoded complete
+map/time identity. It does not manufacture or modify the historical ledger.
+`replay_on_search.py --payload ... --diagnose --require-guide` is unattended and
+fails if any original-budget OFF/ON run has no guide. Diagnosis records three
+cold measurements, same frozen GridMap-cache reuse after an explicit 30 s
+offline warmup limit, and extended 15 s searches with/without profiling.
+Warm/extended runs never grant online capability. Goal eligibility/reached,
+endpoint preparation, first complete path, edge/integral counts, physical,
+predictor, queue-pop and heuristic times are opt-in evidence without Dijkstra
+ordering changes. Edge/endpoint wall times contain prediction/physical work;
+reports must not add them as disjoint costs. Disabled timing is unavailable,
+not a measured zero. Incumbent return remains the existing search behavior.
+
+The unchanged failure reproduced three times at 1 s with no incumbent. OFF
+found a legal path in 0.028 s; extended ON first found a complete path near
+1.179 s and proved the cost 35.1997127121 m in 1.194 s. Frozen-cache reuse found
+the identical cost/path in about 0.10 s with no new prediction, after separately
+reported warmup. This excludes permanent physical disconnection and forced
+optimality as the cause of this observed timeout; prediction dominates.
+Six-package diagnostic rebuild and AStar/replay contract checks passed;
+spec/standards findings on unmeasured times, preparation early exits and budget/
+sparse qualification were corrected and rechecked. Attempt9/generation86's
+same optimized candidate also reproduces a dynamics ratio 1.275954 after three
+successful refinements: its captured start vx=0.637977 already exceeds the
+original 0.5 m/s plus 5% tolerance. Rebinding that physical derivative preserves
+the rejection; neither retiming nor refinement can legally reduce the captured
+initial velocity. This is not yet a claimed solution to future execution
+recovery, and does not grant that historical candidate authorization.

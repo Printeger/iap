@@ -280,6 +280,7 @@ void pointJson(std::ostream& out, const Point& p) {
 // Production multi-terminal search, unlike component attribution (Dijkstra).
 // Missing saved PL is UNCOMPUTED; this mode never fabricates a low-risk field.
 void planningSearch(const Input& in, const std::string& mode, const char* risk_path) {
+  const bool profile=!(std::getenv("IAP_REPLAY_PROFILE") && std::string(std::getenv("IAP_REPLAY_PROFILE"))=="0");
   double reserve, taper; size_t count;
   if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || !count || count > 100000)
     throw std::invalid_argument("invalid planning goal set");
@@ -297,10 +298,10 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   auto calls=std::make_shared<std::atomic<uint64_t>>(0);
   size_t missing=0, advisory_calls=0;
   const auto prediction_stats=std::make_shared<iap::PredictorBatchDiagnostics>();
-  prediction_stats->collect_component_timing=true;
+  prediction_stats->collect_component_timing=profile;
   double prepare_s=0;
   uint64_t version=0;
-  if(mode=="full") {
+  if(mode=="full" || mode=="warm") {
     std::ifstream stream(risk_path,std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),{});
     if(!stream) throw std::invalid_argument("prediction input unavailable");
@@ -344,7 +345,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     };
     version=map->bindRiskContext(std::move(context));
   } else if(mode!="off") throw std::invalid_argument("invalid risk replay mode");
-  const auto frozen=map->capturePlanningRiskQuery(version,in.planning_time_s,policy,nullptr,epoch->generation,true);
+  const auto frozen=map->capturePlanningRiskQuery(version,in.planning_time_s,policy,nullptr,epoch->generation,profile);
   const auto advisory=[&](const Point& p) {
     ++advisory_calls;
     if(mode!="off") return frozen(p);
@@ -356,32 +357,67 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     double distance=(p-in.start).norm();
     for(const auto& goal:goals) distance=std::min(distance,(p-goal).norm());
     context.required_clearance_m+=reserve*std::clamp(distance/taper,0.,1.);
-    auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,true);
+    auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,profile);
     if(cell.executable()) cell.advisory=advisory(p);
     return cell;
   };
   AStar search; search.initGridMap(map,in.pool); search.setFrozenEpoch(epoch);
-  search.setTaskGoal(task_goal); search.setPerformanceDiagnostics(true);
+  search.setTaskGoal(task_goal); search.setPerformanceDiagnostics(profile);
   search.setPlanningQuery(query,false); search.setAdvisoryQuery(advisory);
+  double warm_s=0.;bool warm_found=false;
+  if(mode=="warm") {
+    const auto began=Clock::now();
+    warm_found=search.AstarSearchGoals(in.step_m,in.start,goals,30.,in.center);
+    warm_s=std::chrono::duration<double>(Clock::now()-began).count();
+  }
+  const auto before_risk=*frozen.statistics;
+  const auto before_calls=calls->load();const auto before_advisory=advisory_calls;
+  const auto gnss_before=prediction_stats->gnss_advisory_duration_ns;
+  const auto lidar_before=prediction_stats->lidar_advisory_duration_ns;
+  const auto fusion_before=prediction_stats->fusion_advisory_duration_ns;
   const bool found=search.AstarSearchGoals(in.step_m,in.start,goals,in.budget_s,in.center);
   const auto& r=search.lastResult();
+  const auto path=search.getPath();
+  const auto measured=[&](double seconds) {
+    if(!profile)return std::string("null");
+    std::ostringstream value;value<<std::setprecision(17)<<seconds;return value.str();
+  };
   std::cout<<std::setprecision(17)<<"{\"mode\":"<<std::quoted(mode)<<",\"guide_found\":"<<(found?"true":"false")
+    <<",\"profiling_enabled\":"<<(profile?"true":"false")
     <<",\"failure\":"<<std::quoted(AStar::failureName(r.failure))<<",\"search_s\":"<<r.duration_s
-    <<",\"gnss_prediction_s\":"<<prediction_stats->gnss_advisory_duration_ns*1e-9
-    <<",\"lidar_prediction_s\":"<<prediction_stats->lidar_advisory_duration_ns*1e-9
-    <<",\"fusion_prediction_s\":"<<prediction_stats->fusion_advisory_duration_ns*1e-9
-    <<",\"prediction_prepare_s\":"<<prepare_s<<",\"predictor_calls\":"<<calls->load()
-    <<",\"advisory_calls\":"<<advisory_calls<<",\"missing_unique_voxels\":"<<missing
-    <<",\"risk_cache_hits\":"<<frozen.statistics->hits<<",\"risk_cache_misses\":"<<frozen.statistics->misses
-    <<",\"classifications\":"<<frozen.statistics->classifications<<",\"prediction_s\":"<<frozen.statistics->prediction_s
-    <<",\"classification_s\":"<<frozen.statistics->classification_s<<",\"edge_s\":"<<r.edge_s
+    <<",\"gnss_prediction_s\":"<<measured((prediction_stats->gnss_advisory_duration_ns-gnss_before)*1e-9)
+    <<",\"lidar_prediction_s\":"<<measured((prediction_stats->lidar_advisory_duration_ns-lidar_before)*1e-9)
+    <<",\"fusion_prediction_s\":"<<measured((prediction_stats->fusion_advisory_duration_ns-fusion_before)*1e-9)
+    <<",\"prediction_prepare_s\":"<<prepare_s<<",\"predictor_calls\":"<<calls->load()-before_calls
+    <<",\"advisory_calls\":"<<advisory_calls-before_advisory<<",\"missing_unique_voxels\":"<<missing
+    <<",\"risk_cache_hits\":"<<frozen.statistics->hits-before_risk.hits<<",\"risk_cache_misses\":"<<frozen.statistics->misses-before_risk.misses
+    <<",\"classifications\":"<<frozen.statistics->classifications-before_risk.classifications<<",\"prediction_s\":"<<measured(frozen.statistics->prediction_s-before_risk.prediction_s)
+    <<",\"classification_s\":"<<measured(frozen.statistics->classification_s-before_risk.classification_s)<<",\"edge_s\":"<<measured(r.edge_s)
+    <<",\"occupancy_s\":"<<measured(r.occupancy_query_s)<<",\"clearance_s\":"<<measured(r.clearance_query_s)
+    <<",\"endpoint_prepare_s\":"<<measured(r.endpoint_prepare_s)<<",\"heuristic_s\":"<<measured(r.heuristic_s)<<",\"queue_pop_s\":"<<measured(r.queue_s)
+    <<",\"first_complete_path_s\":";
+  if(std::isfinite(r.first_complete_path_s))std::cout<<r.first_complete_path_s;else std::cout<<"null";
+  std::cout<<",\"incumbent_at_finish\":"<<(!path.empty()?"true":"false")
+    <<",\"warmup_s\":"<<warm_s<<",\"warmup_found\":"<<(warm_found?"true":"false")
+    <<",\"warmup_predictor_calls\":"<<before_calls
+    <<",\"diagnostic_only\":"<<(mode=="warm"?"true":"false")
+    <<",\"edge_checks\":"<<r.edge_checks<<",\"segment_integrals\":"<<r.segment_integrals
     <<",\"physical_queries\":"<<r.query_calls<<",\"sample_cache_hits\":"<<r.cache_hits
     <<",\"advisory_refreshes\":"<<r.advisory_refresh_calls<<",\"risk_integration_calls\":"<<r.risk_integration_calls
     <<",\"lower_bound_pruned_edges\":"<<r.lower_bound_pruned_edges
     <<",\"expanded\":"<<r.expanded<<",\"path_cost_m\":"<<r.path_cost<<",\"length_m\":"<<r.path_length_m
     <<",\"risk_cost_m\":"<<r.risk_cost_m<<",\"terminal_cost_m\":"<<r.terminal_cost_m
-    <<",\"optimality_proven\":"<<(r.optimality_proven?"true":"false")<<",\"path_m\":[";
-  const auto path=search.getPath(); for(size_t i=0;i<path.size();++i) {if(i)std::cout<<',';pointJson(std::cout,path[i]);}
+    <<",\"optimality_proven\":"<<(r.optimality_proven?"true":"false")<<",\"goals\":[";
+  for(size_t i=0;i<r.goals.size();++i) {
+    if(i)std::cout<<',';
+    const auto& g=r.goals[i];
+    std::cout<<"{\"checked\":"<<(g.checked?"true":"false")<<",\"eligible\":"<<(g.eligible?"true":"false")<<",\"reached\":"<<(g.reached?"true":"false")
+      <<",\"failure\":"<<std::quoted(AStar::failureName(g.failure))<<",\"lattice_m\":";
+    if(g.lattice.allFinite())pointJson(std::cout,g.lattice);else std::cout<<"null";
+    std::cout<<'}';
+  }
+  std::cout<<"],\"path_m\":[";
+  for(size_t i=0;i<path.size();++i) {if(i)std::cout<<',';pointJson(std::cout,path[i]);}
   std::cout<<"]}\n";
 }
 

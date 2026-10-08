@@ -17,6 +17,25 @@ from unittest.mock import patch
 
 
 class OnSearchReplayTest(unittest.TestCase):
+    def test_native_writer_identity_is_not_fabricated_as_driver_ledger(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run=Path(temporary);snapshot=run/'export/planner/failure_map/terminal_final';snapshot.mkdir(parents=True)
+            manifests=run/'metadata/manifests';manifests.mkdir(parents=True)
+            meta={'run_manifest':'../../../../metadata/run_manifest.json','artifact_label':'terminal_final',
+                  'planning_attempt_id':61,'planning_input_risk_version':586,'risk_version':586}
+            (snapshot/'snapshot.json').write_text(json.dumps(meta))
+            payload=snapshot/'planning_input.bin';payload.write_bytes(b'payload')
+            (run/'metadata/run_manifest.json').write_text(json.dumps({'source':{'git_worktree_clean':True,'git_commit':'revision'}}))
+            native=manifests/'planner_failure_map_terminal_final.json'
+            native.write_text(json.dumps({'snapshot':'planner/failure_map/terminal_final/snapshot.json',
+                 'planning_input':'planner/failure_map/terminal_final/planning_input.bin','planning_attempt_id':61,'risk_version':586}))
+            evidence=verify_planning_capture(snapshot,payload,meta)
+            self.assertEqual(evidence['authority'],'NATIVE_FAILURE_WRITER')
+            self.assertFalse(evidence['primary_registered'])
+            self.assertFalse((manifests/'planning_input_capture.json').exists())
+            with self.assertRaisesRegex(ValueError,'identity mismatch'):
+                verify_planning_capture(snapshot,payload,{**meta,'planning_attempt_id':62})
+
     def test_pending_unregistered_and_non_search_inputs_cannot_trigger_early_stop(self):
         with tempfile.TemporaryDirectory() as temporary:
             run=Path(temporary)
@@ -94,6 +113,13 @@ class OnSearchReplayTest(unittest.TestCase):
                     self.assertEqual(result.returncode,0,result.stderr)
                     self.assertEqual(primary.read_bytes(),before)
                     self.assertTrue((run/'metadata/manifests/adopted_search.json').is_file())
+                    evidence=json.loads((run/'metadata/manifests/adopted_search.json').read_text())
+                    self.assertFalse(evidence['sparse']['online_capability_evidence'])
+                    rejected=subprocess.run([sys.executable,str(Path(__file__).with_name('replay_on_search.py')),
+                        str(fixture.directory),'--parameters',str(parameters),'--binary',str(_backend_path()),
+                        '--budget-s','15','--require-guide'],capture_output=True,text=True,timeout=5)
+                    self.assertNotEqual(rejected.returncode,0)
+                    self.assertIn('original 1 s search budget',rejected.stderr)
                 finally:
                     finalize_run(run,lifecycle='completed')
         finally:

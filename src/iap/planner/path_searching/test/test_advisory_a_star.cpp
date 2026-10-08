@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <path_searching/dyn_a_star.h>
+#include <thread>
 
 // The route test uses the real A* lattice while supplying a deterministic
 // planning query. Predictor and sensor behavior are covered at their seams.
@@ -73,6 +74,23 @@ TEST(AdvisoryAStar, TimeoutWithAdvisoryRejectionsIsNotExhaustion) {
   EXPECT_FALSE(search.AstarSearchGoals(.1,Eigen::Vector3d(-1,0,1),{Eigen::Vector3d(1,0,1)},0));
   EXPECT_EQ(search.lastResult().failure,AStar::Failure::TIME_BUDGET);
   EXPECT_FALSE(search.lastResult().exhausted);
+}
+
+TEST(AdvisoryAStar, EndpointTimeoutRetainsMeasuredTimeAndUnexaminedIdentity) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(40,40,10));
+  search.setPerformanceDiagnostics(true);
+  search.setPlanningQuery([](const Eigen::Vector3d&) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    return cell;
+  });
+  EXPECT_FALSE(search.AstarSearchGoals(.1,Eigen::Vector3d(-1,0,1),
+      {Eigen::Vector3d(1,0,1),Eigen::Vector3d(1,1,1)},.001));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::TIME_BUDGET);
+  EXPECT_GT(search.lastResult().endpoint_prepare_s,.001);
+  ASSERT_EQ(search.lastResult().goals.size(),2u);
+  EXPECT_FALSE(search.lastResult().goals[1].checked);
 }
 
 TEST(AdvisoryAStar, StartInsideWarningUsesSameHighCostSearch) {
@@ -400,6 +418,14 @@ TEST(AdvisoryAStar, DiagnosticsToggleAndRoundCacheKeepIdenticalRouteAndCost) {
     EXPECT_GT(search.lastResult().sample_hits[0], 0u);
     EXPECT_GT(search.lastResult().sample_hits[1], 0u);
     EXPECT_GT(search.lastResult().sample_hits[2], 0u);
+    EXPECT_TRUE(std::isfinite(search.lastResult().first_complete_path_s));
+    EXPECT_LE(search.lastResult().first_complete_path_s,search.lastResult().duration_s);
+    if(round==1) {
+      ASSERT_EQ(search.lastResult().goals.size(),1u);
+      EXPECT_TRUE(search.lastResult().goals[0].eligible);
+      EXPECT_TRUE(search.lastResult().goals[0].reached);
+      EXPECT_GT(search.lastResult().endpoint_prepare_s,0.);
+    } else EXPECT_TRUE(search.lastResult().goals.empty());
   }
 }
 

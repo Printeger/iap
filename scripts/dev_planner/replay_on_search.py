@@ -38,7 +38,25 @@ def replay_input(meta, params, budget):
 def verify_planning_capture(snapshot, payload, meta):
     run=(snapshot/ meta['run_manifest']).resolve().parent.parent
     primary=json.loads((run/'metadata/run_manifest.json').read_text())
-    capture=json.loads((run/'metadata/manifests/planning_input_capture.json').read_text())
+    ledger=run/'metadata/manifests/planning_input_capture.json'
+    if not ledger.exists():
+        # Direct canonical launches have the writer's native artifact manifest,
+        # without the driver collector ledger. Do not fabricate the latter or
+        # claim a historically recorded binary/payload digest.
+        native=run/'metadata/manifests'/('planner_failure_map_'+meta['artifact_label']+'.json')
+        record=json.loads(native.read_text())
+        if (not primary['source']['git_worktree_clean'] or
+                (run/'export'/record['snapshot']).resolve()!=(snapshot/'snapshot.json').resolve() or
+                (run/'export'/record['planning_input']).resolve()!=payload.resolve() or
+                record['planning_attempt_id']!=meta['planning_attempt_id'] or
+                record['risk_version']!=meta['risk_version'] or
+                meta['planning_input_risk_version']!=meta['risk_version']):
+            raise ValueError('native planning capture identity mismatch')
+        return {'authority':'NATIVE_FAILURE_WRITER','recorded_revision':primary['source']['git_commit'],
+                'observed_payload_sha256':sha(payload),'native_manifest_sha256':sha(native),
+                'primary_registered':str(native.relative_to(run)) in primary.get('subordinate_manifests',[]),
+                'limitation':'Driver ledger and historical producer binary/payload hashes unavailable; native snapshot/map/payload identity checked by C++ replay.'}
+    capture=json.loads(ledger.read_text())
     if (not primary['source']['git_worktree_clean'] or capture['source']['dirty'] or
         capture['source']['revision']!=primary['source']['git_commit']):
         raise ValueError('unclean or mismatched captured revision')
@@ -65,11 +83,16 @@ def main():
     parser.add_argument('--budget-s',type=float,default=1.)
     parser.add_argument('--label',default='original_search')
     parser.add_argument('--require-guide',action='store_true',help='fail the regression gate if either production search has no guide')
+    parser.add_argument('--diagnose',action='store_true',help='three cold measurements, same-cache warm control and offline extended search; never online authorization')
     args=parser.parse_args()
+    if not 0 < args.budget_s <= 30:raise ValueError('replay budget must be positive and at most 30 s')
+    if args.require_guide and args.budget_s!=1.:
+        raise ValueError('--require-guide uses the original 1 s search budget; extended diagnostics cannot grant online capability')
     if not args.label.replace('_','').isalnum(): raise ValueError('unsafe label')
     m=json.loads((args.snapshot/'snapshot.json').read_text())
     params=json.loads(args.parameters.read_text())
-    if args.payload: verify_planning_capture(args.snapshot,args.payload,m)
+    capture=verify_planning_capture(args.snapshot,args.payload,m) if args.payload else None
+    if args.diagnose and not args.payload:raise ValueError('diagnostic controls require the actual complete payload')
     data=replay_input(m,params,args.budget_s)
     inherited=os.environ.get('IAP_RUN_DIR')
     run=adopt_run_directory(inherited) if inherited else resolve_run_directory(
@@ -80,27 +103,38 @@ def main():
         'budget_s':args.budget_s,'parameters_sha256':sha(args.parameters),
         'input_sha256':{f.name:sha(f) for f in args.snapshot.iterdir() if f.is_file()},
         'binary':binary_identity(args.binary.resolve()),'full_prediction_replay':False}
-    if args.payload: result['payload_sha256']=sha(args.payload)
+    if args.payload: result.update(payload_sha256=sha(args.payload),capture_authority=capture)
+    result['measurements']=[]
     status='failed'
     try:
         (out/'replay_input.txt').write_text(data)
-        for mode in ('off','full' if args.payload else 'sparse'):
+        groups=[(mode,mode,args.budget_s) for mode in ('off','full' if args.payload else 'sparse')]
+        if args.diagnose:groups += [('warm','warm',args.budget_s),('extended','full',15.),('extended_unprofiled','full',15.)]
+        for label,mode,budget in groups:
+          for repetition in range(3 if args.diagnose and label in ('off','full','warm') else 1):
             risk=args.payload if mode=='full' else args.snapshot/'queried_risk.csv'
+            if mode=='warm':risk=args.payload
             command=[str(args.binary.resolve()),str((args.snapshot/'cells.bin').resolve()),'--planning-search',mode,str(risk.resolve())]
-            completed=subprocess.run(command,input=data,text=True,capture_output=True,timeout=args.budget_s+30)
-            (out/(mode+'.stderr.log')).write_text(completed.stderr)
+            completed=subprocess.run(command,input=replay_input(m,params,budget),text=True,capture_output=True,timeout=budget+35,
+                env={**os.environ,'IAP_REPLAY_PROFILE':'0' if label=='extended_unprofiled' else '1'})
+            name=label+'_'+str(repetition) if args.diagnose else label
+            (out/(name+'.stderr.log')).write_text(completed.stderr)
             if completed.returncode: raise RuntimeError(f"{mode} replay exit {completed.returncode}: {completed.stderr}")
             verdict=json.loads(completed.stdout)
             verdict['scope']='REAL_FROZEN' if mode=='full' else 'PHYSICAL_OFF' if mode=='off' else 'SAVED_PL_PARTIAL_DIAGNOSTIC'
-            (out/(mode+'.json')).write_text(json.dumps(verdict,indent=2)+'\n')
-            result[mode]=verdict
+            if mode=='warm':verdict['scope']='SAME_FROZEN_GRIDMAP_CACHE_DIAGNOSTIC'
+            verdict.update(label=label,repetition=repetition,search_budget_s=budget,
+                           online_capability_evidence=label in ('off','full') and budget==1.)
+            (out/(name+'.json')).write_text(json.dumps(verdict,indent=2)+'\n')
+            result['measurements'].append(verdict)
+            if repetition==0:result[label]=verdict
         result['historical_full_on_status']='REPLAYED' if args.payload else 'INCONCLUSIVE_MISSING_COMPLETE_INPUT'
         result['full_prediction_replay']=bool(args.payload)
         if result['input_sha256']!={f.name:sha(f) for f in args.snapshot.iterdir() if f.is_file()}:
             raise RuntimeError('frozen input changed during replay')
         if args.payload and result['payload_sha256']!=sha(args.payload):
             raise RuntimeError('prediction payload changed during replay')
-        if args.require_guide and not all(result[k]['guide_found'] for k in ('off','full' if args.payload else 'sparse')):
+        if args.require_guide and not all(v['guide_found'] for v in result['measurements'] if v['label'] in ('off','full','sparse')):
             raise RuntimeError('production search did not deliver a guide within the original budget')
         status='completed'
     except Exception as exc:
