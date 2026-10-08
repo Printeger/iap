@@ -301,6 +301,18 @@ LidarFimPrimitiveIndex::LidarFimPrimitiveIndex(
   for(auto& [key,id]:groups) id=advisory_group_count_++;
   for(size_t i=0;i<advisory_primitives_.size();++i)
     if(advisory_primitives_[i].valid) advisory_primitives_[i].group=groups.at(keys[i]);
+  for(size_t i=0;i<primitives_->size();++i)
+    if((*primitives_)[i].center_w.allFinite()) advisory_order_.push_back(i);
+  // Fix the old query's order once: canonical families, then lexicographic
+  // radius-query buckets, then original insertion order inside each bucket.
+  // Radius clipping only deletes elements from this order, so each family's
+  // floating-point accumulation remains bit-for-bit unchanged at every point.
+  std::stable_sort(advisory_order_.begin(),advisory_order_.end(),[&](size_t a,size_t b) {
+    if(advisory_primitives_[a].group!=advisory_primitives_[b].group)
+      return advisory_primitives_[a].group<advisory_primitives_[b].group;
+    const auto ka=keyFor((*primitives_)[a].center_w),kb=keyFor((*primitives_)[b].center_w);
+    return std::tie(ka.x,ka.y,ka.z)<std::tie(kb.x,kb.y,kb.z);
+  });
 }
 
 std::shared_ptr<const LidarFimPrimitiveIndex> LidarFimPrimitiveIndex::build(
@@ -547,7 +559,6 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   struct Support { Eigen::Matrix3d information=Eigen::Matrix3d::Zero(); size_t count=0; };
   std::map<SupportKey,Support> supports;
   const auto prepared=index && candidate_indices ? index->advisoryPrimitives(params.fim_support_voxel_m) : nullptr;
-  std::vector<size_t> grouped_indices;
   const auto* ordered_indices=candidate_indices;
   Support indexed_support;size_t indexed_group=0;
   const auto flush_indexed_support=[&]() {
@@ -557,19 +568,11 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
       indexed_support=Support{};
     }
   };
-  if(prepared) {
-    // Sort small primitive IDs, not one dense information matrix per return.
-    // Stable ordering preserves the old accumulation order inside each family;
-    // families still sum in their canonical order. All scratch is query-local.
-    grouped_indices=*candidate_indices;
-    std::stable_sort(grouped_indices.begin(),grouped_indices.end(),
-        [&](size_t a,size_t b) {return (*prepared)[a].group<(*prepared)[b].group;});
-    ordered_indices=&grouped_indices;
-  }
   if (!std::isfinite(params.fim_support_voxel_m) || params.fim_support_voxel_m<=0)
     return fallback("invalid_lidar_support_scale");
   const auto accumulate = [&](const LidarFimPrimitive& primitive, size_t primitive_id) {
-    if (!primitive.center_w.allFinite() || !primitive.normal_w.allFinite()) {
+    if ((!prepared || !(*prepared)[primitive_id].valid) &&
+        (!primitive.center_w.allFinite() || !primitive.normal_w.allFinite())) {
       return;
     }
     const Eigen::Vector3d d = primitive.center_w - p_w;
@@ -683,6 +686,10 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
       std::isfinite(params_.fim_radius_m) && params_.fim_radius_m > 0.0
           ? params_.fim_radius_m
           : params_.search_radius_m;
+  if(p_w.allFinite() && std::isfinite(radius) && radius>0. &&
+      index->advisoryPrimitives(params_.fim_support_voxel_m))
+    return evaluate_lidar_advisory_fim_candidates(p_w,index->primitives(),
+        &index->advisoryOrder(),params_,index);
   std::vector<std::size_t> candidates;
   index->queryRadius(p_w, radius, &candidates);
   return evaluate_lidar_advisory_fim_candidates(p_w, index->primitives(),

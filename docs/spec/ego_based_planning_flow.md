@@ -1884,3 +1884,24 @@ Release rebuild/install, 12/12 planner functional checks and the LiDAR/reference
 checks passed. Full IAP CTest remains 31/32: the previously reported legacy
 `test_future_pl_field_predictor` invalid-result assertions remain unresolved.
 Both review axes found no remaining issue in the performance repair.
+
+
+The immutable LiDAR FIM index now prepares the existing correlation-family
+accumulation order once: family ID, original radius-index bucket X/Y/Z, then
+stable original primitive order. Each query performs the exact radius cutoff
+and original distance/Gaussian/information arithmetic; accepted support counts,
+family averaging, weak-direction admission and canonical sums are unchanged.
+Parameter-mismatched queries retain the original radius-index fallback. This
+order is derived from the frozen input, never a second PL cache. Tests compare
+it directly to the former radius query plus stable family sort across negative
+coordinates, invalid normals, radii and bucket/support sizes. Actual frozen
+attempt4 and attempt51 extended searches retain identical guide coordinates,
+length/risk/terminal/total costs, expansions and unique predictions. On captured
+profiling-disabled production settings, original-kernel attempt4 is cold
+TIME_BUDGET in 3/3 trials; repaired cold searches deliver in 0.963–0.982 s.
+Attempt51's original kernel already delivers offline in 0.734–0.756 s; repaired
+queries deliver in 0.551–0.560 s. Historical attempt51's online timeout remains
+separate evidence: isolated replay does not establish its precise live cause.
+Instrumentation overhead and that narrow attempt4 margin are not guarantees
+of continuous real-time service. These are search mechanism results only;
+field continuation and PL metre qualification require their own evidence.

@@ -103,6 +103,7 @@ class LidarFimPrimitiveIndex {
     return support_voxel_m==support_voxel_m_ ? &advisory_primitives_ : nullptr;
   }
   std::size_t advisoryGroupCount() const { return advisory_group_count_; }
+  const std::vector<std::size_t>& advisoryOrder() const { return advisory_order_; }
 
   void queryRadius(const Eigen::Vector3d& center,
                    double radius_m,
@@ -132,6 +133,7 @@ class LidarFimPrimitiveIndex {
   double support_voxel_m_=std::numeric_limits<double>::quiet_NaN();
   std::vector<AdvisoryPrimitive> advisory_primitives_;
   std::size_t advisory_group_count_=0;
+  std::vector<std::size_t> advisory_order_;
 };
 
 class LidarObservabilityFim {

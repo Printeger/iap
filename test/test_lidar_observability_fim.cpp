@@ -719,6 +719,50 @@ TEST(LidarSampling, SameSurfaceDensityDoesNotChangePLByFivePercent) {
   }
 }
 
+TEST(LidarObservabilityFimTest, IndexedInvalidNormalsKeepDiagnosticsWithNoFamilies) {
+  auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>(12);
+  for(size_t i=0;i<primitives->size();++i) {
+    (*primitives)[i].center_w=Eigen::Vector3d(.1*i,0,0);
+    (*primitives)[i].normal_w.setZero();
+  }
+  (*primitives)[1].normal_w.setConstant(NAN);
+  const auto index=iap::LidarFimPrimitiveIndex::build(primitives,1.);
+  ASSERT_EQ(index->advisoryGroupCount(),0u);
+  iap::LidarObservabilityFim estimator;
+  const auto expected=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),primitives.get(),make_current());
+  const auto actual=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),index.get(),make_current());
+  EXPECT_FALSE(actual.valid);EXPECT_EQ(actual.fallback_reason,expected.fallback_reason);
+  EXPECT_EQ(actual.n_primitives,expected.n_primitives);
+  EXPECT_EQ(actual.n_valid_normals,expected.n_valid_normals);
+  EXPECT_EQ(actual.n_support_groups,0);EXPECT_TRUE(actual.lambda.isZero());
+}
+
+TEST(LidarObservabilityFimTest, FrozenFamilyOrderEqualsFormerRadiusQueryThenStableSort) {
+  auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  for(int i=-80;i<=80;++i) {
+    iap::LidarFimPrimitive p;
+    p.center_w=Eigen::Vector3d(.07*i,.11*(i%7),.13*(i%5));
+    p.normal_w=Eigen::Vector3d::Unit(std::abs(i)%3);
+    primitives->push_back(p);
+  }
+  (*primitives)[7].normal_w.setZero();
+  (*primitives)[9].normal_w.setConstant(NAN);
+  for(double cell:{.25,.8,4.}) for(double support:{.3,.5,1.}) {
+    const auto index=iap::LidarFimPrimitiveIndex::build(primitives,cell,support);
+    const auto& prepared=*index->advisoryPrimitives(support);
+    for(const auto& query:{Eigen::Vector3d::Zero().eval(),Eigen::Vector3d(-2.4,.25,-.3),Eigen::Vector3d(2.7,-.25,.4)})
+      for(double radius:{.1,1.,3.3,8.}) {
+        std::vector<size_t> former;
+        index->queryRadius(query,radius,&former);
+        std::stable_sort(former.begin(),former.end(),[&](size_t a,size_t b) { return prepared[a].group<prepared[b].group; });
+        std::vector<size_t> clipped;
+        for(const size_t id:index->advisoryOrder())
+          if(((*primitives)[id].center_w-query).squaredNorm()<=radius*radius) clipped.push_back(id);
+        EXPECT_EQ(clipped,former);
+      }
+  }
+}
+
 TEST(LidarObservabilityFimTest, PreparedCorrelationFamiliesMatchUncachedRadiusClipping) {
   auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>(
       axis_primitives({Eigen::Vector3d::UnitX(),Eigen::Vector3d::UnitY(),Eigen::Vector3d::UnitZ()},24));
@@ -768,5 +812,21 @@ TEST(LidarObservabilityFimTest, DenseIndexedFamiliesRetainInformationAndAdmissio
     EXPECT_EQ(actual.n_primitives,expected.n_primitives);EXPECT_EQ(actual.n_valid_normals,expected.n_valid_normals);
     EXPECT_EQ(actual.n_support_groups,expected.n_support_groups);
     EXPECT_TRUE(actual.lambda.isApprox(expected.lambda,1e-12));
+  }
+}
+
+TEST(LidarObservabilityFimTest, PreparedIndexPreservesInvalidRadiusAdmission) {
+  auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  for(int i=0;i<40;++i) {
+    iap::LidarFimPrimitive p;p.center_w=Eigen::Vector3d(.1*i,0,0);
+    p.normal_w=Eigen::Vector3d::UnitX();primitives->push_back(p);
+  }
+  const auto index=iap::LidarFimPrimitiveIndex::build(primitives,1.,.5);
+  for(double radius:{-1.,0.,std::numeric_limits<double>::infinity(),
+      std::numeric_limits<double>::quiet_NaN()}) {
+    iap::LidarObservabilityFim::Params params;params.fim_radius_m=0.;params.search_radius_m=radius;
+    iap::LidarObservabilityFim estimator(params);
+    const auto result=estimator.evaluate_advisory_fim(Eigen::Vector3d::Zero(),index.get(),make_current());
+    EXPECT_FALSE(result.valid);EXPECT_EQ(result.n_primitives,0);
   }
 }
