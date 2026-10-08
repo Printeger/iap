@@ -1856,3 +1856,20 @@ original 0.5 m/s plus 5% tolerance. Rebinding that physical derivative preserves
 the rejection; neither retiming nor refinement can legally reduce the captured
 initial velocity. This is not yet a claimed solution to future execution
 recovery, and does not grant that historical candidate authorization.
+
+The first-fork performance repair stably sorts LiDAR primitive IDs before
+information accumulation, instead of materializing/sorting a dense matrix for
+every return. The same prepared families, exact radius cutoff, contribution
+order inside each family and canonical family summation remain authoritative;
+scratch is query-local, with no new cache or model rule. On the identical
+attempt61 input, three cold ON searches return in 0.852–0.869 s with 15,421
+predictions and 11,899 expansions. Guide coordinates, length, risk addition,
+terminal item and total cost exactly match the pre-fix extended result. LiDAR
+work drops to about 0.433 s; original online budget, physics and PL remain fixed.
+Dense-family/reference admission and information equivalence are tested at the
+existing LiDAR FIM seam. Field continuation through the first fork still requires
+the subsequent clean-revision targeted run; this replay alone is not that pass.
+Release rebuild/install, 12/12 planner functional checks and the LiDAR/reference
+checks passed. Full IAP CTest remains 31/32: the previously reported legacy
+`test_future_pl_field_predictor` invalid-result assertions remain unresolved.
+Both review axes found no remaining issue in the performance repair.

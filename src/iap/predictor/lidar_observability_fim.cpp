@@ -546,10 +546,26 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   using SupportKey=std::array<int64_t,4>;
   struct Support { Eigen::Matrix3d information=Eigen::Matrix3d::Zero(); size_t count=0; };
   std::map<SupportKey,Support> supports;
-  const auto prepared=index ? index->advisoryPrimitives(params.fim_support_voxel_m) : nullptr;
-  struct IndexedContribution { size_t group; Eigen::Matrix3d information; };
-  std::vector<IndexedContribution> indexed_supports;
-  if(prepared && candidate_indices) indexed_supports.reserve(candidate_indices->size());
+  const auto prepared=index && candidate_indices ? index->advisoryPrimitives(params.fim_support_voxel_m) : nullptr;
+  std::vector<size_t> grouped_indices;
+  const auto* ordered_indices=candidate_indices;
+  Support indexed_support;size_t indexed_group=0;
+  const auto flush_indexed_support=[&]() {
+    if(indexed_support.count) {
+      out.lambda+=indexed_support.information/double(indexed_support.count);
+      ++out.n_support_groups;
+      indexed_support=Support{};
+    }
+  };
+  if(prepared) {
+    // Sort small primitive IDs, not one dense information matrix per return.
+    // Stable ordering preserves the old accumulation order inside each family;
+    // families still sum in their canonical order. All scratch is query-local.
+    grouped_indices=*candidate_indices;
+    std::stable_sort(grouped_indices.begin(),grouped_indices.end(),
+        [&](size_t a,size_t b) {return (*prepared)[a].group<(*prepared)[b].group;});
+    ordered_indices=&grouped_indices;
+  }
   if (!std::isfinite(params.fim_support_voxel_m) || params.fim_support_voxel_m<=0)
     return fallback("invalid_lidar_support_scale");
   const auto accumulate = [&](const LidarFimPrimitive& primitive, size_t primitive_id) {
@@ -566,8 +582,9 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
       const auto& value=(*prepared)[primitive_id];
       if(!value.valid) return;
       const double pi_range=std::exp(-dist2/std::max(2.*radius2,1e-9));
-      indexed_supports.push_back({value.group,
-          weight_scale*pi_range*value.confidence*value.weight*inv_sigma2*value.normal_outer});
+      if(indexed_group!=value.group) {flush_indexed_support();indexed_group=value.group;}
+      indexed_support.information+=weight_scale*pi_range*value.confidence*value.weight*inv_sigma2*value.normal_outer;
+      ++indexed_support.count;
       ++valid_normals;return;
     }
     const double normal_norm = primitive.normal_w.norm();
@@ -597,8 +614,8 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     ++valid_normals;
   };
 
-  if (candidate_indices != nullptr) {
-    for (const std::size_t idx : *candidate_indices) {
+  if (ordered_indices != nullptr) {
+    for (const std::size_t idx : *ordered_indices) {
       if (idx < primitives->size()) {
         accumulate((*primitives)[idx],idx);
       }
@@ -610,19 +627,9 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   }
 
   for (const auto& [key,support]:supports) out.lambda += support.information/double(support.count);
-  out.n_support_groups=static_cast<int>(supports.size());
+  if(!prepared) out.n_support_groups=static_cast<int>(supports.size());
   if(prepared) {
-    // Only local candidates occupy query scratch space. Stable grouping keeps
-    // the uncached primitive summation order inside each sorted family.
-    std::stable_sort(indexed_supports.begin(),indexed_supports.end(),
-        [](const auto& a,const auto& b) {return a.group<b.group;});
-    for(size_t i=0;i<indexed_supports.size();) {
-      const size_t first=i,group=indexed_supports[i].group;
-      Eigen::Matrix3d information=Eigen::Matrix3d::Zero();
-      do {information+=indexed_supports[i++].information;}
-      while(i<indexed_supports.size() && indexed_supports[i].group==group);
-      out.lambda+=information/double(i-first);++out.n_support_groups;
-    }
+    flush_indexed_support();
   }
   out.n_primitives = nearby;
   out.n_valid_normals = valid_normals;

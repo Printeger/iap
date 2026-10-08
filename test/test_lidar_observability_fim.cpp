@@ -747,3 +747,26 @@ TEST(LidarObservabilityFimTest, PreparedCorrelationFamiliesMatchUncachedRadiusCl
     }
   }
 }
+
+TEST(LidarObservabilityFimTest, DenseIndexedFamiliesRetainInformationAndAdmission) {
+  auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  for(int axis=0;axis<3;++axis) for(int u=-8;u<=8;++u) for(int v=-8;v<=8;++v) {
+    iap::LidarFimPrimitive p;p.center_w[axis]=1.2;
+    p.center_w[(axis+1)%3]=.2*u;p.center_w[(axis+2)%3]=.2*v;
+    p.normal_w=3.*Eigen::Vector3d::Unit(axis);p.weight=1.+.02*(u+8);
+    p.normal_confidence=.3+.02*(v+8);primitives->push_back(p);
+    p.center_w[(axis+1)%3]+=.01;p.weight*=.7;primitives->push_back(p);
+  }
+  iap::LidarObservabilityFim::Params params;params.fim_radius_m=2.3;
+  params.fim_support_voxel_m=.5;params.fim_range_sigma_base=.6;
+  const auto index=iap::LidarFimPrimitiveIndex::build(primitives,.8,.5);
+  const iap::LidarObservabilityFim estimator(params);
+  for(const auto& q:{Eigen::Vector3d::Zero().eval(),Eigen::Vector3d(-1.9,.2,.4),Eigen::Vector3d(2.1,.4,-.2)}) {
+    const auto expected=estimator.evaluate_advisory_fim(q,primitives.get(),make_current());
+    const auto actual=estimator.evaluate_advisory_fim(q,index.get(),make_current());
+    EXPECT_EQ(actual.valid,expected.valid);EXPECT_EQ(actual.fallback_reason,expected.fallback_reason);
+    EXPECT_EQ(actual.n_primitives,expected.n_primitives);EXPECT_EQ(actual.n_valid_normals,expected.n_valid_normals);
+    EXPECT_EQ(actual.n_support_groups,expected.n_support_groups);
+    EXPECT_TRUE(actual.lambda.isApprox(expected.lambda,1e-12));
+  }
+}
