@@ -1818,3 +1818,8 @@ deduplication, physical unknown rejection, library identity across prefixes and
 integral-interior model unknown qualification. Both spec and standards review
 findings were corrected and rechecked. The unresolved legacy Predictor check
 and field baseline failure above remain limitations.
+
+The production search replay follows the same adopter rule: an inherited run
+receives only its subordinate result; the outer owner alone registers it in the
+primary manifest. Its subprocess regression verifies the primary bytes remain
+unchanged while both OFF/sparse searches and the result manifest complete.

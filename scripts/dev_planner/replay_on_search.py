@@ -9,8 +9,8 @@ import sys
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'scripts/dev_predictor'))
-from advisory_validation import binary_identity, sha
-from run_directory import resolve_run_directory, adopt_run_directory, finalize_run, write_subordinate_manifest
+from advisory_validation import binary_identity, sha, manifest
+from run_directory import resolve_run_directory, adopt_run_directory, finalize_run
 from analyze_failure_map import _number, _point
 
 
@@ -107,7 +107,7 @@ def main():
         result['error']=f'{type(exc).__name__}: {exc}'
         raise
     finally:
-        write_subordinate_manifest(run,args.label,result)
+        manifest(run,args.label,result,owner=not inherited)
         if not inherited: finalize_run(run,lifecycle=status)
     print(json.dumps({'run':str(run),**{k:{n:v.get(n) for n in ('guide_found','failure','search_s','predictor_calls','advisory_calls','expanded','missing_unique_voxels')} for k,v in result.items() if k in ('off','sparse','full')}}))
 

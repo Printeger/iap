@@ -7,11 +7,13 @@ from pathlib import Path
 import subprocess
 import unittest
 import tempfile
+import sys
 import test_failure_map_tools as fixtures
 from analyze_failure_map import _backend_path
 from replay_on_search import replay_input, verify_planning_capture
 from run_curve_channel_live import finalized_planning_inputs
-from advisory_validation import sha
+from advisory_validation import sha, resolve_run_directory, finalize_run
+from unittest.mock import patch
 
 
 class OnSearchReplayTest(unittest.TestCase):
@@ -80,6 +82,20 @@ class OnSearchReplayTest(unittest.TestCase):
             self.assertGreater(reports['sparse']['missing_unique_voxels'],0)
             self.assertGreater(reports['sparse']['risk_cost_m'],0)
             self.assertEqual(reports['off']['risk_cost_m'],0)
+            parameters=fixture.directory/'parameters.json';parameters.write_text(json.dumps(params))
+            with patch.dict(os.environ,{'IAP_RUN_ROOT':str(fixture.directory/'runs')}):
+                run=resolve_run_directory(entrypoint='search_adopter_test')
+                primary=run/'metadata/run_manifest.json';before=primary.read_bytes()
+                try:
+                    result=subprocess.run([sys.executable,str(Path(__file__).with_name('replay_on_search.py')),
+                        str(fixture.directory),'--parameters',str(parameters),'--binary',str(_backend_path()),
+                        '--label','adopted_search','--require-guide'],text=True,capture_output=True,timeout=10,
+                        env={**os.environ,'IAP_RUN_DIR':str(run)})
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertEqual(primary.read_bytes(),before)
+                    self.assertTrue((run/'metadata/manifests/adopted_search.json').is_file())
+                finally:
+                    finalize_run(run,lifecycle='completed')
         finally:
             fixture.tearDown()
 
