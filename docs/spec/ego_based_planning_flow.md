@@ -1980,3 +1980,12 @@ PL and require the explicit missing epoch reason; finite regularized precision
 is no longer its expected behavior. The ordinary raw-bound fixture uses two
 observable constellations, while single-constellation failure remains covered
 by the dedicated GNSS fault tests. No failure assertion is removed.
+
+
+Scientific audit C extends the same native frozen replay with exact 1/2/4-copy
+experiments on its real derived primitives, retaining the original map, times,
+source sigmas and correlation groups. It checks the position marginal to 1e-12;
+representation-density fixtures remain explicitly synthetic. Independent
+numerical references verify the Cauchy bound, attitude conditioning loss and
+unbounded map-alignment gauge. An incomplete GNSS fault set still retains
+its usable nominal PSD constraint, without granting standalone fault PL.

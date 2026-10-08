@@ -85,6 +85,14 @@ def position_reference(measurement):
 
 def inspect(dataset, require_pose=False):
     checks = []
+    sampling = dataset/'sampling_actual/matrices.jsonl'
+    if sampling.is_file():
+        values = [json.loads(line) for line in sampling.read_text().splitlines()]
+        first = read_matrix(values[0], 'position_marginal')
+        for value in values[1:]:
+            error = float(np.max(np.abs(read_matrix(value, 'position_marginal')-first)))
+            checks.append({'variant': 'actual_correlated_copies', 'copies': value['copies'],
+                           'max_abs_error': error, 'pass': error <= 1e-12})
     for directory in sorted(p for p in dataset.iterdir() if p.is_dir()):
         if not (directory/'points.csv').is_file():
             continue

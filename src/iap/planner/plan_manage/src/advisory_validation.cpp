@@ -538,6 +538,31 @@ void samplingDiagnostics(const std::string& label,glim::RunLogManager& log) {
     run("density_"+std::to_string(density),points);
   }
 }
+void actualSamplingDiagnostics(const Input& in,const std::string& label,glim::RunLogManager& log) {
+  const auto dir=log.export_path("advisory/validation/"+label+"/sampling_actual");
+  if(std::filesystem::exists(dir)) throw std::runtime_error("actual sampling evidence exists");
+  std::filesystem::create_directories(dir);
+  std::ofstream csv(dir/"sampling.csv"),matrices(dir/"matrices.jsonl");
+  csv<<"identity,copies,primitive_count,support_groups,valid,hpl,vpl\n";
+  if(!in.occupancy || !in.occupancy->raw_occupied_voxel_centers)
+    throw std::runtime_error("actual sampling requires recorded raw map centers");
+  const auto original=iap::make_lidar_fim_primitives(*in.occupancy->raw_occupied_voxel_centers);
+  for(int copies:{1,2,4}) {
+    auto primitives=std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+    for(int i=0;i<copies;++i) primitives->insert(primitives->end(),original->begin(),original->end());
+    iap::LidarAdvisoryPredictor predictor(in.params.lidar);
+    predictor.set_lidar_fim_primitives(primitives);
+    auto snapshot=in.integrity;ego_planner::setAdvisoryPosteriorPrior(snapshot,false);
+    const auto lidar=predictor.query(snapshot.p_wb,snapshot);
+    const auto result=iap::FusionAdvisoryPredictor(in.params.fusion).query(snapshot,{},lidar);
+    csv<<"REAL_INPUT_DIAGNOSTIC,"<<copies<<','<<primitives->size()<<','<<lidar.n_support_groups<<','<<result.valid<<',';
+    csvNumber(csv,result.hpl);csv<<',';csvNumber(csv,result.vpl);csv<<'\n';
+    matrices<<"{\"copies\":"<<copies;
+    matrix(matrices,"position_marginal",result.lambda_pred,true);
+    poseMatrix(matrices,"joint_pose_information",result.joint_pose_information,true);
+    matrices<<"}\n";
+  }
+}
 } // namespace
 
 int main(int argc,char** argv) {
@@ -580,6 +605,7 @@ int main(int argc,char** argv) {
         evaluate(source,mode==iap::PredictorSourceMode::GnssOnly?"scan_gnss":"scan_lidar",
             "REAL_INPUT_DIAGNOSTIC",true,budget,log);
       }
+      actualSamplingDiagnostics(in,label,log);
     }
     else if(mode=="fixture") {campaign_namespace=label+"/";campaign(in,"SYNTHETIC_MECHANISM",budget,log);}
     else {

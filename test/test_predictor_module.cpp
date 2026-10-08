@@ -4664,3 +4664,18 @@ TEST(AdvisoryJointPose, SharedRotationGaugeCannotBecomePositionPrecision) {
   const auto observed=iap::FusionAdvisoryPredictor().query(snapshot,{},centered);
   EXPECT_TRUE(observed.valid);
 }
+
+
+TEST(AdvisoryJointPose, IncompleteFaultGeometryCanStillProvideNominalConstraint) {
+  auto snapshot=make_snapshot(true,false);
+  snapshot.gnss_epoch.sats.resize(2);
+  for(auto& sat:snapshot.gnss_epoch.sats) sat.constellation='G';
+  iap::GnssAdvisoryPredictor gnss(make_params().gnss);
+  const auto source=gnss.query(Eigen::Vector3d::Zero(),snapshot);
+  EXPECT_FALSE(source.valid);
+  EXPECT_EQ(source.geometry_status,iap::GnssGeometryStatus::TOO_FEW_SATELLITES);
+  EXPECT_TRUE(source.fim_valid);
+  EXPECT_GT(source.lambda_gnss.trace(),0.);
+  EXPECT_NEAR(source.lambda_min_eig,0.,1e-12);
+  EXPECT_FALSE(std::isfinite(source.hpl));
+}

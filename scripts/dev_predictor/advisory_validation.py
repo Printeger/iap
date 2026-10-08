@@ -96,7 +96,7 @@ def model_audit(run, dataset):
              ("src/iap/integrity/fgo_information_manager.cpp", "smoother.getFactors()", 30),
              ("src/iap/integrity/integrity_monitor.cpp", "report.current_motion_error_proxy_m =", 4),
              ("config/sim_ego/config_gnss.json", '"K_pl":', 1),
-             ("src/iap/predictor/fusion_advisory_predictor.cpp", "out.lambda_pred = out.lambda_prior", 5),
+             ("src/iap/predictor/fusion_advisory_predictor.cpp", "out.joint_pose_information=(gnss_pose+lidar_pose)", 9),
              ("src/iap/sim/sim_extension.cpp", "T_truth_est_ = T_truth * T_est.inverse()", 22)]
     evidence = []
     for file, needle, count in seams:
@@ -105,8 +105,8 @@ def model_audit(run, dataset):
         evidence.append({"file": file, "sha256": sha(REPO / file), "line": start+1,
                          "excerpt": "\n".join(lines[start:start+count])})
     manifest(run, name, {**source_identity(), "evidence": evidence,
-             "observed": "prior is scaled FGO marginal posterior, then GNSS and LiDAR spatial information are added without cross covariance",
-             "unresolved": "exact factor overlap, correlation, coordinate rotation and numerical calibration require live/factor evidence",
+             "observed": "canonical posterior proxy is disabled; pose constraints join before attitude marginalization with a Cauchy cross-source covariance bound",
+             "unresolved": "map/alignment/extrinsic uncertainty, within-source correlation, state-time propagation, real noise calibration and fused faults remain unqualified",
              "production_model_changed": False})
     return path
 
