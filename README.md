@@ -292,6 +292,9 @@ ros2 launch iap iap_sim.launch.py \
 | 参数 | 默认值 | 作用 |
 |---|---|---|
 | `scenario` | `icra_dense_forest_four_fork_v2` | 统一的四分叉测试场景；仍可显式选择目录中的其他场景 |
+| `rinex_nav_file` | `/home/dev/ws_iap/src/iap/log/20261007T231557Z_065/metadata/config/historical_nav.rnx` | 主线历史 GPS＋北斗星历；固定仿真起点为 2022-07-06T12:00:00Z，缺文件不回退 |
+| `advisory_guidance` | `true` | 主线开启风险选路；OFF 对照须显式设为 false |
+| `advisory_posterior_prior` | `false` | 不向 Advisory 添加后验先验 |
 | `start_rviz` | `true` | 启动 RViz |
 | `start_grid_map_visualizer` | `true` | 独立 PL 显示进程；设 false 做显示关闭对照，规划规则不变 |
 | `planner_start_delay_s` | `10.0` | 规划器启动延迟；不代表数据已经就绪 |
@@ -299,6 +302,10 @@ ros2 launch iap iap_sim.launch.py \
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
 本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 已把有效 advisory 预警用于局部绕行偏好，真实执行仍以物理环境、当前融合运动质量与最终曲线检查为准。
+
+默认星历依赖上表指定的已保存文件，请保留该文件或显式指定同历史时段的合格 NAV。
+显式 `rinex_nav_file:=''` 选择 synthetic 机制输入。当前默认 ON 是开发主线选择，
+不代表真实 PL 校准或森林任务验收通过；已记录的 ON 搜索超时尚未修复。
 
 诊断规划停滞时显式打开一次性地图取证：
 
@@ -877,7 +884,7 @@ noise 阶段另需 GNSS/LiDAR 测量 residual_m 与 nominal_sigma_m 字段。
 
 ```bash
 ros2 launch iap iap_sim.launch.py scenario:=icra_dense_forest_four_fork_v2 advisory_posterior_prior:=false advisory_guidance:=false
-# 开启组：advisory_guidance:=true（显式实验；当前默认OFF）
+# 开启组：advisory_guidance:=true（当前主线默认ON）
 ```
 
 正式固定路线试验增加 `advisory_trial:=<绝对 trial.json>`，并在校准/独立验证时
@@ -1108,7 +1115,8 @@ ros2 launch iap iap_sim.launch.py rinex_nav_file:=<绝对历史混合NAV路径> 
 历史GNSS/LiDAR定时器跟随ROS时间，暂停不重复生成随机观测。
 时钟源竞争或任一必要历史输入进程意外退出会停止全图并保存输入故障，
 最终归属把运行记为failed，即使顶层launch返回0。run ID、生命周期及计算预算保持实际／steady时间。
-唯一入口guidance目前默认OFF，ON须显式选择实验配置；尚未推广真实参数。
+唯一入口guidance按开发主线默认ON；OFF诊断与固定路线校准须显式设false。
+这只改变启动默认，不代表真实校准参数已推广。
 生产CPU时钟/传感器进程回归：`ctest --test-dir ../../build/so3_quadrotor_simulator -R test_historical_clock --output-on-failure`。
 该测试使用小型合成传感器夹具，不替代GPU森林或正式9＋9。
 

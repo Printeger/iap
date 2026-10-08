@@ -13,6 +13,7 @@ from unittest import mock
 
 import yaml
 from launch import LaunchContext
+from launch.actions import DeclareLaunchArgument
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -216,6 +217,55 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
         self.assertEqual([k for k in on if on[k]!=off[k]],["planning/advisory_guidance_enabled"])
         self.assertTrue(on["planning/advisory_guidance_enabled"])
         self.assertFalse(off["risk/use_posterior_prior"])
+
+    def test_sim_mainline_defaults_and_explicit_diagnostic_overrides(self):
+        canonical = self._load_launch("iap_sim.launch.py")
+        expected = {
+            "scenario": "icra_dense_forest_four_fork_v2",
+            "rinex_nav_file": "/home/dev/ws_iap/src/iap/log/20261007T231557Z_065/metadata/config/historical_nav.rnx",
+            "advisory_guidance": "true",
+            "advisory_posterior_prior": "false",
+            "start_grid_map_visualizer": "true",
+            "start_rviz": "true",
+            "capture_failure_map": "false",
+            "run_duration_s": "0.0",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            nav = root / "mixed.rnx"
+            nav.write_bytes(b"launch fixture; NAV qualification tested separately")
+            for diagnostic in (False, True):
+                context = LaunchContext()
+                for action in canonical.generate_launch_description().entities:
+                    if isinstance(action, DeclareLaunchArgument):
+                        action.execute(context)
+                for key, value in expected.items():
+                    self.assertEqual(context.launch_configurations[key], value)
+                # Replace the external development NAV with a portable fixture.
+                context.launch_configurations["rinex_nav_file"] = str(nav)
+                if diagnostic:
+                    context.launch_configurations.update(
+                        advisory_guidance="false", rinex_nav_file=""
+                    )
+                with mock.patch.dict(os.environ, {"IAP_RUN_ROOT": str(root / "runs")}), \
+                        mock.patch.object(canonical, "get_package_share_directory", return_value=str(REPO)), \
+                        mock.patch.object(canonical, "IncludeLaunchDescription", wraps=canonical.IncludeLaunchDescription) as include:
+                    canonical._setup(context)
+                child = dict(include.call_args.kwargs["launch_arguments"])
+                self.assertEqual(child["advisory_guidance"], "false" if diagnostic else "true")
+                self.assertEqual(child["advisory_posterior_prior"], "false")
+                self.assertEqual(child["start_grid_map_visualizer"], "true")
+                self.assertEqual(child["start_rviz"], "true")
+                run = Path(child["runtime_root_dir"]).parents[2]
+                info = json.loads((run / "metadata/manifests/full_stack.json").read_text())
+                self.assertEqual(info["advisory_guidance_enabled"], not diagnostic)
+                self.assertEqual(info["gnss_input"]["source"], "synthetic" if diagnostic else "rinex")
+                if diagnostic:
+                    self.assertEqual(child["rinex_nav_file"], "")
+                else:
+                    self.assertEqual(Path(child["rinex_nav_file"]).read_bytes(), nav.read_bytes())
+                    self.assertEqual(info["gnss_input"]["constellations"], ["GPS", "BDS"])
+                self.assertFalse(info["gnss_input"]["formal_advisory_qualified"])
 
     def test_fixed_trial_injects_waypoints_observation_seed_and_preserves_map(self):
         import hashlib

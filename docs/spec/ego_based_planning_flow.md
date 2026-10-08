@@ -327,6 +327,16 @@ flowchart TD
 
 本图描述当前源码；已接入不表示现场验收通过。原版基线流程图保持不变。
 
+当前 canonical 开发入口默认四分叉、历史 GPS＋北斗 RINEX、guidance ON、prior OFF，
+独立可视化及 RViz ON。默认 NAV 为
+`/home/dev/ws_iap/src/iap/log/20261007T231557Z_065/metadata/config/historical_nav.rnx`，
+仍复制/hash登记到每个新 run，缺文件失败且不回退。OFF 对照显式指定
+`advisory_guidance:=false`；synthetic 机制输入显式指定 `rinex_nav_file:=''`。
+此次默认配置变更不修改搜索、物理或发布规则，也不解决已观察到的 ON 搜索超时；
+PL 校准与完整任务资格保持未通过。入口合同验证覆盖默认值传递与显式 OFF/空 NAV 覆盖。
+44 项 canonical 入口合同通过，已安装入口 `--show-args` 确认上述默认值；
+日志见 `log/20261008T072500Z_651/runtime/`。本次未启动森林现场运行。
+
 ```mermaid
 flowchart TD
     Inputs[GLIO、物理观测、当前运动质量、预测输入] --> Round[FSM 事件：唯一冻结视图与预算]
@@ -588,8 +598,8 @@ LiDAR 在现有 PCA 尺度内按表面族平均相关贡献，保留新增独立
 观测 seed 注入或退化时序实测。校准／独立验证保持 INCONCLUSIVE，默认参数不推广。
 
 
-规划引导开关的唯一入口当前默认OFF（内部机制参数可显式ON），canonical 参数为
-`advisory_guidance:=false`；关闭仍计算／录制／显示预测，A* 新查询与缓存刷新
+规划引导开关的唯一入口按开发主线默认ON，canonical 参数为
+`advisory_guidance:=true`；显式false关闭仍计算／录制／显示预测，A* 新查询与缓存刷新
 复用同一偏好转换。无障碍合成退化带的 CPU 开关对照验证真实曲线绕行及发布，
 guide 跟踪使用实际 N-3 样条跨度，并在原修复预算／权重内以实际越线点约束
 返回同一合法 guide。物理／运动／整曲线／最新走廊闸门均保留。
