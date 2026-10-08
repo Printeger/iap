@@ -100,6 +100,7 @@ add_executable(failure_map_replay src/failure_map_replay.cpp)
 ament_target_dependencies(failure_map_replay
   plan_env path_searching rclcpp Eigen3 nav_msgs visualization_msgs
   geometry_msgs sensor_msgs iap cv_bridge pcl_conversions)
+target_link_libraries(failure_map_replay prediction_input iap::iap)
 
 ament_target_dependencies(traj_server
                           rclcpp nav_msgs
@@ -147,6 +148,10 @@ if(BUILD_TESTING)
   add_test(NAME test_failure_map_tools COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/test_failure_map_tools.py)
   set_tests_properties(test_failure_map_tools PROPERTIES ENVIRONMENT
+    "IAP_FAILURE_MAP_REPLAY_BIN=$<TARGET_FILE:failure_map_replay>")
+  add_test(NAME test_on_search_replay COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_planner/test_on_search_replay.py)
+  set_tests_properties(test_on_search_replay PROPERTIES ENVIRONMENT
     "IAP_FAILURE_MAP_REPLAY_BIN=$<TARGET_FILE:failure_map_replay>")
   ament_add_gtest(test_ego_baseline test/test_ego_baseline.cpp
     src/planner_manager.cpp src/planner_risk.cpp src/ego_replan_fsm.cpp)

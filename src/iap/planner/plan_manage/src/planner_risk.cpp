@@ -565,7 +565,7 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
     if (!epoch) continue;
     const auto motion = currentMotionContext();
     const double time_s = node_->now().seconds();
-    const auto risk_version = bindRiskPrediction(capturePredictionSnapshot(time_s),time_s,epoch);
+    const auto risk_version = bindRiskPrediction(capturePredictionSnapshot(time_s),time_s,epoch,true);
     PlanningView view;
     view.physical = epoch;
     view.generation = epoch->generation;
@@ -799,7 +799,8 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
 }
 
 uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
-                                             const double now, std::shared_ptr<const FrozenOccupancyEpoch> occupancy) {
+                                             const double now, std::shared_ptr<const FrozenOccupancyEpoch> occupancy,
+                                             const bool retain_planning_input) {
   PredictionInput input;
   input.occupancy=occupancy ? std::move(occupancy) : grid_map_->captureFrozenOccupancyEpoch();
   input.integrity=snapshot; input.params=predictor_params_;
@@ -807,7 +808,13 @@ uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& sna
   const auto started=std::chrono::steady_clock::now();
   auto context=makeRiskPrediction(input,predictor_calls_);
   if(planning_budget_) planning_timings_.prediction_preparation_s+=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
-  return grid_map_->bindRiskContext(std::move(context));
+  const auto version=grid_map_->bindRiskContext(std::move(context));
+  if(retain_planning_input) {
+    auto binding=std::make_shared<const PlanningInputBinding>(PlanningInputBinding{
+        planning_attempt_id_,version,std::move(input)});
+    std::atomic_store(&planning_input_binding_,std::move(binding));
+  }
+  return version;
 
 }
 void EGOPlannerManager::initPredictionExport() {
@@ -823,15 +830,25 @@ void EGOPlannerManager::initPredictionExport() {
   export_callback_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   prediction_export_service_ = node_->create_service<iap::srv::GetGridMapPredictionInput>(
       "grid_map/prediction_input",
-      [this](const std::shared_ptr<iap::srv::GetGridMapPredictionInput::Request>,
+      [this](const std::shared_ptr<iap::srv::GetGridMapPredictionInput::Request> request,
              std::shared_ptr<iap::srv::GetGridMapPredictionInput::Response> response) {
         const auto started=std::chrono::steady_clock::now();
         const auto calls_before=predictor_calls_->load();
         try {
-          PredictionInput input; input.occupancy=grid_map_->captureFrozenOccupancyEpoch();
+          PredictionInput input;
+          if(request->planning_input) {
+            const auto binding=std::atomic_load(&planning_input_binding_);
+            if(!binding || (request->planning_attempt_id && request->planning_attempt_id!=binding->attempt_id)) {
+              response->reason="planning_attempt_not_retained"; return;
+            }
+            input=binding->input;
+            response->planning_attempt_id=binding->attempt_id; response->risk_version=binding->risk_version;
+          } else {
+          input.occupancy=grid_map_->captureFrozenOccupancyEpoch();
           if (!input.occupancy) { response->reason="physical epoch unavailable"; return; }
           input.reference_time_s=node_->now().seconds(); input.validity_s=risk_validity_s_;
           input.integrity=capturePredictionSnapshot(input.reference_time_s); input.params=predictor_params_;
+          }
           response->payload=encodePredictionInput(input); response->available=true;
           response->frame_id=input.occupancy->frame_id; response->geometry_id=input.occupancy->geometry_id;
           response->generation=input.occupancy->generation;

@@ -1996,6 +1996,36 @@ TEST(EgoBaseline, ActualReadOnlyServiceDoesNotChangePredictionVersion) {
   EXPECT_DOUBLE_EQ(decoded.integrity.current.current_motion_error_proxy_m,.05);
 }
 
+TEST(EgoBaseline, PlanningInputExportRetainsAttemptAcrossNewMapAndMissingAttemptIsExplicit) {
+  auto node=makeNode(); ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const double now=node->now().seconds(); const Eigen::Vector3d start(-2,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},now,start); GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,start);
+  ASSERT_TRUE(manager.beginPlanningView());
+  const auto generation=manager.grid_map_->occupancyGeneration();
+  const auto version=GridMapTestAccess::riskVersion(*manager.grid_map_);
+  manager.endPlanningView();
+  GridMapTestAccess::changeEvidence(*manager.grid_map_,Eigen::Vector3d(5,5,1),true,true,true);
+  auto client=node->create_client<iap::srv::GetGridMapPredictionInput>("grid_map/prediction_input");
+  ASSERT_TRUE(client->wait_for_service(std::chrono::seconds(2)));
+  rclcpp::executors::SingleThreadedExecutor executor; executor.add_node(node);
+  const auto request=[&](uint64_t attempt) {
+    auto req=std::make_shared<iap::srv::GetGridMapPredictionInput::Request>();
+    req->planning_input=true; req->planning_attempt_id=attempt;
+    auto future=client->async_send_request(req);
+    EXPECT_EQ(executor.spin_until_future_complete(future,std::chrono::seconds(2)),rclcpp::FutureReturnCode::SUCCESS);
+    return future.get();
+  };
+  const auto response=request(1); ASSERT_TRUE(response->available)<<response->reason;
+  const auto decoded=ego_planner::decodePredictionInput(response->payload);
+  EXPECT_EQ(response->planning_attempt_id,1u); EXPECT_EQ(response->risk_version,version);
+  EXPECT_EQ(decoded.occupancy->generation,generation);
+  EXPECT_EQ(response->generation,generation);
+  const auto missing=request(99); EXPECT_FALSE(missing->available);
+  EXPECT_TRUE(missing->payload.empty()); EXPECT_EQ(missing->reason,"planning_attempt_not_retained");
+}
+
 TEST(EgoBaseline, AdvisoryPriorToggleSharesExportAndPreservesMotionAuthority) {
   for (const bool enabled : {false, true}) {
     auto node=makeNode(false,1.,enabled); ego_planner::EGOPlannerManager manager;

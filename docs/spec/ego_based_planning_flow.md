@@ -1590,3 +1590,51 @@ C60→C229均BDS-3G，历史有效区间覆盖300秒。2026已有重分配，不
 headers／UTC／metadata与NAV hash及全映射见
 [历史轨道身份独立补证](../../log/20261007T091820Z_056/export/analysis/rinex_identity/report.md)。
 只关闭独立身份依据缺口，旧报告与RTKLIB数值验证保持原身份。
+
+## ON first-guide diagnosis and planning-bound input export
+
+The active order is frozen ON search diagnosis, execution handover repair and an
+explicit guidance-OFF reference, per-fork source/cost comparison, guide-to-curve
+mechanism validation, then empirical calibration and independent mission pairs.
+The original `20261008T071115Z_951` attempt 1 contains 7,508 queried PL voxels
+and no complete Predictor payload. Its full ON replay remains INCONCLUSIVE;
+missing saved voxels never become low-risk evidence. The original profiling
+row records 7,508 actual Predictor calls, separately from 600,649 advisory
+interface calls and 239,873 A* advisory refreshes.
+
+`GetGridMapPredictionInput` keeps its current-display capture when
+`planning_input=false`. With `planning_input=true`, `planning_attempt_id=0`
+returns the latest immutable planning binding; an exact nonzero ID must match
+that single retained slot or return `planning_attempt_not_retained` with no
+payload. Response attempt/risk IDs describe that binding. An export does not
+recapture its time, map or state and does not renew prediction validity.
+Service changes require rebuilding IAP and planner dependents together.
+
+Opt-in failure capture also writes `planning_input.bin` only when attempt,
+physical generation and original reference time agree. Encoding and writing use
+the existing bounded failure writer, outside the planning thread. The runtime
+driver registers payload and snapshot SHA256 plus planning identities. Writer
+errors remain explicit; missing inputs do not acquire replay qualification.
+
+`replay_on_search.py` invokes the production multi-terminal A* with the real
+start, saved complete goal set, saved lattice, original fitting reserve, physical
+rules and explicit frozen parameters. Its one-second search budget is explicit;
+this isolated search is not a full 1.5-second planner/Curve publication trial.
+OFF, saved-PL partial diagnosis and complete-payload replay remain distinct.
+Full replay rejects payload/map/time disagreement; partial replay counts missing
+unique voxels and preserves UNCOMPUTED preference. Component attribution remains
+a separate exhaustive connectivity diagnostic and cannot replace this search.
+
+The first-guidance delivery and live handover stages remain pending. Formal
+experiments remain 0/9 calibration, 0/9 held-out and 0/6 mission runs. Mission
+comparison uses three OFF/ON seed pairs (2101–2103), with actual executed curve
+arc integral of max(HPL/HAL,VPL/VAL); unknown coverage and failures remain in the
+report and cannot be replaced with zero risk.
+
+Verification for this interface: the exact-attempt service regression was red
+against current-display recapture and green after the binding repair. The
+production search replay missing-PL test, complete EgoBaseline suite, failure
+map tools, Advisory transport/replay tests, scheduled server execution, server
+time tests and full-stack feedback checks passed. Offline original-map
+production OFF returned a guide; saved-PL diagnosis reported missing coverage.
+Artifacts are under `log/20261008T074231Z_810`; no live result is claimed here.

@@ -153,6 +153,13 @@ namespace ego_planner
     // The writer receives values, never a mutable query or a live re-query.
     const auto risk_evidence=planning_view_ && planning_view_->advisory_query.captureEvidence
         ? planning_view_->advisory_query.captureEvidence(*snapshot) : std::optional<GridRiskEvidence>{};
+    auto input_binding=std::atomic_load(&planning_input_binding_);
+    if(!planning_view_ || !input_binding || input_binding->attempt_id!=attempt_id ||
+        input_binding->risk_version!=planning_view_->risk_version ||
+        (risk_evidence && input_binding->risk_version!=risk_evidence->risk_version) ||
+        input_binding->input.occupancy->generation!=snapshot->generation ||
+        input_binding->input.reference_time_s!=capture_time)
+      input_binding.reset();
     const auto node = node_;
     auto write = [=](const std::string& label) mutable {
     const auto* search = search_value ? &*search_value : nullptr;
@@ -217,6 +224,14 @@ namespace ego_planner
       if (std::filesystem::exists(pending))
         throw std::runtime_error("previous pending failure map artifact exists");
       std::filesystem::create_directories(pending);
+      // The existing bounded writer owns encoding and disk I/O, outside the
+      // planning budget/thread. Both files retain the same planning binding.
+      if(input_binding) {
+        const auto payload=encodePredictionInput(input_binding->input);
+        std::ofstream stream(pending/"planning_input.bin",std::ios::binary);
+        stream.write(reinterpret_cast<const char*>(payload.data()),payload.size());
+        stream.close(); if(!stream) throw std::runtime_error("planning_input.bin write failed");
+      }
       std::ofstream cells(pending / "cells.bin", std::ios::binary);
       cells.write(reinterpret_cast<const char*>(snapshot->cell_flags.data()),
                   snapshot->cell_flags.size());
@@ -290,6 +305,8 @@ namespace ego_planner
       metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v3\",\n"
           << "  \"kind\": " << std::quoted(kind) << ",\n"
           << "  \"planning_attempt_id\": " << attempt_id << ",\n"
+          << "  \"planning_input_file\": " << (input_binding ? "\"planning_input.bin\"" : "null") << ",\n"
+          << "  \"planning_input_risk_version\": " << (input_binding ? std::to_string(input_binding->risk_version) : "null") << ",\n"
           << "  \"run_id\": " << std::quoted(artifacts->run_dir().filename().string()) << ",\n"
           << "  \"run_manifest\": \"../../../../metadata/run_manifest.json\",\n"
           << "  \"artifact_label\": " << std::quoted(label) << ",\n"
@@ -614,6 +631,8 @@ namespace ego_planner
           << ",\"cells\":" << std::quoted(relative + "/cells.bin")
           << ",\"risk_samples\":"
           << std::quoted(relative + "/queried_risk.csv");
+      if(input_binding) manifest << ",\"planning_input\":"<<std::quoted(relative+"/planning_input.bin")
+          <<",\"planning_attempt_id\":"<<input_binding->attempt_id<<",\"risk_version\":"<<input_binding->risk_version;
       if (!snapshot->observation_sources.empty())
         manifest << ",\"observation_sources\":"
                  << std::quoted(relative + "/observation_sources.bin");

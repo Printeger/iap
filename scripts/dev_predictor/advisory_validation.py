@@ -44,6 +44,7 @@ SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp",
             "include/iap/integrity/araim.hpp", "include/iap/integrity/araim_types.hpp",
             "src/iap/integrity/integrity_monitor.cpp"]
 SOURCES += ["src/iap/odometry/odometry_estimation_gpu.cpp"]
+SOURCES += ["srv/GetGridMapPredictionInput.srv"]
 SOURCES += [str(p.relative_to(REPO)) for directory in
             (REPO/"include/iap/odometry/gpu_evidence",REPO/"src/iap/odometry/gpu_evidence")
             for p in sorted(directory.glob("*")) if p.is_file()]
@@ -262,7 +263,10 @@ def record(run, args):
                 if not client.wait_for_service(timeout_sec=args.timeout):
                     available, reason = False, "input_service_unavailable"
                 else:
-                    future = client.call_async(GetGridMapPredictionInput.Request())
+                    request=GetGridMapPredictionInput.Request()
+                    request.planning_input=args.planning_input
+                    request.planning_attempt_id=args.planning_attempt_id
+                    future = client.call_async(request)
                     rclpy.spin_until_future_complete(node, future, timeout_sec=args.timeout)
                     response = future.result() if future.done() else None
                     available = bool(response and response.available)
@@ -271,7 +275,9 @@ def record(run, args):
                         path = save_record(run, f"{args.label}_{i:04}", response.payload, identity,
                                            {"frame_id": response.frame_id, "geometry_id": response.geometry_id,
                                             "generation": response.generation, "service": args.service,
-                                            "request_id":request_id})
+                                            "request_id":request_id,"planning_input":args.planning_input,
+                                            "planning_attempt_id":response.planning_attempt_id,
+                                            "risk_version":response.risk_version})
                         payload_path = str(path.relative_to(run))
                 w.writerow([i, request_id, run.name, available, reason, time.monotonic() - stamp, payload_path]); req.flush()
                 end = time.monotonic() + args.interval
@@ -540,10 +546,12 @@ def main():
     parser.add_argument("--interval", type=float, default=1.)
     parser.add_argument("--timeout", type=float, default=10.)
     parser.add_argument("--service", default="/grid_map/prediction_input")
+    parser.add_argument("--planning-input",action="store_true",help="read retained planning input instead of a new display capture")
+    parser.add_argument("--planning-attempt-id",type=int,default=0,help="exact retained planning attempt; 0 selects latest")
     parser.add_argument("--glio-topic", default="/drone_0_visual_slam/odom")
     parser.add_argument("--truth-topic", default="/sim/drone_0/truth_odom")
     args = parser.parse_args(); safe_label(args.label)
-    if args.count < 1 or args.interval <= 0 or args.timeout <= 0:
+    if args.count < 1 or args.interval <= 0 or args.timeout <= 0 or args.planning_attempt_id < 0:
         parser.error("positive recording count/interval/timeout required")
     inherited = os.environ.get("IAP_RUN_DIR")
     if args.mode == "record" and not inherited:

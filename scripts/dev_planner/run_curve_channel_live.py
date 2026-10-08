@@ -42,6 +42,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--duration', type=float, default=300)
     parser.add_argument('--label', default='curve_capture')
+    parser.add_argument('--guidance',choices=('false','true'),default='false')
+    parser.add_argument('--stop-after-planning-input',action='store_true',help='bounded first-input capture; stop owned launch when input.bin is saved')
     parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     args = parser.parse_args()
@@ -105,7 +107,7 @@ def main():
                    'run_lifecycle_owner:=driver',
                    'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:=false',
                    'start_grid_map_visualizer:=true', 'advisory_posterior_prior:=false',
-                   'advisory_guidance:=false', 'capture_failure_map:=true',
+                   'advisory_guidance:='+args.guidance, 'capture_failure_map:=true',
                    f'run_duration_s:={args.duration}']
         if args.rinex_nav_file:
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
@@ -130,7 +132,12 @@ def main():
                          'record', '--label', args.label, '--count', str(math.ceil(args.duration / 10)),
                          '--interval', '10', '--timeout', '5'])
         import psutil
+        captured_input=False
         while jobs['launch'].poll() is None:
+            if args.stop_after_planning_input and list((run/'export/planner/failure_map').glob('*/planning_input.bin')):
+                captured_input=True
+                stop(jobs['launch'])
+                break
             try:
                 children = psutil.Process(jobs['launch'].pid).children(recursive=True)
             except psutil.NoSuchProcess:
@@ -152,7 +159,7 @@ def main():
                 jobs[name].wait(timeout=45)
             except subprocess.TimeoutExpired:
                 stop(jobs[name])
-        status = 'completed' if all(p.returncode == 0 for p in jobs.values()) else 'failed'
+        status = 'completed' if all(p.returncode == 0 for p in jobs.values()) or captured_input else 'failed'
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         raise
@@ -164,6 +171,18 @@ def main():
         health_path = run / 'export/analysis/process_health.json'
         health_path.parent.mkdir(parents=True, exist_ok=True)
         health_path.write_text(json.dumps(health, indent=2) + '\n')
+        planning_inputs=[]
+        for payload in sorted((run/'export/planner/failure_map').glob('*/planning_input.bin')):
+            snapshot=payload.parent/'snapshot.json'
+            metadata=json.loads(snapshot.read_text())
+            planning_inputs.append({'payload':str(payload.relative_to(run)),'payload_sha256':sha(payload),
+                'snapshot':str(snapshot.relative_to(run)),'snapshot_sha256':sha(snapshot),
+                'planning_attempt_id':metadata['planning_attempt_id'],
+                'risk_version':metadata['planning_input_risk_version'],
+                'generation':metadata['generation'],'reference_time_s':metadata['planning_time_s']})
+        manifest(run,'planning_input_capture',{'source':identity,'inputs':planning_inputs,
+            'first_input_only_requested':args.stop_after_planning_input,
+            'status':'CAPTURED' if planning_inputs else 'NO_MATCHING_PLANNING_INPUT'},owner=True)
         manifest(run, 'forest_process_result', {'identity': 'LIVE_REFERENCE_MEASUREMENT',
                  'revision': identity['revision'], 'commands': command,
                  'elapsed_s': time.monotonic() - started,

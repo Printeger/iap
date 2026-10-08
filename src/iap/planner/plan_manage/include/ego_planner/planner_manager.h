@@ -64,7 +64,8 @@ namespace ego_planner
     // Freeze one spatial prediction round. The returned version is required
     // by GridMap::queryRisk; binding failure is represented by query status.
     uint64_t bindRiskPrediction(const iap::IntegritySnapshot& snapshot,
-                                double reference_time_s, std::shared_ptr<const FrozenOccupancyEpoch> occupancy = {});
+                                double reference_time_s, std::shared_ptr<const FrozenOccupancyEpoch> occupancy = {},
+                                bool retain_planning_input = false);
     bool planCheckedBrake(const Eigen::Vector3d& position,
                           const Eigen::Vector3d& velocity,
                           const Eigen::Vector3d& acceleration);
@@ -288,6 +289,13 @@ namespace ego_planner
       mutable GridPlanningQueryStats advisory_stats;
     };
     std::optional<PlanningView> planning_view_;
+    struct PlanningInputBinding {
+      uint64_t attempt_id, risk_version;
+      PredictionInput input;
+    };
+    // One immutable slot, read atomically by the independent export group.
+    // Missing older attempts are explicit, never replaced by a fresh capture.
+    std::shared_ptr<const PlanningInputBinding> planning_input_binding_;
     PlanningBudget::Ptr planning_budget_;
     std::vector<LocalTarget> planning_targets_;
     std::optional<Eigen::Vector3d> planning_target_center_;

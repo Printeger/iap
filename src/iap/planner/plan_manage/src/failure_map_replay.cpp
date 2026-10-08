@@ -1,5 +1,6 @@
 #include <path_searching/dyn_a_star.h>
 #include <plan_env/grid_map.h>
+#include <ego_planner/prediction_input.h>
 
 #include <algorithm>
 #include <chrono>
@@ -276,6 +277,96 @@ void pointJson(std::ostream& out, const Point& p) {
   out << '[' << p.x() << ',' << p.y() << ',' << p.z() << ']';
 }
 
+// Production multi-terminal search, unlike component attribution (Dijkstra).
+// Missing saved PL is UNCOMPUTED; this mode never fabricates a low-risk field.
+void planningSearch(const Input& in, const std::string& mode, const char* risk_path) {
+  double reserve, taper; size_t count;
+  if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || !count || count > 100000)
+    throw std::invalid_argument("invalid planning goal set");
+  std::vector<Point> goals; for(size_t i=0;i<count;++i) goals.push_back(readPoint());
+  const Point task_goal=readPoint();
+  GridPlanningRiskPolicy policy;
+  if (!(std::cin >> policy.hpl_budget_m >> policy.vpl_budget_m >> policy.reserve_h_m >>
+      policy.reserve_v_m >> policy.unknown_multiplier >> policy.stale_soft_seconds))
+    throw std::invalid_argument("missing original advisory policy");
+  auto map=GridMap::fromFailureSnapshot(in.snapshot);
+  auto epoch=map->captureFrozenOccupancyEpoch();
+  auto calls=std::make_shared<std::atomic<uint64_t>>(0);
+  size_t missing=0, advisory_calls=0;
+  double prepare_s=0;
+  uint64_t version=0;
+  if(mode=="full") {
+    std::ifstream stream(risk_path,std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),{});
+    if(!stream) throw std::invalid_argument("prediction input unavailable");
+    auto input=ego_planner::decodePredictionInput(bytes);
+    if(!input.occupancy || input.reference_time_s!=in.planning_time_s ||
+        input.occupancy->generation!=epoch->generation || input.occupancy->frame_id!=epoch->frame_id ||
+        input.occupancy->lattice_origin!=epoch->lattice_origin || input.occupancy->extent_m!=epoch->extent_m ||
+        input.occupancy->resolution_m!=epoch->resolution_m || input.occupancy->cells->flags!=epoch->cells->flags)
+      throw std::invalid_argument("planning payload/map/time identity mismatch");
+    epoch=input.occupancy;
+    const auto began=Clock::now();
+    version=map->bindRiskContext(ego_planner::makeRiskPrediction(input,calls));
+    prepare_s=std::chrono::duration<double>(Clock::now()-began).count();
+  } else if(mode=="sparse") {
+    double reference, until;
+    if(!(std::cin>>reference>>until)) throw std::invalid_argument("missing saved risk time");
+    auto samples=std::make_shared<std::unordered_map<size_t,GridRiskVoxel>>();
+    std::ifstream stream(risk_path); std::string line; std::getline(stream,line);
+    while(std::getline(stream,line)) {
+      std::replace(line.begin(),line.end(),',',' '); std::istringstream row(line);
+      size_t address; std::string h,v; unsigned status; GridRiskVoxel value;
+      if(!(row>>address>>h>>v>>status>>value.version>>value.source_flags))
+        throw std::invalid_argument("invalid saved PL row");
+      value.hpl=std::stod(h); value.vpl=std::stod(v); value.status=static_cast<GridRiskStatus>(status);
+      if(address>=epoch->cells->flags.size() || !samples->emplace(address,value).second)
+        throw std::invalid_argument("invalid or duplicate saved PL address");
+    }
+    GridRiskContext context; context.frame_id=epoch->frame_id; context.occupancy_generation=epoch->generation;
+    context.reference_time_s=reference; context.valid_until_s=until;
+    context.predict=[&,samples,epoch](const Point& p) {
+      const Eigen::Vector3i i=((p-epoch->lattice_origin)*epoch->resolution_inv).array().floor().cast<int>();
+      const size_t address=(static_cast<size_t>(i.x())*epoch->voxel_dimensions.y()+i.y())*epoch->voxel_dimensions.z()+i.z();
+      if(const auto found=samples->find(address);found!=samples->end()) return found->second;
+      ++missing; return GridRiskVoxel{};
+    };
+    version=map->bindRiskContext(std::move(context));
+  } else if(mode!="off") throw std::invalid_argument("invalid risk replay mode");
+  const auto frozen=map->capturePlanningRiskQuery(version,in.planning_time_s,policy,nullptr,epoch->generation);
+  const auto advisory=[&](const Point& p) {
+    ++advisory_calls;
+    if(mode!="off") return frozen(p);
+    GridPlanningRisk value; value.cost_multiplier=1.; return value;
+  };
+  const auto physical=map->preparePlanningQuery(in.planning_time_s,in.motion,epoch);
+  const auto query=[&](const Point& p) {
+    auto context=physical;
+    double distance=(p-in.start).norm();
+    for(const auto& goal:goals) distance=std::min(distance,(p-goal).norm());
+    context.required_clearance_m+=reserve*std::clamp(distance/taper,0.,1.);
+    auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,true);
+    if(cell.executable()) cell.advisory=advisory(p);
+    return cell;
+  };
+  AStar search; search.initGridMap(map,in.pool); search.setFrozenEpoch(epoch);
+  search.setTaskGoal(task_goal); search.setPerformanceDiagnostics(true);
+  search.setPlanningQuery(query,false); search.setAdvisoryQuery(advisory);
+  const bool found=search.AstarSearchGoals(in.step_m,in.start,goals,in.budget_s,in.center);
+  const auto& r=search.lastResult();
+  std::cout<<std::setprecision(17)<<"{\"mode\":"<<std::quoted(mode)<<",\"guide_found\":"<<(found?"true":"false")
+    <<",\"failure\":"<<std::quoted(AStar::failureName(r.failure))<<",\"search_s\":"<<r.duration_s
+    <<",\"prediction_prepare_s\":"<<prepare_s<<",\"predictor_calls\":"<<calls->load()
+    <<",\"advisory_calls\":"<<advisory_calls<<",\"missing_unique_voxels\":"<<missing
+    <<",\"physical_queries\":"<<r.query_calls<<",\"sample_cache_hits\":"<<r.cache_hits
+    <<",\"advisory_refreshes\":"<<r.advisory_refresh_calls<<",\"risk_integration_calls\":"<<r.risk_integration_calls
+    <<",\"expanded\":"<<r.expanded<<",\"path_cost_m\":"<<r.path_cost<<",\"length_m\":"<<r.path_length_m
+    <<",\"risk_cost_m\":"<<r.risk_cost_m<<",\"terminal_cost_m\":"<<r.terminal_cost_m
+    <<",\"optimality_proven\":"<<(r.optimality_proven?"true":"false")<<",\"path_m\":[";
+  const auto path=search.getPath(); for(size_t i=0;i<path.size();++i) {if(i)std::cout<<',';pointJson(std::cout,path[i]);}
+  std::cout<<"]}\n";
+}
+
 void attribution(const Input& in, const std::filesystem::path& destination) {
   double reserve, taper; size_t count;
   if (!(std::cin >> reserve >> taper >> count) || reserve < 0 || taper <= 0 || count > 100000)
@@ -435,6 +526,7 @@ int main(int argc, char** argv) {
   try {
     if (argc < 2 || argc > 6) throw std::invalid_argument("usage: failure_map_replay <cells.bin>");
     const Input in = readInput(argv[1]);
+    if(argc==5 && std::string(argv[2])=="--planning-search") {planningSearch(in,argv[3],argv[4]);return 0;}
     if (argc==4 && std::string(argv[2])=="--attribution") { attribution(in,argv[3]); return 0; }
     if (argc >= 3) { benchmark(in, std::stoi(argv[2]), argc == 3 || std::string(argv[3]) != "0", argc >= 5 && std::string(argv[4]) == "1", argc >= 6 && std::string(argv[5]) == "1"); return 0; }
     const auto began = Clock::now();

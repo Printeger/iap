@@ -168,6 +168,7 @@ class AdvisoryValidationTest(unittest.TestCase):
                                count=2, interval=.05, timeout=3., glio_topic="/fixture_glio", truth_topic="/fixture_truth")
         try:
             with patch.object(validation, "source_identity", return_value=identity), patch.dict(os.environ, {"ROS_LOG_DIR": str(self.run_dir / "runtime/ros")}):
+                args.planning_input=False; args.planning_attempt_id=0
                 validation.record(self.run_dir, args)
             table = validation.rows(self.run_dir / "export/advisory/validation/recordings/service_test_requests.csv")
             self.assertEqual(len(table), 2)
