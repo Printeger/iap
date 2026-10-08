@@ -1904,7 +1904,23 @@ queries deliver in 0.551–0.560 s. Historical attempt51's online timeout remain
 separate evidence: isolated replay does not establish its precise live cause.
 Instrumentation overhead and that narrow attempt4 margin are not guarantees
 of continuous real-time service. These are search mechanism results only;
-field continuation and PL metre qualification require their own evidence.
+the clean `051e4ba0` field reference `20261008T152504Z_258` independently
+records server/command/truth continuation across longitudinal exits X=-8 (ID15)
+and X=0 (ID22). The second crossing is Y=3.664 and does not enter its 2m
+junction region; this is not a strict junction-completion or whole-task PASS.
+All successful flow rows retain guide and continuous risk preference; four
+withdrawn pending IDs never activate and physical assessment IDs match their
+captured active/pending objects. Residual TIME_BUDGET, Curve and Release
+rejections and checked braking remain. Same-input actual ID5 local counterfactual
+guides are reachable on both sides: positive Y wins on length, integrated risk
+addition and terminal cost, with published geometry equal to the captured curve.
+Complete branch coverage/actual execution comparison is still limited. Full
+simulator geometry confirms worse canopy GNSS visibility, while admitted fused
+information is almost entirely LiDAR. Raw-time truth error pairs are separate
+from PL qualification: receiver reference/pose mismatch, unpropagated postopt,
+rotation uncertainty and noise/fault eligibility prevent metre coverage claims.
+The registered report and all failures are retained under
+`log/20261008T141443Z_735/export/analysis/second_fork_result/REPORT.md`.
 
 
 Frozen-search replay's online gate uses the captured
