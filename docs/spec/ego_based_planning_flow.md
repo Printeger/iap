@@ -1753,7 +1753,7 @@ changes capture lifecycle only, not flight authorization or task arrival.
 
 The optional reference driver `--capture-fork-entries` adopts the same run and
 uses a read-only helper. Physical map-node parameters define four entrances;
-the trigger is abs(x-entry)<=0.5 m and abs(y)<=the physical junction radius,
+the trigger is abs(x-entry)<=0.5 m and hypot(x-entry,y)<=the physical junction radius,
 independent of risk labels. Each trigger retains odometry/frame/time and requests
 the complete immutable current-display PredictionInput on the existing service.
 This remains separate from exact planning-attempt captures. The payload hash,
@@ -1762,3 +1762,59 @@ are registered in `fork_inputs`; service failure grants no input. Offline
 qualification must still verify the payload state/reference lies in the entrance
 and report unobserved branches. Captures acquired in the repeat OFF baseline
 are diagnostic until its original arrival/execution baseline is verified.
+
+Offline `compare_fork_channels.py SOURCE_RUN --binary .../fork_risk_replay` verifies
+registered entrance, payload/source and Predictor/physical library identities.
+The standalone sampler follows the physical geometry's left/right centerlines,
+three width bands and exact state/exit connectors, snaps to original voxel
+centers, deduplicates and queries batches of 64. Raw/inflated/unknown, full
+physical reason, GNSS visible/unknown/blocked support, source admission,
+information traces and fused HPL/VPL remain separate. Unknown cells are not
+queried or assigned zero PL. Reference cost uses AStar's existing segment
+quadrature through an offline access seam, including physical rejection and
+original fitting reserve/terminal term. A cost-library debug identity change
+from the seam is explicit; the captured implementation must be byte-identical
+and its header identical except for this access seam. Other common Predictor
+and physical libraries must still match exactly. This grants no execution.
+Dependencies match by library name across install prefixes, with required
+Predictor/map/cost dependencies present. Frame, geometry and generation must
+match the captured record. The adopter writes only its subordinate manifest;
+the outer owner registers it. Output streams close successfully before the
+sampler can report success. Complete route coverage includes every actual
+production integral query, not only reference vertices. Unknown integral
+samples prevent full comparison and break-even qualification even if the
+original advisory fallback supplies a numeric model cost. Arrival/lifecycle
+evidence is separate from execution identity verification; this sampler does
+not grant baseline qualification without that missing audit.
+
+OFF repeat `20261008T085940Z_639` completed all four process jobs and collected
+four complete entrance payloads; the original arrival event did not occur in
+300 s. Near the endpoint, the live physical gate repeatedly reported
+ENVIRONMENT_UNOBSERVED. The captured terminal-final map also contains observed
+endpoint support at one earlier frozen generation, so the evidence is
+intermittent coverage, not a claim that the fixed goal is permanently unreachable.
+The first OFF reference reached the original rule but lost helper finalization;
+the second finalized cleanly but did not reach it. Neither is a complete stable
+execution baseline. Four timing regressions passed; field stability remains
+partial. No long ON rerun, unknown relaxation or arrival override is introduced.
+
+All four complete entrance inputs satisfy the physical entrance condition.
+Initial offline channel evidence shows unknown vertices on both reference
+branches at each fork. Legal risk addition and total cost are therefore null;
+observed-subset medians do not rank whole routes. Valid fused samples all include
+LiDAR; GNSS only qualifies on a subset, with explicit LOS/geometry rejection.
+Both a valid observed route comparison and a verified execution baseline remain
+necessary before live fork ON diagnostics. Entrance payloads are display inputs,
+not an invented production terminal set/backend snapshot. Stage 4 is partial:
+first-guide/actual-curve delivery is demonstrated separately, while per-fork
+search and continuous task verification remain unpassed. Stage 5 is blocked by
+input/time/noise/fault qualification and a stable fixed route; calibration,
+held-out validation and formal seed pairs remain 0/9, 0/9 and 0/6.
+
+Offline fork interface verification: six-package rebuild/install, seven focused
+planner contract checks, AStar production-integral regression and two entrance
+trigger checks passed on stable binaries. Fork tests cover along-path voxel
+deduplication, physical unknown rejection, library identity across prefixes and
+integral-interior model unknown qualification. Both spec and standards review
+findings were corrected and rechecked. The unresolved legacy Predictor check
+and field baseline failure above remain limitations.

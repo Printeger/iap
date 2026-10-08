@@ -2,6 +2,7 @@
 """Read-only freezes at physical fork entrances; no risk-labelled trigger."""
 import argparse
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -13,7 +14,7 @@ from run_directory import canonical_run_uses_sim_time
 def entrance(position, geometry):
     for index in range(int(geometry['forked_forest.fork_count'])):
         x = geometry['forked_forest.fork_x_min_m'] + index * geometry['forked_forest.fork_length_m']
-        if abs(position[0]-x) <= .5 and abs(position[1]) <= geometry['forked_forest.junction_clearance_radius_m']:
+        if abs(position[0]-x) <= .5 and math.hypot(position[0]-x,position[1]) <= geometry['forked_forest.junction_clearance_radius_m']:
             return index
     return None
 
@@ -129,7 +130,7 @@ def main():
         node.destroy_node(); rclpy.try_shutdown()
         root = artifact(run, 'export/advisory/forks/entrances.json')
         json_write(root, {'identity':'FORK_INPUT_CAPTURE', 'physical_geometry':geometry, 'entries':entries,
-                          'error':failure, 'trigger_rule':'abs(x-entry)<=0.5m and abs(y)<=physical junction radius'})
+                          'error':failure, 'trigger_rule':'abs(x-entry)<=0.5m and hypot(x-entry,y)<=physical junction radius'})
         manifest(run, 'fork_inputs', {'source':identity, 'collector_sha256':sha(Path(__file__)), 'entries':entries, 'error':failure,
                  'artifacts_sha256':{str(root.relative_to(run)):sha(root)}})
 

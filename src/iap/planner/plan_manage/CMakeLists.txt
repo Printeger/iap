@@ -66,6 +66,11 @@ ament_target_dependencies(advisory_validation plan_env rclcpp nav_msgs geometry_
   sensor_msgs visualization_msgs iap cv_bridge pcl_conversions)
 target_link_libraries(advisory_validation prediction_input iap::iap)
 
+add_executable(fork_risk_replay src/fork_risk_replay.cpp)
+ament_target_dependencies(fork_risk_replay plan_env path_searching rclcpp nav_msgs geometry_msgs
+  sensor_msgs visualization_msgs iap cv_bridge pcl_conversions)
+target_link_libraries(fork_risk_replay prediction_input iap::iap)
+
 add_executable(ego_planner_node
   src/ego_planner_node.cpp
   src/ego_replan_fsm.cpp
@@ -118,6 +123,10 @@ if(BUILD_TESTING)
   target_link_libraries(curve_backend_replay_failure_test prediction_input ${TRAJ_UTILS_LIB} iap::iap ${IAP_MSGS_TYPESUPPORT_CPP})
   add_test(NAME test_curve_backend_replay COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_curve_backend_replay.py)
   set_tests_properties(test_curve_backend_replay PROPERTIES ENVIRONMENT "IAP_CURVE_REPLAY_BIN=$<TARGET_FILE:curve_backend_replay>;IAP_CURVE_REPLAY_FAILURE_BIN=$<TARGET_FILE:curve_backend_replay_failure_test>" TIMEOUT 30)
+  add_test(NAME test_fork_risk_replay COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_compare_fork_channels.py
+    --binary $<TARGET_FILE:fork_risk_replay> --fixture-binary $<TARGET_FILE:advisory_validation>)
+  set_tests_properties(test_fork_risk_replay PROPERTIES TIMEOUT 60)
   add_test(NAME test_advisory_validation COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../scripts/dev_predictor/test_advisory_validation.py
     --binary $<TARGET_FILE:advisory_validation>)

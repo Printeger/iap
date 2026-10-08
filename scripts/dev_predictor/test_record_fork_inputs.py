@@ -11,6 +11,7 @@ class EntranceTest(unittest.TestCase):
                 self.assertEqual(entrance((x,y,1.5),geometry),i)
         self.assertIsNone(entrance((-14.,0,1.5),geometry))
         self.assertIsNone(entrance((-16.,2.1,1.5),geometry))
+        self.assertIsNone(entrance((-15.51,1.99,1.5),geometry))
         # Labels and the preferred arm do not choose the entrance.
         geometry['low_risk'] = 'left'
         self.assertEqual(entrance((-8.,-.2,1.5),geometry),1)

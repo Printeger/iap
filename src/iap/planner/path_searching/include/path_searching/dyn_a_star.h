@@ -184,6 +184,12 @@ private:
 	int rounds_{0};
 
 public:
+    // Read-only offline attribution on a fresh checker. Uses the production
+    // segment quadrature and physical queries; never authorizes execution.
+    std::optional<double> diagnosticSegmentCost(const Eigen::Vector3d& from,
+                                               const Eigen::Vector3d& to) {
+        return segmentCost(from, to, true);
+    }
 	void setComponentDiagnostic(ComponentDiagnostic* diagnostic) { component_diagnostic_ = diagnostic; }
 	typedef std::shared_ptr<AStar> Ptr;
 

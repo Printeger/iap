@@ -713,3 +713,24 @@ TEST(AdvisoryAStar, DominatedIncomingEdgesDoNotSpendRiskIntegrationWork) {
   EXPECT_NEAR(search.lastResult().path_cost,5.,1e-8);
   EXPECT_TRUE(search.lastResult().optimality_proven);
 }
+
+TEST(AdvisoryAStar, OfflineSegmentAttributionUsesPhysicalChecksAndBothDirections) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar checker;checker.setSearchMap(map);
+  checker.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=1.+p.x();return cell;
+  });
+  const Eigen::Vector3d a(0,0,1),b(2,0,1);
+  const auto forward=checker.diagnosticSegmentCost(a,b),reverse=checker.diagnosticSegmentCost(b,a);
+  ASSERT_TRUE(forward);ASSERT_TRUE(reverse);
+  EXPECT_NEAR(*forward,4.,1e-12);EXPECT_NEAR(*reverse,4.,1e-12); // integral of 1+x on [0,2]
+  checker.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;cell.execution_reason=std::abs(p.x()-1.)<.1
+        ? GridExecutionReason::ENVIRONMENT_UNOBSERVED : GridExecutionReason::OK;
+    cell.advisory.cost_multiplier=1.;return cell;
+  },true);
+  EXPECT_FALSE(checker.diagnosticSegmentCost(a,b));
+  EXPECT_FALSE(checker.diagnosticSegmentCost(b,a)); // advisory fallback cannot admit physical unknown
+}
