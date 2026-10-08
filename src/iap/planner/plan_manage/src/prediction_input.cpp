@@ -11,7 +11,8 @@ void setAdvisoryPosteriorPrior(iap::IntegritySnapshot& snapshot, const bool enab
   snapshot.has_lambda_base = true;
 }
 GridRiskContext makeRiskPrediction(const PredictionInput& input,
-    std::shared_ptr<std::atomic<uint64_t>> calls, std::string* rejection_reason) {
+    std::shared_ptr<std::atomic<uint64_t>> calls, std::string* rejection_reason,
+    std::shared_ptr<iap::PredictorBatchDiagnostics> diagnostics) {
   if (rejection_reason) rejection_reason->clear();
   const auto reject = [&](const char* reason) { if (rejection_reason) *rejection_reason=reason; };
   GridRiskContext context;
@@ -38,9 +39,9 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
   auto predictor=makeFrozenPredictor(input);
   const auto admission=predictor.admission(frozenPredictionQuery(input,snapshot.p_wb));
   context.valid_until_s=std::min(context.valid_until_s,admission.valid_until_s);
-  context.predict = [predictor = std::move(predictor), input, calls](const Eigen::Vector3d& center) {
+  context.predict = [predictor = std::move(predictor), input, calls, diagnostics](const Eigen::Vector3d& center) {
     if (calls) calls->fetch_add(1,std::memory_order_relaxed);
-    return predictionRiskVoxel(predictor.query(frozenPredictionQuery(input, center)));
+    return predictionRiskVoxel(predictor.query(frozenPredictionQuery(input, center),diagnostics.get()));
   };
   return context;
 }

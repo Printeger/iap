@@ -60,6 +60,8 @@ class PredictorModule {
 
   PredictorAdmission admission(const PredictorQueryInput& input) const;
   PredictorQueryResult query(const PredictorQueryInput& input) const;
+  PredictorQueryResult query(const PredictorQueryInput& input,
+                             PredictorBatchDiagnostics* diagnostics) const;
   std::vector<PredictorQueryResult> queryBatch(
       const std::vector<PredictorQueryInput>& inputs,
       PredictorBatchDiagnostics* diagnostics = nullptr,

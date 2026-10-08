@@ -510,3 +510,33 @@ TEST_F(GridRiskTest, FrozenQueryRetainsInvalidSentinelWithUnknownPreference) {
       << "invalid raw evidence is never turned into a valid preference";
   EXPECT_EQ(sizeof(GridRiskVoxel),32u) << "preserve the existing dense voxel cache footprint";
 }
+
+TEST_F(GridRiskTest, FrozenClassificationIsComputedOncePerVoxelAndInvalidatedPerContext) {
+  const auto physical=map.captureFailureSnapshot(); ASSERT_TRUE(physical);
+  auto first=context(); first.predict=[this](const Eigen::Vector3d&) {
+    ++calls; GridRiskVoxel value; value.status=GridRiskStatus::VALID;
+    value.hpl=.4; value.vpl=.2; return value;
+  };
+  const auto version=map.bindRiskContext(first);
+  auto frozen=map.capturePlanningRiskQuery(version,10.,{},nullptr,physical->generation,true);
+  const auto a=frozen(point);
+  for(int i=0;i<100;++i) {
+    const auto b=frozen(point+Eigen::Vector3d(.01,0,0));
+    EXPECT_DOUBLE_EQ(a.cost_multiplier,b.cost_multiplier);
+  }
+  EXPECT_EQ(frozen.statistics->accesses,101u);
+  EXPECT_EQ(frozen.statistics->hits,100u);
+  EXPECT_EQ(frozen.statistics->misses,1u);
+  EXPECT_EQ(frozen.statistics->predictions,1u);
+  EXPECT_EQ(frozen.statistics->classifications,1u);
+  auto policy=GridPlanningRiskPolicy{};policy.hpl_budget_m=.3;
+  auto other=map.capturePlanningRiskQuery(version,10.,policy,nullptr,physical->generation);
+  EXPECT_NE(other(point).classification,a.classification);
+  EXPECT_EQ(other.statistics->classifications,1u);
+  EXPECT_EQ(calls,2);
+  auto stale=map.capturePlanningRiskQuery(version,12.,{},nullptr,physical->generation);
+  EXPECT_NE(stale(point).query_status,GridRiskStatus::VALID);
+  EXPECT_EQ(stale.statistics->predictions,0u);
+  EXPECT_EQ(frozen(point).query_status,GridRiskStatus::VALID);
+  EXPECT_EQ(calls,2);
+}

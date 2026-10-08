@@ -698,3 +698,18 @@ TEST(AdvisoryAStar, FineCornerIntegralRejectsWarningBetweenOldHalfVoxelSamples) 
   EXPECT_GT(search.lastResult().rejected_advisory,0u);
   EXPECT_TRUE(search.getPath().empty());
 }
+
+TEST(AdvisoryAStar, DominatedIncomingEdgesDoNotSpendRiskIntegrationWork) {
+  auto map=std::make_shared<GridMap>(); GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,40,10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason=std::abs(p.z()-1.)<.06 ? GridExecutionReason::OK : GridExecutionReason::PHYSICAL_OBSTACLE;
+    cell.advisory.classification=GridAdvisoryClass::VALID;cell.advisory.cost_multiplier=1.25;
+    return cell;
+  });
+  ASSERT_TRUE(search.AstarSearch(.1,{-2.,0.,1.},{2.,0.,1.},1.));
+  EXPECT_GT(search.lastResult().lower_bound_pruned_edges,0u);
+  EXPECT_NEAR(search.lastResult().path_cost,5.,1e-8);
+  EXPECT_TRUE(search.lastResult().optimality_proven);
+}

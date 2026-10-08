@@ -739,6 +739,16 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
                         continue; //in closed set.
                     }
 
+                    // Every admitted edge multiplier is at least one. An OPEN
+                    // neighbor already has a completely checked incoming path;
+                    // this edge cannot improve it even at its geometric lower
+                    // bound. Keep diagnostic boundary enumeration exhaustive.
+                    const double edge_length=(Index2Coord(current->index)-Index2Coord(neighborIdx)).norm();
+                    if(!component_diagnostic_ && flag_explored &&
+                        current->gScore+edge_length>=neighborPtr->gScore) {
+                        ++result_.lower_bound_pruned_edges;
+                        continue;
+                    }
                     const auto edge_started = performance_diagnostics_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     const auto multiplier = edgeCost(
                         Index2Coord(current->index), Index2Coord(neighborPtr->index),

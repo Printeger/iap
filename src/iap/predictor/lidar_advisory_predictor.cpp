@@ -53,7 +53,7 @@ void LidarAdvisoryPredictor::rebuild_lidar_fim_index() {
   const double index_cell_size_m = std::max(
       0.25, 0.5 * params_.fim_params.fim_radius_m);
   primitive_index_ = LidarFimPrimitiveIndex::build(
-      primitives_, index_cell_size_m);
+      primitives_, index_cell_size_m,params_.fim_params.fim_support_voxel_m);
 }
 
 LidarAdvisoryResult LidarAdvisoryPredictor::query(

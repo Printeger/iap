@@ -180,7 +180,7 @@ GridPlanningRisk GridMap::classifyPlanningRisk(const GridRiskVoxel& live,
 
 GridFrozenRiskQuery GridMap::capturePlanningRiskQuery(
     uint64_t version, double now, const GridPlanningRiskPolicy& policy,
-    double* valid_until_s, uint64_t frozen_occupancy_generation) {
+    double* valid_until_s, uint64_t frozen_occupancy_generation, bool diagnostics) {
   std::lock_guard<std::mutex> map_lock(occupancy_epoch_mutex_);
   std::lock_guard<std::mutex> risk_lock(risk_mutex_);
   const auto context=risk_context_;
@@ -193,13 +193,16 @@ GridFrozenRiskQuery GridMap::capturePlanningRiskQuery(
   const bool bound=version!=0 && version==risk_version_ && context.frame_id==mp_.frame_id_ &&
       context.occupancy_generation==generation && (frozen_occupancy_generation || !(sequence&1u));
   if(valid_until_s) *valid_until_s=bound ? context.valid_until_s : std::numeric_limits<double>::quiet_NaN();
-  // Replace the previous classified-value cache with raw values in the same
-  // scope. Classification remains a view of that cache; evidence never reads
-  // a newer global buffer or invokes prediction again.
-  const auto cache=std::make_shared<std::unordered_map<size_t,GridRiskVoxel>>();
+  // Raw evidence and its classification share this one frozen voxel cache.
+  // Time, history, context and policy are immutable here; live queries still
+  // revalidate freshness/version independently. No result crosses a capture.
+  struct CachedRisk { GridRiskVoxel raw; GridPlanningRisk planning; };
+  const auto cache=std::make_shared<std::unordered_map<size_t,CachedRisk>>();
   GridFrozenRiskQuery frozen;
-  frozen.query=[context,history,origin,low,high,dimensions,resolution,inverse,bound,version,now,policy,cache]
+  const auto stats=frozen.statistics=std::make_shared<GridFrozenRiskStats>();
+  frozen.query=[context,history,origin,low,high,dimensions,resolution,inverse,bound,version,now,policy,cache,stats,diagnostics]
       (const Eigen::Vector3d& position) {
+    ++stats->accesses;
     GridRiskVoxel value; value.version=version;
     if (!position.allFinite() || !(position.array()>low.array()+1e-4).all() ||
         !(position.array()<high.array()-1e-4).all()) {
@@ -207,23 +210,31 @@ GridFrozenRiskQuery GridMap::capturePlanningRiskQuery(
     }
     const Eigen::Vector3i index=((position-origin)*inverse).array().floor().cast<int>();
     const size_t address=(static_cast<size_t>(index.x())*dimensions.y()+index.y())*dimensions.z()+index.z();
-    if (const auto found=cache->find(address); found!=cache->end()) value=found->second;
+    if (const auto found=cache->find(address); found!=cache->end()) { ++stats->hits; return found->second.planning; }
     else {
+      ++stats->misses;
       value.status=!bound ? GridRiskStatus::VERSION_CHANGED :
           (!std::isfinite(context.reference_time_s) || !std::isfinite(context.valid_until_s)) ? GridRiskStatus::INVALID :
           now<context.reference_time_s || now>context.valid_until_s ? GridRiskStatus::STALE :
           !context.predict ? GridRiskStatus::UNCOMPUTED : GridRiskStatus::VALID;
       if(value.status==GridRiskStatus::VALID) {
+        ++stats->predictions;
+        const auto began=diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         try { value=context.predict(origin+(index.cast<double>()+Eigen::Vector3d::Constant(.5))*resolution); }
         catch(const std::exception&) { value.status=GridRiskStatus::INVALID; }
+        if(diagnostics) stats->prediction_s+=std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count();
         value.version=version;
         if(value.status==GridRiskStatus::VALID && (!std::isfinite(value.hpl) || !std::isfinite(value.vpl) || value.hpl<0 || value.vpl<0 || value.hpl>=1e9 || value.vpl>=1e9)) value.status=GridRiskStatus::INVALID;
       }
-      cache->emplace(address,value);
     }
     const auto found=history.find(address);
-    return classifyPlanningRisk(value,policy,context,
+    ++stats->classifications;
+    const auto began=diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    const auto result=classifyPlanningRisk(value,policy,context,
         found==history.end() ? nullptr : &found->second,now);
+    if(diagnostics) stats->classification_s+=std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count();
+    cache->emplace(address,CachedRisk{value,result});
+    return result;
   };
   frozen.captureEvidence=[context,origin,high,dimensions,resolution,bound,version,generation,cache]
       (const GridMapFailureSnapshot& physical) -> std::optional<GridRiskEvidence> {
@@ -236,7 +247,7 @@ GridFrozenRiskQuery GridMap::capturePlanningRiskQuery(
     evidence.risk_valid_until_s=context.valid_until_s;
     evidence.queried_risk.reserve(cache->size());
     for(const auto& [address,value]:*cache)
-      evidence.queried_risk.push_back({static_cast<uint32_t>(address),value});
+      evidence.queried_risk.push_back({static_cast<uint32_t>(address),value.raw});
     std::sort(evidence.queried_risk.begin(),evidence.queried_risk.end(),
         [](const auto& a,const auto& b) {return a.address<b.address;});
     return evidence;

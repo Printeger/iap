@@ -71,6 +71,13 @@ std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
 
 class LidarFimPrimitiveIndex {
  public:
+  // Geometry and correlation family are invariant over spatial queries.
+  struct AdvisoryPrimitive {
+    bool valid=false;
+    Eigen::Matrix3d normal_outer=Eigen::Matrix3d::Zero();
+    double confidence=0., weight=1.;
+    std::size_t group=0;
+  };
   struct Stats {
     std::size_t primitive_count = 0;
     std::size_t finite_primitive_count = 0;
@@ -81,17 +88,21 @@ class LidarFimPrimitiveIndex {
   LidarFimPrimitiveIndex();
   LidarFimPrimitiveIndex(
       std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
-      double cell_size_m);
+      double cell_size_m, double support_voxel_m = .5);
 
   static std::shared_ptr<const LidarFimPrimitiveIndex> build(
       std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
-      double cell_size_m);
+      double cell_size_m, double support_voxel_m = .5);
 
   bool empty() const;
   const std::vector<LidarFimPrimitive>* primitives() const {
     return primitives_.get();
   }
   const Stats& stats() const { return stats_; }
+  const std::vector<AdvisoryPrimitive>* advisoryPrimitives(double support_voxel_m) const {
+    return support_voxel_m==support_voxel_m_ ? &advisory_primitives_ : nullptr;
+  }
+  std::size_t advisoryGroupCount() const { return advisory_group_count_; }
 
   void queryRadius(const Eigen::Vector3d& center,
                    double radius_m,
@@ -118,6 +129,9 @@ class LidarFimPrimitiveIndex {
   double cell_size_m_ = 1.0;
   std::unordered_map<Key, std::vector<std::size_t>, KeyHash> buckets_;
   Stats stats_;
+  double support_voxel_m_=std::numeric_limits<double>::quiet_NaN();
+  std::vector<AdvisoryPrimitive> advisory_primitives_;
+  std::size_t advisory_group_count_=0;
 };
 
 class LidarObservabilityFim {

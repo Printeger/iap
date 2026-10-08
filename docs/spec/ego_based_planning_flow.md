@@ -1642,7 +1642,41 @@ expansions. This reproduces the first-guide failure without another long ON
 flight. Original attempt 1 remains evidence-limited. Input registration, changed
 hash/risk rejection and pending-writer exclusion regressions pass.
 
-The first-guidance delivery and live handover stages remain pending. Formal
+Frozen search now reuses classification alongside the original raw GridMap
+voxel evidence. Each capture owns its time, history, policy and version; live
+freshness checks are unchanged. Metric edge cost is always at least geometric
+length, so an incoming edge to an OPEN node is skipped only when that lower
+bound cannot improve its already checked path. Component boundary diagnostics
+remain exhaustive. Endpoint connectors and full physical edge checks remain.
+
+Component measurement identified LiDAR as the dominant cost (0.729 s versus
+GNSS 0.160 s). Its existing primitive index now prepares constant normalized
+normal outer products and sorted correlation-family IDs once per immutable
+primitive set/support scale. Queries retain the exact radius cutoff, distance
+weight, admission and average information per correlated family; only touched
+families count. Stable local grouping avoids allocating/scanning all global
+families on each radius query. Vector-reference regression covers clipped groups, duplicates,
+nonunit/invalid normals, weights, confidence and three support scales. A scale
+mismatch uses the existing uncached grouping, never incorrect prepared IDs.
+The heuristic and objective are unchanged.
+
+The complete attempt-5 replay `20261008T081842Z_923` returns ON guide in
+0.486 s (10,889 predictions/classifications, 312,191 cache hits, 7,982 expansions,
+70,268 dominated edges skipped). Search cost is 37.8865 m: length 4.2800 + risk
+addition 1.6533 + terminal 31.9532; optimality is proven. LiDAR/GNSS/fusion query
+times are 0.179/0.177/0.023 s. Preparation is 0.087 s. The regression command
+uses `--require-guide` so the original timeout is a failing gate. Online CSV
+and offline replay separately expose predictions, frozen-cache accesses/hits/
+misses, classifications, edge samples and component/stage times. Cache and Predictor counters cover the frozen round; `last_search_edge_*`
+fields describe the last search, while existing `search_s`/expansions aggregate
+all searches in the shared budget. Timing is opt-in; these single-thread frozen
+counters are read after queries finish.
+
+Final local-only LiDAR grouping replay and original saved-PL diagnostic were
+rerun after the final Release build. Original OFF still returns a guide; sparse
+replay explicitly reports 4,487 missing unique voxels and zero Predictor calls,
+so it remains a partial diagnostic rather than a historical complete ON replay.
+The first legal Curve delivery and live handover stages remain pending. Formal
 experiments remain 0/9 calibration, 0/9 held-out and 0/6 mission runs. Mission
 comparison uses three OFF/ON seed pairs (2101–2103), with actual executed curve
 arc integral of max(HPL/HAL,VPL/VAL); unknown coverage and failures remain in the
@@ -1654,4 +1688,10 @@ production search replay missing-PL test, complete EgoBaseline suite, failure
 map tools, Advisory transport/replay tests, scheduled server execution, server
 time tests and full-stack feedback checks passed. Offline original-map
 production OFF returned a guide; saved-PL diagnosis reported missing coverage.
-Artifacts are under `log/20261008T074231Z_810`; no live result is claimed here.
+Artifacts are under `log/20261008T074231Z_810`; no live Curve result is claimed
+here. Release rebuild of all six planner/IAP packages passed. Predictor/LiDAR,
+A*, frozen-risk, occupancy/window/startup and planner functional checks passed.
+The broad CTest run also exposes existing package-wide flake8, uncrustify and
+lint_cmake failures; those formatting checks are not represented as passing.
+An overlapping library rebuild invalidated three early test invocations;
+only their subsequent stable-binary reruns count as functional evidence.

@@ -64,6 +64,7 @@ def main():
     parser.add_argument('--payload',type=Path)
     parser.add_argument('--budget-s',type=float,default=1.)
     parser.add_argument('--label',default='original_search')
+    parser.add_argument('--require-guide',action='store_true',help='fail the regression gate if either production search has no guide')
     args=parser.parse_args()
     if not args.label.replace('_','').isalnum(): raise ValueError('unsafe label')
     m=json.loads((args.snapshot/'snapshot.json').read_text())
@@ -88,7 +89,7 @@ def main():
             command=[str(args.binary.resolve()),str((args.snapshot/'cells.bin').resolve()),'--planning-search',mode,str(risk.resolve())]
             completed=subprocess.run(command,input=data,text=True,capture_output=True,timeout=args.budget_s+30)
             (out/(mode+'.stderr.log')).write_text(completed.stderr)
-            if completed.returncode: raise RuntimeError(completed.stderr)
+            if completed.returncode: raise RuntimeError(f"{mode} replay exit {completed.returncode}: {completed.stderr}")
             verdict=json.loads(completed.stdout)
             verdict['scope']='REAL_FROZEN' if mode=='full' else 'PHYSICAL_OFF' if mode=='off' else 'SAVED_PL_PARTIAL_DIAGNOSTIC'
             (out/(mode+'.json')).write_text(json.dumps(verdict,indent=2)+'\n')
@@ -99,6 +100,8 @@ def main():
             raise RuntimeError('frozen input changed during replay')
         if args.payload and result['payload_sha256']!=sha(args.payload):
             raise RuntimeError('prediction payload changed during replay')
+        if args.require_guide and not all(result[k]['guide_found'] for k in ('off','full' if args.payload else 'sparse')):
+            raise RuntimeError('production search did not deliver a guide within the original budget')
         status='completed'
     except Exception as exc:
         result['error']=f'{type(exc).__name__}: {exc}'

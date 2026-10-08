@@ -74,6 +74,7 @@ public:
 		size_t cache_hits = 0;
 		size_t queue_pushes = 0, queue_pops = 0, advisory_refresh_calls = 0;
 		size_t advisory_query_calls = 0, risk_integration_calls = 0;
+        size_t lower_bound_pruned_edges = 0;
 		std::array<size_t, 3> sample_hits{}, sample_misses{}, cache_entries{}, cache_bytes{};
 		double path_cost = 0.0; // Complete objective in metres.
         double path_length_m=0., risk_cost_m=0., terminal_cost_m=0.;

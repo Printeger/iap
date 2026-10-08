@@ -289,7 +289,12 @@ struct GridRiskEvidence {
 
 // One frozen cache owns both planning queries and their raw evidence. Capture
 // runs on the planning thread before the immutable result enters the writer.
+struct GridFrozenRiskStats {
+  size_t accesses=0, hits=0, misses=0, predictions=0, classifications=0;
+  double prediction_s=0., classification_s=0.;
+};
 struct GridFrozenRiskQuery {
+  std::shared_ptr<GridFrozenRiskStats> statistics;
   std::function<GridPlanningRisk(const Eigen::Vector3d&)> query;
   std::function<std::optional<GridRiskEvidence>(const GridMapFailureSnapshot&)> captureEvidence;
   explicit operator bool() const { return static_cast<bool>(query); }
@@ -513,7 +518,7 @@ public:
                                      const GridPlanningRiskPolicy& policy);
   GridFrozenRiskQuery capturePlanningRiskQuery(
       uint64_t version, double evaluation_time_s, const GridPlanningRiskPolicy& policy,
-      double* valid_until_s = nullptr, uint64_t frozen_occupancy_generation = 0);
+      double* valid_until_s = nullptr, uint64_t frozen_occupancy_generation = 0, bool diagnostics = false);
   GridPlanningCell queryPlanningCell(const Eigen::Vector3d& position,
                                     uint64_t version, double evaluation_time_s,
                                     const GridPlanningRiskPolicy& risk_policy,

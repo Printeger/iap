@@ -539,7 +539,13 @@ PredictorAdmission PredictorModule::admission(const PredictorQueryInput& input) 
 
 PredictorQueryResult PredictorModule::query(
     const PredictorQueryInput& input) const {
-  return queryWithSpatialAdvisory(input, nullptr, nullptr, nullptr);
+  return query(input, nullptr);
+}
+
+PredictorQueryResult PredictorModule::query(
+    const PredictorQueryInput& input, PredictorBatchDiagnostics* diagnostics) const {
+  if(diagnostics) ++diagnostics->query_count;
+  return queryWithSpatialAdvisory(input, nullptr, nullptr, diagnostics);
 }
 
 PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(

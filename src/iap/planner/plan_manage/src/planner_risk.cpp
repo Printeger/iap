@@ -582,7 +582,7 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
     // The bound PL context has to refer to this same occupancy generation.
     view.risk_version = risk_version;
     view.advisory_query=grid_map_->capturePlanningRiskQuery(view.risk_version,time_s,
-        planning_risk_policy_,&view.advisory_valid_until_s,epoch->generation);
+        planning_risk_policy_,&view.advisory_valid_until_s,epoch->generation,search_performance_diagnostics_);
     planning_view_ = std::move(view);
     return true;
   }
@@ -631,7 +631,14 @@ void EGOPlannerManager::endPlanningView() {
       <<last_candidate_assessment_.guide_retention.risk_preference_lost<<','
       <<last_candidate_assessment_.guide_retention.quadrature_uncertainty<<','
       <<last_candidate_assessment_.guide_retention.samples<<','
-      <<last_candidate_assessment_.guide_retention.comparable_model_cost<<'\n'; planning_metrics_.flush();
+      <<last_candidate_assessment_.guide_retention.comparable_model_cost;
+    const auto& r=*planning_view_->advisory_query.statistics;
+    const auto& p=*planning_prediction_stats_;
+    const auto& search=bspline_optimizer_->a_star_->lastResult();
+    planning_metrics_<<','<<r.accesses<<','<<r.hits<<','<<r.misses<<','<<r.predictions<<','<<r.classifications
+      <<','<<r.prediction_s<<','<<r.classification_s<<','<<search.risk_integration_calls<<','<<search.edge_s
+      <<','<<p.gnss_advisory_duration_ns*1e-9<<','<<p.lidar_advisory_duration_ns*1e-9
+      <<','<<p.fusion_advisory_duration_ns*1e-9<<'\n'; planning_metrics_.flush();
   }
   planning_view_.reset();
 }
@@ -806,7 +813,12 @@ uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& sna
   input.integrity=snapshot; input.params=predictor_params_;
   input.reference_time_s=now; input.validity_s=risk_validity_s_;
   const auto started=std::chrono::steady_clock::now();
-  auto context=makeRiskPrediction(input,predictor_calls_);
+  if(retain_planning_input) {
+    planning_prediction_stats_=std::make_shared<iap::PredictorBatchDiagnostics>();
+    planning_prediction_stats_->collect_component_timing=search_performance_diagnostics_;
+  }
+  auto context=makeRiskPrediction(input,predictor_calls_,nullptr,
+      retain_planning_input ? planning_prediction_stats_ : nullptr);
   if(planning_budget_) planning_timings_.prediction_preparation_s+=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
   const auto version=grid_map_->bindRiskContext(std::move(context));
   if(retain_planning_input) {
@@ -821,7 +833,7 @@ void EGOPlannerManager::initPredictionExport() {
   if (const auto log=glim::RunLogManager::get_if_initialized(); log && std::filesystem::exists(log->run_dir())) {
     const auto name="planner_flow_"+std::to_string(getpid());
     planning_metrics_.open(log->profiling_path(name+".csv"));
-    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id,search_path_cost_m,search_path_length_m,search_risk_cost_m,search_terminal_cost_m,search_optimality_proven,search_budget_exhausted,search_advisory_changed,route_checked,guide_length_m,curve_length_m,guide_risk_cost_m,curve_risk_cost_m,guide_valid_fraction,curve_valid_fraction,max_guide_deviation_m,guide_corridor_m,route_risk_version,route_comparable_valid_risk,route_lost,continuous_risk_preference_lost,route_quadrature_uncertainty,route_samples,route_comparable_model_cost\n";
+    planning_metrics_<<"reference_time,generation,total_s,freeze_s,prediction_prepare_s,searcher_initialization_s,search_s,backend_s,final_checks_s,search_calls,expanded,queue_pushes,queue_pops,spatial_queries,predictor_queries,repairs,deadline_expired,repair_denied,cache_hits,cache_misses,peak_cache_bytes,advisory_frozen_samples,advisory_frozen_avoid,advisory_frozen_unknown,advisory_downgraded_at_release,advisory_fallback_repairs,target_candidates,selected_goal,predecessor_id,connection_time,publication_id,plan_failure,curve_correction_repairs,guide_fitting_reserve_m,planning_attempt_id,search_path_cost_m,search_path_length_m,search_risk_cost_m,search_terminal_cost_m,search_optimality_proven,search_budget_exhausted,search_advisory_changed,route_checked,guide_length_m,curve_length_m,guide_risk_cost_m,curve_risk_cost_m,guide_valid_fraction,curve_valid_fraction,max_guide_deviation_m,guide_corridor_m,route_risk_version,route_comparable_valid_risk,route_lost,continuous_risk_preference_lost,route_quadrature_uncertainty,route_samples,route_comparable_model_cost,risk_cache_accesses,risk_cache_hits,risk_cache_misses,frozen_predictions,frozen_classifications,prediction_s,classification_s,last_search_edge_integral_samples,last_search_edge_s,gnss_prediction_s,lidar_prediction_s,fusion_prediction_s\n";
     export_metrics_.open(log->profiling_path(name+"_export.csv"));
     export_metrics_<<"reference_time,generation,total_s,payload_bytes,predictor_queries_before,predictor_queries_after\n";
     std::ofstream manifest(log->metadata_path("manifests/"+name+".json"));

@@ -21,7 +21,8 @@ struct PredictionInput {
 void setAdvisoryPosteriorPrior(iap::IntegritySnapshot& snapshot, bool enabled);
 GridRiskContext makeRiskPrediction(const PredictionInput& input,
     std::shared_ptr<std::atomic<uint64_t>> calls = {},
-    std::string* rejection_reason = nullptr);
+    std::string* rejection_reason = nullptr,
+    std::shared_ptr<iap::PredictorBatchDiagnostics> diagnostics = {});
 // Same frozen map/support/primitive derivation as the production binding.
 // Direct queries are diagnostic; callers must retain the binding's rejection.
 iap::PredictorQueryInput frozenPredictionQuery(const PredictionInput& input, const Eigen::Vector3d& center);

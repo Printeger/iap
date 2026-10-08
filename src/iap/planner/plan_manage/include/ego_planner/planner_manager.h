@@ -344,6 +344,7 @@ namespace ego_planner
     uint64_t planning_calls_at_start_=0;
     rclcpp::CallbackGroup::SharedPtr export_callback_group_;
     rclcpp::Service<iap::srv::GetGridMapPredictionInput>::SharedPtr prediction_export_service_;
+    std::shared_ptr<iap::PredictorBatchDiagnostics> planning_prediction_stats_;
     std::shared_ptr<std::atomic<uint64_t>> predictor_calls_ = std::make_shared<std::atomic<uint64_t>>(0);
     iap::IntegritySnapshot capturePredictionSnapshot(double now) const;
     void initPredictionExport();

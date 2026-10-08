@@ -296,6 +296,8 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   auto epoch=map->captureFrozenOccupancyEpoch();
   auto calls=std::make_shared<std::atomic<uint64_t>>(0);
   size_t missing=0, advisory_calls=0;
+  const auto prediction_stats=std::make_shared<iap::PredictorBatchDiagnostics>();
+  prediction_stats->collect_component_timing=true;
   double prepare_s=0;
   uint64_t version=0;
   if(mode=="full") {
@@ -314,7 +316,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     epoch=input.occupancy;
     const auto began=Clock::now();
     std::string rejection;
-    auto prediction=ego_planner::makeRiskPrediction(input,calls,&rejection);
+    auto prediction=ego_planner::makeRiskPrediction(input,calls,&rejection,prediction_stats);
     if(!rejection.empty()) throw std::invalid_argument("production prediction binding rejected: "+rejection);
     version=map->bindRiskContext(std::move(prediction));
     prepare_s=std::chrono::duration<double>(Clock::now()-began).count();
@@ -342,7 +344,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     };
     version=map->bindRiskContext(std::move(context));
   } else if(mode!="off") throw std::invalid_argument("invalid risk replay mode");
-  const auto frozen=map->capturePlanningRiskQuery(version,in.planning_time_s,policy,nullptr,epoch->generation);
+  const auto frozen=map->capturePlanningRiskQuery(version,in.planning_time_s,policy,nullptr,epoch->generation,true);
   const auto advisory=[&](const Point& p) {
     ++advisory_calls;
     if(mode!="off") return frozen(p);
@@ -365,10 +367,17 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   const auto& r=search.lastResult();
   std::cout<<std::setprecision(17)<<"{\"mode\":"<<std::quoted(mode)<<",\"guide_found\":"<<(found?"true":"false")
     <<",\"failure\":"<<std::quoted(AStar::failureName(r.failure))<<",\"search_s\":"<<r.duration_s
+    <<",\"gnss_prediction_s\":"<<prediction_stats->gnss_advisory_duration_ns*1e-9
+    <<",\"lidar_prediction_s\":"<<prediction_stats->lidar_advisory_duration_ns*1e-9
+    <<",\"fusion_prediction_s\":"<<prediction_stats->fusion_advisory_duration_ns*1e-9
     <<",\"prediction_prepare_s\":"<<prepare_s<<",\"predictor_calls\":"<<calls->load()
     <<",\"advisory_calls\":"<<advisory_calls<<",\"missing_unique_voxels\":"<<missing
+    <<",\"risk_cache_hits\":"<<frozen.statistics->hits<<",\"risk_cache_misses\":"<<frozen.statistics->misses
+    <<",\"classifications\":"<<frozen.statistics->classifications<<",\"prediction_s\":"<<frozen.statistics->prediction_s
+    <<",\"classification_s\":"<<frozen.statistics->classification_s<<",\"edge_s\":"<<r.edge_s
     <<",\"physical_queries\":"<<r.query_calls<<",\"sample_cache_hits\":"<<r.cache_hits
     <<",\"advisory_refreshes\":"<<r.advisory_refresh_calls<<",\"risk_integration_calls\":"<<r.risk_integration_calls
+    <<",\"lower_bound_pruned_edges\":"<<r.lower_bound_pruned_edges
     <<",\"expanded\":"<<r.expanded<<",\"path_cost_m\":"<<r.path_cost<<",\"length_m\":"<<r.path_length_m
     <<",\"risk_cost_m\":"<<r.risk_cost_m<<",\"terminal_cost_m\":"<<r.terminal_cost_m
     <<",\"optimality_proven\":"<<(r.optimality_proven?"true":"false")<<",\"path_m\":[";

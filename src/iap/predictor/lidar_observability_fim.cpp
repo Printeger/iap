@@ -256,7 +256,7 @@ LidarFimPrimitiveIndex::LidarFimPrimitiveIndex() = default;
 
 LidarFimPrimitiveIndex::LidarFimPrimitiveIndex(
     std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
-    const double cell_size_m)
+    const double cell_size_m, const double support_voxel_m)
     : primitives_(std::move(primitives)) {
   cell_size_m_ = std::isfinite(cell_size_m) && cell_size_m > 0.0
                      ? cell_size_m
@@ -276,13 +276,38 @@ LidarFimPrimitiveIndex::LidarFimPrimitiveIndex(
     ++stats_.finite_primitive_count;
   }
   stats_.bucket_count = buckets_.size();
+  if(!std::isfinite(support_voxel_m) || support_voxel_m<=0.) return;
+  support_voxel_m_=support_voxel_m;
+  advisory_primitives_.resize(primitives_->size());
+  using SupportKey=std::array<int64_t,4>;
+  std::map<SupportKey,size_t> groups;
+  std::vector<SupportKey> keys(primitives_->size());
+  for(size_t i=0;i<primitives_->size();++i) {
+    const auto& primitive=(*primitives_)[i];
+    if(!primitive.center_w.allFinite() || !primitive.normal_w.allFinite()) continue;
+    const double norm=primitive.normal_w.norm();
+    if(!std::isfinite(norm) || norm<=1e-9) continue;
+    const Eigen::Vector3d n=primitive.normal_w/norm;
+    auto& prepared=advisory_primitives_[i];
+    prepared.confidence=std::clamp(std::isfinite(primitive.normal_confidence) ? primitive.normal_confidence : 1.,0.,1.);
+    prepared.weight=std::isfinite(primitive.weight) && primitive.weight>0. ? primitive.weight : 1.;
+    if(prepared.confidence<=0.) continue;
+    const Eigen::Array3d cell=(primitive.center_w.array()/support_voxel_m+1e-9).floor();
+    if((cell.abs()>double(std::numeric_limits<int64_t>::max()/2)).any()) continue;
+    Eigen::Index family;n.cwiseAbs().maxCoeff(&family);
+    keys[i]={int64_t(cell.x()),int64_t(cell.y()),int64_t(cell.z()),int64_t(family)};
+    groups.emplace(keys[i],0);prepared.valid=true;prepared.normal_outer=n*n.transpose();
+  }
+  for(auto& [key,id]:groups) id=advisory_group_count_++;
+  for(size_t i=0;i<advisory_primitives_.size();++i)
+    if(advisory_primitives_[i].valid) advisory_primitives_[i].group=groups.at(keys[i]);
 }
 
 std::shared_ptr<const LidarFimPrimitiveIndex> LidarFimPrimitiveIndex::build(
     std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
-    const double cell_size_m) {
+    const double cell_size_m, const double support_voxel_m) {
   return std::make_shared<LidarFimPrimitiveIndex>(std::move(primitives),
-                                                 cell_size_m);
+                                                 cell_size_m,support_voxel_m);
 }
 
 bool LidarFimPrimitiveIndex::empty() const {
@@ -475,7 +500,8 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     const Eigen::Vector3d& p_w,
     const std::vector<LidarFimPrimitive>* primitives,
     const std::vector<std::size_t>* candidate_indices,
-    const LidarObservabilityFim::Params& params) {
+    const LidarObservabilityFim::Params& params,
+    const LidarFimPrimitiveIndex* index=nullptr) {
   LidarAdvisoryFimResult out;
 
   auto fallback = [&](const char* reason) {
@@ -520,9 +546,13 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   using SupportKey=std::array<int64_t,4>;
   struct Support { Eigen::Matrix3d information=Eigen::Matrix3d::Zero(); size_t count=0; };
   std::map<SupportKey,Support> supports;
+  const auto prepared=index ? index->advisoryPrimitives(params.fim_support_voxel_m) : nullptr;
+  struct IndexedContribution { size_t group; Eigen::Matrix3d information; };
+  std::vector<IndexedContribution> indexed_supports;
+  if(prepared && candidate_indices) indexed_supports.reserve(candidate_indices->size());
   if (!std::isfinite(params.fim_support_voxel_m) || params.fim_support_voxel_m<=0)
     return fallback("invalid_lidar_support_scale");
-  const auto accumulate = [&](const LidarFimPrimitive& primitive) {
+  const auto accumulate = [&](const LidarFimPrimitive& primitive, size_t primitive_id) {
     if (!primitive.center_w.allFinite() || !primitive.normal_w.allFinite()) {
       return;
     }
@@ -532,6 +562,14 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
       return;
     }
     ++nearby;
+    if(prepared) {
+      const auto& value=(*prepared)[primitive_id];
+      if(!value.valid) return;
+      const double pi_range=std::exp(-dist2/std::max(2.*radius2,1e-9));
+      indexed_supports.push_back({value.group,
+          weight_scale*pi_range*value.confidence*value.weight*inv_sigma2*value.normal_outer});
+      ++valid_normals;return;
+    }
     const double normal_norm = primitive.normal_w.norm();
     if (!std::isfinite(normal_norm) || normal_norm <= 1.0e-9) {
       return;
@@ -562,17 +600,30 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
   if (candidate_indices != nullptr) {
     for (const std::size_t idx : *candidate_indices) {
       if (idx < primitives->size()) {
-        accumulate((*primitives)[idx]);
+        accumulate((*primitives)[idx],idx);
       }
     }
   } else {
-    for (const auto& primitive : *primitives) {
-      accumulate(primitive);
+    for (size_t i=0;i<primitives->size();++i) {
+      accumulate((*primitives)[i],i);
     }
   }
 
   for (const auto& [key,support]:supports) out.lambda += support.information/double(support.count);
   out.n_support_groups=static_cast<int>(supports.size());
+  if(prepared) {
+    // Only local candidates occupy query scratch space. Stable grouping keeps
+    // the uncached primitive summation order inside each sorted family.
+    std::stable_sort(indexed_supports.begin(),indexed_supports.end(),
+        [](const auto& a,const auto& b) {return a.group<b.group;});
+    for(size_t i=0;i<indexed_supports.size();) {
+      const size_t first=i,group=indexed_supports[i].group;
+      Eigen::Matrix3d information=Eigen::Matrix3d::Zero();
+      do {information+=indexed_supports[i++].information;}
+      while(i<indexed_supports.size() && indexed_supports[i].group==group);
+      out.lambda+=information/double(i-first);++out.n_support_groups;
+    }
+  }
   out.n_primitives = nearby;
   out.n_valid_normals = valid_normals;
   if (out.n_support_groups < min_voxels) {
@@ -628,7 +679,7 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
   std::vector<std::size_t> candidates;
   index->queryRadius(p_w, radius, &candidates);
   return evaluate_lidar_advisory_fim_candidates(p_w, index->primitives(),
-                                               &candidates, params_);
+                                               &candidates, params_,index);
 }
 
 }  // namespace iap
