@@ -71,6 +71,7 @@ def main():
     parser.add_argument('--guidance',choices=('false','true'),default='false')
     parser.add_argument('--stop-after-planning-input',action='store_true',help='bounded first-input capture; stop owned launch when input.bin is saved')
     parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
+    parser.add_argument('--capture-fork-entries',action='store_true',help='freeze physical fork entrance inputs with a read-only helper')
     parser.add_argument('--stop-after-task',action='store_true',help='stop owned jobs when the original FSM records task_reached')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     args = parser.parse_args()
@@ -161,12 +162,15 @@ def main():
         spawn('record', [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_validation.py'),
                          'record', '--label', args.label, '--count', str(math.ceil(args.duration / 10)),
                          '--interval', '10', '--timeout', '5'])
+        if args.capture_fork_entries:
+            spawn('forks', [sys.executable, str(REPO / 'scripts/dev_predictor/record_fork_inputs.py'),
+                            '--duration', str(args.duration+15)])
         import psutil
         captured_input=False
         while jobs['launch'].poll() is None:
             captured_input=bool(args.stop_after_planning_input and finalized_planning_inputs(run,require_search=True))
             if (args.stop_after_task and task_reached(run)) or (args.stop_after_planning_input and (captured_input or time.monotonic()-launch_started>=30.)):
-                for name in ('launch','capture','record'):
+                for name in jobs:
                     if jobs[name].poll() is None:
                         intentional_stops.add(name); stop(jobs[name])
                 break
@@ -186,7 +190,7 @@ def main():
                 stop(jobs['launch'])
                 break
             time.sleep(1)
-        for name in ('capture', 'record'):
+        for name in (n for n in jobs if n!='launch'):
             try:
                 jobs[name].wait(timeout=45)
             except subprocess.TimeoutExpired:

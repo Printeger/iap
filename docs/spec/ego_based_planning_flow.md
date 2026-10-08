@@ -1750,3 +1750,15 @@ unwritten. Its lifecycle remains failed and cannot be silently repaired. The
 helper stop regression is red for that failure and green with interrupt handling
 and idempotent `try_shutdown`; all data files close before registration. This
 changes capture lifecycle only, not flight authorization or task arrival.
+
+The optional reference driver `--capture-fork-entries` adopts the same run and
+uses a read-only helper. Physical map-node parameters define four entrances;
+the trigger is abs(x-entry)<=0.5 m and abs(y)<=the physical junction radius,
+independent of risk labels. Each trigger retains odometry/frame/time and requests
+the complete immutable current-display PredictionInput on the existing service.
+This remains separate from exact planning-attempt captures. The payload hash,
+producer identity, geometry parameters and each NOT_REACHED/CAPTURE_FAILED status
+are registered in `fork_inputs`; service failure grants no input. Offline
+qualification must still verify the payload state/reference lies in the entrance
+and report unobserved branches. Captures acquired in the repeat OFF baseline
+are diagnostic until its original arrival/execution baseline is verified.
