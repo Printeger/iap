@@ -109,3 +109,23 @@ is `CONDITIONAL_GEOMETRY_UNCALIBRATED`; finite numeric status is not a covarianc
 of total real error, an empirical bound or a fused integrity PL. Those require
 same-state-time truth pairing, calibrated marginal noises, independent map/align
 uncertainty evidence and covered fault hypotheses with allocated risk.
+
+## Qualification boundary
+
+Standalone GNSS geometry enumerates single-satellite and whole-constellation
+subsets with its original risk allocation. The Current Monitor has operational
+FDE evidence. Neither is imported as a fault bound for the joint pose model.
+There is no validated LiDAR matching/map bias bound, missed-detection allocation
+or common GNSS-LiDAR failure model. The Cauchy covariance bound applies to
+zero-mean residual correlation with the declared marginal covariances; it does
+not bound systematic bias. The current output is therefore a conditional normal
+geometry proxy. It is neither a validated empirical error bound nor a formal
+fused PL. Calibration and heldout counters stay zero until the unchanged route,
+time, coordinate, real-noise and independent-run prerequisites pass. The existing
+unknown-Advisory and motion authorization contracts remain the authority.
+
+Audit rows export final admitted and visible/excluded satellite identities,
+unknown/blocked support counts and hysteresis admission state. Legacy
+`epsilon_applied` means that a diagnostic inverse was computed; the explicit
+`epsilon_diagnostic_only` and `official_covariance_regularized` fields distinguish
+it from the unregularized admitted covariance.

@@ -161,7 +161,8 @@ void describe(const Input& in,const std::filesystem::path& path) {
     o<<",\"measurement_residual_available\":"<<(residual_available?"true":"false");
     o<<",\"pr_residual_m\":";number(o,sat.pr_residual);
     o<<",\"pseudorange_m\":";number(o,sat.pr_meas);
-    o<<",\"excluded\":"<<(sat.excluded?"true":"false")<<"}";
+    o<<",\"excluded\":"<<(sat.excluded?"true":"false")
+      <<",\"admission_hysteresis_pending\":"<<(sat.admission_hysteresis_pending?"true":"false")<<"}";
   }o<<']';
   o << ",\"excluded_prns\": [";
   for(size_t i=0;i<s.current.excluded_prns.size();++i) {if(i)o<<',';o<<s.current.excluded_prns[i];} o<<']';
@@ -357,7 +358,13 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
       observations<<",\"final_sigma_m\":";number(observations,result.gnss.information_sigma_m.at(row));
       observations<<'}';
     }
-    observations<<"]}\n";
+    observations<<"],\"visible_sat_ids\":[";
+    for(size_t i=0;i<result.gnss.visible_sat_ids.size();++i) {if(i)observations<<',';observations<<result.gnss.visible_sat_ids[i];}
+    observations<<"],\"excluded_sat_ids\":[";
+    for(size_t i=0;i<result.gnss.excluded_sat_ids.size();++i) {if(i)observations<<',';observations<<result.gnss.excluded_sat_ids[i];}
+    observations<<"],\"n_known_support\":"<<result.gnss.n_known_support
+        <<",\"n_unknown_support\":"<<result.gnss.n_unknown_support
+        <<",\"n_blocked\":"<<result.gnss.n_blocked<<"}\n";
     const bool valid=physical_ok && context.predict && wrapped.status==GridRiskStatus::VALID && !weak_normals;
     csv<<id<<','<<identity<<','<<label<<','<<std::setprecision(17)<<center.x()<<','<<center.y()<<','<<center.z()<<','<<physical.voxel_index.x()<<','<<physical.voxel_index.y()<<','<<physical.voxel_index.z()<<','<<(in.occupancy?in.occupancy->generation:0)<<','<<in.reference_time_s<<',';
     for(double v:{in.occupancy?in.occupancy->cloud_stamp_s:NAN,in.integrity.pose_stamp,in.integrity.current.stamp,in.integrity.has_epoch?in.integrity.gnss_epoch.stamp:NAN}) {csvNumber(csv,v);csv<<',';}
@@ -406,7 +413,8 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     matrices<<",\"gnss_information_hpl\":";number(matrices,f.gnss_information_hpl);
     matrices<<",\"gnss_information_vpl\":";number(matrices,f.gnss_information_vpl);
     matrices<<",\"fusion_epsilon\":";number(matrices,in.params.fusion.fim_epsilon);
-    matrices<<",\"epsilon_applied\":"<<(f.epsilon_applied?"true":"false")
+    matrices<<",\"official_covariance_regularized\":false,\"epsilon_diagnostic_only\":true"
+        <<",\"epsilon_applied\":"<<(f.epsilon_applied?"true":"false")
       <<",\"degeneracy_regularized\":"<<(f.degeneracy_regularized?"true":"false")
       <<",\"gnss_regularized\":"<<(result.gnss.fim_regularized?"true":"false")
       <<",\"lidar_regularized\":"<<(result.lidar.fim_regularized?"true":"false")

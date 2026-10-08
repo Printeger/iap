@@ -2004,3 +2004,15 @@ postopt position covariance is independently projected with local translation
 rotation, and CV diagnostics preserve p-v cross terms but lack process noise;
 they never grant propagation or coverage. Formal calibration/heldout remain
 0/9 and 0/9. No archived timestamp or eligibility threshold changes.
+
+The bounded 60 s canonical reference capture at clean revision `10a7c631`
+(`20261008T170243Z_381`) passes GPU preflight, Release installed/build identity
+and all four owned process exits. It exports 4290 requested actual CUDA factors,
+363255 residual samples, no queue drop/write failure. This is a reference
+capture, not task arrival or fixed-route acceptance. Its five state-time pairs
+also fail the original prediction-reference time gate. Scientific E therefore
+retains conditional normal geometry only: standalone GNSS fault subsets and
+Current Monitor FDE are distinct from joint fused bounds. LiDAR/systematic/map
+and common faults, real marginal noises and missed-detection/risk allocation
+remain unqualified; no empirical bound, 9+9 PASS or default promotion is granted.
+Audit exports make source admission and diagnostic-only epsilon explicit.
