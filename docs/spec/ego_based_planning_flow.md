@@ -1867,8 +1867,19 @@ predictions and 11,899 expansions. Guide coordinates, length, risk addition,
 terminal item and total cost exactly match the pre-fix extended result. LiDAR
 work drops to about 0.433 s; original online budget, physics and PL remain fixed.
 Dense-family/reference admission and information equivalence are tested at the
-existing LiDAR FIM seam. Field continuation through the first fork still requires
-the subsequent clean-revision targeted run; this replay alone is not that pass.
+existing LiDAR FIM seam. The subsequent clean-revision ON reference
+`20261008T102938Z_837` (90 s, four-fork scene) observed checked continuation
+1→2, 4→5, 5→6 and actual command ID7 crossing the first physical fork exit
+at ROS 1657108865.744 (truth X=-7.999927). Server activation and command IDs,
+published B-spline P/V/A and guide retention are cross-checked in the registered
+report `log/20261008T100656Z_193/export/analysis/first_fork_result/REPORT.md`.
+A real check spanning activation5→6 consumed ID6 feedback and rechecked6.
+This is a mechanism/execution reference, not whole-mission acceptance. New
+first-fork attempt4/generation53 remains cold TIME_BUDGET (extended1.298 s,
+warm0.188 s); all repeated search/release/budget failures and checked recovery
+remain recorded. Continuous timely service is partial. Historical attempt9's
+overspeed initial boundary remains rejected; this field run has no Curve-stage
+failure. No PL metre calibration or formal risk-benefit conclusion is granted.
 Release rebuild/install, 12/12 planner functional checks and the LiDAR/reference
 checks passed. Full IAP CTest remains 31/32: the previously reported legacy
 `test_future_pl_field_predictor` invalid-result assertions remain unresolved.
