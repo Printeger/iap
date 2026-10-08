@@ -2044,3 +2044,19 @@ ON fails, the explicit fallback finds a guide in 0.9284 s with preparation
 0.0923 s, but a complete 1.5 s guide/backend/publication pass is not inferred.
 Full IAP CTest 32/32 and 15 focused Python references pass before bounded ON
 field observation. No route weights or reserve thresholds are changed.
+
+Bounded ON reference `20261008T171823Z_275` binds clean `ab67c656`, matching
+Release binaries and READY CUDA preflight. All owned processes exit zero, but
+66 planner attempts publish no successful trajectory and the task is not
+reached. The final real attempt66/generation446 remains TIME_BUDGET with the
+original high-cost fallback. Independent profiled frozen replay fails at 1 s;
+the offline 5 s diagnostic finds its bounded lattice optimum in 2.7022 s
+(51458 predictions: GNSS 0.6869 s, LiDAR 1.0436 s, fusion 0.2003 s), without
+live map changes. Extra time is diagnostic only; the production 1 s / 1.5 s
+budgets are unchanged. Five ON state-time truth pairs remain outside the
+original prediction-reference time gate and are not motion-route calibration.
+This is an online budget blocker, not closed-loop acceptance. Full model
+uncertainty, time propagation, legal fixed full-route and independent 9+9,
+fused fault risk and online budget qualification remain pending. Defaults and
+formal mission comparison are not promoted. Consolidated evidence and figures:
+`log/20261008T162301Z_891/export/analysis/fusion_scientific_result/REPORT.md`.
