@@ -289,7 +289,10 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   if (!(std::cin >> policy.hpl_budget_m >> policy.vpl_budget_m >> policy.reserve_h_m >>
       policy.reserve_v_m >> policy.unknown_multiplier >> policy.stale_soft_seconds))
     throw std::invalid_argument("missing original advisory policy");
-  auto map=GridMap::fromFailureSnapshot(in.snapshot);
+  auto physical_snapshot=in.snapshot;
+  if(!(std::cin>>physical_snapshot.virtual_ceiling_height_m>>physical_snapshot.inflation_radius_m))
+    throw std::invalid_argument("missing original ceiling/inflation");
+  auto map=GridMap::fromFailureSnapshot(physical_snapshot);
   auto epoch=map->captureFrozenOccupancyEpoch();
   auto calls=std::make_shared<std::atomic<uint64_t>>(0);
   size_t missing=0, advisory_calls=0;
@@ -303,11 +306,17 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     if(!input.occupancy || input.reference_time_s!=in.planning_time_s ||
         input.occupancy->generation!=epoch->generation || input.occupancy->frame_id!=epoch->frame_id ||
         input.occupancy->lattice_origin!=epoch->lattice_origin || input.occupancy->extent_m!=epoch->extent_m ||
-        input.occupancy->resolution_m!=epoch->resolution_m || input.occupancy->cells->flags!=epoch->cells->flags)
+        input.occupancy->resolution_m!=epoch->resolution_m || input.occupancy->cloud_stamp_s!=epoch->cloud_stamp_s ||
+        input.occupancy->virtual_ceiling_height_m!=epoch->virtual_ceiling_height_m ||
+        input.occupancy->map_inflation_m!=epoch->map_inflation_m ||
+        input.occupancy->cells->flags!=epoch->cells->flags)
       throw std::invalid_argument("planning payload/map/time identity mismatch");
     epoch=input.occupancy;
     const auto began=Clock::now();
-    version=map->bindRiskContext(ego_planner::makeRiskPrediction(input,calls));
+    std::string rejection;
+    auto prediction=ego_planner::makeRiskPrediction(input,calls,&rejection);
+    if(!rejection.empty()) throw std::invalid_argument("production prediction binding rejected: "+rejection);
+    version=map->bindRiskContext(std::move(prediction));
     prepare_s=std::chrono::duration<double>(Clock::now()-began).count();
   } else if(mode=="sparse") {
     double reference, until;

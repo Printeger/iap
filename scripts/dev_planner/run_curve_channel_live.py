@@ -38,6 +38,24 @@ def stop(process):
             process.wait()
 
 
+def finalized_planning_inputs(run, require_search=False):
+    """Read only atomically published, registered captures; keep invalid inputs."""
+    inputs=[]
+    for payload in sorted((run/'export/planner/failure_map').glob('*/planning_input.bin')):
+        if payload.parent.name.endswith('.pending'): continue
+        snapshot=payload.parent/'snapshot.json'
+        manifest_path=run/'metadata/manifests'/('planner_failure_map_'+payload.parent.name+'.json')
+        if not snapshot.is_file() or not manifest_path.is_file(): continue
+        metadata=json.loads(snapshot.read_text())
+        registration=json.loads(manifest_path.read_text())
+        if registration.get('planning_input')!=str(payload.relative_to(run/'export')): continue
+        if require_search and (not metadata.get('planning_goals_m') or not metadata.get('search_stage') or
+            metadata.get('motion_quality')!=1 or not math.isfinite(metadata.get('motion_stamp_s') or float('nan'))):
+            continue
+        inputs.append((payload,snapshot,metadata))
+    return inputs
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--duration', type=float, default=300)
@@ -47,6 +65,7 @@ def main():
     parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     args = parser.parse_args()
+    if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
     safe_label(args.label)
@@ -61,6 +80,7 @@ def main():
     status = 'failed'
     command = []
     error = None
+    intentional_stops=set()
     try:
         os.environ['IAP_RUN_DIR'] = str(run)
         os.environ['ROS_LOG_DIR'] = str(run / 'runtime/ros')
@@ -128,15 +148,18 @@ def main():
         spawn('capture', [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_live_capture.py'),
                           '--duration', str(args.duration + 15), '--label', args.label])
         spawn('launch', command)
+        launch_started=time.monotonic()
         spawn('record', [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_validation.py'),
                          'record', '--label', args.label, '--count', str(math.ceil(args.duration / 10)),
                          '--interval', '10', '--timeout', '5'])
         import psutil
         captured_input=False
         while jobs['launch'].poll() is None:
-            if args.stop_after_planning_input and list((run/'export/planner/failure_map').glob('*/planning_input.bin')):
-                captured_input=True
-                stop(jobs['launch'])
+            captured_input=bool(args.stop_after_planning_input and finalized_planning_inputs(run,require_search=True))
+            if args.stop_after_planning_input and (captured_input or time.monotonic()-launch_started>=30.):
+                for name in ('launch','capture','record'):
+                    if jobs[name].poll() is None:
+                        intentional_stops.add(name); stop(jobs[name])
                 break
             try:
                 children = psutil.Process(jobs['launch'].pid).children(recursive=True)
@@ -159,7 +182,9 @@ def main():
                 jobs[name].wait(timeout=45)
             except subprocess.TimeoutExpired:
                 stop(jobs[name])
-        status = 'completed' if all(p.returncode == 0 for p in jobs.values()) or captured_input else 'failed'
+        healthy=all(p.returncode==0 or (n in intentional_stops and p.returncode in (-signal.SIGINT,130))
+                    for n,p in jobs.items())
+        status = 'completed' if healthy and (not args.stop_after_planning_input or captured_input) else 'failed'
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         raise
@@ -172,9 +197,7 @@ def main():
         health_path.parent.mkdir(parents=True, exist_ok=True)
         health_path.write_text(json.dumps(health, indent=2) + '\n')
         planning_inputs=[]
-        for payload in sorted((run/'export/planner/failure_map').glob('*/planning_input.bin')):
-            snapshot=payload.parent/'snapshot.json'
-            metadata=json.loads(snapshot.read_text())
+        for payload,snapshot,metadata in finalized_planning_inputs(run):
             planning_inputs.append({'payload':str(payload.relative_to(run)),'payload_sha256':sha(payload),
                 'snapshot':str(snapshot.relative_to(run)),'snapshot_sha256':sha(snapshot),
                 'planning_attempt_id':metadata['planning_attempt_id'],
@@ -187,6 +210,7 @@ def main():
                  'revision': identity['revision'], 'commands': command,
                  'elapsed_s': time.monotonic() - started,
                  'exit_codes': {n: p.returncode for n, p in jobs.items()},
+                 'intentional_stops':sorted(intentional_stops),
                  'health_sha256': sha(health_path),
                  'logs_sha256': {str(p.relative_to(run)): sha(p)
                                 for p in run.joinpath('runtime').glob('*.log')},

@@ -30,8 +30,30 @@ def replay_input(meta, params, budget):
         ' '.join(_number(params['planning/'+key]) for key in
             ('advisory_hpl_budget_m','advisory_vpl_budget_m','advisory_hpl_reserve_m',
              'advisory_vpl_reserve_m','advisory_unknown_multiplier','advisory_stale_soft_s')),
+        f"{_number(m['virtual_ceiling_height_m'])} {_number(m['inflation_radius_m'])}",
         f"{_number(m['risk_reference_time_s'])} {_number(m['risk_valid_until_s'])}"]
     return '\n'.join(lines)+'\n'
+
+
+def verify_planning_capture(snapshot, payload, meta):
+    run=(snapshot/ meta['run_manifest']).resolve().parent.parent
+    primary=json.loads((run/'metadata/run_manifest.json').read_text())
+    capture=json.loads((run/'metadata/manifests/planning_input_capture.json').read_text())
+    if (not primary['source']['git_worktree_clean'] or capture['source']['dirty'] or
+        capture['source']['revision']!=primary['source']['git_commit']):
+        raise ValueError('unclean or mismatched captured revision')
+    matching=[entry for entry in capture['inputs'] if (run/entry['payload']).resolve()==payload.resolve()]
+    if len(matching)!=1: raise ValueError('payload not uniquely registered in planning capture')
+    entry=matching[0]
+    expected={'planning_attempt_id':meta['planning_attempt_id'],
+        'risk_version':meta['planning_input_risk_version'],'generation':meta['generation'],
+        'reference_time_s':meta['planning_time_s'],'payload_sha256':sha(payload),
+        'snapshot_sha256':sha(snapshot/'snapshot.json')}
+    if (any(entry.get(k)!=v for k,v in expected.items()) or
+        (run/entry['snapshot']).resolve()!=(snapshot/'snapshot.json').resolve() or
+        meta['planning_input_risk_version']!=meta['risk_version']):
+        raise ValueError('captured planning attempt/risk/hash identity mismatch')
+    return entry
 
 
 def main():
@@ -46,6 +68,7 @@ def main():
     if not args.label.replace('_','').isalnum(): raise ValueError('unsafe label')
     m=json.loads((args.snapshot/'snapshot.json').read_text())
     params=json.loads(args.parameters.read_text())
+    if args.payload: verify_planning_capture(args.snapshot,args.payload,m)
     data=replay_input(m,params,args.budget_s)
     inherited=os.environ.get('IAP_RUN_DIR')
     run=adopt_run_directory(inherited) if inherited else resolve_run_directory(
@@ -55,7 +78,7 @@ def main():
     result={'source_run':m['run_id'],'planning_attempt_id':m['planning_attempt_id'],
         'budget_s':args.budget_s,'parameters_sha256':sha(args.parameters),
         'input_sha256':{f.name:sha(f) for f in args.snapshot.iterdir() if f.is_file()},
-        'binary':binary_identity(args.binary.resolve()),'full_prediction_replay':bool(args.payload)}
+        'binary':binary_identity(args.binary.resolve()),'full_prediction_replay':False}
     if args.payload: result['payload_sha256']=sha(args.payload)
     status='failed'
     try:
@@ -71,11 +94,15 @@ def main():
             (out/(mode+'.json')).write_text(json.dumps(verdict,indent=2)+'\n')
             result[mode]=verdict
         result['historical_full_on_status']='REPLAYED' if args.payload else 'INCONCLUSIVE_MISSING_COMPLETE_INPUT'
+        result['full_prediction_replay']=bool(args.payload)
         if result['input_sha256']!={f.name:sha(f) for f in args.snapshot.iterdir() if f.is_file()}:
             raise RuntimeError('frozen input changed during replay')
         if args.payload and result['payload_sha256']!=sha(args.payload):
             raise RuntimeError('prediction payload changed during replay')
         status='completed'
+    except Exception as exc:
+        result['error']=f'{type(exc).__name__}: {exc}'
+        raise
     finally:
         write_subordinate_manifest(run,args.label,result)
         if not inherited: finalize_run(run,lifecycle=status)

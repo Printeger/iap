@@ -1621,9 +1621,26 @@ start, saved complete goal set, saved lattice, original fitting reserve, physica
 rules and explicit frozen parameters. Its one-second search budget is explicit;
 this isolated search is not a full 1.5-second planner/Curve publication trial.
 OFF, saved-PL partial diagnosis and complete-payload replay remain distinct.
-Full replay rejects payload/map/time disagreement; partial replay counts missing
+Full replay first verifies clean captured revision, registered attempt/risk IDs,
+payload and physical snapshot hashes. It then checks map geometry, cloud time,
+ceiling/inflation, original prediction time and production model admission; a
+rejected binding cannot become REAL_FROZEN evidence. Partial replay counts missing
 unique voxels and preserves UNCOMPUTED preference. Component attribution remains
 a separate exhaustive connectivity diagnostic and cannot replace this search.
+
+First-input capture forces a 30-second launch limit and only stops early for a
+finalized, registered search input with valid motion and a complete goal set.
+Pending writer directories and early invalid-motion attempts do not satisfy the
+capture gate. Owned helper processes stop with the launch; unexpected process
+failures remain failures.
+
+The bounded capture `20261008T075629Z_984` supplied a separately identified
+attempt 5 (generation 23). The identity-checked replay
+`20261008T080553Z_350` returns OFF guide in 0.0017 s but full ON times out at
+1.0001 s with 8,880 true Predictor calls / 734,056 advisory calls / 6,353
+expansions. This reproduces the first-guide failure without another long ON
+flight. Original attempt 1 remains evidence-limited. Input registration, changed
+hash/risk rejection and pending-writer exclusion regressions pass.
 
 The first-guidance delivery and live handover stages remain pending. Formal
 experiments remain 0/9 calibration, 0/9 held-out and 0/6 mission runs. Mission
