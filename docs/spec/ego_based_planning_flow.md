@@ -2,6 +2,35 @@
 
 ## 状态与依据
 
+**2026-10-09 当前开发结论：Advisory ON 短程连续执行已恢复。** 修复提交
+`7fe8cb2f`、`bb0290b8`；最终干净修订的 canonical 森林100s参考
+`20261009T051626Z_339`有14条真实前进B-spline、10次scheduled接续，
+ID4–11连续七次接续前进5.464m，全段x净前进9.407m、末15s仍前进1.275m，
+真实经过首叉 `[-12,+2.511,1.964]`。保护制动/立即恢复单列；不表示
+完整任务、无停车全程、森林正式PASS、9＋9或六次对照通过。图文与完整
+输入索引见[本轮交付报告](../../log/20261009T050811Z_947/export/analysis/on_recovery_delivery/REPORT.md)。
+
+当前实际流程：同一个GridMap冻结独立物理/运动与完整来源模型输入 →
+合法真实P/V/A及原16局部目标 → 原1s内发现一条完整检查guide，再用剩余
+预算按原目标/下界改进及证明 → 原EGO B-spline、动力学、actual-curve与
+单guide成本/几何检查 → 最新release物理/运动/接续与publication-corridor
+检查 → server按真实命令反馈激活。整个轮次仍1.5s/三恢复动作；失败候选
+不替换执行前驱。严格起点仍拒绝warning，只有原穷尽条件可进入高代价回退；
+合法warning起点直接进入原高代价动作。发现排序不修改实际risk/terminal
+代价，所有发现过的CLOSED节点重开后才可按原下界声称最优。
+
+已解决：warning起点错误严格入口、完整输入的物理/预测时刻错绑（新现场
+已验证）、冷预测下没有incumbent的高代价及strict搜索交付次序。39个A*
+回归、Planner功能回归及同完整输入红→绿通过。最新attempt50完整payload、
+曲线与最终cell保存：三动作用完，实际曲线未观测点拒绝，不是取消检查
+取得飞行。随后attempt51成功但未观察末尾ID17执行，不计成功。
+
+来源诊断未发现新的明确软件错误：28/28链、真实支持组复制不变性、3/3
+矩阵和60526/60526新GPU残差代数通过；GNSS floor/NLOS尾部、LiDAR跨组
+相关性及真实残差对应、绝对地图/对齐/外参误差仍未校准，历史GPU一例
+不对称仍未授予资格。固定地图条件模型与融合完整性资格保持各自边界。
+下方带日期的旧阶段状态和报告保留其历史修订身份，不覆盖本段当前结论。
+
 本轮当前状态与独立 A/B/C/D 结论见 [Curve／真实Advisory／通道实施进度](../dev_planner/curve_advisory_channel_progress.md)；下方旧阶段结果保留其历史版本身份。
 
 本轮统一[图文交付索引](../../log/20261007T091820Z_056/export/analysis/delivery_report_20261007.md)
@@ -2358,7 +2387,7 @@ single GPU asymmetry rejection remains a qualification limit. Formal 9+9 and
 six complete task comparisons remain deferred.
 
 
-### Cold strict-origin search (2026-10-09, live verification pending)
+### Cold strict-origin search (2026-10-09)
 
 Clean `7fe8cb2f` canonical ON run `20261009T051137Z_447` published actual
 B-splines and real command IDs 1→2→3→4, with three scheduled transitions at
@@ -2382,6 +2411,10 @@ one Search action and no fallback. Objective is 3.056938 length + 1.354295
 risk + 32.677630 terminal = 37.088863 m, unproven at the deadline. All 12
 Planner functional targets and cppcheck/pep257 pass; xmllint initially hit an
 external empty schema download rather than a code assertion. Its separate
-retry is retained. Clean-commit strict-origin live verification follows.
+retry is retained. Clean-commit strict-origin live verification is now recorded in the current
+status above and the delivery report: 14 actual forward curves/10 scheduled
+continuations, first fork and continuing final-15-second motion. The latest
+failed candidate remains fully captured; ENVIRONMENT_UNOBSERVED and exhausted
+repair actions are preserved rather than weakened.
 The physical unobserved remaining-curve refusal in this run remains a checked
 execution refusal, not a diagnosis that occupancy can be weakened.

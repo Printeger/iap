@@ -4,7 +4,7 @@ IAP 是基于 GLIM/GTSAM 的无人机 LiDAR–IMU–GNSS 定位建图与完整�
 
 系统采用因子图估计和优化规划。目标闭环将输出通过检查的可执行轨迹，或明确的失败原因；当前阶段能力见下文。
 
-本 README 是当前编译、运行、日志和分析的主要参考。规划器已接入同一 GridMap 的 advisory 绕行、统一有限恢复、完整实际曲线检查及最新走廊发布闸门；PL 补算显示已迁到独立进程，当前修订尚未取得四分叉闭环证据；`iap_flight` 暂不可用。流程与开发顺序见 [EGO 规划流程](docs/spec/ego_based_planning_flow.md)。
+本 README 是当前编译、运行、日志和分析的主要参考。规划器已接入同一 GridMap 的 advisory 绕行、统一有限恢复、完整实际曲线检查及最新走廊发布闸门；PL 补算显示已迁到独立进程，当前修订已取得四分叉短程 ON 连续执行及首叉证据，完整任务资格仍未通过；`iap_flight` 暂不可用。流程与开发顺序见 [EGO 规划流程](docs/spec/ego_based_planning_flow.md)。
 
 日常运行使用四个正式 launch：`glio.launch.py`、`glio_integrity.launch.py`、`iap_sim.launch.py`、`iap_flight.launch.py`。旧 Demo1–11 和阶段实验入口保留在 `launch/bp/`，用途见[历史入口说明](launch/bp/README.md)。
 
@@ -305,7 +305,7 @@ ros2 launch iap iap_sim.launch.py \
 
 默认星历依赖上表指定的已保存文件，请保留该文件或显式指定同历史时段的合格 NAV。
 显式 `rinex_nav_file:=''` 选择 synthetic 机制输入。当前默认 ON 是开发主线选择，
-不代表真实 PL 校准或森林任务验收通过；已记录的 ON 搜索超时尚未修复。
+不代表真实 PL 校准或森林任务验收通过；冷输入 ON 搜索交付已修复并取得短程实际接续；完整任务、来源校准与正式验收仍未通过。
 
 诊断规划停滞时显式打开一次性地图取证：
 
