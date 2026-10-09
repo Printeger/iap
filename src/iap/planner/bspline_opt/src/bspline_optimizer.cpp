@@ -67,6 +67,12 @@ namespace ego_planner
 
   void BsplineOptimizer::setControlPoints(const Eigen::MatrixXd &points)
   {
+    // Guide indexing and rebound storage must describe this same matrix.
+    // Keep existing sample constraints when only its coordinates change.
+    if(cps_.size!=points.cols()) {
+      cps_.resize(points.cols());
+      curve_clearance_constraints_.clear();
+    }
     cps_.points = points;
   }
 

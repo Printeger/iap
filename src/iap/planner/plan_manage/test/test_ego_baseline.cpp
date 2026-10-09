@@ -82,6 +82,9 @@ struct GridMapTestAccess {
 };
 namespace ego_planner {
 struct BsplineOptimizerTestAccess {
+  static std::pair<int,size_t> controlAndReferenceCounts(const BsplineOptimizer& optimizer) {
+    return {optimizer.cps_.size,optimizer.ref_pts_.size()};
+  }
   static std::pair<double,Eigen::MatrixXd> curveObjective(BsplineOptimizer& optimizer,
       const Eigen::MatrixXd& points) {
     double cost=0;
@@ -2742,6 +2745,20 @@ TEST(EgoBaseline, PureRouteCorrectionPreservesLegalDeviationInsideItsCorridor) {
         << "legal corridor samples need no correction, including warning-support fallback="
         << warning_support;
   }
+}
+
+TEST(EgoBaseline, ReplacingControlPointsSynchronizesGuideReferenceCount) {
+  auto node=makeNode();
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);
+  Eigen::MatrixXd old_points=Eigen::MatrixXd::Zero(3,32);
+  optimizer.initializeFromGuide(old_points);
+  Eigen::MatrixXd points(3,12);
+  for(int i=0;i<12;++i) points.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  optimizer.setControlPoints(points);
+  optimizer.setGuidePath({Eigen::Vector3d(-2,0,1),Eigen::Vector3d(2,0,1)});
+  const auto counts=ego_planner::BsplineOptimizerTestAccess::controlAndReferenceCounts(optimizer);
+  EXPECT_EQ(counts.first,12);
+  EXPECT_EQ(counts.second,12u);
 }
 
 TEST(EgoBaseline, UniformRetimeKeepsActualSampleObjectiveWhileNewFitClearsIt) {

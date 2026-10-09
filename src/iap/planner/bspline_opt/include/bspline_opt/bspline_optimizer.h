@@ -27,8 +27,8 @@ namespace ego_planner
   class ControlPoints
   {
   public:
-    double clearance;
-    int size;
+    double clearance = 0.;
+    int size = 0;
     Eigen::MatrixXd points;
     std::vector<std::vector<Eigen::Vector3d>> base_point; // The point at the statrt of the direction vector (collision point)
     std::vector<std::vector<Eigen::Vector3d>> direction;  // Direction vector, must be normalized.
