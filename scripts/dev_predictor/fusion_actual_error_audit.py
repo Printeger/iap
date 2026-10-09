@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pair original state-time truth and posterior evidence; never qualify by retiming."""
+"""Pair IMU-propagated GNSS-epoch truth; preserve original state and all requests."""
 import argparse
 import csv
 import json
@@ -186,12 +186,13 @@ def main():
     if paired:
         t = np.array([r['pose_stamp_s'] for r in paired]);t -= t.min()
         for axis, label in zip(axes[:2], ('h', 'v')):
-            axis.plot(t, [r['error_'+label+'_m'] for r in paired], 'o-', label='actual state-time error')
+            axis.plot(t, [r['error_'+label+'_m'] for r in paired], 'o-', label='actual GNSS-epoch error')
             axis.plot(t, [r[label+'pl_m'] for r in paired], 'x--', label='conditional model (time gates reported per point)')
-            axis.set_ylabel(label.upper()+' (m)');axis.set_xlabel('original state time offset (s)');axis.legend()
-        axes[2].plot(t, [r['reference_pose_delta_s'] for r in paired], 'o', label='reference - state')
-        axes[2].plot(t, [r['state_epoch_delta_s'] for r in paired], 'x', label='state - GNSS epoch')
-        axes[2].axhline(.05, color='red', ls=':');axes[2].set_ylabel('Original timestamp gap (s)');axes[2].legend()
+            axis.set_ylabel(label.upper()+' (m)');axis.set_xlabel('GNSS epoch offset (s)');axis.legend()
+        axes[2].plot(t, [r['reference_pose_delta_s'] for r in paired], 'o', label='reference - propagated pose')
+        axes[2].plot(t, [r['state_epoch_delta_s'] for r in paired], 'x', label='propagated pose - epoch')
+        axes[2].plot(t, [r['pose_stamp_s']-r['original_state_stamp_s'] for r in paired], '+-', label='epoch - original state')
+        axes[2].axhline(.05, color='red', ls=':', label='reference gate only');axes[2].set_ylabel('Preserved time-chain gap (s)');axes[2].legend(fontsize=8)
     fig.suptitle('Actual errors and conditional predictions; time gates preserved, no calibrated coverage')
     fig.tight_layout();fig.savefig(out/'actual_errors_and_time.png', dpi=150);plt.close(fig)
     write_subordinate_manifest(run, 'fusion_error_'+args.label, {

@@ -2115,7 +2115,7 @@ The affected native Planner/export/codec regressions passed after repairing
 reference-versus-receipt freshness. The older prior A/B assertion incorrectly
 added conditional p-p blocks and epsilon as official information; it now checks
 the joint envelope, independent SVD nuisance projection and exact accepted
-covariance inverse. Existing repository-wide flake8, lint_cmake and uncrustify
+covariance inverse. The observed repository-wide flake8, lint_cmake and uncrustify
 failures remain reported; they do not grant live acceptance.
 
 ## Source and live integration corrections (2026-10-09)
@@ -2147,3 +2147,37 @@ draw, total injected bias/noise, raw sigma, satellite identity and epoch in
 No extra random draws occur. The read-only short-run driver disables the grid
 visualizer, so collecting independent figures does not consume display
 prediction work. Neither risk weights nor online planning budgets change.
+
+The repaired interface has now delivered six moving, same-reference error
+pairs out of eight requests in clean Release/GPU run `20261009T030155Z_886`
+(75 s, advisory guidance OFF, real Predictor capture ON). The original states
+precede the GNSS epochs by 51–57 ms; actual bracketing IMU propagates them,
+and independent NumPy means/F checks qualify all six without changing the
+50 ms reference gate. Truth moves 21.52 m along the short route, with 12.60 m
+horizontal displacement. This is one run, not a formal calibration split;
+the maximum horizontal/vertical error is 0.0197/0.1085 m. Physical, dynamics,
+execution and source timestamps remain owned by their existing interfaces.
+
+`scripts/dev_predictor/source_live_evidence.py` binds the opt-in injection CSV
+to original receiver GPS week/TOW, final factor noise and frozen Advisory rows.
+It preserves raw versus satellite-clock-corrected pseudorange semantics.
+The 1/4 m white draws have standard deviations 0.992/4.046 m; NLOS injection
+with biases has 16.29 m total RMSE. The existing elevation/canopy floors are
+still uncalibrated. Actual GPU identities show repeated source matches and
+cross-level correlation 0.48–0.52. One of 449028 sampled covariances fails the
+unchanged strict symmetry audit (skew 1.12e-7 m²); the full GPU audit remains
+failed, and per-sample rejection is retained rather than relaxed.
+
+All 32 core targets, 15 Planner targets excluding the three reported style
+failures, simulator ephemeris test, and 247 same-ID5 independent algebra checks
+pass. Current code preserves the fixed-map conditional model; neither source
+noise nor absolute map/alignment uncertainty obtains calibration or fused
+fault PL qualification. Actual ID5 old/new policy replays keep both original
+guides and curve: left total 36.7162→36.7310, right 37.3903 unchanged. The original
+1 s ON search still returns ADVISORY_NO_PATH; default/formal promotion is
+withheld. Source-only diagnostics remain separate from planning envelopes,
+and rank/regularization rejection never becomes zero risk or default STOP.
+
+The report, immutable inputs, policy-only old-source overlay identity, figures,
+all request denominators and reproduction commands are registered in
+`log/20261009T021209Z_034/export/analysis/fusion_risk_time_result/REPORT.md`.
