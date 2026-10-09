@@ -932,13 +932,13 @@ start/terminal connector costs share quarter-voxel trapezoidal sampling, matchin
 the fine actual-curve audit (half-voxel remains its numerical convergence comparison). Full voxel
 physical checks remain in addition to this cost quadrature. The heuristic is the
 minimum lattice metric distance + terminal connector lower bound + endpoint
-remaining distance. In the existing high-cost advisory mode, discovery queue
+remaining distance. For planning queries in both strict and existing high-cost modes, discovery queue
 priority uses the existing warning multiplier on geometric distance only until
 the first completely checked guide. This is an ordering priority, never an edge
 cost or admissible proof. All discovered nodes, including CLOSED nodes, then reopen
 under the original unit-distance lower bound in the same search/deadline; this
-allows cheaper risk detours to replace the incumbent. Normal/component searches
-keep their original ordering. A* retains the best complete incumbent and waits
+allows cheaper risk detours to replace the incumbent. Component diagnostics and baseline searches without a planning query keep
+their original ordering. Strict warning admission remains unchanged. A* retains the best complete incumbent and waits
 for a lower-bound proof. Budget expiry returns an existing
 complete route as unproven; no complete route yields TIME_BUDGET. Changed advisory
 costs suppress an optimality claim. A stale physical geometry still rejects.
@@ -2314,7 +2314,7 @@ results. Full figures, commands, identity hashes, request denominators and
 limitations are in `log/20261009T035423Z_499/export/analysis/on_recovery_result/REPORT.md`.
 
 
-### Cold high-cost guide delivery (2026-10-09, live verification pending)
+### Cold high-cost guide delivery (2026-10-09)
 
 The clean baseline is `4d356f51`. Targeted capture `20261009T050500Z_551`
 verified the split physical/prediction-time writer in the canonical forest and
@@ -2356,3 +2356,32 @@ correlation and proxy/match lineage, absolute map/alignment/extrinsic error
 remain uncalibrated; the model remains fixed-map conditional. The historical
 single GPU asymmetry rejection remains a qualification limit. Formal 9+9 and
 six complete task comparisons remain deferred.
+
+
+### Cold strict-origin search (2026-10-09, live verification pending)
+
+Clean `7fe8cb2f` canonical ON run `20261009T051137Z_447` published actual
+B-splines and real command IDs 1→2→3→4, with three scheduled transitions at
+5–6 ms from their declared activation times. It continued through the first
+fork; these are short development execution observations, not full task or
+statistical qualification.
+
+The same run supplied a new full strict-origin failure: attempt4/gen77/risk
+binding is recorded in `failure_map/attempt_failure`. Three original-budget
+full replays all TIME_BUDGET; warm-cache controls deliver at 0.15–0.16 s with
+no new Predictor calls. The extended original-order query obtains its first
+route at 1.755 s. Profiled 1 s search spends 0.878 s predicting, with
+LiDAR/GNSS/fusion 0.520/0.259/0.061 s and only 0.0044 s heuristic work.
+Thus the discovery repair also applies to strict planning queries. It preserves
+strict warning refusal and the original exhausted-ADVISORY_NO_PATH fallback
+condition; a normal-origin timeout never authorizes a high-cost retry.
+A deterministic valid-origin 4000-query allowance regression is red→green.
+All 39 A* tests pass. Original full attempt4 production recovery now obtains
+its first guide at 0.01945 s and returns within 0.99958 s, one strict search,
+one Search action and no fallback. Objective is 3.056938 length + 1.354295
+risk + 32.677630 terminal = 37.088863 m, unproven at the deadline. All 12
+Planner functional targets and cppcheck/pep257 pass; xmllint initially hit an
+external empty schema download rather than a code assertion. Its separate
+retry is retained. Clean-commit strict-origin live verification follows.
+The physical unobserved remaining-curve refusal in this run remains a checked
+execution refusal, not a diagnosis that occupancy can be weakened.

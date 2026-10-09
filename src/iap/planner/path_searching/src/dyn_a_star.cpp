@@ -627,13 +627,13 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     }
     result_.failure = Failure::NONE;
     // Discovery priority is separate from the objective/proof lower bound.
-    // In high-cost mode, unit-distance A* spends the cold prediction allowance
+    // With advisory costs, unit-distance A* spends the cold prediction allowance
     // flooding a ball before it reaches any terminal. Use the existing warning
     // multiplier only to order discovery, then reopen every discovered node
     // under the original admissible bound as soon as a complete guide exists.
     // This priority never changes measured edge/risk/terminal costs or grants
     // optimality, and component diagnostics keep their original ordering.
-    bool discovering = advisory_fallback_ && !component_diagnostic_;
+    bool discovering = planning_query_ && !component_diagnostic_;
     std::vector<GridNodePtr> discovered;
     const auto heuristic = [&](GridNodePtr node) {
         if (component_diagnostic_ && !component_diagnostic_->stop_on_first_goal) return 0.0;

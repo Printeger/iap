@@ -123,6 +123,25 @@ TEST(AdvisoryAStar, HighCostDiscoveryDeliversBeforePredictionWorkIsExhausted) {
   EXPECT_TRUE(search.getPath().back().isApprox(Eigen::Vector3d(1,0,1),1e-9));
 }
 
+TEST(AdvisoryAStar, ValidOriginDiscoveryDeliversBeforePredictionWorkIsExhausted) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,60,20));
+  size_t queries=0;
+  search.setPlanningQuery([&](const Eigen::Vector3d&) {
+    // A deterministic finite work allowance reproduces a cold Predictor
+    // deadline without making the regression depend on machine speed.
+    if(++queries>=4000) search.setPlanningBudget(std::make_shared<PlanningBudget>(0));
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=1.49;return cell;
+  });
+  ASSERT_TRUE(search.AstarSearch(.1,{-1,0,1},{1,0,1},1.,Eigen::Vector3d(0,0,1)));
+  EXPECT_TRUE(search.lastResult().search_budget_exhausted);
+  EXPECT_FALSE(search.lastResult().optimality_proven);
+  EXPECT_NEAR(search.lastResult().path_cost,2.98,1e-9);
+  EXPECT_TRUE(search.getPath().back().isApprox(Eigen::Vector3d(1,0,1),1e-9));
+}
+
 TEST(AdvisoryAStar, HighCostDiscoveryStillProvesTheCheaperDetour) {
   auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
   AStar search;search.initGridMap(map,Eigen::Vector3i(60,40,10));
