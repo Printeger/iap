@@ -24,12 +24,12 @@ def main():
     parser.add_argument("--mode", choices=("retime", "refine", "backend", "initialize", "audit"), default="backend")
     parser.add_argument("--isolated-budget", action="store_true", help="separate mechanism experiment; does not reproduce captured remaining resources")
     args = parser.parse_args()
-    if args.payload and (args.mode != "backend" or args.isolated_budget):
-        parser.error("complete ON payload requires backend mode and captured remaining budget")
+    if args.payload and (args.mode not in ("backend", "initialize") or args.isolated_budget):
+        parser.error("complete ON payload requires backend/initialize mode and captured remaining budget")
     if args.mode == "audit" and args.isolated_budget:
         parser.error("audit diagnoses captured stages without running an online budget")
     data = json.loads(args.snapshot.read_text())
-    if data["kind"] not in ("attempt_failure_curve", "attempt_failure"):
+    if data["kind"] not in ("attempt_failure_curve", "attempt_failure") and not data["kind"].startswith("committed_"):
         raise ValueError("requires final candidate disposition")
     run = resolve_run_directory(entrypoint="curve_backend_replay", scenario="icra_dense_forest_four_fork_v2")
     os.environ["IAP_RUN_DIR"] = str(run)

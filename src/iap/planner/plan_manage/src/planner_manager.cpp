@@ -1699,8 +1699,15 @@ namespace ego_planner
     if(!sample_guide(count)) return false;
     selected.velocity.setZero();
     selected.acceleration.setZero();
-    interval=std::max(nominal_interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
-    // The nominal sampling still owns terminal approach and total duration.
+    // nominal_interval is the time for ctrl_pt_dist, not for every point
+    // introduced by the minimum-control fit. Otherwise a 0.24 m prefix takes
+    // 7.2 s and rolling connections repeatedly replace its initial turn.
+    // Scale the same physical time owner with the actual sampled arc spacing;
+    // the existing feasibility/retime and curve checks remain authoritative.
+    const double sample_spacing=arc.back()/(count-1);
+    interval=std::max(nominal_interval*std::min(1.,sample_spacing/pp_.ctrl_pt_dist),
+        1.5*sample_spacing/std::max(.1,pp_.max_vel_));
+    // Spatial refinement preserves this arc-based total duration.
     // Refine the initialization mesh to the physical guide's voxel scale:
     // coarse samples can erase an early turn needed by the exact start P/V/A.
     // Additional controls spend the same shared deadline, never extra repairs.

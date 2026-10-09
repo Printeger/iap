@@ -117,7 +117,7 @@ int main(int argc,char**argv) {
   GridPlanningRiskPolicy policy;
   GridFrozenRiskQuery risk; uint64_t version=0;
   if(has_payload) {
-    if(mode!="backend") throw std::invalid_argument("complete Advisory input currently requires backend mode");
+    if(mode!="backend" && mode!="initialize") throw std::invalid_argument("complete Advisory input requires backend or initialize mode");
     std::ifstream stream(args[4],std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),{});
     if(!stream) throw std::invalid_argument("prediction input unavailable");
@@ -261,7 +261,8 @@ int main(int argc,char**argv) {
     const auto model=stage.get_optional<std::string>("guide_sampling_model");
     const auto nominal=stage.get_optional<double>("nominal_interval_s");
     if(model || nominal) {
-      if(!model || *model!=ego_planner::kGuideInitializationSamplingModel || !nominal ||
+      if(!model || (*model!=ego_planner::kGuideInitializationSamplingModel &&
+                   *model!="guide_arc_voxel_diagonal_v1") || !nominal ||
           !std::isfinite(*nominal) || *nominal<=0)
         throw std::invalid_argument("initialize requires supported sampling model and positive captured nominal interval");
       captured_sampling_model=*model;nominal_interval=*nominal;

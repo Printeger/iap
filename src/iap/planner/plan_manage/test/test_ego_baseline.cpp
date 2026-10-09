@@ -3149,7 +3149,7 @@ TEST(EgoBaseline, RealOpposingStartVelocityGuideFitKeepsRouteAndCapturedPva) {
   EXPECT_LT(target.velocity.norm(),1e-12);
   EXPECT_LT(target.acceleration.norm(),1e-12);
   ego_planner::UniformBspline curve(q,3,interval);
-  EXPECT_NEAR(curve.getTimeSum(),captured.get<double>("nominal_duration_s"),1e-12);
+  EXPECT_LE(curve.getTimeSum(),captured.get<double>("nominal_duration_s")+1e-12);
   auto derivative=curve.getDerivative(),second=derivative.getDerivative();
   for(const auto& boundary:std::vector<std::tuple<double,Eigen::Vector3d,Eigen::Vector3d,Eigen::Vector3d>>{
       {0.,guide.front(),velocity,acceleration},{curve.getTimeSum(),target.position,target.velocity,target.acceleration}}) {
@@ -3167,15 +3167,35 @@ TEST(EgoBaseline, RepeatedShortGuideFitPreservesNominalTimeAndBoundary) {
   GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
   GridMapTestAccess::markObserved(*manager.grid_map_);
   ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,start);
-  const std::vector<Eigen::Vector3d> guide{start,start+Eigen::Vector3d(.4,0,0)};
+  std::vector<Eigen::Vector3d> guide{start,start+Eigen::Vector3d(.4,0,0)};
+  Eigen::Vector3d velocity=zero,acceleration=zero;
+  // Optional captured geometry verifies the same short-prefix timing seam;
+  // this observed-free fixture is a mechanism test, not forest authorization.
+  if(const char* path=std::getenv("IAP_D4_SHORT_GUIDE_INPUT")) {
+    boost::property_tree::ptree captured;boost::property_tree::read_json(path,captured);
+    const auto point=[](const auto& values) {Eigen::Vector3d p;size_t i=0;
+      for(const auto& child:values) p[i++]=child.second.template get_value<double>();return p;};
+    guide.clear();for(const auto& item:captured.get_child("guide_m")) guide.push_back(point(item.second));
+    velocity=point(captured.get_child("real_start_v_mps"));acceleration=point(captured.get_child("real_start_a_mps2"));
+  }
   ego_planner::LocalTarget target{guide.back(),zero,zero,0};
   Eigen::MatrixXd q;std::vector<Eigen::Vector3d> samples;double interval=1.2;
-  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,zero,zero,true,
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,true,
       target,1.2,interval,samples,q));
   const double duration=ego_planner::UniformBspline(q,3,interval).getTimeSum();
+  // Complete a sub-half-metre local action before the original 1.6 s
+  // connection horizon; minimum control count must not make it a 7.2 s action.
+  EXPECT_LT(duration,1.6);
+  auto fitted=ego_planner::UniformBspline(q,3,interval);
+  auto derivative=fitted.getDerivative();auto second=derivative.getDerivative();
+  EXPECT_LT((derivative.evaluateDeBoorT(0)-velocity).norm(),1e-9);
+  EXPECT_LT((second.evaluateDeBoorT(0)-acceleration).norm(),1e-9);
+  EXPECT_LT((fitted.evaluateDeBoorT(duration)-guide.back()).norm(),1e-9);
+  EXPECT_LT(derivative.evaluateDeBoorT(duration).norm(),1e-9);
+  EXPECT_LT(second.evaluateDeBoorT(duration).norm(),1e-9);
   const auto first=q;
   // The same variable is reused by target replacement and final-stop fitting.
-  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,zero,zero,true,
+  ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::fitGuide(manager,guide,velocity,acceleration,true,
       target,1.2,interval,samples,q));
   EXPECT_NEAR(ego_planner::UniformBspline(q,3,interval).getTimeSum(),duration,1e-12);
   EXPECT_LT((q-first).norm(),1e-12);
