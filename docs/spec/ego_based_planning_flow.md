@@ -84,6 +84,16 @@ PL/风险权重或物理检查。参考进度到末端也不等于任务到达�
 同时覆盖末端进度、侧向越过和非法终点回归；全部69基线用例通过。
 针对该终端目标修复的现场任务到达仍待验证。
 
+完整输入导出不再以缺失风险缓存的null/NaN时间否定原轮次绑定。
+仍核对attempt、原输入risk version、物理generation及可用缓存时间；
+缓存不可用时按原不可变绑定保存同一payload，并显式输出
+planning_input_reference_time_s、frozen_planning_risk_evidence_available=false，
+risk_samples_version保留旧历史样本自身身份，不能冒充当前模型缓存。
+输入risk_version与历史样本版本分离；缺预测/缓存证据不因此取得任何资格。
+回归在同绑定下模拟缓存证据缺失，原导出缺文件为红，修复须保存逐字节
+相同payload，原模型/权重/时刻不改。旧attempt156缺输入仍为证据缺口。
+
+
 
 
 

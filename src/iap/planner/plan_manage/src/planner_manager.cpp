@@ -166,8 +166,8 @@ namespace ego_planner
         input_binding->risk_version!=planning_view_->risk_version ||
         (risk_evidence && input_binding->risk_version!=risk_evidence->risk_version) ||
         input_binding->input.occupancy->generation!=snapshot->generation ||
-        input_binding->input.reference_time_s!=(risk_evidence ?
-            risk_evidence->risk_reference_time_s : snapshot->risk_reference_time_s))
+        (risk_evidence && std::isfinite(risk_evidence->risk_reference_time_s) &&
+         input_binding->input.reference_time_s!=risk_evidence->risk_reference_time_s))
       input_binding.reset();
     const auto node = node_;
     auto write = [=](const std::string& label) mutable {
@@ -333,6 +333,8 @@ namespace ego_planner
           << "  \"planning_attempt_id\": " << attempt_id << ",\n"
           << "  \"planning_input_file\": " << (input_binding ? "\"planning_input.bin\"" : "null") << ",\n"
           << "  \"planning_input_risk_version\": " << (input_binding ? std::to_string(input_binding->risk_version) : "null") << ",\n"
+          << "  \"planning_input_reference_time_s\": " << (input_binding ? number(input_binding->input.reference_time_s) : "null") << ",\n"
+          << "  \"frozen_planning_risk_evidence_available\": " << (risk_evidence ? "true" : "false") << ",\n"
           << "  \"run_id\": " << std::quoted(artifacts->run_dir().filename().string()) << ",\n"
           << "  \"run_manifest\": \"../../../../metadata/run_manifest.json\",\n"
           << "  \"artifact_label\": " << std::quoted(label) << ",\n"
@@ -383,7 +385,8 @@ namespace ego_planner
           << ",\n  \"inflation_radius_m\": " << number(snapshot->inflation_radius_m)
           << ",\n  \"cell_flags_file\": \"cells.bin\",\n"
           << "  \"cell_flag_bits\": {\"raw\": 1, \"inflated\": 2, \"observed\": 4},\n"
-          << "  \"risk_version\": " << (risk_evidence ? risk_evidence->risk_version : snapshot->risk_version) << ",\n"
+          << "  \"risk_version\": " << (risk_evidence ? risk_evidence->risk_version : input_binding ? input_binding->risk_version : snapshot->risk_version) << ",\n"
+          << "  \"risk_samples_version\": " << (risk_evidence ? risk_evidence->risk_version : snapshot->risk_version) << ",\n"
           << "  \"risk_context_matches_map\": "
           << ((risk_evidence ? risk_evidence->risk_context_matches_map : snapshot->risk_context_matches_map) ? "true" : "false") << ",\n"
           << "  \"risk_reference_time_s\": "

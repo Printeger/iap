@@ -153,6 +153,9 @@ struct EGOReplanFSMTestAccess {
 };
 struct EGOPlannerManagerTestAccess {
   static size_t targetCount(const EGOPlannerManager& manager) { return manager.planning_targets_.size(); }
+  static void loseRiskCaptureEvidence(EGOPlannerManager& manager) {
+    manager.planning_view_->advisory_query.captureEvidence={};
+  }
   static EGOPlannerManager::TrajectoryAssessment expiredRelease(EGOPlannerManager& manager) {
     manager.last_candidate_assessment_.sampled_points=11;
     manager.last_candidate_assessment_.execution_reason=GridExecutionReason::TRACKING_ERROR;
@@ -2190,6 +2193,17 @@ TEST(EgoBaseline, FailureCapturePreservesDifferentPhysicalAndPredictionTimes) {
   EXPECT_DOUBLE_EQ(metadata.get<double>("risk_reference_time_s"),10.);
   EXPECT_DOUBLE_EQ(metadata.get<double>("planning_time_s"),10.1);
   EXPECT_EQ(input.occupancy->generation,cell.occupancy_generation);
+  ego_planner::EGOPlannerManagerTestAccess::loseRiskCaptureEvidence(manager);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"missing_risk_capture",cell,&result);
+  const auto missing=run/"export/planner/failure_map/missing_risk_capture";
+  ASSERT_TRUE(std::filesystem::exists(missing/"planning_input.bin"));
+  std::ifstream preserved(missing/"planning_input.bin",std::ios::binary);
+  EXPECT_EQ(std::vector<uint8_t>((std::istreambuf_iterator<char>(preserved)),{}),bytes);
+  boost::property_tree::ptree missing_metadata;
+  boost::property_tree::read_json((missing/"snapshot.json").string(),missing_metadata);
+  EXPECT_FALSE(missing_metadata.get<bool>("frozen_planning_risk_evidence_available"));
+  EXPECT_DOUBLE_EQ(missing_metadata.get<double>("planning_input_reference_time_s"),input.reference_time_s);
+  EXPECT_EQ(missing_metadata.get<uint64_t>("risk_version"),metadata.get<uint64_t>("planning_input_risk_version"));
 }
 
 TEST(EgoBaseline, PlanningInputExportRetainsAttemptAcrossNewMapAndMissingAttemptIsExplicit) {
