@@ -251,6 +251,8 @@ namespace ego_planner
       std::string physical_check_scope = "not_checked";
       std::string first_physical_section;
       double first_stopping_distance_m = std::numeric_limits<double>::quiet_NaN();
+      std::shared_ptr<const GridMapFailureSnapshot> physical_snapshot;
+      GridMotionContext physical_motion;
       std::vector<Eigen::Vector3d> guide; // Geometry owned by this candidate revision.
       BsplineOptimizer::GuideRetention guide_retention;
       std::optional<bool> terminal_stop; // Explicit fixed-task policy; null if unavailable.

@@ -56,6 +56,9 @@ namespace ego_planner
       evidence.physical_check_scope=assessment->physical_check_scope;
       evidence.first_physical_section=assessment->first_execution_section;
       evidence.first_stopping_distance_m=assessment->first_execution_stopping_distance_m;
+      evidence.physical_snapshot=assessment->physical_epoch
+          ? assessment->physical_epoch->failure_evidence : nullptr;
+      evidence.physical_motion=assessment->evaluated_motion;
     }
     if (curve_stages_.size()<24) curve_stages_.push_back(std::move(evidence));
     else { curve_stages_.back()=std::move(evidence); ++dropped_curve_stages_; }
@@ -247,6 +250,23 @@ namespace ego_planner
         std::ofstream final_cells(pending/"final_check_cells.bin",std::ios::binary);
         final_cells.write(reinterpret_cast<const char*>(final_snapshot->cell_flags.data()),final_snapshot->cell_flags.size());
         final_cells.close(); if(!final_cells) throw std::runtime_error("final_check_cells.bin write failed");
+      }
+      // Preserve earlier completed captures even if a subsequent release
+      // capture fails before acquiring an epoch. Never substitute this map for
+      // the missing final check. Reuse immutable evidence and the bounded writer.
+      std::unordered_set<uint64_t> stage_generations;
+      for(const auto& stage : stages) if(stage.physical_snapshot &&
+          stage_generations.insert(stage.physical_snapshot->generation).second) {
+        const auto& evidence=*stage.physical_snapshot;
+        const auto stem="stage_epoch_"+std::to_string(evidence.generation);
+        std::ofstream stage_cells(pending/(stem+"_cells.bin"),std::ios::binary);
+        stage_cells.write(reinterpret_cast<const char*>(evidence.cell_flags.data()),evidence.cell_flags.size());
+        stage_cells.close(); if(!stage_cells) throw std::runtime_error("stage epoch cells write failed");
+        if(!evidence.observation_sources.empty()) {
+          std::ofstream sources(pending/(stem+"_sources.bin"),std::ios::binary);
+          sources.write(reinterpret_cast<const char*>(evidence.observation_sources.data()),evidence.observation_sources.size());
+          sources.close(); if(!sources) throw std::runtime_error("stage epoch sources write failed");
+        }
       }
       std::ofstream risk(pending / "queried_risk.csv");
       risk << "address,hpl_m,vpl_m,status,version,source_flags,gnss_raw_valid,gnss_geometry_status\n";
@@ -561,6 +581,32 @@ namespace ego_planner
             << ",\"physical_generation\":" << evidence.physical_generation
             << ",\"physical_evaluation_time_s\":" << number(evidence.physical_evaluation_time_s)
             << ",\"physical_check_scope\":" << std::quoted(evidence.physical_check_scope)
+            << ",\"physical_snapshot\":";
+        if(evidence.physical_snapshot) {
+          const auto& map=*evidence.physical_snapshot;
+          const auto stem="stage_epoch_"+std::to_string(map.generation);
+          metadata << "{\"generation\":" << map.generation
+              << ",\"frame_id\":" << std::quoted(map.frame_id)
+              << ",\"origin_m\":" << vector(map.origin)
+              << ",\"max_boundary_m\":" << vector(map.max_boundary)
+              << ",\"dimensions\":" << vector(map.dimensions.cast<double>())
+              << ",\"resolution_m\":" << number(map.resolution_m)
+              << ",\"cloud_stamp_s\":" << number(map.cloud_stamp_s)
+              << ",\"inflation_radius_m\":" << number(map.inflation_radius_m)
+              << ",\"virtual_ceiling_height_m\":" << number(map.virtual_ceiling_height_m)
+              << ",\"cell_flags_file\":" << std::quoted(stem+"_cells.bin")
+              << ",\"observation_sources_file\":" << (map.observation_sources.empty() ? "null" : "\""+stem+"_sources.bin\"")
+              << ",\"motion_stamp_s\":" << number(evidence.physical_motion.stamp_s)
+              << ",\"motion_quality\":" << static_cast<unsigned>(evidence.physical_motion.quality)
+              << ",\"motion_error_proxy_m\":" << number(evidence.physical_motion.error_proxy_m)
+              << ",\"motion_body_radius_m\":" << number(evidence.physical_motion.body_radius_m)
+              << ",\"motion_tracking_reserve_m\":" << number(evidence.physical_motion.tracking_reserve_m)
+              << ",\"motion_budget_m\":" << number(evidence.physical_motion.motion_budget_m)
+              << ",\"motion_max_age_s\":" << number(evidence.physical_motion.max_motion_age_s)
+              << ",\"environment_max_age_s\":" << number(evidence.physical_motion.max_environment_age_s)
+              << ",\"motion_allow_bridged\":" << (evidence.physical_motion.allow_bridged ? "true" : "false") << '}';
+        } else metadata << "null";
+        metadata
             << ",\"first_physical_section\":" << std::quoted(evidence.first_physical_section)
             << ",\"first_stopping_distance_m\":" << number(evidence.first_stopping_distance_m)
             << ",\"target_p_m\":" << vector(evidence.target.position)
@@ -658,6 +704,13 @@ namespace ego_planner
                  << std::quoted(relative + "/observation_sources.bin");
       if(final_snapshot && final_snapshot->generation!=snapshot->generation)
         manifest << ",\"final_check_cells\":" << std::quoted(relative+"/final_check_cells.bin");
+      manifest << ",\"stage_epoch_cells\":[";
+      bool first_stage_epoch=true;
+      for(const auto generation : stage_generations) {
+        manifest << (first_stage_epoch ? "" : ",") << std::quoted(relative+"/stage_epoch_"+std::to_string(generation)+"_cells.bin");
+        first_stage_epoch=false;
+      }
+      manifest << ']';
       if (snapshot->current_frame)
         manifest << ",\"current_frame_hits\":"
                  << std::quoted(relative + "/current_frame_hits.csv")
@@ -1327,7 +1380,7 @@ namespace ego_planner
     if(capture_failure_map_) {
       const auto saved=std::count_if(captured_failure_kinds_.begin(),captured_failure_kinds_.end(),
           [](const std::string& kind) {return kind.rfind("committed_",0)==0;});
-      if(saved<32) captureFailureMap("committed_"+std::to_string(planning_attempt_id_),
+      if(saved<128) captureFailureMap("committed_"+std::to_string(planning_attempt_id_),
           start_pt,selected.position,start_cell,&optimizer.a_star_->lastResult(),nullptr,&curve);
     }
     visualization_->displayInitPathList(points,.2,0);

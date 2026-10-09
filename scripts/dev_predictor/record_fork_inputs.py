@@ -24,11 +24,20 @@ def observe_entrances(sample, geometry, entries, request_pending):
     if not geometry:
         return
     index = entrance(sample['position_m'], geometry)
+    capture_kind = 'junction_entrance'
+    if index is None:
+        # A route can bypass the central junction. Preserve its input at the
+        # same physical x plane without claiming that junction was entered.
+        for candidate in entries:
+            if abs(sample['position_m'][0]-candidate['entrance_x_m']) <= .5:
+                index = candidate['fork_index']
+                capture_kind = 'junction_bypass_plane'
+                break
     for entry in entries:
         if entry['status'] == 'NOT_REACHED' and sample['position_m'][0] > entry['entrance_x_m']+.5:
             entry.update(status='CAPTURE_FAILED', reason='entrance_passed_without_capture')
     if index is not None and entries[index]['status'] == 'NOT_REACHED':
-        entries[index].update(status='REACHED', trigger=dict(sample))
+        entries[index].update(status='REACHED', trigger=dict(sample), capture_kind=capture_kind)
         if request_pending:
             entries[index].update(status='CAPTURE_FAILED', reason='input_service_busy_at_entrance')
 
@@ -97,11 +106,12 @@ def main():
                     entry = entries[index]
                     entry['reason'] = response.reason if response else 'input_service_timeout'
                     if response and response.available:
-                        path = save_record(run, f'fork_entry_{index}', response.payload, identity,
+                        label = 'fork_entry' if entry['capture_kind'] == 'junction_entrance' else 'fork_bypass'
+                        path = save_record(run, f'{label}_{index}', response.payload, identity,
                             {'frame_id': response.frame_id, 'geometry_id': response.geometry_id,
                              'generation': response.generation, 'planning_input': False,
                              'planning_attempt_id': response.planning_attempt_id, 'risk_version': response.risk_version,
-                             'entry_trigger': entry['trigger'], 'physical_geometry': geometry})
+                             'entry_trigger': entry['trigger'], 'capture_kind':entry['capture_kind'], 'physical_geometry': geometry})
                         entry.update(status='CAPTURED', payload=str(path.relative_to(run)), payload_sha256=sha(path))
                     else:
                         entry['status'] = 'CAPTURE_FAILED'
@@ -130,7 +140,7 @@ def main():
         node.destroy_node(); rclpy.try_shutdown()
         root = artifact(run, 'export/advisory/forks/entrances.json')
         json_write(root, {'identity':'FORK_INPUT_CAPTURE', 'physical_geometry':geometry, 'entries':entries,
-                          'error':failure, 'trigger_rule':'abs(x-entry)<=0.5m and hypot(x-entry,y)<=physical junction radius'})
+                          'error':failure, 'trigger_rule':'abs(x-entry)<=0.5m; junction radius distinguishes entrance from bypass-plane evidence'})
         manifest(run, 'fork_inputs', {'source':identity, 'collector_sha256':sha(Path(__file__)), 'entries':entries, 'error':failure,
                  'artifacts_sha256':{str(root.relative_to(run)):sha(root)}})
 

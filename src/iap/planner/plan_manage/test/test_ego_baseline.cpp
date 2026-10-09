@@ -160,6 +160,14 @@ struct EGOPlannerManagerTestAccess {
         manager.node_->now().seconds());
   }
   static void recordUnavailableRelease(EGOPlannerManager& manager,const Eigen::MatrixXd& control,double interval) {
+    EGOPlannerManager::TrajectoryAssessment completed;
+    completed.physical_epoch=manager.grid_map_->captureFrozenCorridor({control.col(0)},.55,{},true);
+    ASSERT_TRUE(completed.physical_epoch);
+    completed.evaluated_generation=completed.physical_epoch->generation;
+    completed.sampled_points=1;
+    completed.physical_check_scope="actual_curve";
+    manager.recordCurveStage("completed_before_unavailable",control,interval,LocalTarget{},NAN,
+        &completed,false,std::nullopt,false);
     EGOPlannerManager::TrajectoryAssessment unavailable;
     // Actual first release-curve capture can fail before obtaining an epoch.
     unavailable.execution_reason=GridExecutionReason::ENVIRONMENT_STALE;
@@ -816,6 +824,25 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
     EXPECT_EQ(release.get<std::string>("stage"),"release_curve_checked");
     EXPECT_EQ(release.get<std::string>("physical_check_reason"),"null");
     EXPECT_EQ(release.get<std::string>("physical_precondition_reason"),"ENVIRONMENT_STALE"); }
+  { boost::property_tree::ptree metadata;
+    boost::property_tree::read_json((root/"attempt_failure_curve/snapshot.json").string(),metadata);
+    bool preserved=false;
+    for(const auto& stage:metadata.get_child("curve_stages")) {
+      if(stage.second.get<std::string>("stage")!="completed_before_unavailable") continue;
+      const auto& epoch=stage.second.get_child("physical_snapshot");
+      const auto file=root/"attempt_failure_curve"/epoch.get<std::string>("cell_flags_file");
+      ASSERT_TRUE(std::filesystem::exists(file));
+      const auto original=manager.grid_map_->captureFailureSnapshot(true);
+      ASSERT_TRUE(original);
+      std::ifstream cells(file,std::ios::binary);
+      const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(cells)),{});
+      EXPECT_EQ(bytes,original->cell_flags);
+      EXPECT_EQ(epoch.get<uint64_t>("generation"),original->generation);
+      preserved=true;
+    }
+    EXPECT_TRUE(preserved);
+    EXPECT_EQ(metadata.get<std::string>("final_check"),"null");
+  }
   // Production FSM can override a successful physical check with tracking
   // rejection after live occupancy advances. Export still owns the old epoch.
   const Eigen::Vector3d proof_position(-2,2,1);

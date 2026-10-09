@@ -31,6 +31,18 @@ class EntranceTest(unittest.TestCase):
         self.assertEqual(entries[1]['trigger']['position_m'], [-8.,0,1.5])
         self.assertEqual(entries[2]['status'], 'NOT_REACHED')
 
+    def test_bypass_is_captured_without_claiming_junction_entry(self):
+        geometry = {'forked_forest.fork_count':4, 'forked_forest.fork_x_min_m':-16.,
+                    'forked_forest.fork_length_m':8., 'forked_forest.junction_clearance_radius_m':2.}
+        entries = [{'fork_index':i, 'entrance_x_m':x, 'status':'NOT_REACHED'}
+                   for i,x in enumerate((-16.,-8.,0.,8.))]
+        sample={'position_m':[-.49,-7.,1.5]}
+        self.assertIsNone(entrance(sample['position_m'],geometry))
+        observe_entrances(sample,geometry,entries,False)
+        self.assertEqual(entries[2]['status'],'REACHED')
+        self.assertEqual(entries[2]['capture_kind'],'junction_bypass_plane')
+        self.assertEqual(entries[2]['trigger'],sample)
+
 
 if __name__ == '__main__':
     unittest.main()
