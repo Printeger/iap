@@ -678,12 +678,13 @@ namespace ego_planner
           changeFSMExecState(WAIT_TARGET, "FSM");
           goto force_return;
         }
-        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
+        else if (t_cur > info->duration_ - 1e-2 ||
+                 ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_))
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
       }
-      else if (t_cur > replan_thresh_)
+      else if (t_cur > replan_thresh_ || t_cur > info->duration_ - 1e-2)
       {
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
@@ -749,7 +750,26 @@ namespace ego_planner
     const double remaining=info.start_time_.seconds()+info.duration_-now.seconds();
     const double advance=std::min(1.6,remaining);
     if(advance<=.1) {
-      changeFSMExecState(EMERGENCY_STOP,"insufficient connection time"); return false;
+      // A short resting local curve may finish before the rolling-replan
+      // threshold. Its elapsed time only requests planning; actual command
+      // identity and fresh measured rest own the transition to a new start.
+      // Until confirmed, supervision retains the checked old tail.
+      applyLatestOdometry();
+      const double end=info.start_time_.seconds()+info.duration_;
+      const double current=now.seconds();
+      const double max_age=planner_manager_->currentMotionContext().max_motion_age_s;
+      const auto odom=std::atomic_load(&pending_odom_);
+      if(remaining>0 || !applied_command_ ||
+          applied_command_->trajectory_id!=static_cast<unsigned>(info.traj_id_) ||
+          !odom || odom->header.frame_id!=planner_manager_->grid_map_->getFrameId()) return false;
+      const double command_stamp=rclcpp::Time(applied_command_->header.stamp).seconds();
+      if(command_stamp<end || command_stamp>current || current-command_stamp>max_age ||
+          applied_odom_stamp_s_<end || applied_odom_stamp_s_>current ||
+          current-applied_odom_stamp_s_>max_age || !odom_pos_.allFinite() || !odom_vel_.allFinite() ||
+          (odom_pos_-info.position_traj_.evaluateDeBoorT(info.duration_)).norm()>tracking_error_limit_m_ ||
+          odom_vel_.norm()>=.1 || info.velocity_traj_.evaluateDeBoorT(info.duration_).norm()>1e-5 ||
+          info.acceleration_traj_.evaluateDeBoorT(info.duration_).norm()>1e-5) return false;
+      return planFromGlobalTraj(); // Same actual-PVA planning and final publication checks.
     }
     const auto connection=now+rclcpp::Duration::from_seconds(advance);
     const double t=connection.seconds()-info.start_time_.seconds();

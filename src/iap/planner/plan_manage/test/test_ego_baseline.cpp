@@ -185,6 +185,20 @@ struct EGOReplanFSMTestAccess {
     fsm.odom_vel_=velocity;fsm.execFSMCallback();
     return fsm.flag_escape_emergency_;
   }
+  static void shortExecution(EGOReplanFSM& fsm,const Eigen::Vector3d& target,
+      nav_msgs::msg::Odometry::ConstSharedPtr odom) {
+    fsm.visualization_=std::make_shared<PlanningVisualization>(fsm.node_);
+    fsm.local_target_pt_=target;fsm.target_type_=EGOReplanFSM::MANUAL_TARGET;
+    fsm.have_target_=fsm.have_trigger_=fsm.have_odom_=true;fsm.have_new_target_=false;
+    fsm.replan_thresh_=1.;fsm.no_replan_thresh_=1.;fsm.tracking_error_limit_m_=.3;
+    fsm.exec_state_=EGOReplanFSM::EXEC_TRAJ;
+    fsm.exec_timer_=fsm.node_->create_wall_timer(std::chrono::hours(1),[]{});
+    fsm.data_disp_pub_=fsm.node_->create_publisher<traj_utils::msg::DataDisp>("short_rest_display",10);
+    fsm.bspline_pub_=fsm.node_->create_publisher<traj_utils::msg::Bspline>("short_rest_bspline",10);
+    fsm.odometryCallback(odom);
+  }
+  static void tick(EGOReplanFSM& fsm) {fsm.execFSMCallback();}
+  static bool fromCurrent(EGOReplanFSM& fsm) {return fsm.planFromCurrentTraj();}
   static bool select(EGOReplanFSM& fsm, double distance) { return fsm.getLocalTarget(distance); }
   static bool replanning(const EGOReplanFSM& fsm) { return fsm.exec_state_==EGOReplanFSM::REPLAN_TRAJ; }
   static Eigen::Vector3d taskGoal(const EGOReplanFSM& fsm) { return fsm.end_pt_; }
@@ -1230,6 +1244,46 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   auto curve=manager->publicationTrajectory().position_traj_;
   EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
   EXPECT_TRUE(manager->assessTrajectory(curve,0,node->now().seconds()).executable());
+}
+
+TEST(EgoBaseline, ShortRestingCurveCompletesBeforeReplanThresholdAndRequiresFeedback) {
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),local(-1.8,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->reboundReplan(start,zero,zero,local,zero,true,false));
+  manager->endPlanningView();
+  auto& active=manager->local_data_;ASSERT_LT(active.duration_,1.);
+  active.start_time_=node->now()-rclcpp::Duration::from_seconds(active.duration_+.05);
+  const int old_id=active.traj_id_;
+  auto odom=std::make_shared<nav_msgs::msg::Odometry>();odom->header.frame_id="map";
+  odom->header.stamp=node->now();odom->pose.pose.position.x=local.x();odom->pose.pose.position.z=local.z();
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,local);
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,local,goal);
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,local,odom);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm)); // elapsed time is insufficient
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,old_id+99,node->now().seconds());
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm));
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,old_id,node->now().seconds());
+  auto moving=std::make_shared<nav_msgs::msg::Odometry>(*odom);moving->twist.twist.linear.x=.2;
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,local,moving);
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm));
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,local,odom);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm));
+  EXPECT_GT(manager->publicationTrajectory().traj_id_,old_id);
+  EXPECT_FALSE(manager->hasPendingTrajectory());
+  auto curve=manager->publicationTrajectory().position_traj_;
+  EXPECT_LT((curve.evaluateDeBoorT(0)-local).norm(),1e-8);
+  EXPECT_TRUE(manager->assessTrajectory(curve,0,node->now().seconds()).executable());
+  EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
 }
 
 TEST(EgoBaseline, KnownOccupiedMissionRemainsOriginalAndCannotBeAuthorized) {
