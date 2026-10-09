@@ -27,11 +27,19 @@ const char* AStar::failureName(const Failure failure) {
     return "UNKNOWN";
 }
 
-GridSearchCell AStar::timedPlanningQuery(const Vector3d& position) {
+GridSearchCell AStar::timedPlanningQuery(const Vector3d& position, bool integral_sample) {
     if (deadlineExpired()) { GridSearchCell cell; cell.execution_reason=GridExecutionReason::ENVIRONMENT_STALE; return cell; }
     const auto started = performance_diagnostics_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     ++result_.query_calls;
     auto cell = planning_query_(position);
+    // An installed Advisory callback owns cost on both new physical samples
+    // and cache hits. It cannot replace the physical execution result.
+    if(cell.executable() && advisory_query_) {
+        ++(integral_sample ? result_.risk_integration_calls : result_.advisory_refresh_calls);
+        const auto risk=advisory_query_(position);
+        cell.advisory_class=risk.classification;
+        cell.cost_multiplier=risk.cost_multiplier;
+    }
     recordFirstRejection(position, cell);
     if (performance_diagnostics_) result_.query_management_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     return cell;
@@ -267,17 +275,8 @@ std::optional<double> AStar::segmentCost(const Vector3d& from, const Vector3d& t
             if (check_physical && grid_map_->getInflateOccupancy(position)) return std::nullopt;
             cell.execution_reason = GridExecutionReason::OK;
             cell.cost_multiplier = 1.;
-        } else if (!check_physical && advisory_query_) {
-            if(planning_query_) cell=timedPlanningQuery(position);
-            ++result_.risk_integration_calls;
-            const auto risk = advisory_query_(position);
-            // Fine samples may cross an unobserved voxel near a corner even
-            // when endpoint/midpoint/voxel-centre checks passed. Advisory is
-            // a cost and must never overwrite this actual execution refusal.
-            cell.advisory_class = risk.classification;
-            cell.cost_multiplier = risk.cost_multiplier;
         } else {
-            cell = timedPlanningQuery(position);
+            cell = timedPlanningQuery(position,true);
         }
         if (!cell.executable()) {
             ++result_.rejected_execution[static_cast<size_t>(cell.execution_reason)];

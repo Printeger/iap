@@ -624,6 +624,7 @@ TEST(AdvisoryAStar, CachedPhysicalSampleRefreshesAdvisory) {
   ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
                                 Eigen::Vector3d(1, 0, 1)));
   EXPECT_GT(refreshes, 0u);
+  EXPECT_EQ(refreshes,search.lastResult().query_calls+search.lastResult().cache_hits);
   EXPECT_EQ(refreshes, search.lastResult().advisory_refresh_calls +
       search.lastResult().risk_integration_calls);
   EXPECT_GT(search.lastResult().path_cost, 2.0); // metres, including unknown-risk integral

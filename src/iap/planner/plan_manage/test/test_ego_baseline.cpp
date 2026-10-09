@@ -1242,6 +1242,8 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   std::optional<std::filesystem::path> observation_snapshot;
   std::optional<std::string> prior_recovery_result;
   std::optional<double> presearch_elapsed;
+  unsigned expected_search_calls=2;
+  std::optional<std::string> expected_observation_result;
   Eigen::Vector3d captured_route,captured_center,start_velocity=Eigen::Vector3d::Zero(),start_acceleration=Eigen::Vector3d::Zero();
   Eigen::Vector3d start(-2,0,1),goal(5.8,0,1);const Eigen::Vector3d zero=Eigen::Vector3d::Zero();
   if(frozen_input) {
@@ -1251,11 +1253,16 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
     if(boundary.get<bool>("expect_observation",false)) observation_snapshot=captured;
     if(const auto value=boundary.get_optional<std::string>("prior_recovery_result")) prior_recovery_result=*value;
     if(const auto value=boundary.get_optional<double>("presearch_elapsed_s")) presearch_elapsed=*value;
+    expected_search_calls=boundary.get<unsigned>("expected_search_calls",2);
+    expected_observation_result=boundary.get_optional<std::string>("expected_observation_result").value_or(
+        observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION");
     boost::property_tree::read_json(captured.string(),metadata);
     const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
       for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
     if(const auto payload=boundary.get_optional<std::string>("planning_payload")) {
       planning_payload=*payload;captured_route=point(metadata.get_child("planning_goals_m").front().second);
+      if(boundary.get<bool>("use_original_normal_target",false))
+        captured_route=point(metadata.get_child("recovery_searches").front().second.get_child("requested_goals_m").front().second);
       captured_center=point(metadata.get_child("search_pool_center_m"));
       start_velocity=point(metadata.get_child("real_start_v_mps"));start_acceleration=point(metadata.get_child("real_start_a_mps2"));
     }
@@ -1294,8 +1301,9 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
   if(presearch_elapsed) ego_planner::EGOPlannerManagerTestAccess::restorePresearchResources(*manager,*presearch_elapsed);
   ASSERT_TRUE(manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false));
-  EXPECT_EQ(manager->observationResult(),observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION");
-  EXPECT_EQ(manager->planningBudget()->searches.calls,2u);
+  EXPECT_EQ(manager->observationResult(),expected_observation_result.value_or(
+      observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION"));
+  EXPECT_EQ(manager->planningBudget()->searches.calls,expected_search_calls);
   EXPECT_TRUE(manager->guideIdentity().mission_goal.isApprox(goal,1e-9));
   if(!observation_snapshot) EXPECT_GT(manager->guideIdentity().committed_endpoint.x(),start.x()+.2);
   else {

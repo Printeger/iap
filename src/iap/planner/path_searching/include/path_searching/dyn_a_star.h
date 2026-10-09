@@ -136,7 +136,7 @@ private:
 	std::function<uint64_t()> live_generation_provider_;
 	GridSearchCell queryVoxelCenter(const Eigen::Vector3d& position);
 	GridSearchCell queryLatticePoint(const Eigen::Vector3i& index);
-	GridSearchCell timedPlanningQuery(const Eigen::Vector3d& position);
+	GridSearchCell timedPlanningQuery(const Eigen::Vector3d& position, bool integral_sample = false);
 	void finishFailure(Failure failure, const rclcpp::Time& started);
 	void recordMapAtFinish();
 	void recordCacheStats();

@@ -379,7 +379,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     for(const auto& goal:goals) distance=std::min(distance,(p-goal).norm());
     context.required_clearance_m+=reserve*std::clamp(distance/taper,0.,1.);
     auto cell=map->queryPlanningCell(p,0,in.planning_time_s,policy,in.motion,false,&context,profile);
-    if(cell.executable()) cell.advisory=advisory(p);
+    if(mode=="off") cell.advisory.cost_multiplier=1.;
     return cell;
   };
   auto search_owner=std::make_shared<AStar>();auto& search=*search_owner;

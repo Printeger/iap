@@ -96,7 +96,7 @@ class FailureMapToolsTest(unittest.TestCase):
         self.assertEqual(inspect(self.directory, 10)["classification"],
                          "NO_ROUTE_IN_OBSERVED_SEARCH_POOL")
 
-    def test_rounded_endpoint_needs_its_connector(self):
+    def test_rounded_endpoint_uses_checked_adjacent_connector(self):
         self.meta["kind"] = "endpoint"
         self.meta["search_failure"] = "END_BLOCKED"
         self.meta["motion_body_radius_m"] = 0.0
@@ -106,8 +106,12 @@ class FailureMapToolsTest(unittest.TestCase):
         self.flags[14, 10, 2] |= 1
         self.write()
         report = inspect(self.directory, 10)
-        self.assertEqual(report["original_replay_failure"], "END_BLOCKED")
-        self.assertEqual(report["classification"], "ENDPOINT_SELECTION")
+        # The nearest rounded lattice point is blocked, but the existing
+        # bounded attachment search now finds an independently checked
+        # adjacent connector around this one raw voxel. Preserve the recorded
+        # old END_BLOCKED identity and report its disagreement with replay.
+        self.assertEqual(report["original_replay_failure"], "NONE")
+        self.assertEqual(report["classification"], "ONLINE_REPLAY_DISAGREEMENT")
 
     def test_stale_map_is_inconclusive(self):
         self.meta["planning_time_s"] = 11.0

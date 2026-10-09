@@ -151,7 +151,7 @@ namespace ego_planner
     bool observationReadyToPlan();
     const std::string& observationResult() const { return observation_attempt_.result; }
     GridRouteCell queryRouteViewCell(const Eigen::Vector3d& position,
-                                    double clearance_reserve_m = 0.) const;
+                                    double clearance_reserve_m = 0., bool include_advisory = true) const;
     struct GuideIdentity {
       Eigen::Vector3d mission_goal=Eigen::Vector3d::Constant(NAN);
       Eigen::Vector3d route_target=Eigen::Vector3d::Constant(NAN);

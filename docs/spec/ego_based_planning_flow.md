@@ -32,6 +32,10 @@ execute 查询始终要求合法观测。route 许可不会隐式转成 execute 
 Advisory 根据合法 HPL/VPL 与原 budget/reserve 得到统一有限代价；warning 不再
 strict 拒绝或 fallback 重搜。未知／失效保持有限缺失代价，不伪装低风险或无障碍。
 GuideIdentity 分开 mission_goal、route_target、committed_endpoint，保存冻结身份及区间。
+A* 有独立 Advisory 回调时，该回调统一负责首次样本及缓存命中的有限代价；
+manager 的 A* 物理回调不再重复读取 Advisory。queryRouteViewCell 的
+include_advisory 参数支持这一分工，默认行为保留；实际曲线／EGO 查询不变。
+细采样仍逐点执行物理查询，软代价不能覆盖拒绝。原采样、权重和缓存更新规则不变。
 
 正常和观察曲线都要求实际起点 P/V/A 与真实零末 V/A，retime 后重查。
 fitGuideCurve 的 nominal_interval 是 ctrl_pt_dist 的物理时间尺度；实际采样间距按
@@ -118,17 +122,22 @@ failure_map 和后端重放入口。覆盖未知 guide 但有已观测旁路、�
 耗尽预算不能重发、唯一 warning 通路实际发布，以及撤销后旧尾段继续受检。
 相关检查通过；未开展 OFF 对照、9+9、来源校准或正式统计实验。
 
-当前现场证据：`20261009T185105Z_550`（SHA `b5a18450`），干净提交、Release
+当前现场证据：`20261009T192949Z_307`（SHA `2af67695`），干净提交、Release
 安装 exact_bytes、GPU READY（cuInit=0，device_count=1），原有效配置与 NAV 不变。
-guide→实际静止曲线→执行反馈贯通，但在 x≈−5.29 持续恢复阻塞，未产生 task_reached。
-`terminal_final` generation=2557 的 map／Current motion／ON payload／真实 PVA
-由 `export/analysis/v11_connection_input.json` 绑定；旧观察记录状态未直接捕获，
-重放明确标注未执行 SEARCH_TIMEOUT 状态重建，不伪装为原始捕获。
-修复前未执行连接超时封住恢复；取消该误锁后，原 0.5 s 正常搜索仍挤压恢复。
-修复后同输入只进行正常加一次连接搜索，交付静止曲线 endpoint≈[-2.27886,1.09024,1.48284]，
-时长约 20.203 s，累计搜索约 0.80873 s、搜索后总耗时约 0.83908 s，加捕获的
-搜索前约 0.17408 s 仍在原 1.5 s 内，实际硬检查通过。相关 baseline 及
-pipeline／full_stack_feedback 验证；原任务持续推进与静止到达待下一次现场确认。
+已越过上一轮 x≈−5.29 的误锁，guide→实际静止曲线→执行反馈贯通，随后在
+x≈2.33 停滞，300 s 内无 task_reached。连接搜索多次超时；末轮得到 guide
+并通过冻结曲线检查，但 generation=2589 的最新提交检查发现未知而拒绝，未放行。
+`terminal_final` generation=2587 的原 map／Current motion／ON payload／PVA，
+以及原正常请求目标，绑定在 `export/analysis/v11_normal_prefix_input.json`。
+该输入验证当前代码能从正常乐观 guide 截取 endpoint≈[4.50595,1.89239,1.50617]，
+拟合约 11.739 s 静止曲线并通过实际硬检查；搜索约 0.19012 s，搜索及后端约
+0.22277 s，加捕获的前置耗时约 0.23731 s 仍在原总预算内。
+独立执行连接搜索在原约 0.57121 s 内仍超时；不能宣称所有恢复连接问题已解决。
+单一 Advisory 读取将该同输入搜索的约 598991 次代价读取降至约 401478 次，
+风险权重不变；是否能在实际负载下持续提交并到达，仍须原任务现场验证。
+受影响 A* 的代价选择／缓存刷新／未知细角拒绝及 baseline、集成入口继续复用。
+failure_map 的旧端点夹具同步既有相邻格点附接行为：单 raw voxel 可绕行时
+重放应成功并报告与历史 END_BLOCKED 不一致；完整障碍墙仍拒绝连接。
 
 已有完整观察连接证据继续复用：`20261009T181320Z_163` generation=2613 同身份
 原 ON 输入在现有 baseline 入口交付完整目标 [18.33843,0.43888,1.60902]，

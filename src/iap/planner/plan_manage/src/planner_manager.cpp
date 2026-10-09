@@ -1262,7 +1262,11 @@ namespace ego_planner
     if(goals.empty()) {record("OBSERVATION_BLOCKED");last_plan_failure_=PlanFailure::ObservationBlocked;return false;}
     if(planning_budget_->searchRemaining()<=0) {record("BUDGET");last_plan_failure_=PlanFailure::Budget;return false;}
     auto& optimizer=*bspline_optimizer_;
-    optimizer.a_star_->setPlanningQuery([this](const Eigen::Vector3d& p) {return GridSearchCell(queryGuidanceCell(p));});
+    optimizer.a_star_->setPlanningQuery([this](const Eigen::Vector3d& p) {
+      auto cell=queryPlanningViewCell(p,0.,false);
+      cell.advisory=guidancePreference(cell.advisory);
+      return GridSearchCell(cell);
+    });
     optimizer.setPlanningEndpoints(start,goals.front());optimizer.setPlanningGoals(goals,center);
     if(!optimizer.searchRecoveryGuide(planning_budget_->searchRemaining(),preferred_count)) {
       const bool timeout=optimizer.a_star_->lastResult().failure==AStar::Failure::TIME_BUDGET;
@@ -1403,7 +1407,7 @@ namespace ego_planner
     optimizer.a_star_->setPlanningQuery([this,start_pt,fitting_reserve](const Eigen::Vector3d& point) {
       double distance=(point-start_pt).norm();
       for(const auto& target:planning_targets_) distance=std::min(distance,(point-target.position).norm());
-      return GridSearchCell(queryRouteViewCell(point,fitting_reserve*std::clamp(distance/.5,0.,1.)));
+      return GridSearchCell(queryRouteViewCell(point,fitting_reserve*std::clamp(distance/.5,0.,1.),false));
     });
     guide_identity_=GuideIdentity{};
     guide_identity_.mission_goal=global_data_.global_traj_.getTimes().empty() ? target_pt :
