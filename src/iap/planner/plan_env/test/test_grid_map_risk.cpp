@@ -1,6 +1,43 @@
 #include <gtest/gtest.h>
 #include <plan_env/grid_map.h>
 
+TEST(GridCorridorCapture, DenseRepeatedSamplesCompleteWithinBoundedCaptureTime) {
+  GridMapFailureSnapshot saved;
+  saved.dimensions = Eigen::Vector3i::Constant(40);
+  saved.origin = Eigen::Vector3d::Zero();
+  saved.max_boundary = Eigen::Vector3d::Constant(4);
+  saved.resolution_m = 0.1;
+  saved.cloud_stamp_s = 10;
+  saved.generation = 1;
+  saved.frame_id = "map";
+  saved.cell_flags.assign(64000, 4);
+  saved.cell_flags[(20 * 40 + 20) * 40 + 20] = 0;
+  saved.cell_flags[(21 * 40 + 20) * 40 + 20] = 5;
+  auto map = GridMap::fromFailureSnapshot(saved);
+  // Release checks densely sample a slow curve. Repeated sample voxels must
+  // retain the same raw neighbourhood and point flags without rebuilding it.
+  const Eigen::Vector3d p(2.05, 2.05, 2.05);
+  const auto reference = map->captureFrozenCorridor({p}, 0.55, {}, true);
+  ASSERT_NE(reference, nullptr);
+  auto budget = std::make_shared<PlanningBudget>(0.15, 3);
+  const auto dense = map->captureFrozenCorridor(
+      std::vector<Eigen::Vector3d>(10000, p), 0.55, budget, true);
+  ASSERT_NE(dense, nullptr) << "dense capture exhausted its bounded allowance";
+  EXPECT_EQ(dense->cells->addresses, reference->cells->addresses);
+  EXPECT_EQ(dense->cells->flags, reference->cells->flags);
+  EXPECT_EQ(dense->cells->comparison_masks, reference->cells->comparison_masks);
+  EXPECT_EQ(dense->cells->raw_addresses, reference->cells->raw_addresses);
+  EXPECT_EQ(dense->cells->raw_row_offsets, reference->cells->raw_row_offsets);
+  ASSERT_NE(dense->failure_evidence, nullptr);
+  EXPECT_EQ(dense->failure_evidence->cell_flags, saved.cell_flags);
+  EXPECT_EQ(budget->used(), 0u);
+  EXPECT_EQ(map->commitFrozenCorridor(*dense, 10, 1, [] { return true; }),
+            GridMap::CorridorCommit::Committed);
+  EXPECT_EQ(map->captureFrozenCorridor({p}, 0.55,
+                                      std::make_shared<PlanningBudget>(0, 3)),
+            nullptr);
+}
+
 // Only geometry construction bypasses ROS. All cache operations use the public
 // GridMap interface, including real map mutation/reset and query callbacks.
 struct GridMapTestAccess {

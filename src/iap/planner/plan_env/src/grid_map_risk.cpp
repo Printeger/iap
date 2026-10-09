@@ -684,7 +684,12 @@ std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
     if (!p.allFinite()) continue;
     const Eigen::Vector3i index = ((p-epoch->lattice_origin)*epoch->resolution_inv).array().floor().cast<int>();
     if ((index.array()<0).any() || (index.array()>=dims.array()).any()) continue;
-    masks[(index.x()*dims.y()+index.y())*dims.z()+index.z()] |= 7;
+    auto& point_mask = masks[(index.x()*dims.y()+index.y())*dims.z()+index.z()];
+    // Neighbours only set raw bit 1. Mask 7 means an actual sample in this
+    // voxel already contributed its complete neighbourhood. Dense curve
+    // samples must not rebuild that identical comparison set each time.
+    if (point_mask == 7) continue;
+    point_mask |= 7;
     for (int x=std::max(0,index.x()-radius); x<=std::min(dims.x()-1,index.x()+radius); ++x)
       for (int y=std::max(0,index.y()-radius); y<=std::min(dims.y()-1,index.y()+radius); ++y)
         for (int z=std::max(0,index.z()-radius); z<=std::min(dims.z()-1,index.z()+radius); ++z) {
