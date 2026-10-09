@@ -317,6 +317,19 @@ struct EGOPlannerManagerTestAccess {
   static void replayMap(EGOPlannerManager& manager,GridMap::Ptr map) {
     manager.grid_map_=map;manager.bspline_optimizer_->setEnvironment(map);
   }
+  static void frozenPrediction(EGOPlannerManager& manager,const std::filesystem::path& payload) {
+    std::ifstream stream(payload,std::ios::binary);std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(stream),{});
+    auto input=decodePredictionInput(bytes);ASSERT_TRUE(input.occupancy);
+    ASSERT_EQ(input.occupancy->cells->flags,manager.planning_view_->physical->cells->flags);
+    ASSERT_EQ(input.occupancy->generation,manager.planning_view_->generation);
+    ASSERT_LE(input.reference_time_s,manager.planning_view_->time_s);
+    ASSERT_LE(manager.planning_view_->time_s,input.reference_time_s+input.validity_s);
+    std::string rejection;auto prediction=makeRiskPrediction(input,{},&rejection);
+    ASSERT_TRUE(rejection.empty()) << rejection;
+    auto& view=*manager.planning_view_;view.risk_version=manager.grid_map_->bindRiskContext(std::move(prediction));
+    view.advisory_query=manager.grid_map_->capturePlanningRiskQuery(view.risk_version,view.time_s,manager.planning_risk_policy_);
+    manager.advisory_guidance_enabled_=true;
+  }
   static void injectAdvisory(EGOPlannerManager& manager) {
     manager.planning_view_->advisory_query.query=[](const Eigen::Vector3d& p) {
       GridPlanningRisk r; r.query_status=GridRiskStatus::VALID;
@@ -1161,6 +1174,8 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   auto* manager = owner.get();
   auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
   manager->initPlanModules(node, vis);
+  std::optional<std::filesystem::path> planning_payload;
+  Eigen::Vector3d captured_route,captured_center,start_velocity=Eigen::Vector3d::Zero(),start_acceleration=Eigen::Vector3d::Zero();
   Eigen::Vector3d start(-2,0,1),goal(5.8,0,1);const Eigen::Vector3d zero=Eigen::Vector3d::Zero();
   if(frozen_input) {
     boost::property_tree::ptree boundary,metadata;
@@ -1169,6 +1184,11 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
     boost::property_tree::read_json(captured.string(),metadata);
     const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
       for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
+    if(const auto payload=boundary.get_optional<std::string>("planning_payload")) {
+      planning_payload=*payload;captured_route=point(metadata.get_child("planning_goals_m").front().second);
+      captured_center=point(metadata.get_child("search_pool_center_m"));
+      start_velocity=point(metadata.get_child("real_start_v_mps"));start_acceleration=point(metadata.get_child("real_start_a_mps2"));
+    }
     start=point(metadata.get_child("real_start_p_m"));goal=point(boundary.get_child("mission_goal_m"));
     GridMapFailureSnapshot snapshot;snapshot.origin=point(metadata.get_child("origin_m"));
     snapshot.max_boundary=point(metadata.get_child("max_boundary_m"));
@@ -1193,13 +1213,15 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   }
   ASSERT_TRUE(manager->planGlobalTraj(start, zero, zero, goal, zero, zero));
   ASSERT_TRUE(manager->beginPlanningView());
+  if(planning_payload) ego_planner::EGOPlannerManagerTestAccess::frozenPrediction(*manager,*planning_payload);
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, start, goal);
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,frozen_input ? 5. : 3.));
-  const auto target = ego_planner::EGOReplanFSMTestAccess::target(fsm);
-  EXPECT_FALSE(manager->queryLocalTargetCell(target, node->now().seconds()).executable());
+  const auto target = planning_payload ? captured_route : ego_planner::EGOReplanFSMTestAccess::target(fsm);
+  if(planning_payload) manager->setLocalTargets({{target,zero,zero,0}},captured_center);
+  if(!planning_payload) EXPECT_FALSE(manager->queryLocalTargetCell(target,node->now().seconds()).executable());
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
-  ASSERT_TRUE(manager->reboundReplan(start,zero,zero,target,zero,true,false));
+  ASSERT_TRUE(manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false));
   EXPECT_EQ(manager->observationResult(),"OBSERVED_PROGRESS_CONNECTION");
   EXPECT_EQ(manager->planningBudget()->searches.calls,2u);
   EXPECT_TRUE(manager->guideIdentity().mission_goal.isApprox(goal,1e-9));

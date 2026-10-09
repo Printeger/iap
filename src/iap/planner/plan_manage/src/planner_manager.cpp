@@ -1112,7 +1112,8 @@ namespace ego_planner
   bool EGOPlannerManager::tryObservationApproach(const Eigen::Vector3d& start,
       const ExecutablePrefix& blocked) {
     const bool allow_observation=blocked.blocked_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED;
-    if(!allow_observation && blocked.blocked_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
+    const bool timed_search=bspline_optimizer_->a_star_->lastResult().failure==AStar::Failure::TIME_BUDGET;
+    if(!allow_observation && !timed_search && blocked.blocked_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
         blocked.blocked_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE) return false;
     auto& attempt=observation_attempt_;
     const auto& epoch=*planning_view_->physical;
@@ -1423,7 +1424,9 @@ namespace ego_planner
       optimizer.initializeFromGuide(control); return true;
     };
     if(!normal_guide_found) {
-      if(optimizer.a_star_->lastResult().failure!=AStar::Failure::END_BLOCKED) return fail(PlanFailure::Search);
+      const auto search_failure=optimizer.a_star_->lastResult().failure;
+      if(search_failure!=AStar::Failure::END_BLOCKED && search_failure!=AStar::Failure::TIME_BUDGET)
+        return fail(PlanFailure::Search);
       ExecutablePrefix blocked;blocked.blocked_position=target_pt;
       blocked.blocked_reason=queryPlanningViewCell(target_pt,0.,false).execution_reason;
       if(!tryObservationApproach(start_pt,blocked) || !initialize_guide())

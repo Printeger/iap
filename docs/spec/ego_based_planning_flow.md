@@ -1,100 +1,103 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
 唯一需求基线：[IAP_Safety_Planner_Requirements_v1.1_20261009.md](IAP_Safety_Planner_Requirements_v1.1_20261009.md)。
-本文件只描述当前接口、实施状态和验证边界，历史记录由 Git 保存。
+本文件只描述当前真实流程、接口和验证边界，历史开发过程由 Git 保存。
 
-## 当前状态
+## 状态与身份
 
 开发起点 `f994cc9c632e8bb534cd9f47d6b663ad32673a47`，分支 `dev/iap_refactor`。
-起始差异仅用户提供的未跟踪 v1.1 文件。原版 ego-planner-swarm 保持只读。
+起始差异仅用户提供的未跟踪 v1.1 文件；原版 ego-planner-swarm 保持只读。
 
-| 阶段 | 当前真实状态 |
+| 阶段 | 实际状态 |
 |---|---|
-| D1 | 已迁移并定向验证：GridRouteCell/queryRouteCell 与 execute 分离；统一有限 Advisory 代价，A* 无 warning 拒绝／fallback 重搜；未知原目标保留路线身份，GuideIdentity 分开三个目标 |
-| D2 | 已迁移并定向验证：执行点／体素边查询截取连续前缀；新正常曲线实际 PVA 起点及零末 V/A；停止空间／非零末速授权退出；发布和监督检查完整 active 尾段；空检查默认不可执行 |
-| D3 | 已实现并定向验证：同一 A* 一次多目标执行连接恢复；推进优先，八个观察候选廉价过滤；实际完成后新证据收益；共享预算余量；质量报告与硬发布解耦 |
-| D4 | 第一次原完整 ON 已运行，未到达：冲突 lookahead 被筛选拒绝，尚未进入搜索；相关修复定向通过，准备唯一一次修复重跑 |
+| D1 | 实现及验证：route/execute 分离、统一有限 Advisory 代价、三个目标身份 |
+| D2 | 实现及验证：连续执行前缀、真实零末 V/A、实际曲线检查、接续和撤销后的完整旧尾段检查 |
+| D3 | 实现及验证：一次共享预算内执行连接恢复、观察后当前帧真实收益、最多一次质量／几何修正 |
+| D4 | 相关集成通过；两次原 ON 均未到达。末次超时恢复缺口已同输入修复验证，未追加现场 |
 
-## 本轮已确定的三个边界
+交付状态 **IMPLEMENTED**，未达到 DEV_ACCEPTED，Goal 未标记完成。
+现场额度已用满 2/2；最终修复能否使原任务按原规则到达仍未验证。
 
-当前 guide 无足够执行前缀，只说明该 guide 受阻。恢复在原额度内复用同一 A*，
-优先连接已观测推进目标，必要时才连接正观测收益目标。搜索未找到与超时分别报告。
-所有连接均按执行语义，不把未知或 warning 改成执行许可。
+## 当前主线与权限
 
-观察最多八个廉价候选，使用已知障碍、执行观测和已有连接证据筛选。
-一次多目标连接搜索输出一条路径，仅对所选目标求解一次 EGO。
-推进连接与观察连接合计一个恢复机会，不逐候选完整搜索／优化。
-实际收益只在执行反馈确认动作完成后，依合法相关新观测判断；自身移动不能重置尝试。
+原 FSM → beginPlanningView 冻结 GridMap／motion／risk 和唯一 PlanningBudget →
+一个正常路线目标 → 同一 A* 在预算内 CostProof 比较有限软代价 →
+selectExecutablePrefix 截取连续执行前缀 → 原 EGO 拟合／优化静止末端曲线 →
+assessTrajectory 完成实际曲线硬检查 → 可选质量报告／一次修正 →
+最新 corridor、当前 motion、PVA、时效及接续检查 → 原子提交 →
+publicationStillTimely → 原 traj_server accepted/pending/active 反馈 → 原 FSM 监督。
 
-沿用唯一 PlanningBudget，1.5 s 总量、1.0 s 累计搜索、原三个修复额度。
-正常搜索、恢复、可选质量计算须为后端／最终硬检查／提交留余量；
-计时依据原森林 `20261009T083044Z_095`：首轮总量 0.2088 s、搜索 0.04964 s，
-成功轮次搜索后工作最高 0.3869 s。搜索保留 0.5 s（正常单次最多 0.5 s），
-可选质量保留 0.4 s。恢复只使用累计搜索与总量余量，无预算返回 BUDGET；
-未完成硬检查默认拒绝。以上是本机测量留量，不是极低耗时承诺。
+GridRouteCell/queryRouteCell 允许物理未知但保留已知障碍、净空、motion、时效拒绝；
+execute 查询始终要求合法观测。route 许可不会隐式转成 execute 许可。
+Advisory 根据合法 HPL/VPL 与原 budget/reserve 得到统一有限代价；warning 不再
+strict 拒绝或 fallback 重搜。未知／失效保持有限缺失代价，不伪装低风险或无障碍。
+GuideIdentity 分开 mission_goal、route_target、committed_endpoint，保存冻结身份及区间。
 
-## 当前主线与接口
+正常和观察曲线都要求实际起点 P/V/A 与真实零末 V/A，retime 后重查。
+原正常非零末速与直线 terminal_stopping_space 授权已退出在线主线。
+assessTrajectory 的 completed 默认为假，空检查／硬检查耗尽不能发布。
+已有实际采样、坐标极值、净空、观测、motion、时效、tracking 和发布检查保留；
+未新增完整连续机体包络证明。pending 撤销前后都检查 active 至静止末端的完整尾段，
+以实际 command feedback 消费身份，不靠生效时刻推断切换。
 
-原 FSM → beginPlanningView 冻结地图／motion／risk 和预算 → 单一路线 LocalTarget →
-BsplineOptimizer::searchRecoveryGuide（同一个 A*，route 语义及有限软代价）→ 连续执行前缀 → 静止末端 guide 拟合／优化 →
-assessTrajectory（completed 必须为真）→ 可选 guide retention 报告及最多一次修正 → 最新实际曲线及相关 corridor → 原子提交 →
-原 traj_server accepted/pending/active 反馈和 FSM 监督。
+## 一次恢复与观察收益
 
-正常路线使用 A* 现有 CostProof 阶段在预算内比较有限软代价；超时有 incumbent
-只说明已有 guide，不声称最优。无足够执行前缀时，tryObservationApproach 在同一
-搜索中优先连接已观测推进目标，再连接正收益观察候选。参考 lookahead 已知物理冲突
-同样经 A* 端点拒绝进入这一次连接恢复；原任务目标本身已知冲突仍不能改目标。恢复超时不解释成不可达；
-推进未判定前不因 observation incumbent 而启动观察。只保留所选路径，随后一次 EGO。
-观察记录绑定实际轨迹 ID：server feedback＋末端 odom 确认静止完成后，
-相关 unknown→free/occupied 且完成后的当前帧真实掩码覆盖该体素才算 GAIN；NO_GAIN、DATA_UNAVAILABLE、
-COMPLETION_UNCONFIRMED 不重置同事件。FSM 继续使用现有等待证据机制。
-保留一张 GridMap、一个 A*、一条 guide、一个工作候选、原 EGO/FSM/traj_server。
-不修改 GLIO、观测来源、预测模型、消息或任务到达规则。
+当前 guide 无足够执行前缀，只说明该 guide 受阻。正常 lookahead 已知冲突、
+正常搜索超时但尚有预算，也进入同一个 tryObservationApproach 连接恢复机会。
+原任务目标本身的已知冲突仍拒绝，不修改任务终点。
+恢复复用同一 A* 多目标搜索，优先已观测推进目标；确需改善观测时，再选观察目标。
+只保留所选 guide，随后仅对所选目标求解 EGO，不引入新搜索器、常驻目标池或恢复 FSM。
 
-## 有效配置与验证边界
+观察最多八个廉价位置，依执行端点、邻接证据、已知遮挡和原 FOV 的正收益预估过滤。
+端点／邻接可用仍不等于连接可用，最终由同一次执行语义连接搜索证明。
+若推进搜索超时，不能以 observation incumbent 声称推进目标不可达。
+SEARCH_TIMEOUT、NO_EXECUTABLE_CONNECTION_FOUND、BUDGET 分别报告。
 
-原 scene `icra_dense_forest_four_fork_v2`、map seed 41021、GNSS seed 20260502、
-原终点 `[18,0,1.5]`、原到达规则、300 s、Advisory ON、prior OFF，关闭可视化。
-实际启动前再核对安装配置和身份，不用默认参数替代有效配置。
-不改变 body/tracking/motion 预留、PL budget/reserve、FOV、年龄、动态限制。
+观察记录绑定实际轨迹 ID；server feedback、合法末端 odom 和静止确认完成后，
+相关 unknown→free/occupied 且新当前帧真实掩码覆盖该体素才记 GAIN。
+NO_GAIN、DATA_UNAVAILABLE、COMPLETION_UNCONFIRMED 不重置同事件；自身移动不续发额度。
+沿用 FSM 的等待证据机制；正常推进连接不作为失败观察事件锁住后续推进。
+恢复请求目标集随既有 search evidence 保存，重放使用真实请求目标和冻结输入。
 
-复用 T1–T6 和现有 baseline/pipeline/scheduled/traj_server/full_stack_feedback 入口，
-日常只测受影响项，最终一次相关集成。冻结输入初始定位一次、修复验证一次，
-没有新证据不重复同实验。现场必须干净且提交／安装一致、GPU 预检通过。
-本轮最多两次完整 ON：默认一次，明确相关修复和定向通过后才一次重跑。
-不做完整 OFF、9+9、来源校准或连续机体包络证明。
+## 共享预算与质量边界
 
-交付仅原任务真实到达且必要验证通过可记 DEV_ACCEPTED／Goal complete；
-IMPLEMENTED 或明确范围 BLOCKED 仍非目标完成。
+PlanningBudget 仍为总量 1.5 s、累计搜索 1.0 s、原三个修复额度，不提高或重置。
+计时依据原森林 `20261009T083044Z_095`：成功轮次搜索后工作最高约 0.3869 s。
+搜索保留 0.5 s 给后端／硬检查／提交，正常单次最多 0.5 s，恢复只用累计搜索
+与总量剩余量；无余量返回 BUDGET。可选质量工作保留 0.4 s。
+这些是本机实测留量，不是极低耗时指标承诺。
 
-D1 定向证据：route 未知保留 execute 拒绝且检查 known obstacle，分段代价连续；
-A* 唯一 warning 通路、较低风险路线选择和断连多目标共三项通过。
-原目标未知身份和原目标侧向越过两项真实 FSM 回归通过。
-有限软代价、物理执行和原任务到达分别判断。
+guide retention 是质量报告；质量退化可触发最多一次修正，失败则保留已受检候选。
+NOT_COMPARED／PREFERENCE_DEGRADED 不单独否决提交；最终硬检查仍必须完成。
+正常、连接恢复、几何修正、后端重启及发布重查共用同一预算与原额度。
 
-D2 定向证据：非零起始 P/V/A 的未知尾部 guide 仅提交已观测前缀，
-mission/route/committed endpoint 分开，最终实际末 V/A 小于 1e-5；冷运行总量
-0.00402 s、优化 0.000713 s、候选检查 0.000122 s（合成 free-map，非现场性能保证）。
-真实 captured guide 拟合、retime 导数、采样间越界和撤销后的旧尾段拒绝检查通过。
-新 fixture 首次遗漏既有 swarm 初始化导致崩溃，补齐 fixture 初始化后定向通过。
-默认空检查不能放行；正常末速和直线停止空间已无在线授权调用。
+## 配置、验证与剩余边界
 
-D3 定向证据：短未知前缀存在已观测旁路、最高收益观察点断连但较低收益点可达、
-累计搜索耗尽不能重置、唯一 warning 通路实际曲线静止发布、完成后新 free/occupied
-才有收益均通过。A* 与 GridMap 受影响测试通过；旧 strict、目标池及非零末速
-断言迁移到 v1.1，相关 pipeline、scheduled、traj_server、full_stack_feedback、failure_map 以及
-搜索／后端重放入口通过。baseline 集成 79 项通过，剩余前缀 fixture 原有窄未知带
-被代价搜索成功绕开；改为确实存在未知尾部的同类合成输入后该项定向通过。
-新重放识别 ends_at_rest，单次质量修正失败保留物理候选，最终硬检查耗尽仍拒绝。
-本轮第一次 ON：`20261009T163141Z_282`，运行 SHA `e442c8ff`，GPU READY、
-安装 exact_bytes，原 seed/任务/阈值；300 s 窗口未到达，无轨迹发布。
-最早反例是已知障碍 lookahead 被筛选阻断，未给同一 A* 连接恢复机会；
-冻结原始 map＋Current motion 的 selector 在该 run `export/analysis/v11_boundary_input.json`。
-物理回放只验证该接口与曲线，不替代 Advisory 比较或现场任务。
-本轮现场计数 1/2，第二次仅在此相关修复定向通过并提交后允许。
+两次现场均为 `icra_dense_forest_four_fork_v2`，map seed 41021、GNSS seed 20260502，
+初始 `[-18,0,1.5]`、终点 `[18,0,1.5]`、原静止到达规则、300 s 窗口，
+Advisory ON、prior OFF、可视化关闭。原历史 NAV hash
+`42e87bd2edff3bb66e6d58b01c1710e9547270cfe795203ce947b8d88356bd32`。
+有效上限 v=0.5 m/s、a=2.0 m/s²；PL budget H/V=0.55/0.60 m、reserve=0.10/0.10 m；
+body=0.35 m、tracking reserve=0.10 m、tracking limit=0.30 m，motion/environment age=0.5 s。
+均未放宽；FOV、地图来源、GLIO、执行消息、预测模型保持原实现。
 
-D4 修复验证：冻结同一现场 map/generation 15 与原 Current motion 时刻，
-lookahead `[-12.98,0.01,1.51]` 报 PHYSICAL_OBSTACLE，原始净空约 0.143 m；
-一次执行连接从八个推进目标中交付一条 guide，实际曲线硬检查／静止末端通过，
-没有补未知或改变物理／年龄／任务条件。合成反例及完成后当前帧掩码覆盖检查通过。
-恢复搜索请求目标集随既有 evidence 保存，重放不再错用正常 lookahead 集合。
+复用现有 baseline／A*／GridMap 与 pipeline、scheduled、traj_server、full_stack_feedback、
+failure_map 和后端重放入口。覆盖未知 guide 但有已观测旁路、高收益观察点断连但另点可达、
+耗尽预算不能重发、唯一 warning 通路实际发布，以及撤销后旧尾段继续受检。
+相关检查通过；未开展 OFF 对照、9+9、来源校准或正式统计实验。
+
+现场 1：`20261009T163141Z_282`，SHA `e442c8ff`；目标筛选阻断，无轨迹提交，未到达。
+现场 2：`20261009T164820Z_516`，SHA `2ab6164e`；guide→实际曲线→反馈贯通，
+车辆从约 −18 m 推进至 `[-6.6,0.6,1.5]`，随后长路线搜索超时，未到达。
+两次均干净提交、Release 安装 exact_bytes、GPU READY（cuInit=0，device_count=1）。
+现场 2 冷首轮总量 0.19546 s、累计搜索 0.00585 s、后端 0.000251 s、候选检查 0.0000615 s；
+成功轮次最高总量约 0.99543 s，均为现场已有计时，非性能重复实验。
+
+末次冻结输入位于现场 2 `export/planner/failure_map/terminal_final`，generation=2551，
+planning time=1657109100.062、risk anchor=1657109099.899，真实 map／Current motion／
+Advisory payload／起始 PVA／路线目标／pool center 均保留。
+`export/analysis/v11_timeout_input.json` 绑定原输入 hash；原搜索 0.5 s 超时后仍有
+约 0.815 s 总余量。最后修复允许使用原余量进入一次执行连接；同输入验证中
+正常搜索仍超时，恢复约 0.003 s，累计搜索约 0.503 s，实际曲线硬检查／静止末端通过。
+该修复只完成定向及直接依赖集成，没有第三次现场或到达证据。
+独立原到达规则审计 `20261009T171436Z_756` 确认两次均未到达。
