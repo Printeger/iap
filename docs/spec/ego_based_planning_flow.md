@@ -2273,3 +2273,36 @@ and published no curve. This is a development reference failure, not acceptance.
 No additional live trial or budget increase is used. The capture-interface
 repair after the pair is validated offline and is not claimed to have been
 present in that pair. Formal protocols and qualification remain deferred.
+
+
+### Light development result and next evidence gate
+
+The completed same-version pair is `20261009T041138Z_319` (OFF) and
+`20261009T041407Z_021` (ON). OFF truth horizontal displacement is 19.471 m,
+with 32 actual positive command IDs/31 continuations; ON has zero publication
+and zero actual command IDs, with only 0.0094 m horizontal hover displacement.
+OFF/ON each retain all 12 requests and 11 time-qualified pairs; 10 OFF pairs
+have true motion plus actual command feedback, while ON has none. These are
+correlated development samples, not independent calibration trials.
+
+ON final attempt99/generation966/risk243 entered the repaired high-cost mode
+and exhausted its original search allowance without an incumbent. Its complete
+physical/query/identity evidence is retained, but the time-equality export bug
+omitted the original full Predictor payload. The subsequent capture fix cannot
+retroactively turn another service snapshot into that attempt's input. Thus
+this pair establishes recovery-branch entry and a new bounded search blocker,
+but not complete full-model failure replay or ON execution acceptance. The
+next minimum capture is one same-attempt full input with the repaired interface;
+there were no extra live rounds or budget increases in this task.
+
+A new genuine moving codec9 input gives nine same-point GNSS/LiDAR/Fusion
+comparisons and 27 independent QR/SVD marginalization checks. At point0,
+HPL/VPL are GNSS 136.1448/393.3624 m, LiDAR .5049558/.5889836 m and Fusion
+.5049474/.5889815 m under the same envelope. Three GNSS-only degraded points
+retain unavailable bounds; no zero risk is manufactured. Source statistics
+remain uncalibrated and the map remains fixed-condition. Three motion-audit
+checks and all 15 Planner functional/selected lint targets pass after capture
+repair. Existing three formatting failures and the prior strict GPU covariance
+failure remain reported. No default/formal promotion is authorized by these
+results. Full figures, commands, identity hashes, request denominators and
+limitations are in `log/20261009T035423Z_499/export/analysis/on_recovery_result/REPORT.md`.
