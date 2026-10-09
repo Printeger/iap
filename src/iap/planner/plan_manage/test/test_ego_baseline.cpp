@@ -2107,6 +2107,40 @@ TEST(EgoBaseline, ActualReadOnlyServiceDoesNotChangePredictionVersion) {
   EXPECT_DOUBLE_EQ(decoded.integrity.current.current_motion_error_proxy_m,.05);
 }
 
+TEST(EgoBaseline, FailureCapturePreservesDifferentPhysicalAndPredictionTimes) {
+  std::filesystem::path owned;
+  if(!glim::RunLogManager::get_if_initialized()) {
+    char name[]="/tmp/iap_split_reference_XXXXXX";const auto temporary=mkdtemp(name);
+    ASSERT_NE(temporary,nullptr);owned=temporary;setenv("IAP_RUN_DIR",owned.c_str(),1);
+    glim::RunLogManager::initialize("split_reference_capture_test");
+  }
+  const auto run=glim::RunLogManager::get_if_initialized()->run_dir();
+  struct Cleanup {std::filesystem::path owned;~Cleanup(){if(!owned.empty())std::filesystem::remove_all(owned);}} cleanup{owned};
+  auto node=makeNode();
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),10100000000LL),RCL_RET_OK);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);manager.grid_map_->setFailureEvidenceCapture(true);
+  const Eigen::Vector3d start(-2,0,1);
+  GridMapTestAccess::input(*manager.grid_map_,{},10.,start);GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,10.,1,start);
+  ASSERT_TRUE(manager.beginPlanningView());
+  GridPlanningCell cell;cell.occupancy_generation=manager.grid_map_->occupancyGeneration();
+  AStar::Result result;result.occupancy_generation=cell.occupancy_generation;result.failure=AStar::Failure::TIME_BUDGET;
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"split_reference",cell,&result);
+  const auto leaf=run/"export/planner/failure_map/split_reference";
+  ASSERT_TRUE(std::filesystem::exists(leaf/"planning_input.bin"));
+  std::ifstream stream(leaf/"planning_input.bin",std::ios::binary);
+  std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),{});
+  const auto input=ego_planner::decodePredictionInput(bytes);
+  boost::property_tree::ptree metadata;boost::property_tree::read_json((leaf/"snapshot.json").string(),metadata);
+  EXPECT_DOUBLE_EQ(input.reference_time_s,10.);
+  EXPECT_DOUBLE_EQ(metadata.get<double>("risk_reference_time_s"),10.);
+  EXPECT_DOUBLE_EQ(metadata.get<double>("planning_time_s"),10.1);
+  EXPECT_EQ(input.occupancy->generation,cell.occupancy_generation);
+}
+
 TEST(EgoBaseline, PlanningInputExportRetainsAttemptAcrossNewMapAndMissingAttemptIsExplicit) {
   auto node=makeNode(); ego_planner::EGOPlannerManager manager;
   manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));

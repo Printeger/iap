@@ -155,12 +155,16 @@ namespace ego_planner
     // The writer receives values, never a mutable query or a live re-query.
     const auto risk_evidence=planning_view_ && planning_view_->advisory_query.captureEvidence
         ? planning_view_->advisory_query.captureEvidence(*snapshot) : std::optional<GridRiskEvidence>{};
+    // Prediction reference is the propagated GNSS epoch; capture_time is the
+    // physical planning/check time. Bind each to its own authority, never demand
+    // equality or rewrite either timestamp to retain the complete input.
     auto input_binding=std::atomic_load(&planning_input_binding_);
     if(!planning_view_ || !input_binding || input_binding->attempt_id!=attempt_id ||
         input_binding->risk_version!=planning_view_->risk_version ||
         (risk_evidence && input_binding->risk_version!=risk_evidence->risk_version) ||
         input_binding->input.occupancy->generation!=snapshot->generation ||
-        input_binding->input.reference_time_s!=capture_time)
+        input_binding->input.reference_time_s!=(risk_evidence ?
+            risk_evidence->risk_reference_time_s : snapshot->risk_reference_time_s))
       input_binding.reset();
     const auto node = node_;
     auto write = [=](const std::string& label) mutable {

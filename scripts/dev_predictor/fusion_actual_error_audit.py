@@ -21,6 +21,16 @@ def rows(path):
         return list(csv.DictReader(stream))
 
 
+def truth_motion_evidence(samples, stamp):
+    # Offline qualification only. Keep the same 50 ms interpolation gate;
+    # estimator velocity cannot prove that the real vehicle moved.
+    before, _ = interpolate_truth(samples, stamp-.02)
+    after, _ = interpolate_truth(samples, stamp+.02)
+    speed = float(np.linalg.norm(after-before)/.04)
+    return {'speed_mps': speed, 'from_s': stamp-.02, 'to_s': stamp+.02,
+            'moving': speed > .1}
+
+
 def posterior_at_state(meta):
     e = meta['postopt_evidence']
     dimensions = e['tangent_dimensions']
@@ -59,6 +69,12 @@ def main():
     odom = [r for p in recordings.glob('*_odometry.csv') for r in rows(p)]
     truth = [r for r in odom if r['source'] == 'truth' and r['frame'] == 'map' and r['body'] == 'drone_0']
     glio = [r for r in odom if r['source'] == 'glio']
+    feedback_times = []
+    for execution in source.glob('profiling/planner_execution_*.csv'):
+        for r in rows(execution):
+            if r['event']=='feedback_received' and int(r['trajectory_id'])>0:
+                feedback_times.append(float(r['command_time_s']))
+    feedback_times = np.sort(feedback_times)
     results = []
     commands = []
     inputs = {}
@@ -129,6 +145,8 @@ def main():
                 if not np.allclose(np.array(meta['coordinates']['T_lidar_imu']).reshape(4, 4), np.eye(4), atol=1e-9, rtol=0):
                     raise ValueError('canonical_body_extrinsic_unproved')
                 position, _ = interpolate_truth(truth, stamp)
+                truth_motion = truth_motion_evidence(truth, stamp)
+                executing = bool(len(feedback_times) and np.min(np.abs(feedback_times-stamp))<=.05)
                 difference = np.array(meta['position'])-position
                 posterior, cv_no_q, shift = posterior_at_state(meta)
                 item.update(raw_state_pair=True, pose_stamp_s=stamp,
@@ -137,7 +155,9 @@ def main():
                             state_epoch_delta_s=stamp-meta['gnss_stamp'],
                             reference_time_qualified=coordinate['calibration_time_qualified'] and coordinate['postopt_evidence'].get('time_propagation_qualified',False),
                             original_state_stamp_s=original_stamp,
-                            moving=float(np.linalg.norm(meta['postopt_evidence']['optimized_means'][16:19]))>.1,
+                            moving=truth_motion['moving'], truth_motion=truth_motion,
+                            executing_command_at_reference=executing,
+                            estimator_moving_diagnostic=float(np.linalg.norm(meta['postopt_evidence']['optimized_means'][16:19]))>.1,
                             velocity_mps=meta['postopt_evidence']['optimized_means'][16:19],
                             time_evidence=coordinate['postopt_evidence'].get('motion_reference'),
                             error_h_m=float(np.linalg.norm(difference[:2])), error_v_m=float(abs(difference[2])),
@@ -169,6 +189,7 @@ def main():
                'requested': len(results), 'raw_state_pairs': len(paired),
                'reference_time_qualified': sum(r['reference_time_qualified'] for r in results),
                'moving_reference_time_pairs':sum(r.get('moving',False) and r['qualified'] for r in results),
+               'executed_moving_reference_time_pairs':sum(r.get('moving',False) and r.get('executing_command_at_reference',False) and r['qualified'] for r in results),
                'metre_qualified': 0, 'independent_runs': 1, 'formal_calibration_runs': 0,
                'formal_validation_runs': 0, 'posterior_used_as_predictor_prior': False,
                'position_error_quantiles': {axis: np.quantile([r['error_'+axis+'_m'] for r in paired], [.5, .95, 1.]).tolist()

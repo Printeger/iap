@@ -314,6 +314,8 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   auto physical_snapshot=in.snapshot;
   if(!(std::cin>>physical_snapshot.virtual_ceiling_height_m>>physical_snapshot.inflation_radius_m))
     throw std::invalid_argument("missing original ceiling/inflation");
+  double risk_reference, risk_until;
+  if(!(std::cin>>risk_reference>>risk_until))throw std::invalid_argument("missing original prediction reference/validity");
   auto map=GridMap::fromFailureSnapshot(physical_snapshot);
   auto epoch=map->captureFrozenOccupancyEpoch();
   auto calls=std::make_shared<std::atomic<uint64_t>>(0);
@@ -327,7 +329,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),{});
     if(!stream) throw std::invalid_argument("prediction input unavailable");
     auto input=ego_planner::decodePredictionInput(bytes);
-    if(!input.occupancy || input.reference_time_s!=in.planning_time_s ||
+    if(!input.occupancy || input.reference_time_s!=risk_reference ||
         input.occupancy->generation!=epoch->generation || input.occupancy->frame_id!=epoch->frame_id ||
         input.occupancy->lattice_origin!=epoch->lattice_origin || input.occupancy->extent_m!=epoch->extent_m ||
         input.occupancy->resolution_m!=epoch->resolution_m || input.occupancy->cloud_stamp_s!=epoch->cloud_stamp_s ||
@@ -343,8 +345,6 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     version=map->bindRiskContext(std::move(prediction));
     prepare_s=std::chrono::duration<double>(Clock::now()-began).count();
   } else if(mode=="sparse") {
-    double reference, until;
-    if(!(std::cin>>reference>>until)) throw std::invalid_argument("missing saved risk time");
     auto samples=std::make_shared<std::unordered_map<size_t,GridRiskVoxel>>();
     std::ifstream stream(risk_path); std::string line; std::getline(stream,line);
     while(std::getline(stream,line)) {
@@ -357,7 +357,7 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
         throw std::invalid_argument("invalid or duplicate saved PL address");
     }
     GridRiskContext context; context.frame_id=epoch->frame_id; context.occupancy_generation=epoch->generation;
-    context.reference_time_s=reference; context.valid_until_s=until;
+    context.reference_time_s=risk_reference; context.valid_until_s=risk_until;
     context.predict=[&,samples,epoch](const Point& p) {
       const Eigen::Vector3i i=((p-epoch->lattice_origin)*epoch->resolution_inv).array().floor().cast<int>();
       const size_t address=(static_cast<size_t>(i.x())*epoch->voxel_dimensions.y()+i.y())*epoch->voxel_dimensions.z()+i.z();

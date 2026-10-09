@@ -2244,3 +2244,32 @@ Predictor suite passes 121 cases. Fixed-map conditioning, missing independent
 map/alignment error evidence and the strict sampled GPU asymmetry rejection
 remain explicit limits. No posterior prior, map covariance, risk weight or
 noise-scale authority is added by this diagnostic tool.
+
+
+### Separate physical planning and prediction reference identities
+
+The paired development runs exposed an export bug: failure capture compared
+`input.reference_time_s` (the propagated GNSS epoch) to the physical planning
+clock, discarding the retained full input when they differed. Failure-map
+binding and complete-input replay now compare prediction reference against
+the frozen risk context's reference, while physical/environment checks use
+the original planning time. Neither clock is rewritten. A 100 ms split-clock
+capture regression is red before this change and retains the original full
+payload and both clocks afterwards. Historical failure records stay read-only;
+missing payloads in the development pair cannot be retrospectively qualified.
+
+Independent error qualification now derives actual motion from bracketed
+truth positions with the unchanged 50 ms interpolation gate, preserving
+estimator velocity separately. Executed moving pairs additionally require
+matching positive-ID command feedback at that reference. Hover oscillations
+without a published curve do not prove ON execution. The new motion check has
+static, nonzero-velocity and missing-time/extrapolation regressions.
+
+The 120 s same-commit OFF/ON pair used clean `01851423`, the same historical
+navigation file, GNSS seed 20260502 and map seed 41021, with visualization OFF.
+OFF delivered multiple real continuations; ON entered the corrected one-search
+high-cost branch but exhausted the original 1 s allowance before any incumbent
+and published no curve. This is a development reference failure, not acceptance.
+No additional live trial or budget increase is used. The capture-interface
+repair after the pair is validated offline and is not claimed to have been
+present in that pair. Formal protocols and qualification remain deferred.
