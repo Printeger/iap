@@ -151,6 +151,7 @@ namespace ego_planner
     }
     bool searchRecoveryGuide(double max_duration_s = .5, size_t preferred_goal_count = 0);
     struct RecoverySearchEvidence {
+      std::vector<Eigen::Vector3d> requested_goals;
       GridExecutionReason start_reason = GridExecutionReason::OK;
       GridAdvisoryClass start_advisory = GridAdvisoryClass::UNKNOWN;
       bool normal_attempted = false, fallback_eligible = false, fallback_entered = false;

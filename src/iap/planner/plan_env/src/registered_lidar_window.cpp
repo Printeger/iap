@@ -381,6 +381,13 @@ RegisteredLidarWindow::currentFrameSource() const {
   return current_frame_.source;
 }
 
+RegisteredVoxelState RegisteredLidarWindow::currentStateAt(const Eigen::Vector3i& index) const {
+  if(!has_current_frame_ || !inBounds(index)) return RegisteredVoxelState::UNKNOWN;
+  const auto i=static_cast<size_t>(address(index));
+  return current_hit_[i] ? RegisteredVoxelState::OCCUPIED :
+      current_free_[i] ? RegisteredVoxelState::OBSERVED_FREE : RegisteredVoxelState::UNKNOWN;
+}
+
 std::vector<uint8_t> RegisteredLidarWindow::observationSourceFlags() const {
   std::vector<uint8_t> flags(active_hit_count_.size());
   for (size_t i = 0; i < flags.size(); ++i)

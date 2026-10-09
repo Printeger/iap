@@ -400,6 +400,13 @@ std::optional<RegisteredLidarFrameMetadata> GridMap::currentObservationFrame(uin
   return registered_lidar_window_->currentFrameMetadata();
 }
 
+std::optional<RegisteredVoxelState> GridMap::currentObservationState(uint64_t generation,const Eigen::Vector3d& point) {
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  if(occupancy_update_sequence_.load()!=2*generation || !registered_lidar_window_ || !point.allFinite()) return {};
+  Eigen::Vector3i index;posToIndex(point,index);
+  return registered_lidar_window_->currentStateAt(index);
+}
+
 GridPlanningCell GridMap::queryPlanningCell(const Eigen::Vector3d& position,
     uint64_t version, double now, const GridPlanningRiskPolicy& policy,
     const GridMotionContext& motion, bool detailed, const GridPlanningContext* context,

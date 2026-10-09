@@ -29,7 +29,8 @@ struct GridMapTestAccess {
         map.md_.observed_buffer_[map.toAddress(Eigen::Vector3i(x,y,z))]=behind || isolated;
       }
   }
-  static void syntheticSensor(GridMap& map,const Eigen::Vector3d& origin,double stamp) {
+  static void syntheticSensor(GridMap& map,const Eigen::Vector3d& origin,double stamp,
+      std::optional<Eigen::Vector3d> hit={}) {
     RegisteredLidarWindow::Geometry g;g.origin=map.mp_.map_origin_;
     g.dimensions=map.mp_.map_voxel_num_;g.resolution_m=map.mp_.resolution_;g.frame_contract_id="observation-fixture";
     if(!map.registered_lidar_window_) map.registered_lidar_window_=std::make_unique<RegisteredLidarWindow>(g);
@@ -37,7 +38,8 @@ struct GridMapTestAccess {
     frame.stamp_s=frame.scan_end_stamp_s=stamp;frame.sensor_receipt_steady_ns=1;frame.T_map_lidar.translation()=origin;
     frame.frame_contract_id=g.frame_contract_id;frame.sensor_model_id="synthetic-original-fov";
     frame.horizontal_fov_rad=2*std::acos(-1.);frame.vertical_min_rad=-.5;frame.vertical_max_rad=.1;
-    frame.min_range_m=.1;frame.max_range_m=15.;frame.hits_lidar.emplace_back(0,0,0);
+    frame.min_range_m=.1;frame.max_range_m=15.;
+    frame.hits_lidar.push_back(hit ? Eigen::Vector3d(*hit-origin) : Eigen::Vector3d::Zero());
     ASSERT_TRUE(map.registered_lidar_window_->applyCurrentFrame(frame).accepted);
   }
   static uint64_t riskVersion(const GridMap& map) { return map.risk_version_; }
@@ -312,6 +314,9 @@ struct EGOPlannerManagerTestAccess {
   static std::optional<int> solverResult(const EGOPlannerManager& manager) {return manager.bspline_optimizer_->lastOptimizationResult();}
   static bool solverNormal(const EGOPlannerManager& manager) {return manager.bspline_optimizer_->lastOptimizationTerminatedNormally();}
   static size_t advisoryQueries(const EGOPlannerManager& manager) { return manager.planning_view_->advisory_stats.queries; }
+  static void replayMap(EGOPlannerManager& manager,GridMap::Ptr map) {
+    manager.grid_map_=map;manager.bspline_optimizer_->setEnvironment(map);
+  }
   static void injectAdvisory(EGOPlannerManager& manager) {
     manager.planning_view_->advisory_query.query=[](const Eigen::Vector3d& p) {
       GridPlanningRisk r; r.query_status=GridRiskStatus::VALID;
@@ -1147,28 +1152,62 @@ TEST(EgoBaseline, CurvedReferenceUsesForwardArcAndFirstSelfIntersection) {
   EXPECT_LT(manager->global_data_.last_progress_time_, 0.1);
 }
 
-TEST(EgoBaseline, TargetInTreeIsReplacedByObservedForwardVoxel) {
+TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) {
   // Synthetic known start: the captured v2 repair start is unobserved and
   // cannot stand in for a captured GLIO connection state.
-  auto node = makeNode();
+  const char* frozen_input=std::getenv("IAP_D4_BOUNDARY_INPUT");
+  auto node = makeNode(false,1.,false,false,frozen_input ? .1 : .2,frozen_input ? .5 : 1.);
   auto owner = std::make_unique<ego_planner::EGOPlannerManager>();
   auto* manager = owner.get();
   auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
   manager->initPlanModules(node, vis);
-  const Eigen::Vector3d start(-2, 0, 1), goal(2, 0, 1), zero = Eigen::Vector3d::Zero();
-  GridMapTestAccess::input(*manager->grid_map_, {Eigen::Vector3d(1, 0, 1)},
-                           node->now().seconds(), start);
-  GridMapTestAccess::markObserved(*manager->grid_map_);
-  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager, node->now().seconds(), 1, start);
+  Eigen::Vector3d start(-2,0,1),goal(5.8,0,1);const Eigen::Vector3d zero=Eigen::Vector3d::Zero();
+  if(frozen_input) {
+    boost::property_tree::ptree boundary,metadata;
+    boost::property_tree::read_json(frozen_input,boundary);
+    const std::filesystem::path captured=boundary.get<std::string>("snapshot");
+    boost::property_tree::read_json(captured.string(),metadata);
+    const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
+      for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
+    start=point(metadata.get_child("real_start_p_m"));goal=point(boundary.get_child("mission_goal_m"));
+    GridMapFailureSnapshot snapshot;snapshot.origin=point(metadata.get_child("origin_m"));
+    snapshot.max_boundary=point(metadata.get_child("max_boundary_m"));
+    snapshot.dimensions=point(metadata.get_child("dimensions")).template cast<int>();
+    snapshot.resolution_m=metadata.get<double>("resolution_m");snapshot.generation=metadata.get<uint64_t>("generation");
+    snapshot.cloud_stamp_s=metadata.get<double>("cloud_stamp_s");snapshot.frame_id=metadata.get<std::string>("frame_id");
+    snapshot.virtual_ceiling_height_m=metadata.get<double>("virtual_ceiling_height_m");
+    snapshot.inflation_radius_m=metadata.get<double>("inflation_radius_m");
+    std::ifstream cells(captured.parent_path()/metadata.get<std::string>("cell_flags_file"),std::ios::binary);
+    snapshot.cell_flags.assign(std::istreambuf_iterator<char>(cells),{});
+    ASSERT_EQ(snapshot.cell_flags.size(),static_cast<size_t>(snapshot.dimensions.prod()));
+    ego_planner::EGOPlannerManagerTestAccess::replayMap(*manager,GridMap::fromFailureSnapshot(snapshot));
+    const double time=boundary.get<double>("reference_time_s");
+    ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),static_cast<int64_t>(time*1e9)),RCL_RET_OK);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,boundary.get<double>("motion_stamp_s"),1,start);
+    ego_planner::EGOPlannerManagerTestAccess::setMotionError(*manager,boundary.get<double>("motion_error_proxy_m"));
+  } else {
+    GridMapTestAccess::input(*manager->grid_map_,{Eigen::Vector3d(1,0,1)},node->now().seconds(),start);
+    GridMapTestAccess::markObserved(*manager->grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  }
   ASSERT_TRUE(manager->planGlobalTraj(start, zero, zero, goal, zero, zero));
   ASSERT_TRUE(manager->beginPlanningView());
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, start, goal);
-  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm, 3));
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,frozen_input ? 5. : 3.));
   const auto target = ego_planner::EGOReplanFSMTestAccess::target(fsm);
-  EXPECT_TRUE(manager->queryLocalTargetCell(target, node->now().seconds()).executable());
-  EXPECT_GT(target.x(), 0);
-  EXPECT_GT((target - Eigen::Vector3d(1, 0, 1)).norm(), 0.45);
+  EXPECT_FALSE(manager->queryLocalTargetCell(target, node->now().seconds()).executable());
+  manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
+  ASSERT_TRUE(manager->reboundReplan(start,zero,zero,target,zero,true,false));
+  EXPECT_EQ(manager->observationResult(),"OBSERVED_PROGRESS_CONNECTION");
+  EXPECT_EQ(manager->planningBudget()->searches.calls,2u);
+  EXPECT_TRUE(manager->guideIdentity().mission_goal.isApprox(goal,1e-9));
+  EXPECT_GT(manager->guideIdentity().committed_endpoint.x(),start.x()+.2);
+  EXPECT_TRUE(manager->queryLocalTargetCell(manager->guideIdentity().committed_endpoint,node->now().seconds()).executable());
+  auto curve=manager->publicationTrajectory().position_traj_;
+  EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
+  EXPECT_TRUE(manager->assessTrajectory(curve,0,node->now().seconds()).executable());
 }
 
 TEST(EgoBaseline, KnownOccupiedMissionRemainsOriginalAndCannotBeAuthorized) {
@@ -3334,7 +3373,7 @@ TEST(EgoBaseline, ObservationConnectionSkipsHigherGainDisconnectedPocketInOneSea
 }
 
 TEST(EgoBaseline, ObservationOutcomeNeedsCompletedFeedbackAndRelatedNewEvidence) {
-  for(int mode=0;mode<4;++mode) {
+  for(int mode=0;mode<5;++mode) {
     auto node=makeNode(false,1.,false,false,.1);
     ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
     ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
@@ -3346,11 +3385,13 @@ TEST(EgoBaseline, ObservationOutcomeNeedsCompletedFeedbackAndRelatedNewEvidence)
     ego_planner::EGOPlannerManagerTestAccess::observationPending(manager,goal,key);
     EXPECT_FALSE(manager.observationReadyToPlan());EXPECT_EQ(manager.observationResult(),"WAITING_DATA");
     ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100200000000LL),RCL_RET_OK);
-    if(mode<3) {
-      GridMapTestAccess::syntheticSensor(*manager.grid_map_,start,100.2);
-      if(mode==1 || mode==2) GridMapTestAccess::changeEvidence(*manager.grid_map_,key,mode==2,false,true);
+    if(mode<3 || mode==4) {
+      GridMapTestAccess::syntheticSensor(*manager.grid_map_,start,100.2,
+          mode==1 ? std::optional<Eigen::Vector3d>(key+Eigen::Vector3d(.3,0,0)) :
+          mode==2 ? std::optional<Eigen::Vector3d>(key) : std::nullopt);
+      if(mode==1 || mode==2 || mode==4) GridMapTestAccess::changeEvidence(*manager.grid_map_,key,mode==2,false,true);
       EXPECT_TRUE(manager.observationReadyToPlan());
-      EXPECT_EQ(manager.observationResult(),mode==0 ? "NO_GAIN" : "OBSERVATION_GAIN");
+      EXPECT_EQ(manager.observationResult(),(mode==0 || mode==4) ? "NO_GAIN" : "OBSERVATION_GAIN");
     } else {
       ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100600000000LL),RCL_RET_OK);
       EXPECT_TRUE(manager.observationReadyToPlan());EXPECT_EQ(manager.observationResult(),"OBSERVATION_DATA_UNAVAILABLE");

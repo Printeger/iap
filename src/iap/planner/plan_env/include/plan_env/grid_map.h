@@ -544,6 +544,7 @@ public:
       const GridMotionContext& motion, const GridPlanningContext* context = nullptr,
       bool performance_diagnostics = false);
   std::optional<RegisteredLidarFrameMetadata> currentObservationFrame(uint64_t generation) const;
+  std::optional<RegisteredVoxelState> currentObservationState(uint64_t generation,const Eigen::Vector3d& point);
   GridPlanningQueryStats planningQueryStats() const;
   GridPlanningContext preparePlanningQuery(double now,
                                           const GridMotionContext& motion,

@@ -13,7 +13,7 @@
 | D1 | 已迁移并定向验证：GridRouteCell/queryRouteCell 与 execute 分离；统一有限 Advisory 代价，A* 无 warning 拒绝／fallback 重搜；未知原目标保留路线身份，GuideIdentity 分开三个目标 |
 | D2 | 已迁移并定向验证：执行点／体素边查询截取连续前缀；新正常曲线实际 PVA 起点及零末 V/A；停止空间／非零末速授权退出；发布和监督检查完整 active 尾段；空检查默认不可执行 |
 | D3 | 已实现并定向验证：同一 A* 一次多目标执行连接恢复；推进优先，八个观察候选廉价过滤；实际完成后新证据收益；共享预算余量；质量报告与硬发布解耦 |
-| D4 | 尚未运行本轮原完整 ON；不得沿用历史现场作为本轮到达 |
+| D4 | 第一次原完整 ON 已运行，未到达：冲突 lookahead 被筛选拒绝，尚未进入搜索；相关修复定向通过，准备唯一一次修复重跑 |
 
 ## 本轮已确定的三个边界
 
@@ -42,10 +42,11 @@ assessTrajectory（completed 必须为真）→ 可选 guide retention 报告及
 
 正常路线使用 A* 现有 CostProof 阶段在预算内比较有限软代价；超时有 incumbent
 只说明已有 guide，不声称最优。无足够执行前缀时，tryObservationApproach 在同一
-搜索中优先连接已观测推进目标，再连接正收益观察候选。恢复超时不解释成不可达；
+搜索中优先连接已观测推进目标，再连接正收益观察候选。参考 lookahead 已知物理冲突
+同样经 A* 端点拒绝进入这一次连接恢复；原任务目标本身已知冲突仍不能改目标。恢复超时不解释成不可达；
 推进未判定前不因 observation incumbent 而启动观察。只保留所选路径，随后一次 EGO。
 观察记录绑定实际轨迹 ID：server feedback＋末端 odom 确认静止完成后，
-相关 unknown→free/occupied 新证据才算 GAIN；NO_GAIN、DATA_UNAVAILABLE、
+相关 unknown→free/occupied 且完成后的当前帧真实掩码覆盖该体素才算 GAIN；NO_GAIN、DATA_UNAVAILABLE、
 COMPLETION_UNCONFIRMED 不重置同事件。FSM 继续使用现有等待证据机制。
 保留一张 GridMap、一个 A*、一条 guide、一个工作候选、原 EGO/FSM/traj_server。
 不修改 GLIO、观测来源、预测模型、消息或任务到达规则。
@@ -85,4 +86,15 @@ D3 定向证据：短未知前缀存在已观测旁路、最高收益观察点�
 搜索／后端重放入口通过。baseline 集成 79 项通过，剩余前缀 fixture 原有窄未知带
 被代价搜索成功绕开；改为确实存在未知尾部的同类合成输入后该项定向通过。
 新重放识别 ends_at_rest，单次质量修正失败保留物理候选，最终硬检查耗尽仍拒绝。
-本轮完整 ON 计数为 0/2，现场到达尚未验证。
+本轮第一次 ON：`20261009T163141Z_282`，运行 SHA `e442c8ff`，GPU READY、
+安装 exact_bytes，原 seed/任务/阈值；300 s 窗口未到达，无轨迹发布。
+最早反例是已知障碍 lookahead 被筛选阻断，未给同一 A* 连接恢复机会；
+冻结原始 map＋Current motion 的 selector 在该 run `export/analysis/v11_boundary_input.json`。
+物理回放只验证该接口与曲线，不替代 Advisory 比较或现场任务。
+本轮现场计数 1/2，第二次仅在此相关修复定向通过并提交后允许。
+
+D4 修复验证：冻结同一现场 map/generation 15 与原 Current motion 时刻，
+lookahead `[-12.98,0.01,1.51]` 报 PHYSICAL_OBSTACLE，原始净空约 0.143 m；
+一次执行连接从八个推进目标中交付一条 guide，实际曲线硬检查／静止末端通过，
+没有补未知或改变物理／年龄／任务条件。合成反例及完成后当前帧掩码覆盖检查通过。
+恢复搜索请求目标集随既有 evidence 保存，重放不再错用正常 lookahead 集合。

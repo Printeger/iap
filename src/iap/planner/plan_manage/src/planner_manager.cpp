@@ -144,6 +144,7 @@ namespace ego_planner
         ? bspline_optimizer_->recoveryGuide() : std::vector<Eigen::Vector3d>{};
     std::vector<Eigen::Vector3d> goal_positions;
     for(const auto& target : planning_targets_) goal_positions.push_back(target.position);
+    if(!recovery_evidence.empty()) goal_positions=recovery_evidence.back().requested_goals;
     const double fitting_reserve_m=.5*snapshot->resolution_m;
     const auto state_json = std::exchange(failure_state_json_, std::string{});
     const auto* checked=candidate_trace ? (assessment ? assessment : last_release_assessment_
@@ -366,7 +367,9 @@ namespace ego_planner
             << ",\"initial_remaining_s\":" << number(e.initial_remaining_s)
             << ",\"fallback_remaining_s\":" << number(e.fallback_remaining_s)
             << ",\"final_failure\":" << std::quoted(AStar::failureName(e.final_failure))
-            << ",\"guide_found\":" << (e.guide_found ? "true" : "false") << '}';
+            << ",\"guide_found\":" << (e.guide_found ? "true" : "false") << ",\"requested_goals_m\":[";
+        for(size_t j=0;j<e.requested_goals.size();++j) metadata << (j ? "," : "") << vector(e.requested_goals[j]);
+        metadata << "]}";
       }
       metadata << "],\n  \"guide_m\": [";
       for(size_t i=0;i<guide.size();++i) metadata << (i ? "," : "") << vector(guide[i]);
@@ -1108,16 +1111,21 @@ namespace ego_planner
 
   bool EGOPlannerManager::tryObservationApproach(const Eigen::Vector3d& start,
       const ExecutablePrefix& blocked) {
-    if(blocked.blocked_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED) return false;
+    const bool allow_observation=blocked.blocked_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+    if(!allow_observation && blocked.blocked_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
+        blocked.blocked_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE) return false;
     auto& attempt=observation_attempt_;
     const auto& epoch=*planning_view_->physical;
     const auto evidence=[&](const Eigen::Vector3d& p) {
       const auto cell=grid_map_->queryFrozenOccupancy(epoch,p);
       return uint8_t((cell.observed ? 4 : 0)|(cell.raw_occupied ? 1 : 0)|(cell.inflated_occupied ? 2 : 0));
     };
-    bool changed=!attempt.mission.isApprox(guide_identity_.mission_goal,1e-6);
+    Eigen::Vector3i blocked_index;grid_map_->posToIndex(blocked.blocked_position,blocked_index);
+    Eigen::Vector3d blocked_key;grid_map_->indexToPos(blocked_index,blocked_key);
+    bool changed=!attempt.mission.isApprox(guide_identity_.mission_goal,1e-6) ||
+        !attempt.key.isApprox(blocked_key,1e-6);
     for(size_t i=0;!changed && i<attempt.probes.size();++i) changed=evidence(attempt.probes[i])!=attempt.before[i];
-    if(!changed && attempt.result!="NONE") {
+    if(!changed && attempt.result!="NONE" && attempt.result!="OBSERVED_PROGRESS_CONNECTION") {
       last_plan_failure_=PlanFailure::ObservationBlocked;return false;
     }
     if(planning_budget_->searchRemaining()<=0 || planning_budget_->count(PlanningBudget::Repair::Search)>=2) {
@@ -1167,7 +1175,7 @@ namespace ego_planner
     const auto sensor=grid_map_->currentObservationFrame(epoch.generation);
     struct Candidate {Eigen::Vector3d position;int gain;};
     std::vector<Candidate> observations;
-    if(sensor && std::isfinite(sensor->horizontal_fov_rad) && std::isfinite(sensor->vertical_min_rad) &&
+    if(allow_observation && sensor && std::isfinite(sensor->horizontal_fov_rad) && std::isfinite(sensor->vertical_min_rad) &&
         std::isfinite(sensor->vertical_max_rad) && sensor->min_range_m>=0 && sensor->max_range_m>0) {
       const auto visible=[&](const Eigen::Vector3d& target,const Eigen::Vector3d& displacement) {
         const Eigen::Vector3d origin=sensor->T_map_lidar.translation()+displacement;
@@ -1263,7 +1271,9 @@ namespace ego_planner
       bool gain=false;
       for(size_t i=0;i<attempt.probes.size();++i) if(!(attempt.before[i]&4)) {
         const auto fact=grid_map_->queryFrozenOccupancy(*epoch,attempt.probes[i]);
-        gain=gain || fact.observed || fact.raw_occupied;
+        const auto source=grid_map_->currentObservationState(epoch->generation,attempt.probes[i]);
+        if(!source) return false; // The frame changed; consume the next legal frame.
+        gain=gain || ((fact.observed || fact.raw_occupied) && *source!=RegisteredVoxelState::UNKNOWN);
       }
       attempt.result=gain ? "OBSERVATION_GAIN" : "NO_GAIN";
     }
@@ -1351,6 +1361,7 @@ namespace ego_planner
     guide_identity_=GuideIdentity{};
     guide_identity_.mission_goal=global_data_.global_traj_.getTimes().empty() ? target_pt :
         global_data_.getPosition(global_data_.global_duration_);
+    guide_identity_.route_target=target_pt;
     guide_identity_.map_generation=planning_view_->generation;
     guide_identity_.risk_version=planning_view_->risk_version;
     guide_identity_.frame=grid_map_->getFrameId();
@@ -1384,7 +1395,7 @@ namespace ego_planner
     // OFF and ON share one whole-route search on every local planning round.
     // Establish a valid control owner for failure evidence before the search.
     optimizer.initializeFromGuide(Eigen::MatrixXd::Zero(3,7));
-    if(!optimizer.searchRecoveryGuide()) return fail(PlanFailure::Search);
+    const bool normal_guide_found=optimizer.searchRecoveryGuide();
     const auto initialize_guide=[&]() {
       const auto prefix=selectExecutablePrefix(optimizer.recoveryGuide());
       guide_identity_.route_target=optimizer.recoveryGuide().back();
@@ -1411,7 +1422,14 @@ namespace ego_planner
       bind_boundaries(); recordCurveStage("guide_bound",control,interval,selected);
       optimizer.initializeFromGuide(control); return true;
     };
-    if(optimizer.needsGuideReinitialization() && !initialize_guide()) {
+    if(!normal_guide_found) {
+      if(optimizer.a_star_->lastResult().failure!=AStar::Failure::END_BLOCKED) return fail(PlanFailure::Search);
+      ExecutablePrefix blocked;blocked.blocked_position=target_pt;
+      blocked.blocked_reason=queryPlanningViewCell(target_pt,0.,false).execution_reason;
+      if(!tryObservationApproach(start_pt,blocked) || !initialize_guide())
+        return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Search : last_plan_failure_);
+      last_plan_failure_=PlanFailure::None;
+    } else if(optimizer.needsGuideReinitialization() && !initialize_guide()) {
       const auto blocked=selectExecutablePrefix(optimizer.recoveryGuide());
       if(!tryObservationApproach(start_pt,blocked) || !initialize_guide())
         return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Curve : last_plan_failure_);

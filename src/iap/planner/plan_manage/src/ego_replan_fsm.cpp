@@ -1279,6 +1279,14 @@ namespace ego_planner
       local_target_pt_=end_pt_; return false; // Known occupied/conflicting mission, not a replacement goal.
     }
     add_target(nominal,false);
+    local_target_pt_=nominal;local_target_vel_=Eigen::Vector3d::Zero();
+    if(local_targets_.empty() && (wait_for_map_reason_==GridExecutionReason::PHYSICAL_OBSTACLE ||
+        wait_for_map_reason_==GridExecutionReason::INSUFFICIENT_CLEARANCE)) {
+      // A conflicting reference lookahead cannot authorize motion. Let the
+      // same search report its endpoint refusal and consume the one bounded
+      // observed-connection recovery, rather than waiting forever here.
+      local_targets_.push_back(LocalTarget{nominal,Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),0});
+    }
     if(!local_targets_.empty()) {
       local_target_pt_=nominal; local_target_vel_=Eigen::Vector3d::Zero();
       planner_manager_->setLocalTargets(local_targets_,center); return true;

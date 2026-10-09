@@ -105,6 +105,7 @@ namespace ego_planner
     const auto remaining=[&]() { return std::max(0.,std::chrono::duration<double>(deadline-PlanningBudget::Clock::now()).count()); };
     recovery_search_evidence_.emplace_back();
     auto& evidence=recovery_search_evidence_.back();evidence.initial_remaining_s=remaining();
+    evidence.requested_goals=planning_goals_;
     const auto origin=guide_query_ ? guide_query_(start) : GridPlanningCell{};
     evidence.start_reason=origin.execution_reason;evidence.start_advisory=origin.advisory.classification;
     const auto reject=[&](AStar::Failure failure) {

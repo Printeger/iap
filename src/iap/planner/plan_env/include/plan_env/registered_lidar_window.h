@@ -157,6 +157,7 @@ class RegisteredLidarWindow {
       const std::vector<RegisteredLidarFrameData>& frames);
 
   RegisteredVoxelState stateAt(const Eigen::Vector3i& index) const;
+  RegisteredVoxelState currentStateAt(const Eigen::Vector3i& index) const;
   std::uint64_t activeGeneration() const { return active_generation_; }
   std::int64_t currentFrameId() const { return current_frame_id_; }
   const Geometry& geometry() const { return geometry_; }
