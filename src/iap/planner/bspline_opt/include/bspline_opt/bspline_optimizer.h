@@ -149,7 +149,7 @@ namespace ego_planner
     void setCurvePhysicalBounds(const Eigen::Vector3d& lower, const Eigen::Vector3d& upper) {
       curve_bounds_ = std::make_pair(lower, upper);
     }
-    bool searchRecoveryGuide();
+    bool searchRecoveryGuide(double max_duration_s = .5, size_t preferred_goal_count = 0);
     struct RecoverySearchEvidence {
       GridExecutionReason start_reason = GridExecutionReason::OK;
       GridAdvisoryClass start_advisory = GridAdvisoryClass::UNKNOWN;
@@ -192,7 +192,7 @@ namespace ego_planner
                           std::function<GridPlanningCell(const Eigen::Vector3d&)> guide_query = {}) {
       planning_query_ = std::move(query);
       guide_query_=guide_query ? std::move(guide_query) : planning_query_;
-      planning_advisory_fallback_ = advisory_fallback;
+      planning_advisory_fallback_ = false; // Historical argument grants no online traversal authority.
       initialization_failed_ = false;
       guide_tracking_ = false;
       guide_reinitialization_ = false;

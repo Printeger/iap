@@ -412,6 +412,10 @@ RegisteredLidarWindow::currentFrameMetadata() const {
   metadata.scan_end_stamp_s = source.scan_end_stamp_s;
   metadata.sensor_receipt_steady_ns = source.sensor_receipt_steady_ns;
   metadata.T_map_lidar = source.T_map_lidar;
+  metadata.horizontal_fov_rad=source.horizontal_fov_rad;
+  metadata.vertical_min_rad=source.vertical_min_rad;
+  metadata.vertical_max_rad=source.vertical_max_rad;
+  metadata.min_range_m=source.min_range_m;metadata.max_range_m=source.max_range_m;
   metadata.frame_contract_id = source.frame_contract_id;
   metadata.source_is_map_reference = source.source_is_map_reference;
   metadata.source_health_valid = source.source_health_valid;

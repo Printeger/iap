@@ -130,6 +130,7 @@ namespace ego_planner
     const double feasibility_tolerance=pp_.feasibility_tolerance_;
     const auto assessment_value = assessment ? std::optional<TrajectoryAssessment>(*assessment) : std::nullopt;
     const auto attempt_id = planning_attempt_id_;
+    const auto guide_identity=guide_identity_;
     const auto start_p = failure_start_p_, start_v = failure_start_v_, start_a = failure_start_a_;
     const int executing_id = local_data_.traj_id_, feedback_id = server_feedback_id_;
     const int candidate_id = pending_trajectory_ ? pending_trajectory_->traj_id_ : 0;
@@ -332,6 +333,10 @@ namespace ego_planner
       metadata << "{\n  \"schema_version\": \"iap_gridmap_failure_v3\",\n"
           << "  \"kind\": " << std::quoted(kind) << ",\n"
           << "  \"planning_attempt_id\": " << attempt_id << ",\n"
+          << "  \"guide_policy\": " << std::quoted(guide_identity.policy) << ",\n"
+          << "  \"mission_goal_m\": " << vector(guide_identity.mission_goal) << ",\n"
+          << "  \"route_target_m\": " << vector(guide_identity.route_target) << ",\n"
+          << "  \"committed_endpoint_m\": " << vector(guide_identity.committed_endpoint) << ",\n"
           << "  \"planning_input_file\": " << (input_binding ? "\"planning_input.bin\"" : "null") << ",\n"
           << "  \"planning_input_risk_version\": " << (input_binding ? std::to_string(input_binding->risk_version) : "null") << ",\n"
           << "  \"planning_input_reference_time_s\": " << (input_binding ? number(input_binding->input.reference_time_s) : "null") << ",\n"
@@ -616,7 +621,7 @@ namespace ego_planner
             << ",\"target_p_m\":" << vector(evidence.target.position)
             << ",\"target_v_mps\":" << vector(evidence.target.velocity)
             << ",\"target_a_mps2\":" << vector(evidence.target.acceleration)
-            << ",\"terminal_stop\":" << (evidence.terminal_stop ? (*evidence.terminal_stop ? "true" : "false") : "null")
+            << ",\"ends_at_rest\":true,\"reaches_mission_goal\":" << (evidence.terminal_stop ? (*evidence.terminal_stop ? "true" : "false") : "null")
             << ",\"max_component_velocity_mps\":" << number(vmax) << ",\"max_velocity_time_s\":" << number(vt)
             << ",\"max_component_acceleration_mps2\":" << number(amax) << ",\"max_acceleration_time_s\":" << number(at)
             << ",\"velocity_control_bound_mps\":" << number(velocity.getControlPoint().cwiseAbs().maxCoeff())
@@ -1101,6 +1106,171 @@ namespace ego_planner
     return prefix;
   }
 
+  bool EGOPlannerManager::tryObservationApproach(const Eigen::Vector3d& start,
+      const ExecutablePrefix& blocked) {
+    if(blocked.blocked_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED) return false;
+    auto& attempt=observation_attempt_;
+    const auto& epoch=*planning_view_->physical;
+    const auto evidence=[&](const Eigen::Vector3d& p) {
+      const auto cell=grid_map_->queryFrozenOccupancy(epoch,p);
+      return uint8_t((cell.observed ? 4 : 0)|(cell.raw_occupied ? 1 : 0)|(cell.inflated_occupied ? 2 : 0));
+    };
+    bool changed=!attempt.mission.isApprox(guide_identity_.mission_goal,1e-6);
+    for(size_t i=0;!changed && i<attempt.probes.size();++i) changed=evidence(attempt.probes[i])!=attempt.before[i];
+    if(!changed && attempt.result!="NONE") {
+      last_plan_failure_=PlanFailure::ObservationBlocked;return false;
+    }
+    if(planning_budget_->searchRemaining()<=0 || planning_budget_->count(PlanningBudget::Repair::Search)>=2) {
+      last_plan_failure_=PlanFailure::Budget;attempt.result="BUDGET";return false;
+    }
+    attempt=ObservationAttempt{};attempt.mission=guide_identity_.mission_goal;
+    attempt.key=blocked.blocked_position;
+    Eigen::Vector3i index;grid_map_->posToIndex(attempt.key,index);grid_map_->indexToPos(index,attempt.key);
+    attempt.probes.push_back(attempt.key);
+    for(int axis=0;axis<3;++axis) for(double sign:{-1.,1.}) {
+      Eigen::Vector3d p=attempt.key;p[axis]+=sign*epoch.resolution_m;
+      if(grid_map_->queryFrozenOccupancy(epoch,p).available) attempt.probes.push_back(p);
+    }
+    for(const auto& p:attempt.probes) attempt.before.push_back(evidence(p));
+    // One transient goal list for the SAME multi-target search. This is not a
+    // route pool: only its selected path is retained and solved by EGO.
+    std::vector<Eigen::Vector3d> goals;
+    const Eigen::Vector3d center=planning_target_center_.value_or((start+guide_identity_.route_target)/2);
+    const auto append=[&](const Eigen::Vector3d& point) {
+      if(!((point-center).array().abs()<4.8).all() || (point-start).norm()<.2 ||
+          !queryPlanningViewCell(point,0.,false).executable()) return;
+      for(const auto& other:goals) if((point-other).norm()<epoch.resolution_m) return;
+      // Known endpoint eligibility is not connectivity. Eliminate isolated
+      // execution cells cheaply; all surviving targets still need one A* path.
+      bool attached=(point-start).norm()<epoch.resolution_m;
+      for(int x=-1;!attached && x<=1;++x) for(int y=-1;!attached && y<=1;++y)
+        for(int z=-1;!attached && z<=1;++z) {
+          if(planning_budget_->searchRemaining()<=0) return;
+          if(x==0 && y==0 && z==0) continue;
+          const Eigen::Vector3d next=point+epoch.resolution_m*Eigen::Vector3d(x,y,z);
+          attached=queryPlanningViewCell(next,0.,false).executable() &&
+              queryPlanningViewCell((next+point)/2,0.,false).executable();
+        }
+      if(!attached) return;
+      goals.push_back(point);
+    };
+    append(guide_identity_.route_target);
+    Eigen::Vector3d forward=attempt.mission-start;
+    if(forward.norm()<1e-6) {last_plan_failure_=PlanFailure::ObservationBlocked;return false;}
+    forward.normalize();Eigen::Vector3d left=Eigen::Vector3d::UnitZ().cross(forward);
+    if(left.norm()<1e-6) left=Eigen::Vector3d::UnitY();else left.normalize();
+    for(double distance:{1.,2.,3.}) for(double side:{0.,-.5,.5}) {
+      const Eigen::Vector3d p=start+distance*forward+side*left;
+      if(goals.size()<8 && (p-attempt.mission).norm()+.2<(start-attempt.mission).norm()) append(p);
+    }
+    const size_t preferred_count=goals.size();
+    const auto sensor=grid_map_->currentObservationFrame(epoch.generation);
+    struct Candidate {Eigen::Vector3d position;int gain;};
+    std::vector<Candidate> observations;
+    if(sensor && std::isfinite(sensor->horizontal_fov_rad) && std::isfinite(sensor->vertical_min_rad) &&
+        std::isfinite(sensor->vertical_max_rad) && sensor->min_range_m>=0 && sensor->max_range_m>0) {
+      const auto visible=[&](const Eigen::Vector3d& target,const Eigen::Vector3d& displacement) {
+        const Eigen::Vector3d origin=sensor->T_map_lidar.translation()+displacement;
+        const Eigen::Vector3d relative=sensor->T_map_lidar.linear().transpose()*(target-origin);
+        const double range=relative.norm();
+        if(range<sensor->min_range_m || range>sensor->max_range_m || range<=1e-6) return false;
+        const double yaw=std::atan2(relative.y(),relative.x());
+        const double pitch=std::asin(std::clamp(relative.z()/range,-1.,1.));
+        if(std::abs(yaw)>sensor->horizontal_fov_rad*.5 || pitch<sensor->vertical_min_rad || pitch>sensor->vertical_max_rad) return false;
+        // Known blockers are decisive; unknown LOS is only an uncertain forecast.
+        const int n=std::max(1,int(std::ceil(range/(epoch.resolution_m*.5))));
+        for(int j=1;j<n;++j) {
+          if(planning_budget_->searchRemaining()<=0) return false;
+          const auto fact=grid_map_->queryFrozenOccupancy(epoch,origin+(target-origin)*(double(j)/n));
+          if(!fact.available || fact.raw_occupied || fact.inflated_occupied) return false;
+        }
+        return true;
+      };
+      Eigen::Vector3d horizontal=forward;horizontal.z()=0.;
+      if(horizontal.norm()<1e-6) horizontal=Eigen::Vector3d::UnitX();else horizontal.normalize();
+      const std::array<Eigen::Vector3d,8> offsets{{.5*horizontal,-.5*horizontal,.5*left,-.5*left,
+          .5*Eigen::Vector3d::UnitZ(),-.5*Eigen::Vector3d::UnitZ(),.5*(horizontal+left),.5*(horizontal-left)}};
+      for(const auto& offset:offsets) {
+        const Eigen::Vector3d p=start+offset;
+        if(!queryPlanningViewCell(p,0.,false).executable() || !((p-center).array().abs()<4.8).all()) continue;
+        int gain=0;
+        for(size_t i=0;i<attempt.probes.size();++i) if(!(attempt.before[i]&4) &&
+            visible(attempt.probes[i],offset) && !visible(attempt.probes[i],Eigen::Vector3d::Zero())) ++gain;
+        if(gain>0) observations.push_back({p,gain});
+      }
+      std::sort(observations.begin(),observations.end(),[&](const auto& a,const auto& b) {
+        if(a.gain!=b.gain) return a.gain>b.gain;
+        const double da=(a.position-start).squaredNorm(),db=(b.position-start).squaredNorm();
+        if(std::abs(da-db)>1e-9) return da<db;
+        for(int axis=0;axis<3;++axis) if(a.position[axis]!=b.position[axis]) return a.position[axis]<b.position[axis];
+        return false;
+      });
+      for(const auto& candidate:observations) append(candidate.position);
+    }
+    if(goals.empty()) {attempt.result="OBSERVATION_BLOCKED";last_plan_failure_=PlanFailure::ObservationBlocked;return false;}
+    if(planning_budget_->searchRemaining()<=0) {attempt.result="BUDGET";last_plan_failure_=PlanFailure::Budget;return false;}
+    auto& optimizer=*bspline_optimizer_;
+    optimizer.a_star_->setPlanningQuery([this](const Eigen::Vector3d& p) {return GridSearchCell(queryGuidanceCell(p));});
+    optimizer.setPlanningEndpoints(start,goals.front());optimizer.setPlanningGoals(goals,center);
+    if(!optimizer.searchRecoveryGuide(planning_budget_->searchRemaining(),preferred_count)) {
+      const bool timeout=optimizer.a_star_->lastResult().failure==AStar::Failure::TIME_BUDGET;
+      attempt.result=timeout ? "SEARCH_TIMEOUT" : "NO_EXECUTABLE_CONNECTION_FOUND";
+      last_plan_failure_=timeout ? PlanFailure::Budget : PlanFailure::ObservationBlocked;return false;
+    }
+    attempt.selected_observation=optimizer.a_star_->lastResult().selected_goal>=preferred_count;
+    if(attempt.selected_observation && preferred_count && optimizer.a_star_->lastResult().search_budget_exhausted) {
+      // An observation incumbent does not prove that the preferred observed
+      // progression is disconnected when the shared search deadline expires.
+      attempt.result="SEARCH_TIMEOUT";last_plan_failure_=PlanFailure::Budget;return false;
+    }
+    attempt.result=attempt.selected_observation ? "SELECTED_OBSERVATION" : "OBSERVED_PROGRESS_CONNECTION";
+    // Update only the route identity; immutable mission and evidence remain intact.
+    guide_identity_.route_target=optimizer.recoveryGuide().back();
+    RCLCPP_INFO(node_->get_logger(),"Bounded recovery: %s targets=%zu preferred=%zu search_s=%.6f remaining_s=%.6f",
+        attempt.result.c_str(),goals.size(),preferred_count,planning_budget_->searches.seconds,planning_budget_->remaining());
+    return true;
+  }
+
+  bool EGOPlannerManager::observationReadyToPlan() {
+    auto& attempt=observation_attempt_;
+    if(attempt.trajectory_id<0 || (attempt.result!="EXECUTING" && attempt.result!="WAITING_DATA")) return true;
+    const double now=node_->now().seconds();
+    const auto odom=latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
+    if(attempt.result=="EXECUTING") {
+      if(now>attempt.wait_until_s) {
+        attempt.result="OBSERVATION_COMPLETION_UNCONFIRMED";
+        RCLCPP_INFO(node_->get_logger(),"Observation completion not confirmed for trajectory %d",attempt.trajectory_id);
+        return true;
+      }
+      if(server_feedback_id_!=attempt.trajectory_id || local_data_.traj_id_!=attempt.trajectory_id || !odom ||
+          odom->header.frame_id!=grid_map_->getFrameId()) return false;
+      const double end=local_data_.start_time_.seconds()+local_data_.duration_;
+      const double stamp=rclcpp::Time(odom->header.stamp).seconds();
+      if(stamp<end || now<stamp || now-stamp>motion_max_age_s_) return false;
+      const auto& p=odom->pose.pose.position;const auto& v=odom->twist.twist.linear;
+      auto curve=local_data_.position_traj_;
+      if((Eigen::Vector3d(p.x,p.y,p.z)-curve.evaluateDeBoorT(local_data_.duration_)).norm()>motion_start_tolerance_m_ ||
+          Eigen::Vector3d(v.x,v.y,v.z).norm()>=.1) return false;
+      attempt.completion_time_s=stamp;attempt.wait_until_s=stamp+environment_max_age_s_;attempt.result="WAITING_DATA";
+    }
+    const auto epoch=grid_map_->captureFrozenOccupancyEpoch();
+    const auto sensor=epoch ? grid_map_->currentObservationFrame(epoch->generation) : std::nullopt;
+    if(!sensor || sensor->scan_end_stamp_s<=attempt.completion_time_s ||
+        sensor->scan_end_stamp_s>now || now-sensor->scan_end_stamp_s>environment_max_age_s_) {
+      if(now<attempt.wait_until_s) return false;
+      attempt.result="OBSERVATION_DATA_UNAVAILABLE";
+    } else {
+      bool gain=false;
+      for(size_t i=0;i<attempt.probes.size();++i) if(!(attempt.before[i]&4)) {
+        const auto fact=grid_map_->queryFrozenOccupancy(*epoch,attempt.probes[i]);
+        gain=gain || fact.observed || fact.raw_occupied;
+      }
+      attempt.result=gain ? "OBSERVATION_GAIN" : "NO_GAIN";
+    }
+    RCLCPP_INFO(node_->get_logger(),"Observation trajectory %d outcome=%s",attempt.trajectory_id,attempt.result.c_str());
+    return true;
+  }
+
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
       Eigen::Vector3d start_acc, Eigen::Vector3d target_pt, Eigen::Vector3d target_vel,
       bool /* polynomial_init */, bool /* random_polynomial */) {
@@ -1241,7 +1411,12 @@ namespace ego_planner
       bind_boundaries(); recordCurveStage("guide_bound",control,interval,selected);
       optimizer.initializeFromGuide(control); return true;
     };
-    if(optimizer.needsGuideReinitialization() && !initialize_guide()) return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Curve : last_plan_failure_);
+    if(optimizer.needsGuideReinitialization() && !initialize_guide()) {
+      const auto blocked=selectExecutablePrefix(optimizer.recoveryGuide());
+      if(!tryObservationApproach(start_pt,blocked) || !initialize_guide())
+        return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Curve : last_plan_failure_);
+      last_plan_failure_=PlanFailure::None;
+    }
     TrajectoryAssessment assessment;
     UniformBspline curve;
     for(;;) {
@@ -1284,7 +1459,8 @@ namespace ego_planner
             false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
         if(retimed.budget_exhausted) return fail(PlanFailure::Budget);
         if(!retimed.curve_clearance_violations.empty() &&
-            !planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) return fail(PlanFailure::Budget);
+            (planning_budget_->count(PlanningBudget::Repair::CurveCorrection)>=1 ||
+             !planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection))) return fail(PlanFailure::Budget);
         optimizer.addCurveClearanceConstraints(control,interval,retimed.curve_clearance_violations);
         const bool provisional=optimizer.BsplineOptimizeTrajRefine(control,interval,control);
         recordCurveStage(provisional ? "refined" : "refined_provisional_rejected",control,interval,selected,NAN,nullptr,true);
@@ -1304,21 +1480,14 @@ namespace ego_planner
          velocity.evaluateDeBoorT(duration).norm()>1e-5 ||
          acceleration.evaluateDeBoorT(duration).norm()>1e-5) return fail(PlanFailure::Curve);
       const auto check_start=PlanningBudget::Clock::now();
-      assessment=assessTrajectory(curve,planning_view_->risk_version,planning_view_->time_s,
+      assessment=assessTrajectory(curve,0,planning_view_->time_s,
           false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
-      assessment.guide_retention=optimizer.assessGuideRetention(control,interval,
-          [this](const Eigen::Vector3d& p) {return queryPlanningViewAdvisory(p);});
-      assessment.budget_exhausted=assessment.budget_exhausted || assessment.guide_retention.budget_exhausted;
-      recordCurveStage("route_checked",control,interval,selected,NAN,&assessment);
+      recordCurveStage("actual_curve_checked",control,interval,selected,NAN,&assessment);
       planning_timings_.final_checks_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-check_start).count();
       last_candidate_assessment_=assessment;
       if(capture_failure_map_) failed_candidate_curve_=curve;
       if(assessment.budget_exhausted) return fail(PlanFailure::Budget);
-      if(!assessment.guide_retention.checked) return fail(PlanFailure::Curve);
-      const bool advisory_violation=advisory_guidance_enabled_ && assessment.advisory_avoid_samples && !optimizer.advisoryFallbackUsed();
-      const bool route_loss=assessment.guide_retention.route_lost ||
-          (advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
-      if(assessment.executable() && !advisory_violation && !route_loss) break;
+      if(assessment.executable()) break;
       if(!assessment.executable() && assessment.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
           assessment.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
           assessment.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
@@ -1327,7 +1496,7 @@ namespace ego_planner
         captureFailureMap("candidate",assessment.first_execution_position,selected.position,
             assessment.first_execution_cell,nullptr,nullptr,&curve,&assessment);
       if(optimizer.recoveryGuide().empty()) {
-        if(!optimizer.searchRecoveryGuide() || !initialize_guide()) return fail(PlanFailure::Search);
+        return fail(PlanFailure::Search);
       } else {
         const auto correction=correctCurveCandidate(optimizer,control,interval,assessment);
         if(correction!=PlanFailure::None) {
@@ -1335,12 +1504,51 @@ namespace ego_planner
         }
       }
     }
+    if(planning_budget_->optionalRemaining()>0) {
+      planning_budget_->beginOptionalWork();
+      const auto quality=[&]() {return optimizer.assessGuideRetention(control,interval,
+          [this](const Eigen::Vector3d& p){return queryPlanningViewAdvisory(p);});};
+      assessment.guide_retention=quality();
+      const bool degraded=assessment.guide_retention.route_lost ||
+          (advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
+      if(degraded && !planning_budget_->workExpired() &&
+          planning_budget_->count(PlanningBudget::Repair::CurveCorrection)==0 &&
+          planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection)) {
+        // One working candidate, with a local value for optional rollback.
+        const auto original=control;const auto original_assessment=assessment;
+        optimizer.strengthenGuideTracking();
+        optimizer.addCurveGuideConstraints(control,interval,assessment.guide_retention.route_lost,
+            advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
+        const bool refined=optimizer.BsplineOptimizeTrajRefine(control,interval,control);
+        bind_boundaries();UniformBspline corrected(control,3,interval);
+        corrected.setPhysicalLimits(pp_.max_vel_,pp_.max_acc_,pp_.feasibility_tolerance_);
+        double ratio=1.;
+        auto v=corrected.getDerivative();auto a=v.getDerivative();const double end=corrected.getTimeSum();
+        bool accepted=refined && !planning_budget_->workExpired() && corrected.checkFeasibility(ratio,false) &&
+            (corrected.evaluateDeBoorT(0)-start_pt).norm()<=1e-5 &&
+            (v.evaluateDeBoorT(0)-start_vel).norm()<=1e-5 && (a.evaluateDeBoorT(0)-start_acc).norm()<=1e-5 &&
+            (corrected.evaluateDeBoorT(end)-selected.position).norm()<=1e-5 &&
+            v.evaluateDeBoorT(end).norm()<=1e-5 && a.evaluateDeBoorT(end).norm()<=1e-5;
+        if(accepted) {
+          auto checked=assessTrajectory(corrected,0,planning_view_->time_s,false,0,
+              std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
+          accepted=checked.executable() && !planning_budget_->workExpired();
+          if(accepted) {assessment=checked;curve=corrected;assessment.guide_retention=quality();}
+        }
+        if(!accepted) {control=original;assessment=original_assessment;optimizer.setControlPoints(control);}
+      }
+      planning_budget_->endOptionalWork();
+    }
+    last_candidate_assessment_=assessment;
+    recordCurveStage("quality_reported",control,interval,selected,NAN,&assessment,false,std::nullopt,false);
+    if(!assessment.guide_retention.checked || assessment.guide_retention.budget_exhausted ||
+        assessment.guide_retention.route_lost || assessment.guide_retention.risk_preference_lost)
+      RCLCPP_INFO(node_->get_logger(),"Curve preference quality=%s (hard execution check retained)",
+          assessment.guide_retention.checked && !assessment.guide_retention.budget_exhausted ? "PREFERENCE_DEGRADED" : "NOT_COMPARED");
     const bool advisory_downgraded=!std::isfinite(planning_view_->advisory_valid_until_s) ||
         node_->now().seconds()>planning_view_->advisory_valid_until_s || grid_map_->occupancyGeneration()!=planning_view_->generation;
-    if(assessment.advisory_unknown_samples || optimizer.advisoryFallbackUsed() || advisory_downgraded)
-      RCLCPP_INFO(node_->get_logger(),"Trajectory advisory degraded: frozen_unknown=%zu fallback=%d historical_or_unavailable=%d",
-          assessment.advisory_unknown_samples,optimizer.advisoryFallbackUsed(),
-          advisory_downgraded);
+    if(advisory_downgraded)
+      RCLCPP_INFO(node_->get_logger(),"Trajectory preference reference is historical or unavailable; hard execution checks remain required");
     // Capture the latest relevant corridor once. Remote updates are harmless;
     // changes within this corridor get at most one budgeted recapture.
     bool committed=false;
@@ -1424,6 +1632,12 @@ namespace ego_planner
           !planning_budget_->tryRepair(PlanningBudget::Repair::PublicationRecheck)) break;
     }
     if(!committed) return fail(PlanFailure::Release);
+    if(observation_attempt_.selected_observation && observation_attempt_.result=="SELECTED_OBSERVATION") {
+      observation_attempt_.trajectory_id=publicationTrajectory().traj_id_;
+      observation_attempt_.result="EXECUTING";
+      observation_attempt_.wait_until_s=publicationTrajectory().start_time_.seconds()+
+          publicationTrajectory().duration_+environment_max_age_s_;
+    }
     continous_failures_count_=0;
     // Opt-in evidence uses the existing frozen capture/writer. A committed
     // candidate is not proof of publication or server activation. Bound disk
@@ -1485,12 +1699,12 @@ namespace ego_planner
   EGOPlannerManager::PlanFailure EGOPlannerManager::correctCurveCandidate(
       BsplineOptimizer& optimizer,Eigen::MatrixXd& control,double interval,
       const TrajectoryAssessment& assessment) {
-    if(!planning_budget_ || !planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection))
+    if(!planning_budget_ || planning_budget_->count(PlanningBudget::Repair::CurveCorrection)>=1 ||
+       !planning_budget_->tryRepair(PlanningBudget::Repair::CurveCorrection))
       return PlanFailure::Budget;
     const bool route_loss=assessment.guide_retention.route_lost ||
         (advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
-    const bool advisory_violation=advisory_guidance_enabled_ && assessment.advisory_avoid_samples &&
-        !optimizer.advisoryFallbackUsed();
+    const bool advisory_violation=false;
     if(route_loss) optimizer.strengthenGuideTracking();
     if(!assessment.curve_clearance_violations.empty()) {
       if(!optimizer.addCurveClearanceConstraints(control,interval,assessment.curve_clearance_violations))

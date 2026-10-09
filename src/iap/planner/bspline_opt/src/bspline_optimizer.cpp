@@ -86,14 +86,14 @@ namespace ego_planner
     const double duration=curve.getTimeSum();
     const size_t count=static_cast<size_t>(std::ceil(duration/spacing));
     for(size_t i=0;i<=count;++i) {
-      if (budget_ && budget_->expired()) return true;
+      if (budget_ && budget_->workExpired()) return true;
       const auto cell=planning_query_(curve.evaluateDeBoorT(std::min(duration,i*spacing)));
       if(!cell.executable()) return true;
     }
     return false;
   }
 
-  bool BsplineOptimizer::searchRecoveryGuide() {
+  bool BsplineOptimizer::searchRecoveryGuide(double max_duration_s,size_t preferred_goal_count) {
     if (!planning_endpoints_ || planning_goals_.empty()) return false;
     if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::Search)) return false;
     const auto start=planning_endpoints_->first;
@@ -101,7 +101,7 @@ namespace ego_planner
     // One original 1 s search allowance, also bounded by the round's budget.
     // A retry consumes the remainder, never another fresh search allowance.
     const auto deadline=PlanningBudget::Clock::now()+std::chrono::duration_cast<PlanningBudget::Clock::duration>(
-        std::chrono::duration<double>(std::min(1.,budget_ ? budget_->remaining() : 1.)));
+        std::chrono::duration<double>(std::min(max_duration_s,budget_ ? budget_->searchRemaining() : max_duration_s)));
     const auto remaining=[&]() { return std::max(0.,std::chrono::duration<double>(deadline-PlanningBudget::Clock::now()).count()); };
     recovery_search_evidence_.emplace_back();
     auto& evidence=recovery_search_evidence_.back();evidence.initial_remaining_s=remaining();
@@ -113,7 +113,7 @@ namespace ego_planner
       reportSearchFailure(a_star_->lastResult(),cps_.points,0,cps_.size-1,"whole_curve_recovery");
       return false;
     };
-    if(remaining()<=0 || (budget_ && budget_->expired()))return reject(AStar::Failure::TIME_BUDGET);
+    if(remaining()<=0 || (budget_ && budget_->workExpired()))return reject(AStar::Failure::TIME_BUDGET);
     if(!origin.executable())return reject(
         origin.execution_reason==GridExecutionReason::ENVIRONMENT_STALE ? AStar::Failure::MAP_STALE :
         origin.execution_reason==GridExecutionReason::CURRENT_MOTION_UNAVAILABLE ||
@@ -121,7 +121,7 @@ namespace ego_planner
         origin.execution_reason==GridExecutionReason::CURRENT_MOTION_BUDGET ? AStar::Failure::CURRENT_MOTION : AStar::Failure::START_BLOCKED);
     evidence.normal_attempted=true;
     const bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center,
-        AStar::GoalSearchPurpose::Guide);
+        preferred_goal_count ? AStar::GoalSearchPurpose::Guide : AStar::GoalSearchPurpose::CostProof,preferred_goal_count);
     evidence.normal_failure=a_star_->lastResult().failure;
     evidence.final_failure=a_star_->lastResult().failure;evidence.guide_found=found;
     if(!found) {
@@ -187,7 +187,7 @@ namespace ego_planner
     UniformBspline curve(points,3,interval);
     const size_t previous=curve_clearance_constraints_.size();
     for(const auto& [time,cell]:violations) {
-      if(budget_ && budget_->expired()) return false;
+      if(budget_ && budget_->workExpired()) return false;
       if(!cell.nearest_raw_center.allFinite() || !std::isfinite(cell.required_clearance_m)) continue;
       const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
       const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));
@@ -224,15 +224,14 @@ namespace ego_planner
     std::optional<uint64_t> model_version;
     const auto integrate=[&](bool actual,double step) {
       Integral integral;
-      if(budget_ && budget_->expired()) {result.budget_exhausted=true;return integral;}
+      if(budget_ && budget_->workExpired()) {result.budget_exhausted=true;return integral;}
       const auto sample=[&](const Eigen::Vector3d& point) {
         ++result.samples;
         const auto value=advisory(point);
         if(!model_version) {model_version=value.version;result.risk_version=value.version;}
         if(value.version!=*model_version || !std::isfinite(value.cost_multiplier) ||
            value.cost_multiplier<1) integral.stable_cost=false;
-        const bool valid=value.classification==GridAdvisoryClass::VALID &&
-            value.query_status==GridRiskStatus::VALID && value.version!=0 &&
+        const bool valid=value.query_status==GridRiskStatus::VALID && value.version!=0 &&
             std::isfinite(value.hpl) && std::isfinite(value.vpl) &&
             value.hpl>=0 && value.vpl>=0 && value.hpl<1e9 && value.vpl<1e9 &&
             std::isfinite(value.cost_multiplier) && value.cost_multiplier>=1;
@@ -252,7 +251,7 @@ namespace ego_planner
             (guide_pts_[edge+1]-guide_pts_[edge]).norm();
         const size_t count=std::max<size_t>(1,std::ceil(measure/step));
         for(size_t i=1;i<=count;++i) {
-          if(budget_ && budget_->expired()) {result.budget_exhausted=true;return integral;}
+          if(budget_ && budget_->workExpired()) {result.budget_exhausted=true;return integral;}
           const double fraction=double(i)/count;
           const Eigen::Vector3d point=actual ? Eigen::Vector3d(curve.evaluateDeBoorT(curve.getTimeSum()*fraction)) :
               Eigen::Vector3d(guide_pts_[edge]+fraction*(guide_pts_[edge+1]-guide_pts_[edge]));
@@ -296,7 +295,7 @@ namespace ego_planner
     std::vector<CurveClearanceConstraint> corridor_constraints;
     bool corridor_violated=false;
     for(double time=0;time<=curve.getTimeSum();time+=.02) {
-      if(budget_ && budget_->expired()) return false;
+      if(budget_ && budget_->workExpired()) return false;
       const Eigen::Vector3d position=curve.evaluateDeBoorT(time);
       const auto cell=planning_query_(position);
       const bool physical_boundary=cell.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
@@ -825,7 +824,7 @@ namespace ego_planner
       AStar::Failure& failure) const
   {
     const auto expired = [&]() {
-      if (budget_ && budget_->expired()) { failure = AStar::Failure::TIME_BUDGET; return true; }
+      if (budget_ && budget_->workExpired()) { failure = AStar::Failure::TIME_BUDGET; return true; }
       return false;
     };
     failure = AStar::Failure::NONE;
@@ -928,7 +927,7 @@ namespace ego_planner
     bool unknown_guess = false;
     if (planning_query_) {
       for (int i = 0; i < init_points.cols(); ++i) {
-        if (budget_ && budget_->expired()) { initialization_failed_ = true; return {}; }
+        if (budget_ && budget_->workExpired()) { initialization_failed_ = true; return {}; }
         const auto cell = planning_query_(init_points.col(i));
         unknown_guess |= cell.execution_reason == GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
                          cell.execution_reason == GridExecutionReason::OUT_OF_MAP;
@@ -978,13 +977,13 @@ namespace ego_planner
     // 遍历所有点
     for (int i = order_; i <= i_end; ++i)
     {
-      if (budget_ && budget_->expired()) { initialization_failed_ = true; return {}; }
+      if (budget_ && budget_->workExpired()) { initialization_failed_ = true; return {}; }
       // cout << " *" << i-1 << "*" ;
       //  相邻两个点之间进行线性插值并检测障碍物
       for (double a = 1.0; a > 0.0; a -= step_size)
       {
         // TODO:没搞懂这是干嘛的
-        if (budget_ && budget_->expired()) { initialization_failed_ = true; return {}; }
+        if (budget_ && budget_->workExpired()) { initialization_failed_ = true; return {}; }
         occ = planningOccupied(a * init_points.col(i - 1) + (1 - a) * init_points.col(i));
         // cout << " " << occ;
         //  cout << setprecision(5);
@@ -1371,7 +1370,7 @@ namespace ego_planner
     BsplineOptimizer *opt = reinterpret_cast<BsplineOptimizer *>(func_data);
     // cout << "k=" << k << endl;
     // cout << "opt->flag_continue_to_optimize_=" << opt->flag_continue_to_optimize_ << endl;
-    if (opt->budget_ && opt->budget_->expired()) return 1;
+    if (opt->budget_ && opt->budget_->workExpired()) return 1;
     return (opt->force_stop_type_ == STOP_FOR_ERROR || opt->force_stop_type_ == STOP_FOR_REBOUND);
   }
 
@@ -1571,7 +1570,7 @@ namespace ego_planner
     }
     if(!curve_bounds_) return;
     for(int first=0;first+3<q.cols();++first) {
-      if(budget_ && budget_->expired()) return;
+      if(budget_ && budget_->workExpired()) return;
       for(int axis=0;axis<3;++axis) {
         const double p0=q(axis,first),p1=q(axis,first+1),p2=q(axis,first+2),p3=q(axis,first+3);
         const double a=(-p0+3*p1-3*p2+p3)/6.,b=(p0-2*p1+p2)/2.,c=(p2-p0)/2.;
@@ -2208,8 +2207,8 @@ namespace ego_planner
     constexpr int MAX_RESART_NUMS_SET = 3;
     do
     {
-      if (budget_ && (budget_->expired() || initialization_failed_)) {
-        optimization_reason_=budget_->expired() ? "budget_expired" : "initialization_failed";
+      if (budget_ && (budget_->workExpired() || initialization_failed_)) {
+        optimization_reason_=budget_->workExpired() ? "budget_expired" : "initialization_failed";
         return false;
       }
       if ((restart_nums || rebound_times) && budget_ &&
@@ -2285,7 +2284,7 @@ namespace ego_planner
         } else {
           const double step=std::min(.02,grid_map_->getResolution()/(2*std::max(.1,max_vel_)));
           for(double t=0;t<=traj.getTimeSum()+step;t+=step) {
-            if(budget_ && budget_->expired()) return false;
+            if(budget_ && budget_->workExpired()) return false;
             flag_occ=planningOccupied(traj.evaluateDeBoorT(std::min(t,traj.getTimeSum())));
             if(flag_occ) break;
           }
@@ -2419,7 +2418,7 @@ namespace ego_planner
                                         "Solver error in refining!, return = %d, %s", result, lbfgs::lbfgs_strerror(result));
       }
 
-      if (budget_ && budget_->expired()) return false;
+      if (budget_ && budget_->workExpired()) return false;
       // 使用优化后的控制点创建新的轨迹
       UniformBspline traj = UniformBspline(cps_.points, 3, bspline_interval_);
       double tm, tmp;

@@ -534,7 +534,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
 
 bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
                             const std::vector<Vector3d>& requested_goals, double max_duration_s,
-                            std::optional<Vector3d> center_override,GoalSearchPurpose purpose)
+                            std::optional<Vector3d> center_override,GoalSearchPurpose purpose,size_t preferred_goal_count)
 {
     std::vector<Vector3d> diagnostic_goals;
     if (component_diagnostic_) {
@@ -548,7 +548,8 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     const Vector3d end_pt = goals.front();
     const auto steady_start = PlanningBudget::Clock::now();
     search_started_=steady_start; active_search_=true;
-    const double limit = max_duration_s >= 0.0 ? max_duration_s : (planning_query_ ? 1.0 : .2);
+    const double requested_limit = max_duration_s >= 0.0 ? max_duration_s : (planning_query_ ? 1.0 : .2);
+    const double limit=budget_ ? std::min(requested_limit,budget_->searchRemaining()) : requested_limit;
     search_deadline_ = steady_start + std::chrono::duration_cast<PlanningBudget::Clock::duration>(
         std::chrono::duration<double>(limit));
     rclcpp::Time time_1 = rclcpp::Clock().now();
@@ -695,7 +696,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         // if ( num_iter < 10000 )
         //     cout << "current=" << current->index.transpose() << endl;
 
-        if(!discovering && !component_diagnostic_ && std::isfinite(incumbent) && current->fScore>=incumbent-1e-9)
+        if(!preferred_goal_count && !discovering && !component_diagnostic_ && std::isfinite(incumbent) && current->fScore>=incumbent-1e-9)
             return finish_success(true);
         for(const auto& goal:valid_goals) {
             if((component_diagnostic_ && goal.original>=requested_goals.size()) || current->index!=goal.index) continue;
@@ -704,7 +705,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
             if(performance_diagnostics_ && goal.original<result_.goals.size()) result_.goals[goal.original].reached=true;
             if(component_diagnostic_) component_diagnostic_->goals[goal.original].reached=true;
             const double complete=current->gScore+*connector+goal.terminal;
-            if(complete<incumbent-1e-9) {
+            if(complete<incumbent-1e-9 || (preferred_goal_count && goal.original<preferred_goal_count && result_.selected_goal>=preferred_goal_count)) {
                 if(!std::isfinite(incumbent)) result_.first_complete_path_s=std::chrono::duration<double>(PlanningBudget::Clock::now()-search_started_).count();
                 incumbent=complete;gridPath_=retrievePath(current);
                 result_.selected_goal=goal.original;result_.requested_end=goals[goal.original];
@@ -712,12 +713,13 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
                 result_.path_cost=complete;result_.terminal_cost_m=goal.terminal;
             }
         }
-        if(purpose==GoalSearchPurpose::Guide && !component_diagnostic_ && !gridPath_.empty())
+        if(purpose==GoalSearchPurpose::Guide && !component_diagnostic_ && !gridPath_.empty() &&
+            (!preferred_goal_count || result_.selected_goal<preferred_goal_count))
             return finish_success(false); // Feasibility is not an optimality proof.
         if (component_diagnostic_ && component_diagnostic_->stop_on_first_goal && !gridPath_.empty())
             return finish_success(false); // Explicit diagnostic early exit never claims optimality.
         if(deadlineExpired()) {if(!gridPath_.empty()) return finish_success(false);finishFailure(Failure::TIME_BUDGET,time_1);return false;}
-        if(discovering && !gridPath_.empty()) {
+        if(discovering && !gridPath_.empty() && !preferred_goal_count) {
             discovering=false;
             decltype(openSet_) proof_queue;
             for(auto node:discovered) {
@@ -832,7 +834,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
 
     if (component_diagnostic_ && !component_diagnostic_->stop_on_first_goal && !deadlineExpired())
         result_.exhausted = true; // A fully enumerated component can also contain a legal goal.
-    if(!gridPath_.empty()) return finish_success(!deadlineExpired());
+    if(!gridPath_.empty()) return finish_success(!preferred_goal_count && !deadlineExpired());
     if (deadlineExpired()) { finishFailure(Failure::TIME_BUDGET, time_1); return false; }
     result_.exhausted = true;
     const bool unknown_rejected = result_.rejected_execution[

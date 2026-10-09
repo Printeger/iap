@@ -148,6 +148,8 @@ namespace ego_planner
       bool budget_exhausted=false;
     };
     ExecutablePrefix selectExecutablePrefix(const std::vector<Eigen::Vector3d>& guide) const;
+    bool observationReadyToPlan();
+    const std::string& observationResult() const { return observation_attempt_.result; }
     GridRouteCell queryRouteViewCell(const Eigen::Vector3d& position,
                                     double clearance_reserve_m = 0.) const;
     struct GuideIdentity {
@@ -320,6 +322,16 @@ namespace ego_planner
     // Missing older attempts are explicit, never replaced by a fresh capture.
     std::shared_ptr<const PlanningInputBinding> planning_input_binding_;
     PlanningBudget::Ptr planning_budget_;
+    struct ObservationAttempt {
+      Eigen::Vector3d mission=Eigen::Vector3d::Constant(NAN), key=Eigen::Vector3d::Constant(NAN);
+      std::vector<Eigen::Vector3d> probes;
+      std::vector<uint8_t> before;
+      int trajectory_id=-1;
+      double completion_time_s=NAN, wait_until_s=NAN;
+      bool selected_observation=false;
+      std::string result="NONE";
+    } observation_attempt_;
+    bool tryObservationApproach(const Eigen::Vector3d& start,const ExecutablePrefix& blocked);
     GuideIdentity guide_identity_;
     std::vector<LocalTarget> planning_targets_;
     std::optional<Eigen::Vector3d> planning_target_center_;

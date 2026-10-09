@@ -16,7 +16,7 @@ namespace ego_planner {
 struct CurveBackendReplayAccess {
   static bool fit(EGOPlannerManager& manager,const std::vector<Eigen::Vector3d>& guide,
       const Eigen::Vector3d& velocity,const Eigen::Vector3d& acceleration,
-      Eigen::Vector3d& end_velocity,const Eigen::Vector3d& end_acceleration,
+      Eigen::Vector3d& end_velocity,Eigen::Vector3d& end_acceleration,
       bool terminal_stop,double max_velocity,double max_acceleration,double nominal_interval,double& interval,Eigen::MatrixXd& control) {
     manager.pp_.max_vel_=max_velocity;manager.pp_.max_acc_=max_acceleration;
     manager.pp_.ctrl_pt_dist=manager.node_->declare_parameter("manager/control_points_distance",std::numeric_limits<double>::quiet_NaN());
@@ -25,7 +25,7 @@ struct CurveBackendReplayAccess {
     LocalTarget target{guide.back(),end_velocity,end_acceleration,0};std::vector<Eigen::Vector3d> points;
     const bool success=manager.fitGuideCurve(guide,velocity,acceleration,terminal_stop,
         target,nominal_interval,interval,points,control);
-    end_velocity=target.velocity;return success;
+    end_velocity=target.velocity;end_acceleration=target.acceleration;return success;
   }
   static const GridPlanningContext& bind(EGOPlannerManager& manager,rclcpp::Node::SharedPtr node,
       GridMap::Ptr map,const GridPlanningContext& context,const GridMotionContext& motion,
@@ -164,7 +164,8 @@ int main(int argc,char**argv) {
   auto q=controls(stage.get_child("control_points_m")); double dt=stage.get<double>("interval_s");
   const double v=stage.get<double>("velocity_limit_mps"),a=stage.get<double>("acceleration_limit_mps2"),tol=stage.get<double>("feasibility_tolerance");
   const Eigen::Vector3d start=point(input.get_child("real_start_p_m")),sv=point(input.get_child("real_start_v_mps")),sa=point(input.get_child("real_start_a_mps2"));
-  const Eigen::Vector3d end=point(stage.get_child("target_p_m")),ea=point(stage.get_child("target_a_mps2"));
+  const Eigen::Vector3d end=point(stage.get_child("target_p_m"));
+  Eigen::Vector3d ea=point(stage.get_child("target_a_mps2"));
   Eigen::Vector3d ev=point(stage.get_child("target_v_mps"));const Eigen::Vector3d captured_ev=ev;
   ego_planner::BsplineOptimizer optimizer; optimizer.setParam(node);optimizer.setEnvironment(map);optimizer.setDroneId(0);
   ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);
@@ -271,7 +272,8 @@ int main(int argc,char**argv) {
       nominal_interval_source="LEGACY_COARSE_STAGE_INTERVAL";
     }
     if((guide.front()-start).norm()>1e-6) throw std::invalid_argument("guide does not own captured start");
-    const auto captured_stop=stage.get_optional<bool>("terminal_stop");
+    auto captured_stop=stage.get_optional<bool>("ends_at_rest");
+    if(!captured_stop) captured_stop=stage.get_optional<bool>("terminal_stop");
     if(captured_stop) {terminal_stop=*captured_stop;stop_policy_source="EXPLICIT_CAPTURED_POLICY";}
     else if(captured_ev.norm()>1e-9) {stop_policy_source="NONZERO_CAPTURED_VELOCITY_PROVES_CONTINUE";}
     else throw std::invalid_argument("historical zero terminal velocity lacks captured stop policy");
@@ -279,6 +281,7 @@ int main(int argc,char**argv) {
       throw std::invalid_argument("captured terminal stop policy conflicts with nonzero velocity");
     if(!ego_planner::CurveBackendReplayAccess::fit(manager,guide,sv,sa,ev,ea,terminal_stop,v,a,nominal_interval,dt,q))
       throw std::runtime_error("guide initialization rejected");
+    terminal_stop=true;stop_policy_source="V1_1_RESTING_ENDPOINT";
     save("guide_fit_replayed",q,dt);
     optimizer.initializeFromGuide(q);
   }
@@ -328,17 +331,19 @@ int main(int argc,char**argv) {
   std::cout<<"route checked="<<candidate.guide_retention.checked
       <<" lost="<<candidate.guide_retention.route_lost
       <<" max="<<candidate.guide_retention.max_deviation_m<<" repairs="<<budget->used()<<'\n';
-  if(candidate.budget_exhausted || candidate.guide_retention.budget_exhausted ||
-      !candidate.guide_retention.checked) {termination="route_check_incomplete";break;}
+  if(candidate.budget_exhausted) {termination="hard_check_incomplete";break;}
+  if(candidate.executable() && (candidate.guide_retention.budget_exhausted ||
+      !candidate.guide_retention.checked || budget->optionalRemaining()<=0 ||
+      budget->count(PlanningBudget::Repair::CurveCorrection)>=1)) break;
   if(candidate.executable() && !candidate.guide_retention.route_lost &&
-      !(has_payload && candidate.guide_retention.risk_preference_lost) &&
-      !(has_payload && !fallback && candidate.advisory_avoid_samples)) break;
+      !(has_payload && candidate.guide_retention.risk_preference_lost)) break;
   if(!candidate.executable() && candidate.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
       candidate.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
       candidate.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
       candidate.execution_reason!=GridExecutionReason::OUT_OF_MAP) {termination="candidate_rejected";break;}
   const auto correction=ego_planner::CurveBackendReplayAccess::correct(manager,optimizer,q,dt,candidate);
   if(correction!=ego_planner::EGOPlannerManager::PlanFailure::None) {
+    if(candidate.executable()) {termination="quality_correction_skipped";break;}
     termination=correction==ego_planner::EGOPlannerManager::PlanFailure::Budget ?
         "curve_correction_budget_denied" : "curve_correction_rejected";
     break;
@@ -347,19 +352,22 @@ int main(int argc,char**argv) {
   const auto initial=assess(q,dt);constraint_samples+=initial.curve_clearance_violations.size();
   optimizer.addCurveClearanceConstraints(q,dt,initial.curve_clearance_violations);
   std::cout<<"correction prepared repairs="<<budget->used()<<'\n';
+  const auto checked_control=q;const double checked_interval=dt;
   feasible=false; // The next solver owns a new candidate, even if it exits early.
   backend_ok=!initial.budget_exhausted && optimizer.BsplineOptimizeTrajRebound(q,dt);
   save(backend_ok ? "corrected" : "correction_failed",q,dt);
   UniformBspline::enforceBoundaryStates(q,dt,start,sv,sa,end,ev,ea);
   save("corrected_bound",q,dt);
+  if(!backend_ok && candidate.executable()) {
+    q=checked_control;dt=checked_interval;backend_ok=true;feasible=true;
+    termination="quality_correction_rejected";break;
+  }
   if(!backend_ok) termination="backend_correction_rejected";
   } while(backend_ok);
   const auto final=feasible ? assess(q,dt,true) : ego_planner::EGOPlannerManager::TrajectoryAssessment{};
   const auto retention=feasible ? optimizer.assessGuideRetention(q,dt,
       [&](const Eigen::Vector3d& p) {return has_payload ? risk(p) : GridPlanningRisk{};}) : ego_planner::BsplineOptimizer::GuideRetention{};
-  const bool candidate_valid=backend_ok && feasible && final.executable() && !final.budget_exhausted &&
-      retention.checked && !retention.budget_exhausted && !retention.route_lost &&
-      !(has_payload && retention.risk_preference_lost) && !(has_payload && !fallback && final.advisory_avoid_samples);
+  const bool candidate_valid=backend_ok && feasible && final.executable() && !final.budget_exhausted;
   std::cout<<"final_check="<<(feasible ? gridExecutionReasonName(final.execution_reason) : "not_checked")<<" elapsed="<<budget->elapsed()<<'\n';
   std::ofstream result(output);
   result<<std::setprecision(17)<<"{\"schema\":\"iap_curve_backend_replay_v1\",\"identity\":\"OFFLINE_MECHANISM_REPLAY\",\"mode\":"<<std::quoted(mode)

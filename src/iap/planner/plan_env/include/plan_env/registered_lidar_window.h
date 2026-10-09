@@ -75,6 +75,8 @@ struct RegisteredLidarFrameMetadata {
   double scan_end_stamp_s = 0.0;
   std::uint64_t sensor_receipt_steady_ns = 0;
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
+  double horizontal_fov_rad=NAN, vertical_min_rad=NAN, vertical_max_rad=NAN;
+  double min_range_m=NAN, max_range_m=NAN;
   std::string frame_contract_id;
   bool source_is_map_reference = false;
   bool source_health_valid = false;

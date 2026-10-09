@@ -205,7 +205,7 @@ public:
 	void setPlanningQuery(std::function<GridSearchCell(const Eigen::Vector3d&)> query,
 	                      bool advisory_fallback = false) {
 		planning_query_ = std::move(query);
-		advisory_fallback_ = advisory_fallback;
+		advisory_fallback_ = false; // Historical replay argument, no traversal policy.
 	}
 	void setAdvisoryQuery(std::function<GridPlanningRisk(const Eigen::Vector3d&)> query,
                           std::function<GridPlanningQueryStats()> statistics = {}) {
@@ -259,7 +259,7 @@ public:
     enum class GoalSearchPurpose { Guide, CostProof };
     bool AstarSearchGoals(double step_size, const Eigen::Vector3d& start,
                          const std::vector<Eigen::Vector3d>& goals, double max_duration_s,
-                         std::optional<Eigen::Vector3d> center_override, GoalSearchPurpose purpose);
+                         std::optional<Eigen::Vector3d> center_override, GoalSearchPurpose purpose, size_t preferred_goal_count = 0);
 
 	std::vector<Eigen::Vector3d> getPath();
 };

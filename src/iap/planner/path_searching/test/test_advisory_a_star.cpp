@@ -24,9 +24,9 @@ GridPlanningCell cellFor(const Eigen::Vector3d& p) {
   GridPlanningCell cell;
   cell.execution_reason = GridExecutionReason::OK;
   cell.advisory.classification =
-      std::abs(p.x()) < 0.4 && std::abs(p.y()) < 2.0
+      std::abs(p.x()) < 0.4 && std::abs(p.y()) < .6
           ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
-  cell.advisory.cost_multiplier = 1.0;
+  cell.advisory.cost_multiplier = cell.advisory.classification==GridAdvisoryClass::AVOID ? 3. : 1.;
   return cell;
 }
 }  // namespace
@@ -47,7 +47,7 @@ TEST(AdvisoryAStar, TakesLongerRouteAroundPredictedBand) {
     EXPECT_NE(cellFor(route[i]).advisory.classification,
               GridAdvisoryClass::AVOID);
   }
-  EXPECT_GT(length, 5.2);  // > 1.30 times the 4 m direct route.
+  EXPECT_GT(length, 4.2); // Finite cost prefers this cheap physical detour.
 }
 
 TEST(AdvisoryAStar, OneSearchReachesAnotherGoalWhenPreferredGoalIsDisconnected) {
@@ -89,12 +89,10 @@ TEST(AdvisoryAStar, AllWarnedTerminalsProveStrictIneligibilityBeforeGraphFlood) 
     }) ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
     cell.advisory.cost_multiplier=3.;return cell;
   });
-  EXPECT_FALSE(search.AstarSearchGoals(.1,{-1,0,1},goals,1.));
-  EXPECT_EQ(search.lastResult().failure,AStar::Failure::ADVISORY_NO_PATH);
-  EXPECT_TRUE(search.lastResult().exhausted);
-  EXPECT_EQ(search.lastResult().expanded,0u);
-  EXPECT_LT(queries,4000u);
-  EXPECT_GE(search.lastResult().rejected_advisory,goals.size());
+  ASSERT_TRUE(search.AstarSearchGoals(.1,{-1,0,1},goals,1.,{},AStar::GoalSearchPurpose::Guide));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::NONE);
+  EXPECT_EQ(search.lastResult().rejected_advisory,0u);
+
   queries=0;search.setPlanningBudget(std::make_shared<PlanningBudget>(1.5,3));
   search.setPlanningQuery([](const Eigen::Vector3d& p) {
     GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
@@ -114,8 +112,8 @@ TEST(AdvisoryAStar, WarnedTerminalKeepsOtherStrictGoalOriginalIdentity) {
         GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;return cell;
   });
   ASSERT_TRUE(search.AstarSearchGoals(.1,{-1,0,1},{{1,0,1},{1,1,1}},1.));
-  EXPECT_EQ(search.lastResult().selected_goal,1u);
-  EXPECT_TRUE(search.getPath().back().isApprox(Eigen::Vector3d(1,1,1),1e-9));
+  EXPECT_EQ(search.lastResult().selected_goal,0u);
+  EXPECT_TRUE(search.getPath().back().isApprox(Eigen::Vector3d(1,0,1),1e-9));
 }
 
 TEST(AdvisoryAStar, EndpointTimeoutRetainsMeasuredTimeAndUnexaminedIdentity) {
@@ -425,14 +423,8 @@ TEST(AdvisoryAStar, UnknownFrontierDoesNotHideExhaustedAdvisoryRejections) {
   };
   const Eigen::Vector3d start(-1,0,1), goal(1,0,1);
   search.setPlanningQuery(query);
-  EXPECT_FALSE(search.AstarSearch(.1,start,goal));
-  EXPECT_TRUE(search.lastResult().exhausted);
-  EXPECT_GT(search.lastResult().rejected_advisory,0u);
-  EXPECT_GT(search.lastResult().rejected_execution[
-      static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)],0u);
-  EXPECT_EQ(search.lastResult().failure,AStar::Failure::ADVISORY_NO_PATH);
-  search.setPlanningQuery(query,true);
   ASSERT_TRUE(search.AstarSearch(.1,start,goal));
+  EXPECT_EQ(search.lastResult().rejected_advisory,0u);
   for(const auto& p:search.getPath()) EXPECT_TRUE(query(p).executable());
   // Retrying with high costs still cannot cross an actual unknown barrier.
   search.setPlanningQuery([query](const Eigen::Vector3d& p) {
@@ -714,14 +706,10 @@ TEST(AdvisoryAStar, AdvisoryRejectionAfterCacheRefreshKeepsFirstReasonAndPoint) 
     risk.cost_multiplier = 1;
     return risk;
   });
-  EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1, 0, 1),
-      Eigen::Vector3d(1, 0, 1)));
-  const auto& result = search.lastResult();
-  EXPECT_EQ(result.failure, AStar::Failure::ADVISORY_NO_PATH);
-  ASSERT_TRUE(result.has_first_rejection);
-  EXPECT_EQ(result.first_rejection_cell.execution_reason, GridExecutionReason::OK);
-  EXPECT_EQ(result.first_rejection_cell.advisory_class, GridAdvisoryClass::AVOID);
-  EXPECT_TRUE(result.first_rejection_position.allFinite());
+  ASSERT_TRUE(search.AstarSearch(0.1, Eigen::Vector3d(-1,0,1),Eigen::Vector3d(1,0,1)));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::NONE);
+  EXPECT_EQ(search.lastResult().rejected_advisory,0u);
+  EXPECT_FALSE(search.lastResult().has_first_rejection);
 }
 
 TEST(AdvisoryAStar, LegalRealStartConnectsAroundBlockedRoundedNode) {
@@ -898,9 +886,10 @@ TEST(AdvisoryAStar, FineCornerIntegralRejectsWarningBetweenOldHalfVoxelSamples) 
     c.advisory.classification=p.x()>.012 && p.x()<.020 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
     c.advisory.cost_multiplier=c.advisory.classification==GridAdvisoryClass::AVOID ? 3. : 1.;return c;
   });
-  EXPECT_FALSE(search.AstarSearch(.1,Eigen::Vector3d(0,0,1),Eigen::Vector3d(.1,.1,1),-1,Eigen::Vector3d(0,0,1)));
-  EXPECT_GT(search.lastResult().rejected_advisory,0u);
-  EXPECT_TRUE(search.getPath().empty());
+  ASSERT_TRUE(search.AstarSearch(.1,Eigen::Vector3d(0,0,1),Eigen::Vector3d(.1,.1,1),-1,Eigen::Vector3d(0,0,1)));
+  EXPECT_EQ(search.lastResult().rejected_advisory,0u);
+  EXPECT_GT(search.lastResult().risk_cost_m,0.);
+  EXPECT_FALSE(search.getPath().empty());
 }
 
 TEST(AdvisoryAStar, DominatedIncomingEdgesDoNotSpendRiskIntegrationWork) {

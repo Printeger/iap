@@ -336,7 +336,7 @@ TEST_F(GridRiskTest, AdvisoryWarningIsDistinctFromUnknownAndExecution) {
 
   const auto stale = map.queryPlanningRisk(point, version, 11.1, policy);
   EXPECT_EQ(stale.classification, GridAdvisoryClass::STALE_REFERENCE);
-  EXPECT_GT(stale.cost_multiplier, policy.unknown_multiplier);
+  EXPECT_DOUBLE_EQ(stale.cost_multiplier, policy.unknown_multiplier); // v1.1 missing/stale finite cost
   const auto unknown = map.queryPlanningRisk(point, version, 12.1, policy);
   EXPECT_EQ(unknown.classification, GridAdvisoryClass::UNKNOWN);
   EXPECT_DOUBLE_EQ(unknown.cost_multiplier, policy.unknown_multiplier);

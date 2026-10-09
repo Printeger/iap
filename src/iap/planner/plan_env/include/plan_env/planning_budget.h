@@ -16,6 +16,13 @@ class PlanningBudget {
   double remaining() const {
     return std::max(0.0, std::chrono::duration<double>(deadline_ - Clock::now()).count());
   }
+  // Measured successful forest post-search work reaches 0.387 s. Retain
+  // 0.5 s for backend/check/commit, and 0.4 s from optional quality work.
+  double searchRemaining() const { return std::max(0.,std::min(1.-searches.seconds,remaining()-.5)); }
+  double optionalRemaining() const { return std::max(0.,remaining()-.4); }
+  void beginOptionalWork() { optional_work_=true; }
+  void endOptionalWork() { optional_work_=false; }
+  bool workExpired() const { return expired() || (optional_work_ && optionalRemaining()<=0.); }
   bool expired() const { return Clock::now() >= deadline_; }
   bool tryRepair(Repair reason) {
     if (expired() || used_ >= limit_) { denied_ = true; return false; }
@@ -36,6 +43,7 @@ class PlanningBudget {
   Clock::time_point deadline_;
   unsigned limit_, used_ = 0;
   bool denied_ = false;
+  bool optional_work_ = false;
   std::array<unsigned, static_cast<size_t>(Repair::Count)> counts_{};
 };
 #endif

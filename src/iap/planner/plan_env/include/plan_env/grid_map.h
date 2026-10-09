@@ -543,6 +543,7 @@ public:
       uint64_t version, double evaluation_time_s, const GridPlanningRiskPolicy& risk_policy,
       const GridMotionContext& motion, const GridPlanningContext* context = nullptr,
       bool performance_diagnostics = false);
+  std::optional<RegisteredLidarFrameMetadata> currentObservationFrame(uint64_t generation) const;
   GridPlanningQueryStats planningQueryStats() const;
   GridPlanningContext preparePlanningQuery(double now,
                                           const GridMotionContext& motion,

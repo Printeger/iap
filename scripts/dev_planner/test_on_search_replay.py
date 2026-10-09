@@ -123,8 +123,8 @@ class OnSearchReplayTest(unittest.TestCase):
             self.assertGreater(reports['sparse']['missing_unique_voxels'],0)
             self.assertGreater(reports['sparse']['risk_cost_m'],0)
             self.assertEqual(reports['off']['risk_cost_m'],0)
-            # The same physical input can fail its preference connector while
-            # the explicit original fallback still charges the warning cost.
+            # Warning remains a finite soft cost under either historical
+            # diagnostic label; it cannot reject an executable connector.
             risk.write_text('address,hpl_m,vpl_m,status,version,source_flags\n'+
                 ''.join(f'{i},1,1,1,1,0\n' for i in range(fixture.flags.size)))
             for enabled in (False, True):
@@ -134,7 +134,7 @@ class OnSearchReplayTest(unittest.TestCase):
                     env={**os.environ,'IAP_REPLAY_ADVISORY_FALLBACK':'1' if enabled else '0'})
                 self.assertEqual(check.returncode,0,check.stderr)
                 value=json.loads(check.stdout)
-                self.assertEqual(value['guide_found'],enabled)
+                self.assertTrue(value['guide_found'])
                 self.assertEqual(value['advisory_fallback'],enabled)
                 if enabled:
                     self.assertTrue(value['diagnostic_only'])

@@ -63,7 +63,7 @@ class CurveReplayTest(unittest.TestCase):
                                         "--params-file",str(parameters)],
                                        env={**os.environ,"IAP_RUN_DIR":str(run)},
                                        capture_output=True,text=True,timeout=15)
-                self.assertEqual(process.returncode,0 if scenario=="normal" else 1,
+                self.assertEqual(process.returncode,1 if scenario=="late_failure" else 0,
                                  process.stderr+process.stdout)
                 result=json.loads((run/"export/planner/curve_replay/result.json").read_text())
                 self.assertEqual(result["original_time_s"],fixture["planning_time_s"])
@@ -74,21 +74,22 @@ class CurveReplayTest(unittest.TestCase):
                 self.assertIn("dynamics_pass",stages)
                 if scenario=="normal":
                     self.assertTrue(result["physical_geometric_candidate_valid"])
-                    self.assertEqual(result["added_repairs"],2)
-                    self.assertLess(result["guide_max_deviation_m"],result["guide_corridor_m"])
+                    self.assertEqual(result["added_repairs"],1)
+                    self.assertGreater(result["guide_max_deviation_m"],result["guide_corridor_m"])
+                    self.assertFalse(result["guide_route_preserved"])
                 elif scenario=="late_failure":
                     self.assertIn("correction_failed",stages)
                     self.assertFalse(result["physical_geometric_candidate_valid"])
-                    self.assertFalse(result["dynamics_feasible"])
-                    self.assertEqual(result["final_check_state"],"not_checked")
+                    self.assertTrue(result["dynamics_feasible"])
+                    self.assertEqual(result["final_check_state"],"incomplete")
                     self.assertIn("budget_expired",result["solver_reason"])
                 else:
                     self.assertTrue(result["dynamics_feasible"])
                     self.assertTrue(result["physical_executable"])
                     self.assertFalse(result["guide_route_preserved"])
-                    self.assertFalse(result["physical_geometric_candidate_valid"])
+                    self.assertTrue(result["physical_geometric_candidate_valid"])
                     self.assertEqual(result["added_repairs"],0)
-                    self.assertEqual(result["termination"],"curve_correction_budget_denied")
+                    self.assertEqual(result["termination"],"quality_correction_skipped")
 
     def test_real_route_loss_is_visible_before_final_check(self):
         fixture = json.loads((Path(__file__).parent /
@@ -173,14 +174,14 @@ class CurveReplayTest(unittest.TestCase):
                 if scenario.startswith("voxel_sampling") or scenario == "unsupported_sampling_model":
                     self.assertIsNotNone(fine_capture)
                     first.update(interval_s=fine_capture['interval_s'],control_points_m=fine_capture['control_points_m'],
-                                 target_v_mps=fine_capture['target_v_mps'],nominal_interval_s=1.2000000000000002,
+                                 target_v_mps=fine_capture['target_v_mps'],ends_at_rest=True,nominal_interval_s=1.2000000000000002,
                                  guide_sampling_model='guide_arc_voxel_diagonal_v1')
                     if scenario == 'voxel_sampling_missing_nominal':del first['nominal_interval_s']
                     if scenario == 'unsupported_sampling_model':first['guide_sampling_model']='unsupported'
                 if scenario in ("zero_without_policy", "explicit_stop"):
                     first["target_v_mps"] = [0., 0., 0.]
                 if scenario == "explicit_stop":
-                    first["terminal_stop"] = True
+                    first["ends_at_rest"] = True
                 elif scenario == "unowned":
                     del first["guide_m"]
                 snapshot.write_text(json.dumps(current))
@@ -210,13 +211,15 @@ class CurveReplayTest(unittest.TestCase):
                 self.assertEqual(result["curve_stages"][1]["stage"], "guide_fit_replayed")
                 if scenario == 'same_input':
                     fine_capture={**result['curve_stages'][1],'target_v_mps':result['replayed_target_velocity_mps']}
+                    fine_capture['ends_at_rest']=True
                 if scenario == 'voxel_sampling':
                     self.assertEqual(result['nominal_interval_source'],'EXPLICIT_STAGE_NOMINAL_INTERVAL')
                     self.assertEqual(result['nominal_interval_s'],first['nominal_interval_s'])
                     self.assertEqual(result['captured_guide_sampling_model'],first['guide_sampling_model'])
                     self.assertEqual(result['curve_stages'][1]['interval_s'],first['interval_s'])
                     self.assertEqual(result['curve_stages'][1]['control_points_m'],first['control_points_m'])
-                self.assertEqual(result["terminal_stop"], scenario == "explicit_stop")
+                self.assertTrue(result["terminal_stop"])
+                self.assertEqual(result["replayed_target_velocity_mps"],[0.,0.,0.])
                 self.assertEqual(result["added_repairs"], 0)
             del data["curve_stages"][1]["guide_m"]
             snapshot.write_text(json.dumps(data))
@@ -306,15 +309,15 @@ class CurveReplayTest(unittest.TestCase):
                     self.assertIn("stage target/guide mismatch", process.stderr)
                     self.assertFalse((run / "export/planner/curve_replay/result.json").exists())
                     continue
-                # This refine-only fixture repairs dynamics but still loses its
-                # guide. A dynamic PASS must never become a composite PASS.
-                self.assertEqual(process.returncode, 1, process.stderr + process.stdout)
+                # A lost guide is preference quality; physical/dynamic checks
+                # still own candidate validity, with no execution authorization.
+                self.assertEqual(process.returncode, 0 if expected else 1, process.stderr + process.stdout)
                 result = json.loads((run / "export/planner/curve_replay/result.json").read_text())
                 self.assertEqual(result["dynamics_feasible"], expected)
                 self.assertEqual(result["original_time_s"], 100.1)
                 self.assertEqual(result["original_cloud_stamp_s"], 100.)
                 self.assertEqual(result["physical_executable"], expected)
-                self.assertFalse(result["physical_geometric_candidate_valid"])
+                self.assertEqual(result["physical_geometric_candidate_valid"],expected)
                 self.assertFalse(result["execution_authorized"])
                 if scenario=="refine":
                     self.assertFalse(result["guide_route_preserved"])

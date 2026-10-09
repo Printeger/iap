@@ -219,6 +219,7 @@ namespace ego_planner
     {
       end_pt_ = next_wp;
       wait_for_map_reason_ = GridExecutionReason::OK;
+      local_target_pt_=planner_manager_->guideIdentity().committed_endpoint;
       search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
 
       constexpr double step_size_t = 0.1;
@@ -535,6 +536,7 @@ namespace ego_planner
   void EGOReplanFSM::execFSMCallback()
   {
     applyLatestCommandFeedback();
+    planner_manager_->observationReadyToPlan();
     applyLatestOdometry();
     if(planner_manager_->hasPendingTrajectory() && node_->now().seconds()>
         planner_manager_->publicationTrajectory().start_time_.seconds()+.1)
@@ -985,6 +987,7 @@ namespace ego_planner
         start_vel_.squaredNorm() /
             (2.0 * std::max(0.1, planner_manager_->pp_.max_acc_)) +
         2.0 * planner_manager_->grid_map_->getResolution());
+    if(!planner_manager_->observationReadyToPlan()) return false;
     const auto predecessor=planner_manager_->local_data_;
     bool plan_and_refine_success = false;
     bool target_selected = false;
@@ -1005,7 +1008,11 @@ namespace ego_planner
     have_new_target_ = false;
     if (!plan_and_refine_success) {
       last_failed_plan_time_s_ = now;
-      if(budget->expired() || budget->denied()) return false;
+      if(budget->expired() || budget->denied() ||
+          planner_manager_->lastPlanFailure()==EGOPlannerManager::PlanFailure::Budget) {
+        wait_for_evidence();return false;
+      }
+      if(planner_manager_->lastPlanFailure()==EGOPlannerManager::PlanFailure::ObservationBlocked) wait_for_evidence();
       const auto immediate_failure = planner_manager_->lastSearchFailure();
       if (immediate_failure == AStar::Failure::END_UNOBSERVED ||
           immediate_failure == AStar::Failure::NO_VALID_REPAIR_ENTRY ||
@@ -1014,6 +1021,7 @@ namespace ego_planner
           immediate_failure == AStar::Failure::END_BLOCKED ||
           immediate_failure == AStar::Failure::NO_PATH_WITH_UNOBSERVED ||
           immediate_failure == AStar::Failure::NO_PATH ||
+          immediate_failure == AStar::Failure::TIME_BUDGET ||
           immediate_failure == AStar::Failure::CURRENT_MOTION)
         wait_for_evidence();
       const auto start_cell = planner_manager_->queryLocalTargetCell(
@@ -1037,6 +1045,7 @@ namespace ego_planner
             search_pool_target_limit_m_);
       }
     } else {
+      local_target_pt_=planner_manager_->guideIdentity().committed_endpoint;
       search_pool_target_limit_m_ = std::numeric_limits<double>::infinity();
       stall_started_s_ = -1.0;
     }
