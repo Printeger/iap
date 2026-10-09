@@ -224,6 +224,23 @@ struct EGOPlannerManagerTestAccess {
     return manager.tryObservationApproach(start,blocked);
   }
   static const std::vector<Eigen::Vector3d>& guide(const EGOPlannerManager& manager) {return manager.bspline_optimizer_->recoveryGuide();}
+  static void unexecutedRecovery(EGOPlannerManager& manager,const Eigen::Vector3d& mission,
+      const Eigen::Vector3d& blocked,const std::string& result) {
+    auto& a=manager.observation_attempt_;a=EGOPlannerManager::ObservationAttempt{};
+    a.mission=mission;Eigen::Vector3i index;manager.grid_map_->posToIndex(blocked,index);manager.grid_map_->indexToPos(index,a.key);
+    a.probes={a.key};const auto cell=manager.grid_map_->queryFrozenOccupancy(*manager.planning_view_->physical,a.key);
+    a.before={uint8_t((cell.observed ? 4 : 0)|(cell.raw_occupied ? 1 : 0)|(cell.inflated_occupied ? 2 : 0))};
+    a.result=result; // No selected observer, trajectory or executed action.
+  }
+  static void restorePresearchResources(EGOPlannerManager& manager,double elapsed) {
+    // Replay setup/decoding is outside the captured planning round. Restore
+    // its remaining total BEFORE search once; production recovery never does so.
+    ASSERT_GE(elapsed,0.);ASSERT_LE(elapsed,1.5);
+    manager.planning_budget_=std::make_shared<PlanningBudget>(1.5-elapsed);
+  }
+  static void observationOutcome(EGOPlannerManager& manager,const std::string& result) {
+    manager.observation_attempt_.result=result;
+  }
   static void observationPending(EGOPlannerManager& manager,const Eigen::Vector3d& mission,const Eigen::Vector3d& key) {
     auto& a=manager.observation_attempt_;a=EGOPlannerManager::ObservationAttempt{};
     a.mission=mission;a.key=key;a.probes={key};a.before={0};a.trajectory_id=9;a.result="EXECUTING";a.wait_until_s=101.;
@@ -1223,6 +1240,8 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   manager->initPlanModules(node, vis);
   std::optional<std::filesystem::path> planning_payload;
   std::optional<std::filesystem::path> observation_snapshot;
+  std::optional<std::string> prior_recovery_result;
+  std::optional<double> presearch_elapsed;
   Eigen::Vector3d captured_route,captured_center,start_velocity=Eigen::Vector3d::Zero(),start_acceleration=Eigen::Vector3d::Zero();
   Eigen::Vector3d start(-2,0,1),goal(5.8,0,1);const Eigen::Vector3d zero=Eigen::Vector3d::Zero();
   if(frozen_input) {
@@ -1230,6 +1249,8 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
     boost::property_tree::read_json(frozen_input,boundary);
     const std::filesystem::path captured=boundary.get<std::string>("snapshot");
     if(boundary.get<bool>("expect_observation",false)) observation_snapshot=captured;
+    if(const auto value=boundary.get_optional<std::string>("prior_recovery_result")) prior_recovery_result=*value;
+    if(const auto value=boundary.get_optional<double>("presearch_elapsed_s")) presearch_elapsed=*value;
     boost::property_tree::read_json(captured.string(),metadata);
     const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
       for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
@@ -1263,6 +1284,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   ASSERT_TRUE(manager->planGlobalTraj(start, zero, zero, goal, zero, zero));
   ASSERT_TRUE(manager->beginPlanningView());
   if(planning_payload) ego_planner::EGOPlannerManagerTestAccess::frozenPrediction(*manager,*planning_payload,observation_snapshot);
+  if(prior_recovery_result) ego_planner::EGOPlannerManagerTestAccess::unexecutedRecovery(*manager,goal,captured_route,*prior_recovery_result);
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, start, goal);
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,frozen_input ? 5. : 3.));
@@ -1270,6 +1292,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   if(planning_payload) manager->setLocalTargets({{target,zero,zero,0}},captured_center);
   if(!planning_payload) EXPECT_FALSE(manager->queryLocalTargetCell(target,node->now().seconds()).executable());
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
+  if(presearch_elapsed) ego_planner::EGOPlannerManagerTestAccess::restorePresearchResources(*manager,*presearch_elapsed);
   ASSERT_TRUE(manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false));
   EXPECT_EQ(manager->observationResult(),observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION");
   EXPECT_EQ(manager->planningBudget()->searches.calls,2u);
@@ -1283,7 +1306,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   auto curve=manager->publicationTrajectory().position_traj_;
   EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
   EXPECT_TRUE(manager->assessTrajectory(curve,0,node->now().seconds()).executable());
-  if(observation_snapshot) {
+  if(observation_snapshot || presearch_elapsed) {
     const auto budget=manager->planningBudget();
     std::cout<<"FROZEN_OBSERVATION endpoint="<<manager->guideIdentity().committed_endpoint.transpose()
         <<" duration_s="<<curve.getTimeSum()<<" elapsed_s="<<budget->elapsed()
@@ -3495,6 +3518,7 @@ TEST(EgoBaseline, ShortOptimisticPrefixRecoversObservedBypassAndCannotResetSearc
     ASSERT_EQ(prefix.blocked_reason,GridExecutionReason::ENVIRONMENT_UNOBSERVED);EXPECT_LT(prefix.length_m,.2);
     auto budget=manager.planningBudget();ASSERT_TRUE(budget->tryRepair(PlanningBudget::Repair::Search));
     if(exhausted) budget->searches.seconds=1.;
+    ego_planner::EGOPlannerManagerTestAccess::unexecutedRecovery(manager,goal,prefix.blocked_position,"SEARCH_TIMEOUT");
     const bool recovered=ego_planner::EGOPlannerManagerTestAccess::recover(manager,start,goal,prefix);
     EXPECT_EQ(recovered,!exhausted);
     if(exhausted) {
@@ -3534,6 +3558,13 @@ TEST(EgoBaseline, ObservationConnectionSkipsHigherGainDisconnectedPocketInOneSea
   for(const auto& p:guide) EXPECT_TRUE(manager.queryPlanningViewCell(p).executable());
   EXPECT_FALSE(ego_planner::EGOPlannerManagerTestAccess::recover(manager,start+Eigen::Vector3d(-.5,0,0),goal,blocked));
   EXPECT_EQ(manager.planningBudget()->searches.calls,1u); // Self motion cannot reset the event.
+  auto adjacent=blocked;adjacent.blocked_position.x()+=.1;
+  EXPECT_FALSE(ego_planner::EGOPlannerManagerTestAccess::recover(manager,start+Eigen::Vector3d(-.5,0,0),goal,adjacent));
+  EXPECT_EQ(manager.planningBudget()->searches.calls,1u); // A neighbouring unknown key cannot renew the observer either.
+  ego_planner::EGOPlannerManagerTestAccess::observationOutcome(manager,"NO_GAIN");
+  EXPECT_TRUE(ego_planner::EGOPlannerManagerTestAccess::recover(manager,start+Eigen::Vector3d(-1.,0,0),goal,blocked));
+  EXPECT_EQ(manager.planningBudget()->searches.calls,2u);
+  EXPECT_EQ(manager.observationResult(),"NO_GAIN"); // Observed progress does not erase the used observation record.
 }
 
 TEST(EgoBaseline, ObservationOutcomeNeedsCompletedFeedbackAndRelatedNewEvidence) {

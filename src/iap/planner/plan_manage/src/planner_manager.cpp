@@ -1161,14 +1161,22 @@ namespace ego_planner
     Eigen::Vector3i blocked_index;grid_map_->posToIndex(blocked.blocked_position,blocked_index);
     Eigen::Vector3d blocked_key;grid_map_->indexToPos(blocked_index,blocked_key);
     bool changed=!attempt.mission.isApprox(guide_identity_.mission_goal,1e-6) ||
-        !attempt.key.isApprox(blocked_key,1e-6);
-    for(size_t i=0;!changed && i<attempt.probes.size();++i) changed=evidence(attempt.probes[i])!=attempt.before[i];
-    if(!changed && attempt.result!="NONE" && attempt.result!="OBSERVED_PROGRESS_CONNECTION") {
-      last_plan_failure_=PlanFailure::ObservationBlocked;return false;
+        (!attempt.selected_observation && !attempt.key.isApprox(blocked_key,1e-6));
+    for(size_t i=0;!changed && i<attempt.probes.size();++i) {
+      const auto now=evidence(attempt.probes[i]);
+      // Losing a known voxel or moving to a neighbouring blocked voxel does
+      // not replenish an observer. Related new observations do.
+      changed=(now&4) && (!(attempt.before[i]&4) || ((now^attempt.before[i])&3));
     }
+    const bool observation_locked=!changed && attempt.selected_observation;
+    const auto record=[&](const std::string& result) {if(!observation_locked) attempt.result=result;};
     if(planning_budget_->searchRemaining()<=0 || planning_budget_->count(PlanningBudget::Repair::Search)>=2) {
-      last_plan_failure_=PlanFailure::Budget;attempt.result="BUDGET";return false;
+      last_plan_failure_=PlanFailure::Budget;record("BUDGET");return false;
     }
+    // An incomplete connection search has not consumed an observation action.
+    // A consumed observer only removes observation goals: a newly checked
+    // observed progression may still use this round's one recovery search.
+    if(!observation_locked) {
     attempt=ObservationAttempt{};attempt.mission=guide_identity_.mission_goal;
     attempt.key=blocked.blocked_position;
     Eigen::Vector3i index;grid_map_->posToIndex(attempt.key,index);grid_map_->indexToPos(index,attempt.key);
@@ -1178,6 +1186,7 @@ namespace ego_planner
       if(grid_map_->queryFrozenOccupancy(epoch,p).available) attempt.probes.push_back(p);
     }
     for(const auto& p:attempt.probes) attempt.before.push_back(evidence(p));
+    }
     // One transient goal list for the SAME multi-target search. This is not a
     // route pool: only its selected path is retained and solved by EGO.
     std::vector<Eigen::Vector3d> goals;
@@ -1201,19 +1210,19 @@ namespace ego_planner
       goals.push_back(point);
     };
     append(guide_identity_.route_target);
-    Eigen::Vector3d forward=attempt.mission-start;
+    Eigen::Vector3d forward=guide_identity_.mission_goal-start;
     if(forward.norm()<1e-6) {last_plan_failure_=PlanFailure::ObservationBlocked;return false;}
     forward.normalize();Eigen::Vector3d left=Eigen::Vector3d::UnitZ().cross(forward);
     if(left.norm()<1e-6) left=Eigen::Vector3d::UnitY();else left.normalize();
     for(double distance:{1.,2.,3.}) for(double side:{0.,-.5,.5}) {
       const Eigen::Vector3d p=start+distance*forward+side*left;
-      if(goals.size()<8 && (p-attempt.mission).norm()+.2<(start-attempt.mission).norm()) append(p);
+      if(goals.size()<8 && (p-guide_identity_.mission_goal).norm()+.2<(start-guide_identity_.mission_goal).norm()) append(p);
     }
     const size_t preferred_count=goals.size();
     const auto& sensor=epoch.observation_frame;
     struct Candidate {Eigen::Vector3d position;int gain;};
     std::vector<Candidate> observations;
-    if(allow_observation && sensor && std::isfinite(sensor->horizontal_fov_rad) && std::isfinite(sensor->vertical_min_rad) &&
+    if(allow_observation && !observation_locked && sensor && std::isfinite(sensor->horizontal_fov_rad) && std::isfinite(sensor->vertical_min_rad) &&
         std::isfinite(sensor->vertical_max_rad) && sensor->min_range_m>=0 && sensor->max_range_m>0) {
       const auto visible=[&](const Eigen::Vector3d& target,const Eigen::Vector3d& displacement) {
         const Eigen::Vector3d origin=sensor->T_map_lidar.translation()+displacement;
@@ -1250,27 +1259,28 @@ namespace ego_planner
       });
       for(const auto& candidate:observations) append(candidate.position);
     }
-    if(goals.empty()) {attempt.result="OBSERVATION_BLOCKED";last_plan_failure_=PlanFailure::ObservationBlocked;return false;}
-    if(planning_budget_->searchRemaining()<=0) {attempt.result="BUDGET";last_plan_failure_=PlanFailure::Budget;return false;}
+    if(goals.empty()) {record("OBSERVATION_BLOCKED");last_plan_failure_=PlanFailure::ObservationBlocked;return false;}
+    if(planning_budget_->searchRemaining()<=0) {record("BUDGET");last_plan_failure_=PlanFailure::Budget;return false;}
     auto& optimizer=*bspline_optimizer_;
     optimizer.a_star_->setPlanningQuery([this](const Eigen::Vector3d& p) {return GridSearchCell(queryGuidanceCell(p));});
     optimizer.setPlanningEndpoints(start,goals.front());optimizer.setPlanningGoals(goals,center);
     if(!optimizer.searchRecoveryGuide(planning_budget_->searchRemaining(),preferred_count)) {
       const bool timeout=optimizer.a_star_->lastResult().failure==AStar::Failure::TIME_BUDGET;
-      attempt.result=timeout ? "SEARCH_TIMEOUT" : "NO_EXECUTABLE_CONNECTION_FOUND";
+      record(timeout ? "SEARCH_TIMEOUT" : "NO_EXECUTABLE_CONNECTION_FOUND");
       last_plan_failure_=timeout ? PlanFailure::Budget : PlanFailure::ObservationBlocked;return false;
     }
-    attempt.selected_observation=optimizer.a_star_->lastResult().selected_goal>=preferred_count;
-    if(attempt.selected_observation && preferred_count && optimizer.a_star_->lastResult().search_budget_exhausted) {
+    const bool selected_observation=optimizer.a_star_->lastResult().selected_goal>=preferred_count;
+    if(selected_observation && preferred_count && optimizer.a_star_->lastResult().search_budget_exhausted) {
       // An observation incumbent does not prove that the preferred observed
       // progression is disconnected when the shared search deadline expires.
-      attempt.result="SEARCH_TIMEOUT";last_plan_failure_=PlanFailure::Budget;return false;
+      record("SEARCH_TIMEOUT");last_plan_failure_=PlanFailure::Budget;return false;
     }
-    attempt.result=attempt.selected_observation ? "SELECTED_OBSERVATION" : "OBSERVED_PROGRESS_CONNECTION";
+    const std::string result=selected_observation ? "SELECTED_OBSERVATION" : "OBSERVED_PROGRESS_CONNECTION";
+    if(!observation_locked) {attempt.selected_observation=selected_observation;record(result);}
     // Update only the route identity; immutable mission and evidence remain intact.
     guide_identity_.route_target=optimizer.recoveryGuide().back();
     RCLCPP_INFO(node_->get_logger(),"Bounded recovery: %s targets=%zu preferred=%zu search_s=%.6f remaining_s=%.6f",
-        attempt.result.c_str(),goals.size(),preferred_count,planning_budget_->searches.seconds,planning_budget_->remaining());
+        result.c_str(),goals.size(),preferred_count,planning_budget_->searches.seconds,planning_budget_->remaining());
     return true;
   }
 
@@ -1326,6 +1336,8 @@ namespace ego_planner
     last_plan_failure_=PlanFailure::None;
     failure_start_p_=start_pt; failure_start_v_=start_vel; failure_start_a_=start_acc;
     const auto fail=[&](PlanFailure reason) {
+      if(observation_attempt_.selected_observation && observation_attempt_.result=="SELECTED_OBSERVATION")
+        observation_attempt_.result="OBSERVATION_NOT_COMMITTED";
       last_plan_failure_=planning_budget_->expired() || planning_budget_->denied() ? PlanFailure::Budget : reason;
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
           "Planner rebound rejected: phase=%s execution=%s budget_expired=%d repair_denied=%d",
@@ -1430,7 +1442,12 @@ namespace ego_planner
     // OFF and ON share one whole-route search on every local planning round.
     // Establish a valid control owner for failure evidence before the search.
     optimizer.initializeFromGuide(Eigen::MatrixXd::Zero(3,7));
-    const bool normal_guide_found=optimizer.searchRecoveryGuide();
+    // The frozen forest failure used 0.5 s here and left only 0.27--0.33 s
+    // for a connection that still timed out; a cold frozen witness first
+    // connected at 0.488 s. Reserve three quarters of the usable
+    // search time for that one recovery, in addition to the existing 0.5 s
+    // backend/check/commit reserve. No allowance is increased or restarted.
+    const bool normal_guide_found=optimizer.searchRecoveryGuide(.25*planning_budget_->searchRemaining());
     const auto initialize_guide=[&]() {
       const auto prefix=selectExecutablePrefix(optimizer.recoveryGuide());
       guide_identity_.route_target=optimizer.recoveryGuide().back();
