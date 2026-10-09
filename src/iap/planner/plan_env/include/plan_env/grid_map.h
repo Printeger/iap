@@ -462,6 +462,9 @@ struct FrozenOccupancyEpoch
   uint64_t active_window_generation = 0;
   int64_t current_frame_id = -1;
   std::string current_frame_content_hash;
+  // Forecast metadata captured in the same occupancy transaction. It grants
+  // no observation or execution permission and carries no copied beam data.
+  std::optional<RegisteredLidarFrameMetadata> observation_frame;
   std::string frame_contract_id;
   Eigen::Vector3d current_vehicle_position =
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());

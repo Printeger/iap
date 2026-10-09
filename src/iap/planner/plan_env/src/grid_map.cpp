@@ -2917,6 +2917,7 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
   epoch->generation = state->generation;
   epoch->active_window_generation = state->active_window_generation;
   epoch->current_frame_id = state->current_frame_id;
+  epoch->observation_frame = state->current_frame;
   epoch->current_frame_content_hash = state->current_frame
       ? state->current_frame->content_hash : std::string{};
   epoch->frame_contract_id = state->frame_contract_id;
@@ -3215,6 +3216,7 @@ GridMap::captureFrozenOccupancyEpoch() const
   epoch->current_frame_id = buffers->raw_centers
       ? frozen_buffers->current_frame_id
       : static_cast<int64_t>(frozen_buffers->generation);
+  epoch->observation_frame = buffers->current_registered_frame;
   if (buffers->raw_centers && buffers->current_registered_frame)
   {
     epoch->current_frame_content_hash =

@@ -3477,6 +3477,11 @@ TEST(EgoBaseline, ObservationConnectionSkipsHigherGainDisconnectedPocketInOneSea
   ASSERT_TRUE(manager.beginPlanningView());
   ego_planner::EGOPlannerManager::ExecutablePrefix blocked;
   blocked.blocked_reason=GridExecutionReason::ENVIRONMENT_UNOBSERVED;blocked.blocked_position=goal;
+  const auto frozen_generation=manager.grid_map_->occupancyGeneration();
+  // A legal new frame may arrive while the normal search consumes the frozen
+  // map. Recovery forecasting must retain that map's original sensor metadata.
+  GridMapTestAccess::changeEvidence(*manager.grid_map_,start,false,false,true);
+  EXPECT_FALSE(manager.grid_map_->currentObservationFrame(frozen_generation));
   EXPECT_TRUE(manager.queryPlanningViewCell(start+Eigen::Vector3d(0,0,.5)).executable());
   ASSERT_TRUE(ego_planner::EGOPlannerManagerTestAccess::recover(manager,start,goal,blocked));
   EXPECT_EQ(manager.observationResult(),"SELECTED_OBSERVATION");

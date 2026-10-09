@@ -1173,7 +1173,7 @@ namespace ego_planner
       if(goals.size()<8 && (p-attempt.mission).norm()+.2<(start-attempt.mission).norm()) append(p);
     }
     const size_t preferred_count=goals.size();
-    const auto sensor=grid_map_->currentObservationFrame(epoch.generation);
+    const auto& sensor=epoch.observation_frame;
     struct Candidate {Eigen::Vector3d position;int gain;};
     std::vector<Candidate> observations;
     if(allow_observation && sensor && std::isfinite(sensor->horizontal_fov_rad) && std::isfinite(sensor->vertical_min_rad) &&
