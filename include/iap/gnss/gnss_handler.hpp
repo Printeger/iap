@@ -5,14 +5,18 @@
 #include <iap/gnss/pseudorange_factor.hpp>
 #include <iap/gnss/doppler_factor.hpp>
 #include <iap/gnss/canopy_noise_model.hpp>
+#include <iap/gnss/postopt_evidence.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <Eigen/Core>
 #include <memory>
 #include <deque>
 #include <mutex>
+#include <functional>
 
 namespace iap {
+void propagate_gnss_postopt(GnssPostoptEvidence& evidence,
+    const gtsam::PreintegratedImuMeasurements& motion);
 
 /**
  * @brief Thread-safe buffer and factory for GNSS factors.
@@ -65,6 +69,7 @@ class GnssHandler {
 
   /// Insert a GNSS epoch (thread-safe; called on ROS subscriber callback).
   void insert_epoch(const GnssEpoch& epoch);
+  using MotionProvider = std::function<std::shared_ptr<const gtsam::PreintegratedImuMeasurements>(double,double)>;
 
   /**
    * @brief Collect the nearest buffered epoch to @p frame_stamp and build factors.
@@ -79,7 +84,8 @@ class GnssHandler {
   gtsam::NonlinearFactorGraph get_factors(int                     frame_idx,
                                           double                  frame_stamp,
                                           const Eigen::Vector3d&  anc_ecef,
-                                          std::vector<GnssEpoch>* out_epochs = nullptr);
+                                          std::vector<GnssEpoch>* out_epochs = nullptr,
+                                          const MotionProvider& motion_provider = {});
 
   /// Number of epochs waiting in the queue.
   std::size_t queue_size() const;

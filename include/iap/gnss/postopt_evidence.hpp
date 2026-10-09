@@ -31,6 +31,16 @@ struct GnssPostoptEvidence {
   std::vector<double> optimized_means;
   std::vector<double> linearization_means;
   std::vector<double> joint_covariance_row_major;
+  // Original state/epoch stamps and means above never change. These are the
+  // separately propagated state and covariance at the acquisition epoch.
+  std::vector<double> propagated_optimized_means;
+  std::vector<double> propagated_linearization_means;
+  std::vector<double> propagated_joint_covariance;
+  std::vector<double> propagation_transition;
+  std::vector<double> propagation_noise;
+  std::vector<double> imu_measurements;
+  std::vector<double> imu_noise;
+  std::vector<double> imu_bias_hat;
 };
 // ROS transport and frozen snapshots copy every member, including unavailable
 // results and original times. No conversion grants freshness or qualification.
@@ -53,6 +63,14 @@ template<class Target, class Source> Target copy_gnss_postopt_evidence(const Sou
   target.optimized_means.assign(source.optimized_means.begin(),source.optimized_means.end());
   target.linearization_means.assign(source.linearization_means.begin(),source.linearization_means.end());
   target.joint_covariance_row_major.assign(source.joint_covariance_row_major.begin(),source.joint_covariance_row_major.end());
+  target.propagated_optimized_means.assign(source.propagated_optimized_means.begin(),source.propagated_optimized_means.end());
+  target.propagated_linearization_means.assign(source.propagated_linearization_means.begin(),source.propagated_linearization_means.end());
+  target.propagated_joint_covariance.assign(source.propagated_joint_covariance.begin(),source.propagated_joint_covariance.end());
+  target.propagation_transition.assign(source.propagation_transition.begin(),source.propagation_transition.end());
+  target.propagation_noise.assign(source.propagation_noise.begin(),source.propagation_noise.end());
+  target.imu_measurements.assign(source.imu_measurements.begin(),source.imu_measurements.end());
+  target.imu_noise.assign(source.imu_noise.begin(),source.imu_noise.end());
+  target.imu_bias_hat.assign(source.imu_bias_hat.begin(),source.imu_bias_hat.end());
   return target;
 }
 }

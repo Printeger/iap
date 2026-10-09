@@ -560,7 +560,9 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   coordinates.T_lidar_imu=frame->T_lidar_imu.matrix();
   msg.advisory_coordinates_valid=coordinates.rejection().empty() &&
       coordinates.frame_id==report.estimation_frame_id &&
-      std::abs(coordinates.stamp-frame->stamp)<1e-6;
+      std::abs(gnss_bundle.state.state_stamp-frame->stamp)<1e-6 &&
+      std::abs(coordinates.stamp-(gnss_bundle.state.propagation=="IMU_TO_GNSS_EPOCH"
+          ? gnss_bundle.state.gnss_stamp : gnss_bundle.state.state_stamp))<1e-6;
   msg.advisory_coordinates_failure_reason=coordinates.failure_reason;
   msg.advisory_coordinates_frame_id=coordinates.frame_id;
   msg.advisory_coordinates_stamp=coordinates.stamp;

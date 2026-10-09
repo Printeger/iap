@@ -17,7 +17,8 @@ from run_directory import (adopt_run_directory, resolve_run_directory, finalize_
                            write_subordinate_manifest, canonical_run_uses_sim_time)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
-CODEC = "iap_prediction_input_v8/boost_binary/zlib_length_u64le"
+CODEC = "iap_prediction_input_v9/boost_binary/zlib_length_u64le"
+READABLE_CODECS={CODEC,"iap_prediction_input_v8/boost_binary/zlib_length_u64le"}
 SOURCES = ["src/iap/planner/plan_manage/include/ego_planner/prediction_input.h",
            "src/iap/planner/plan_manage/src/prediction_input.cpp",
            "src/iap/planner/plan_manage/src/prediction_input_codec.cpp",
@@ -43,7 +44,11 @@ SOURCES += ["src/iap/odometry/odometry_estimation_imu.cpp",
             "include/iap/gnss/clock_geometry.hpp", "src/iap/integrity/araim.cpp",
             "include/iap/integrity/araim.hpp", "include/iap/integrity/araim_types.hpp",
             "src/iap/integrity/integrity_monitor.cpp"]
-SOURCES += ["src/iap/odometry/odometry_estimation_gpu.cpp"]
+SOURCES += ["src/iap/odometry/odometry_estimation_gpu.cpp",
+            "src/iap/gnss/pseudorange_factor.cpp","include/iap/gnss/pseudorange_factor.hpp",
+            "src/iap/gnss/doppler_factor.cpp","include/iap/gnss/doppler_factor.hpp",
+            "src/iap/common/imu_integration.cpp","include/iap/common/imu_integration.hpp",
+            "scripts/dev_predictor/epoch_motion_reference.py"]
 SOURCES += ["srv/GetGridMapPredictionInput.srv",
             "scripts/dev_predictor/fusion_scientific_audit.py",
             "scripts/dev_predictor/fusion_actual_error_audit.py",
@@ -117,7 +122,7 @@ def model_audit(run, dataset):
 
 def validate_record(payload, sidecar):
     info = json.loads(sidecar.read_text())
-    if info.get("codec") != CODEC or info.get("identity") != "REAL_FROZEN":
+    if info.get("codec") not in READABLE_CODECS or info.get("identity") != "REAL_FROZEN":
         raise ValueError("complete real recording identity required; failure_map/fixture cannot substitute")
     if info["payload_sha256"] != sha(payload):
         raise ValueError("payload checksum mismatch")

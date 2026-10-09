@@ -16,10 +16,10 @@ def audit_postopt(meta):
     if not e.get('optimized_valid') or not e.get('covariance_valid'):
         return {'available':False,'reason':e.get('failure_reason','postopt_evidence_unavailable'),
                 'time_propagation_qualified':False,'meter_qualified':False}
-    if e.get('model')!='postopt_X_V_B_R_E_active_clocks_joint_v1' or e.get('propagation')!='NOT_PROPAGATED':
+    if e.get('model')!='postopt_X_V_B_R_E_active_clocks_joint_v1' or e.get('propagation') not in ('NOT_PROPAGATED','IMU_TO_GNSS_EPOCH'):
         raise ValueError('postopt_model_or_propagation_mismatch')
     c=meta['coordinates']
-    if (e['frame_id']!=c['frame_id'] or abs(e['state_stamp']-c['stamp'])>1e-6 or
+    if (e['frame_id']!=c['frame_id'] or abs((e['gnss_stamp'] if e['propagation']=='IMU_TO_GNSS_EPOCH' else e['state_stamp'])-c['stamp'])>1e-6 or
         abs(e['gnss_stamp']-meta['gnss_stamp'])>1e-6 or
         e['epoch_source_identity']!=meta['epoch_source_identity'] or not e['update_sequence']):
         raise ValueError('postopt_epoch_or_state_owner_mismatch')
@@ -41,6 +41,11 @@ def audit_postopt(meta):
     if (np.linalg.norm(covariance-covariance.T)>1e-9*max(1.,np.linalg.norm(covariance)) or
         np.linalg.eigvalsh(covariance).min()<=0):
         raise ValueError('postopt_joint_covariance_invalid')
+    motion=None
+    if e['propagation']=='IMU_TO_GNSS_EPOCH':
+        from epoch_motion_reference import audit_epoch_motion
+        motion=audit_epoch_motion(e)
+        optimized=np.asarray(e['propagated_optimized_means'],dtype=float)
     T=rigid(optimized[:16].reshape(4,4));rigid(linearization[:16].reshape(4,4))
     if (np.linalg.norm(T-np.asarray(c['T_world_imu']).reshape(4,4))>1e-9 or
         np.linalg.norm(optimized[25:34].reshape(3,3)-np.asarray(c['R_ecef_world']).reshape(3,3))>1e-9 or
@@ -59,12 +64,12 @@ def audit_postopt(meta):
             'rotation_tangent_covariance_rad2':covariance[15:18,15:18].tolist(),
             'clock_difference_joint_covariance':differences,
             'covariance_point':'captured linearization_means; optimized_means separately recorded',
-            'time_propagation_qualified':False,'meter_qualified':False}
+            'time_propagation_qualified':bool(motion),'motion_reference':motion,'meter_qualified':False}
 
 
 def audit(meta):
     c=meta['coordinates']
-    if (meta.get('recording_codec_version')!=8 or
+    if (meta.get('recording_codec_version') not in (8,9) or
         meta.get('clock_model')!='per_constellation_pseudorange_bias_v1' or
         meta.get('gnss_fault_model')!='single_satellite_and_constellation_v1') or not c.get('required') or not c.get('valid'):
         raise ValueError('production_coordinate_evidence_unavailable')
@@ -75,7 +80,7 @@ def audit(meta):
         T=np.eye(4);T[:3,:3]=R;rigid(T)
     if c.get('reason') or c['map_frame']!=meta['frame_id'] or c['body_frame']!='imu':
         raise ValueError('coordinate_frame_or_body_mismatch')
-    if (abs(c['stamp']-meta['current_stamp'])>1e-6 or abs(c['stamp']-meta['pose_stamp'])>1e-6 or
+    if (abs(meta.get('postopt_evidence',{}).get('state_stamp',c['stamp'])-meta['current_stamp'])>1e-6 or abs(c['stamp']-meta['pose_stamp'])>1e-6 or
         c['frame_id']!=meta['estimation_frame_id']):
         raise ValueError('coordinate_estimator_time_mismatch')
     if not meta['has_epoch']:raise ValueError('gnss_epoch_missing_from_frozen_input')
@@ -106,7 +111,7 @@ def audit(meta):
             'antenna_offset_map':(T_mw[:3,:3]@T_wi[:3,:3]@lever).tolist(),
             'T_map_lidar':(T_mw@T_wi@np.linalg.inv(T_li)).tolist(),
             'PL_axes':'map XY horizontal; map Z vertical; GNSS raw/anchored remain legacy ENU diagnostics',
-            'conditioning':'World/ENU/map alignment is conditioned; pose attitude handling follows the bound model. No captured state propagation is inferred.',
+            'conditioning':'World/ENU/map alignment uncertainty is not propagated; pose attitude follows the joint model. Captured IMU propagation is checked independently when present.',
             'truth_used_by_predictor':False}
 
 

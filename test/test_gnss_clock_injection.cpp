@@ -218,3 +218,58 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
     EXPECT_FALSE(incomplete.state.failure_reason.empty());
   }
 }
+
+TEST(GnssEpochMotion, MotionResidualUsesAcquisitionEpochAndAllStateKeys) {
+  auto params=gtsam::PreintegrationParams::MakeSharedU(9.81);
+  params->accelerometerCovariance=.0025*gtsam::Matrix3::Identity();
+  params->gyroscopeCovariance=.0004*gtsam::Matrix3::Identity();
+  params->integrationCovariance=.000001*gtsam::Matrix3::Identity();
+  auto motion=std::make_shared<gtsam::PreintegratedImuMeasurements>(params);
+  for(int i=0;i<40;++i)motion->integrateMeasurement(gtsam::Vector3(2.,0.,9.81),gtsam::Vector3::Zero(),.002);
+  const double truth_x=20.*.08+.5*2.*.08*.08;
+  using namespace gtsam::symbol_shorthand;
+  auto noise=gtsam::noiseModel::Isotropic::Sigma(1,1.);
+  iap::PseudorangeFactor pr(X(1),C(1),E(0),R(0),2e7-truth_x,
+      gtsam::Vector3(2e7,0,0),0.,100.,{},noise);
+  iap::DopplerFactor dop(X(1),V(1),C(1),R(0),-20.16,
+      gtsam::Vector3(2e7,0,0),gtsam::Vector3::Zero(),gtsam::Vector3::Zero(),noise);
+  gtsam::Values values;values.insert(X(1),gtsam::Pose3());values.insert(V(1),gtsam::Vector3(20.,0.,0.));
+  values.insert(B(1),gtsam::imuBias::ConstantBias());values.insert(C(1),gtsam::Vector2::Zero().eval());
+  values.insert(E(0),gtsam::Vector3::Zero().eval());values.insert(R(0),gtsam::Rot3());
+  // Red witness: an unpropagated factor attaches a 1.6064 m motion error.
+  EXPECT_NEAR(pr.unwhitenedError(values)(0),-truth_x,1e-8);
+  EXPECT_NEAR(dop.unwhitenedError(values)(0),-.16,1e-8);
+  pr.bind_epoch_motion(V(1),B(1),motion);dop.bind_epoch_motion(B(1),motion);
+  std::vector<gtsam::Matrix> h;
+  EXPECT_NEAR(pr.unwhitenedError(values,&h)(0),0.,1e-8);
+  ASSERT_EQ(h.size(),6u);EXPECT_NEAR(h[4](0,0),.08,3e-4);EXPECT_GT(h[5].norm(),0.);
+  EXPECT_NEAR(dop.unwhitenedError(values,&h)(0),0.,1e-8);
+  ASSERT_EQ(h.size(),5u);EXPECT_GT(h[4].norm(),0.);
+  EXPECT_GT(motion->preintMeasCov().trace(),0.);
+}
+
+TEST(GnssEpochMotion, MissingImuAndBackwardAcquisitionDoNotCreateFactors) {
+  iap::GnssEpoch epoch;epoch.stamp=10.05;epoch.gps_sec=28.05;
+  iap::SatObs sat;sat.elevation=1.;epoch.sats.push_back(sat);
+  iap::GnssHandler handler;handler.insert_epoch(epoch);
+  const iap::GnssHandler::MotionProvider missing=[](double,double) {return std::shared_ptr<const gtsam::PreintegratedImuMeasurements>{};};
+  std::vector<iap::GnssEpoch> used;
+  EXPECT_TRUE(handler.get_factors(1,10.,Eigen::Vector3d::Zero(),&used,missing).empty());
+  EXPECT_TRUE(used.empty());epoch.stamp=9.95;handler.insert_epoch(epoch);
+  EXPECT_TRUE(handler.get_factors(1,10.,Eigen::Vector3d::Zero(),&used,missing).empty());
+}
+
+TEST(GnssEpochMotion, StationaryVerticalProcessNoiseHasIndependentDiscreteIntegral) {
+  auto params=gtsam::PreintegrationParams::MakeSharedU(9.81);
+  params->accelerometerCovariance=.0025*gtsam::Matrix3::Identity();
+  params->gyroscopeCovariance=.0004*gtsam::Matrix3::Identity();
+  params->integrationCovariance=.000001*gtsam::Matrix3::Identity();
+  gtsam::PreintegratedImuMeasurements motion(params);
+  for(int i=0;i<40;++i)motion.integrateMeasurement(gtsam::Vector3(0,0,9.81),gtsam::Vector3::Zero(),.002);
+  const auto q=motion.preintMeasCov();
+  // Independent discrete white acceleration integration, plus integration Q.
+  const double t=.08,h=.002;
+  EXPECT_NEAR(q(5,5),.0025*(t*t*t/3.-h*h*t/12.)+.000001*t,1e-12);
+  EXPECT_NEAR(q(8,8),.0025*t,1e-12);
+  EXPECT_NEAR(q(5,8),.0025*t*t/2.,1e-12);
+}

@@ -812,7 +812,7 @@ uint64_t EGOPlannerManager::bindRiskPrediction(const iap::IntegritySnapshot& sna
   PredictionInput input;
   input.occupancy=occupancy ? std::move(occupancy) : grid_map_->captureFrozenOccupancyEpoch();
   input.integrity=snapshot; input.params=predictor_params_;
-  input.reference_time_s=now; input.validity_s=risk_validity_s_;
+  input.reference_time_s=snapshot.has_pose ? snapshot.pose_stamp : now; input.validity_s=risk_validity_s_;
   const auto started=std::chrono::steady_clock::now();
   if(retain_planning_input) {
     planning_prediction_stats_=std::make_shared<iap::PredictorBatchDiagnostics>();
@@ -861,6 +861,7 @@ void EGOPlannerManager::initPredictionExport() {
           if (!input.occupancy) { response->reason="physical epoch unavailable"; return; }
           input.reference_time_s=node_->now().seconds(); input.validity_s=risk_validity_s_;
           input.integrity=capturePredictionSnapshot(input.reference_time_s); input.params=predictor_params_;
+          if(input.integrity.has_pose)input.reference_time_s=input.integrity.pose_stamp;
           }
           response->payload=encodePredictionInput(input); response->available=true;
           response->frame_id=input.occupancy->frame_id; response->geometry_id=input.occupancy->geometry_id;

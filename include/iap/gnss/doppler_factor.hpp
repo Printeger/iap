@@ -3,6 +3,7 @@
 
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
+#include <gtsam/navigation/ImuFactor.h>
 #include <Eigen/Core>
 
 namespace iap {
@@ -69,6 +70,10 @@ class DopplerFactor
   char   constellation() const { return constellation_; }
   double elevation()     const { return elevation_; }
   double dop_meas()      const { return dop_meas_; }
+  void bind_epoch_motion(gtsam::Key bias,
+                         std::shared_ptr<const gtsam::PreintegratedImuMeasurements> motion);
+  gtsam::Vector unwhitenedError(const gtsam::Values& values,
+      gtsam::OptionalMatrixVecType H = nullptr) const override;
 
   /// Evaluate residual (and optional Jacobians).
   gtsam::Vector evaluateError(const gtsam::Pose3&    pose,
@@ -81,6 +86,7 @@ class DopplerFactor
                                gtsam::OptionalMatrixType H_rot  = nullptr) const override;
 
  private:
+  std::shared_ptr<const gtsam::PreintegratedImuMeasurements> epoch_motion_;
   double          dop_meas_;          ///< Doppler measurement [m/s]
   Eigen::Vector3d sat_pos_;           ///< satellite ECEF position [m]
   Eigen::Vector3d sat_vel_;           ///< satellite ECEF velocity [m/s]

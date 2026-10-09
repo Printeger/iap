@@ -176,19 +176,29 @@ TEST(GnssHandlerEpochBindingTest, ConsumesOnlyNearestEpochAndRetainsLaterEpoch) 
   handler.insert_epoch(epoch(100.08, 3));
 
   std::vector<GnssEpoch> consumed;
+  const GnssHandler::MotionProvider stationary=[](double start,double end) {
+    auto p=gtsam::PreintegrationParams::MakeSharedU(9.81);
+    auto motion=std::make_shared<gtsam::PreintegratedImuMeasurements>(p);
+    motion->integrateMeasurement(gtsam::Vector3(0.,0.,9.81),gtsam::Vector3::Zero(),end-start);
+    return motion;
+  };
   const auto first = handler.get_factors(
-      0, 100.0, Eigen::Vector3d::Zero(), &consumed);
+      0, 100.0, Eigen::Vector3d::Zero(), &consumed,stationary);
   ASSERT_EQ(consumed.size(), 1U);
   EXPECT_DOUBLE_EQ(consumed.front().stamp, 100.04);
   EXPECT_EQ(first.size(), 4U);
   EXPECT_EQ(handler.queue_size(), 1U);
 
   const auto second = handler.get_factors(
-      1, 100.1, Eigen::Vector3d::Zero(), &consumed);
+      1, 100.06, Eigen::Vector3d::Zero(), &consumed,stationary);
   ASSERT_EQ(consumed.size(), 1U);
   EXPECT_DOUBLE_EQ(consumed.front().stamp, 100.08);
   EXPECT_EQ(second.size(), 6U);
   EXPECT_EQ(handler.queue_size(), 0U);
+  // An older acquisition epoch is not silently rebound to a later pose.
+  handler.insert_epoch(epoch(100.08,3));
+  EXPECT_TRUE(handler.get_factors(2,100.1,Eigen::Vector3d::Zero(),&consumed,stationary).empty());
+  EXPECT_TRUE(consumed.empty());
 }
 
 // ============================================================================

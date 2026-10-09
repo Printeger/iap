@@ -184,6 +184,13 @@ GnssExtensionModule::GnssExtensionModule()
   }
 
   // Register on_new_frame to track frame index/stamp for factor injection
+  Callbacks::on_insert_imu.add([this](double stamp,const Eigen::Vector3d& acc,const Eigen::Vector3d& gyro) {
+    std::lock_guard<std::mutex> lock(epoch_imu_mutex_);
+    epoch_imu_.insert_imu(stamp,acc,gyro);
+    const auto& queue=epoch_imu_.imu_data_in_queue();
+    int expired=0;for(const auto& value:queue) {if(value(0)>=stamp-3.)break;++expired;}
+    epoch_imu_.erase_imu_data(expired);
+  });
   Callbacks::on_new_frame.add([this](const glim::EstimationFrame::ConstPtr& f) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     last_frame_id_.store(f->id);
@@ -613,8 +620,41 @@ void GnssExtensionModule::on_smoother_update_(
   }
 
   std::vector<GnssEpoch> consumed;
+  last_epoch_motion_.reset();last_epoch_imu_samples_.clear();
   auto gnss_factors = gnss_handler_->get_factors(
-      static_cast<int>(frame_id), frame_stamp, anc_ecef, &consumed);
+      static_cast<int>(frame_id), frame_stamp, anc_ecef, &consumed,
+      [this,&new_values,frame_id](double start,double end) -> std::shared_ptr<const gtsam::PreintegratedImuMeasurements> {
+        std::lock_guard<std::mutex> lock(epoch_imu_mutex_);
+        const auto& queue=epoch_imu_.imu_data_in_queue();
+        if(!std::isfinite(start) || !std::isfinite(end) || end<=start || end-start>.1 ||
+            queue.empty() || queue.front()(0)>start || queue.back()(0)<end) return {};
+        double ordered=-INFINITY;
+        for(const auto& value:queue) {
+          if(!value.allFinite() || value(0)<=ordered)return {};
+          ordered=value(0);
+        }
+        double previous=start;
+        for(const auto& v:queue) if(v(0)>start && v(0)<=end) {
+          if(v(0)-previous>.02 || !v.allFinite())return {};previous=v(0);
+        }
+        if(end-previous>.02)return {};
+        // Include the bracketing measurement beyond end: the existing GLIO
+        // integration convention uses the right endpoint of each interval.
+        Eigen::Matrix<double,7,1> preceding=queue.front();
+        for(const auto& v:queue) {
+          if(v(0)<start){preceding=v;continue;}
+          if(last_epoch_imu_samples_.empty())for(int i=0;i<7;++i)last_epoch_imu_samples_.push_back(preceding(i));
+          if(last_epoch_imu_samples_.size()+7>2048)return {};
+          for(int i=0;i<7;++i)last_epoch_imu_samples_.push_back(v(i));
+          if(v(0)>=end)break;
+        }
+        const auto key=gtsam::symbol_shorthand::B(frame_id);
+        if(!new_values.exists(key))return {};
+        int count=0;epoch_imu_.integrate_imu(start,end,new_values.at<gtsam::imuBias::ConstantBias>(key),&count);
+        if(count==0)return {};
+        last_epoch_motion_=std::make_shared<gtsam::PreintegratedImuMeasurements>(epoch_imu_.integrated_measurements());
+        return last_epoch_motion_;
+      });
 
   if (gnss_factors.size() > 0) {
     auto& lifecycle = glim::KeyLifecycleMonitor::instance();
@@ -1148,6 +1188,18 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
       evidence.joint_covariance_row_major.push_back(covariance(row,col));
     evidence.covariance_valid=true;
     evidence.failure_reason.clear();
+    if(last_epoch_motion_) {
+      propagate_gnss_postopt(evidence,*last_epoch_motion_);
+      evidence.imu_measurements=last_epoch_imu_samples_;
+      const auto bias=last_epoch_motion_->biasHat().vector();
+      evidence.imu_bias_hat.assign(bias.data(),bias.data()+6);
+      const auto& p=last_epoch_motion_->p();
+      evidence.imu_noise={std::sqrt(p.accelerometerCovariance(0,0)),
+          std::sqrt(p.gyroscopeCovariance(0,0)),std::sqrt(p.integrationCovariance(0,0))};
+      const auto& m=evidence.propagated_optimized_means;
+      for(int i=0;i<16;++i)coordinates.T_world_imu(i/4,i%4)=m[i];
+      coordinates.stamp=evidence.gnss_stamp;
+    }
   } catch (const std::exception& error) {
     evidence.failure_reason=error.what();
     static std::atomic<std::uint64_t> failures{0}; const auto count=++failures;

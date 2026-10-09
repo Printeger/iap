@@ -127,4 +127,40 @@ gtsam::Vector DopplerFactor::evaluateError(
   return (gtsam::Vector(1) << residual).finished();
 }
 
+void DopplerFactor::bind_epoch_motion(gtsam::Key bias,
+    std::shared_ptr<const gtsam::PreintegratedImuMeasurements> motion) {
+  if(!motion || motion->deltaTij()<=0. || epoch_motion_)
+    throw std::invalid_argument("invalid epoch motion binding");
+  epoch_motion_=std::move(motion);keys_.push_back(bias);
+}
+gtsam::Vector DopplerFactor::unwhitenedError(const gtsam::Values& values,
+    gtsam::OptionalMatrixVecType H) const {
+  if(!epoch_motion_) return gtsam::NoiseModelFactor4<gtsam::Pose3,gtsam::Vector3,gtsam::Vector2,gtsam::Rot3>::unwhitenedError(values,H);
+  const auto predicted=epoch_motion_->predict(
+      gtsam::NavState(values.at<gtsam::Pose3>(keys_[0]),values.at<gtsam::Vector3>(keys_[1])),
+      values.at<gtsam::imuBias::ConstantBias>(keys_[4]));
+  auto clock=values.at<gtsam::Vector2>(keys_[2]);
+  clock(0)+=epoch_motion_->deltaTij()*clock(1);
+  const auto error=evaluateError(predicted.pose(),predicted.velocity(),clock,values.at<gtsam::Rot3>(keys_[3]));
+  if(H) {
+    H->resize(keys_.size());
+    gtsam::Values inputs;for(const auto key:keys_)inputs.insert(key,values.at(key));
+    // Differentiate the composed measurement on each actual GTSAM manifold.
+    // Includes velocity, bias, clock drift, lever rotation and E/R cross terms.
+    for(std::size_t i=0;i<keys_.size();++i) {
+      const auto& value=values.at(keys_[i]);
+      (*H)[i].resize(1,value.dim());
+      for(std::size_t j=0;j<value.dim();++j) {
+        gtsam::Vector d=gtsam::Vector::Zero(value.dim());d(j)=1e-5;
+        gtsam::VectorValues delta;
+        for(const auto& kv:inputs)delta.insert(kv.key,gtsam::Vector::Zero(kv.value.dim()));
+        delta.at(keys_[i])=d;const auto plus=inputs.retract(delta);
+        delta.at(keys_[i])=-d;const auto minus=inputs.retract(delta);
+        (*H)[i].col(j)=(unwhitenedError(plus)-unwhitenedError(minus))/(2e-5);
+      }
+    }
+  }
+  return error;
+}
+
 }  // namespace iap

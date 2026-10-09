@@ -208,7 +208,12 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o<<",\"keys\":[";for(std::size_t i=0;i<state.keys.size();++i){if(i)o<<',';o<<state.keys[i];}o<<']';
   values("tangent_dimensions",state.tangent_dimensions);values("mean_dimensions",state.mean_dimensions);
   values("optimized_means",state.optimized_means);values("linearization_means",state.linearization_means);
-  values("joint_covariance_row_major",state.joint_covariance_row_major);o<<'}';
+  values("joint_covariance_row_major",state.joint_covariance_row_major);
+  values("propagated_optimized_means",state.propagated_optimized_means);
+  values("propagated_linearization_means",state.propagated_linearization_means);
+  values("propagated_joint_covariance",state.propagated_joint_covariance);
+  values("propagation_transition",state.propagation_transition);values("propagation_noise",state.propagation_noise);
+  values("imu_measurements",state.imu_measurements);values("imu_noise",state.imu_noise);values("imu_bias_hat",state.imu_bias_hat);o<<'}';
   if(in.occupancy) {
     const auto& e=*in.occupancy;
     o<<",\"frame_id\":"<<std::quoted(e.frame_id)<<",\"geometry_id\":"<<std::quoted(e.geometry_id)<<",\"generation\":"<<e.generation;

@@ -25,7 +25,7 @@ int main(int argc,char** argv) {
     std::ifstream file(argv[1],std::ios::binary);std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
     if(!file || bytes.empty())throw std::invalid_argument("input payload unavailable");
     auto in=ego_planner::decodePredictionInput(bytes);const auto e=in.occupancy;
-    if(!e || !e->cells || in.recording_codec_version!=8)throw std::invalid_argument("complete v8 frozen input required");
+    if(!e || !e->cells || (in.recording_codec_version<8 || in.recording_codec_version>9))throw std::invalid_argument("complete v8/v9 frozen input required");
     iap::sim::ForkedForestConfig geometry;double width,z;const double reserve=.5*e->resolution_m,taper=.5;
     GridMotionContext motion;GridPlanningRiskPolicy policy;Point task_goal;
     if(!(std::cin>>geometry.fork_x_min_m>>geometry.fork_length_m>>geometry.low_risk_amplitude_m

@@ -30,6 +30,7 @@
 #include <iap/gnss/gnss_handler.hpp>
 #include <iap/gnss/clock_between_factor.hpp>
 #include <iap/util/extension_module_ros2.hpp>
+#include <iap/common/imu_integration.hpp>
 
 namespace iap {
 
@@ -105,6 +106,10 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::shared_ptr<spdlog::logger> logger_;
 
   std::unique_ptr<GnssHandler> gnss_handler_;
+  glim::IMUIntegration epoch_imu_;
+  std::mutex epoch_imu_mutex_;
+  std::shared_ptr<const gtsam::PreintegratedImuMeasurements> last_epoch_motion_;
+  std::vector<double> last_epoch_imu_samples_;
 
   // Current frame tracking (set by on_new_frame callback)
   std::atomic<long>     last_frame_id_{-1};

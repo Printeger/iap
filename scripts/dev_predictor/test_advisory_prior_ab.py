@@ -11,6 +11,7 @@ from unittest.mock import patch
 import numpy as np
 import advisory_prior_ab_validation as ab
 import advisory_staged_report as staged
+from fusion_scientific_audit import position_reference
 
 parser=argparse.ArgumentParser()
 parser.add_argument("--binary",required=True)
@@ -80,9 +81,21 @@ class AdvisoryPriorABTest(unittest.TestCase):
                     a=np.asarray(point["gnss"]["row_major"]).reshape(3,3)
                     b=np.asarray(point["lidar"]["row_major"]).reshape(3,3)
                     total=np.asarray(point["fused_information"]["row_major"]).reshape(3,3)
-                    np.testing.assert_allclose(total,a+b,atol=1e-9,rtol=1e-12)
+                    # Conditional p-p blocks a,b cannot be added as position
+                    # marginals. Independently form measurement square roots
+                    # from the shared joint state, then SVD-project attitude.
+                    g=np.asarray(point["gnss_pose_information"]["row_major"]).reshape(6,6)
+                    l=np.asarray(point["lidar_pose_information"]["row_major"]).reshape(6,6)
+                    joint=np.asarray(point["joint_pose_information"]["row_major"]).reshape(6,6)
+                    self.assertEqual(point["cross_source_noise_inflation"],2.)
+                    np.testing.assert_allclose(joint,(g+l)/2,atol=1e-9,rtol=1e-12)
+                    values,vectors=np.linalg.eigh(joint)
+                    measurement=np.sqrt(np.maximum(values,0))[:,None]*vectors.T
+                    np.testing.assert_allclose(total,position_reference(measurement),atol=1e-8,rtol=1e-9)
                     covariance=np.asarray(point["covariance"]["row_major"]).reshape(3,3)
-                    np.testing.assert_allclose((total+np.eye(3)*point["fusion_epsilon"])@covariance,np.eye(3),atol=1e-8)
+                    self.assertFalse(point["official_covariance_regularized"])
+                    self.assertTrue(point["epsilon_diagnostic_only"])
+                    np.testing.assert_allclose(total@covariance,np.eye(3),atol=1e-8)
 
     def test_weak_directions_and_regularization_are_exported(self):
         weak=self.matrices["off"]["weak_lidar_only"][0]

@@ -3,6 +3,7 @@
 
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
+#include <gtsam/navigation/ImuFactor.h>
 #include <Eigen/Core>
 #include <vector>
 
@@ -72,6 +73,10 @@ class PseudorangeFactor
   char   constellation() const { return constellation_; }
   double elevation()     const { return elevation_; }
   double pr_meas()       const { return pr_meas_; }
+  void bind_epoch_motion(gtsam::Key velocity, gtsam::Key bias,
+                         std::shared_ptr<const gtsam::PreintegratedImuMeasurements> motion);
+  gtsam::Vector unwhitenedError(const gtsam::Values& values,
+      gtsam::OptionalMatrixVecType H = nullptr) const override;
 
   /// Evaluate residual (and optional Jacobians).
   gtsam::Vector evaluateError(const gtsam::Pose3&    pose,
@@ -84,6 +89,7 @@ class PseudorangeFactor
                                gtsam::OptionalMatrixType H_rot     = nullptr) const override;
 
  private:
+  std::shared_ptr<const gtsam::PreintegratedImuMeasurements> epoch_motion_;
   double              pr_meas_;      ///< pseudorange measurement [m]
   Eigen::Vector3d     sat_pos_;      ///< satellite ECEF position [m]
   double              tgd_;          ///< group delay [s]

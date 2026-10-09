@@ -47,7 +47,7 @@ GridRiskContext makeRiskPrediction(const PredictionInput& input,
 }
 iap::PredictorQueryInput frozenPredictionQuery(const PredictionInput& input, const Eigen::Vector3d& center) {
   iap::PredictorQueryInput query(center,input.integrity,input.reference_time_s,0.,
-                               input.occupancy->frame_id,input.reference_time_s);
+                               input.occupancy->frame_id,std::max(input.integrity.stamp,input.reference_time_s));
   query.lidar_support_stamp_s=input.occupancy->cloud_stamp_s;
   query.lidar_support_max_age_s=input.validity_s;
   // A non-finite physical support time explicitly rejects that source.

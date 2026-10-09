@@ -1674,7 +1674,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto calibrated=input; calibrated.params.gnss.measurement_noise_scale=2.3;
   calibrated.params.lidar.fim_params.fim_support_voxel_m=.4;
   const auto roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(calibrated));
-  EXPECT_EQ(roundtrip.recording_codec_version,8u);
+  EXPECT_EQ(roundtrip.recording_codec_version,9u);
   EXPECT_DOUBLE_EQ(roundtrip.params.gnss.measurement_noise_scale,2.3);
   EXPECT_DOUBLE_EQ(roundtrip.params.lidar.fim_params.fim_support_voxel_m,.4);
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(calibrated));
@@ -1700,7 +1700,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   std::string fault_rejection;
   EXPECT_FALSE(ego_planner::makeRiskPrediction(fault_roundtrip,{},&fault_rejection).predict);
   EXPECT_EQ(fault_rejection,"unsupported_gnss_fault_model");
-  EXPECT_EQ(input.recording_codec_version,8u);
+  EXPECT_EQ(input.recording_codec_version,9u);
   auto state_input=input;
   auto& state=state_input.integrity.postopt_evidence;
   state.update_sequence=51;state.frame_id=17;state.state_stamp=9.95;state.gnss_stamp=10.;
@@ -1709,10 +1709,20 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   state.optimized_means={1.,2.,3.,4.};state.linearization_means={.9,2.,2.9,4.};
   state.joint_covariance_row_major={4.09,0,4,0,0,.0425,0,.04,4,0,4,0,0,.04,0,.04};
   state.optimized_valid=state.covariance_valid=true;state.failure_reason.clear();
+  state.propagation="IMU_TO_GNSS_EPOCH";state.propagated_optimized_means={5.,6.};
+  state.propagated_linearization_means={4.9,6.};state.propagated_joint_covariance={2.,0.,0.,3.};
+  state.propagation_transition={1.,.05,0.,1.};state.propagation_noise={.01,0.,0.,.02};
+  state.imu_measurements={9.95,0.,0.,9.81,0.,0.,0.,10.,0.,0.,9.81,0.,0.,0.};
+  state.imu_noise={.05,.02,.001};state.imu_bias_hat={0.,0.,0.,0.,0.,0.};
   auto state_copy=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(state_input));
   EXPECT_EQ(state_copy.integrity.postopt_evidence.linearization_means,state.linearization_means);
   EXPECT_EQ(state_copy.integrity.postopt_evidence.joint_covariance_row_major,state.joint_covariance_row_major);
   EXPECT_DOUBLE_EQ(state_copy.integrity.postopt_evidence.state_stamp,9.95);
+  EXPECT_EQ(state_copy.integrity.postopt_evidence.imu_measurements,state.imu_measurements);
+  EXPECT_EQ(state_copy.integrity.postopt_evidence.propagated_joint_covariance,state.propagated_joint_covariance);
+  state_copy.integrity.postopt_evidence.propagation_noise[0]=.03;
+  EXPECT_NE(ego_planner::predictionInputIdentity(state_copy),ego_planner::predictionInputIdentity(state_input));
+  state_copy=state_input;
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(state_input));
   state_copy.integrity.postopt_evidence.joint_covariance_row_major[2]=3.9;
   EXPECT_NE(ego_planner::predictionInputIdentity(state_copy),ego_planner::predictionInputIdentity(state_input));

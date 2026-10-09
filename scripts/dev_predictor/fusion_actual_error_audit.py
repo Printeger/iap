@@ -106,7 +106,8 @@ def main():
             try:
                 coordinate = audit(meta)
                 stamp = meta['pose_stamp']
-                matching = [r for r in glio if abs(float(r['stamp'])-stamp) <= 1e-6]
+                original_stamp=meta['postopt_evidence']['state_stamp']
+                matching = [r for r in glio if abs(float(r['stamp'])-original_stamp) <= 1e-6]
                 if not matching:
                     raise ValueError('raw_GLIO_state_identity_unmatched')
                 world = np.array(meta['coordinates']['T_world_imu']).reshape(4, 4)
@@ -114,7 +115,7 @@ def main():
                 # Recorder subscribes /drone_0_visual_slam/odom, whose producer
                 # already applies T_map_world. Do not apply that transform twice.
                 if not any(r['frame'] == 'map' and np.allclose(
-                        [float(r[k]) for k in 'xyz'], (transform@world)[:3, 3],
+                        [float(r[k]) for k in 'xyz'], (transform@np.array(meta['postopt_evidence']['optimized_means'][:16]).reshape(4,4))[:3, 3],
                         atol=1e-8, rtol=0) for r in matching):
                     raise ValueError('recorded_GLIO_prediction_map_pose_mismatch')
                 if not np.allclose((transform@world)[:3, 3], meta['position'], atol=1e-8, rtol=0):
@@ -134,7 +135,11 @@ def main():
                             reference_time_s=meta['reference_time_s'], gnss_stamp_s=meta['gnss_stamp'],
                             reference_pose_delta_s=meta['reference_time_s']-stamp,
                             state_epoch_delta_s=stamp-meta['gnss_stamp'],
-                            reference_time_qualified=coordinate['calibration_time_qualified'],
+                            reference_time_qualified=coordinate['calibration_time_qualified'] and coordinate['postopt_evidence'].get('time_propagation_qualified',False),
+                            original_state_stamp_s=original_stamp,
+                            moving=float(np.linalg.norm(meta['postopt_evidence']['optimized_means'][16:19]))>.1,
+                            velocity_mps=meta['postopt_evidence']['optimized_means'][16:19],
+                            time_evidence=coordinate['postopt_evidence'].get('motion_reference'),
                             error_h_m=float(np.linalg.norm(difference[:2])), error_v_m=float(abs(difference[2])),
                             error_xyz_m=difference.tolist(), predictor_valid=row['valid']=='1',
                             hpl_m=float(row['fused_hpl']) if row['fused_hpl'] else None,
@@ -143,7 +148,17 @@ def main():
                             cv_no_process_noise_covariance_diagnostic_m2=cv_no_q.tolist(),
                             cv_mean_shift_diagnostic_m=shift.tolist(),
                             map_up_enu_angle_deg=coordinate['map_up_enu_angle_deg'],
-                            reason='REFERENCE_STATE_PROPAGATION_NOISE_MAP_AND_FUSED_FAULTS_UNQUALIFIED')
+                            reason='UNCALIBRATED_MARGINAL_NOISE_MAP_AND_FUSED_FAULTS')
+                item['qualified']=bool(item['reference_time_qualified'] and item['predictor_valid'])
+                item['qualification_scope']='SAME_REFERENCE_CONDITIONAL_ERROR_PAIR'
+                item['empirical_bound_qualified']=False
+                if item['qualified']:item['reason']=''
+                else:item['reason']='REFERENCE_TIME_OR_PREDICTOR_UNAVAILABLE'
+                if meta['postopt_evidence']['propagation']=='IMU_TO_GNSS_EPOCH':
+                    ev=meta['postopt_evidence'];n=sum(ev['tangent_dimensions'])
+                    pp=np.array(ev['propagated_joint_covariance']).reshape(n,n)
+                    jt=np.zeros((3,n));jt[:,3:6]=transform[:3,:3]@np.array(ev['propagated_linearization_means'][:16]).reshape(4,4)[:3,:3]
+                    item['propagated_posterior_envelope_m2']=(jt@pp@jt.T).tolist()
             except ValueError as error:
                 item['reason'] = str(error)
             results.append(item)
@@ -153,6 +168,7 @@ def main():
     summary = {'identity': 'REAL_STATE_TIME_ERROR_DIAGNOSTIC', 'source_run': source.name,
                'requested': len(results), 'raw_state_pairs': len(paired),
                'reference_time_qualified': sum(r['reference_time_qualified'] for r in results),
+               'moving_reference_time_pairs':sum(r.get('moving',False) and r['qualified'] for r in results),
                'metre_qualified': 0, 'independent_runs': 1, 'formal_calibration_runs': 0,
                'formal_validation_runs': 0, 'posterior_used_as_predictor_prior': False,
                'position_error_quantiles': {axis: np.quantile([r['error_'+axis+'_m'] for r in paired], [.5, .95, 1.]).tolist()
@@ -171,12 +187,12 @@ def main():
         t = np.array([r['pose_stamp_s'] for r in paired]);t -= t.min()
         for axis, label in zip(axes[:2], ('h', 'v')):
             axis.plot(t, [r['error_'+label+'_m'] for r in paired], 'o-', label='actual state-time error')
-            axis.plot(t, [r[label+'pl_m'] for r in paired], 'x--', label='different-reference conditional model')
+            axis.plot(t, [r[label+'pl_m'] for r in paired], 'x--', label='conditional model (time gates reported per point)')
             axis.set_ylabel(label.upper()+' (m)');axis.set_xlabel('original state time offset (s)');axis.legend()
         axes[2].plot(t, [r['reference_pose_delta_s'] for r in paired], 'o', label='reference - state')
         axes[2].plot(t, [r['state_epoch_delta_s'] for r in paired], 'x', label='state - GNSS epoch')
         axes[2].axhline(.05, color='red', ls=':');axes[2].set_ylabel('Original timestamp gap (s)');axes[2].legend()
-    fig.suptitle('Real state-time pairs; different-reference curves are diagnostics, no coverage qualification')
+    fig.suptitle('Actual errors and conditional predictions; time gates preserved, no calibrated coverage')
     fig.tight_layout();fig.savefig(out/'actual_errors_and_time.png', dpi=150);plt.close(fig)
     write_subordinate_manifest(run, 'fusion_error_'+args.label, {
         'source_run': str(source), 'source_revision': primary['source']['git_commit'],

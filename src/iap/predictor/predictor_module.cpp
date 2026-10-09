@@ -498,7 +498,15 @@ PredictorAdmission PredictorModule::admission(const PredictorQueryInput& input) 
     out.gnss_reason=s.coordinates.rejection();
     if(out.gnss_reason.empty() &&
        (s.coordinates.frame_id!=s.current.estimation_frame_id ||
-        std::abs(s.coordinates.stamp-s.current.stamp)>1e-6 ||
+        std::abs(s.coordinates.stamp-(s.postopt_evidence.propagation=="IMU_TO_GNSS_EPOCH"
+            ? s.postopt_evidence.gnss_stamp : s.current.stamp))>1e-6 ||
+        (s.postopt_evidence.propagation=="IMU_TO_GNSS_EPOCH" &&
+         (!s.postopt_evidence.optimized_valid || !s.postopt_evidence.covariance_valid ||
+          std::abs(s.postopt_evidence.state_stamp-s.current.stamp)>1e-6 ||
+          s.postopt_evidence.gnss_stamp<=s.postopt_evidence.state_stamp ||
+          s.postopt_evidence.gnss_stamp-s.postopt_evidence.state_stamp>.1 ||
+          s.postopt_evidence.propagated_optimized_means.empty() ||
+          s.postopt_evidence.propagated_joint_covariance.empty())) ||
         std::abs(s.coordinates.stamp-s.pose_stamp)>1e-6 ||
         ((s.coordinates.T_map_world*s.coordinates.T_world_imu).topRightCorner<3,1>()-s.p_wb).norm()>1e-6 ||
         ((s.coordinates.T_map_world*s.coordinates.T_world_imu).topLeftCorner<3,3>()-s.q_wb.normalized().toRotationMatrix()).norm()>1e-6 ||

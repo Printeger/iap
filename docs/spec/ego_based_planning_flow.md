@@ -2075,3 +2075,45 @@ source admission, risk weights and online budgets retain their authorities.
 Regression `AdvisoryNumerics.SharedPoseEnvelopeDoesNotRewardSourceLoss`
 first failed on the old source-count policy (HPL 7.036 → 5 on source loss),
 then checks weakening, disappearance and recovery against `2/(1+strength)`.
+
+## GNSS acquisition-time synchronization (2026-10-09)
+
+The GNSS handler no longer binds a nonzero epoch/state interval without real
+IMU coverage. Production uses the existing GLIO IMU integration convention and
+sensor noise configuration, with forward intervals up to the unchanged 0.1 s
+factor window and complete bracketing (no gap over 20 ms). The composed PR and
+Doppler factors retain X/V/B and constellation clock dependence; residuals are
+computed at the original acquisition epoch, including clock drift. A common
+IMU error affects all scalar rows: its covariance is bounded by the row-count
+Cauchy diagonal envelope before adding measurement variance. Missing, backward,
+stale or incomplete IMU intervals do not create factors.
+
+The smoother finish retains original state stamp, GNSS stamp, optimized and
+linearization means, and the joint X/V/B/R/E/clock covariance. A separate
+propagated state at the GNSS epoch owns Predictor coordinates. Its transition
+retains every original joint cross term. Because this same IMU segment entered
+GNSS factors, the state/process cross covariance is unknown; the diagnostic
+posterior propagation therefore stores the conservative envelope
+`2 (F P F^T + Q)`, rather than claiming an independent process-noise sum.
+Bias and clock drift are held constant over this short propagation; unmodeled
+bias evolution, alignment, map and extrinsic errors remain unqualified. This
+posterior is a comparison only and is never added as Predictor information.
+
+The frozen spatial prediction reference is the propagated pose acquisition
+stamp. Capture/evaluation time remains separate and controls source freshness;
+execution odometry and Current Monitor stamps retain their original authority.
+Codec v9 stores the original and propagated means/covariances, F/Q, actual IMU
+samples, noise and bias linearization. Codec v8 historical input remains
+read-only and cannot acquire new propagation qualification through replay.
+Independent NumPy integration checks motion means and transitions; a discrete
+white-noise integral checks stationary IMU Q. Tests also retain the old
+1.6064 m error as a red witness and check missing/backward IMU rejection.
+
+Verification for the acquisition-time interface: all 32 core CTest targets,
+including the moving residual and independent discrete-Q checks, passed.
+The affected native Planner/export/codec regressions passed after repairing
+reference-versus-receipt freshness. The older prior A/B assertion incorrectly
+added conditional p-p blocks and epsilon as official information; it now checks
+the joint envelope, independent SVD nuisance projection and exact accepted
+covariance inverse. Existing repository-wide flake8, lint_cmake and uncrustify
+failures remain reported; they do not grant live acceptance.
