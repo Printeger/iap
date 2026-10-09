@@ -355,6 +355,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessReleaseCorridor
       return assessment;
     }
   }
+  assessment.completed=true;
   return assessment;
 }
 
@@ -447,7 +448,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     }
     const auto p=curve.evaluateDeBoorT(t);
     const auto cell=grid_map_->queryPlanningCell(p,0,now_s,planning_risk_policy_,motion,false,physical_context);
-    if(cell.execution_reason==GridExecutionReason::OUT_OF_MAP && assessment.executable()) {
+    if(cell.execution_reason==GridExecutionReason::OUT_OF_MAP && (assessment.execution_reason==GridExecutionReason::OK)) {
       assessment.execution_reason=cell.execution_reason; assessment.first_execution_time_s=t;
       assessment.first_execution_position=p; assessment.first_execution_cell=cell;
     }
@@ -482,7 +483,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       assessment.first_unobserved_position = p;
       assessment.first_unobserved_cell = cell;
     }
-    if (!cell.executable() && (assessment.executable() ||
+    if (!cell.executable() && ((assessment.execution_reason==GridExecutionReason::OK) ||
         (assessment.execution_reason==GridExecutionReason::OUT_OF_MAP && t<assessment.first_execution_time_s))) {
       assessment.execution_reason = cell.execution_reason;
       assessment.first_execution_time_s = t;
@@ -503,7 +504,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   }
   // Retain the immutable epoch for every rejected check, including repeated
   // reasons; first-kind disk export deduplication must not erase terminal proof.
-  if (capture_failure_map_ && !assessment.executable()) {
+  if (capture_failure_map_ && !(assessment.execution_reason==GridExecutionReason::OK)) {
     if (assessment.physical_epoch && assessment.physical_epoch->failure_evidence)
       assessment.failure_snapshot=assessment.physical_epoch->failure_evidence;
     else if (planning_view_ && physical_context==&planning_view_->physical_context)
@@ -514,6 +515,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
         assessment.failure_snapshot = std::make_shared<const GridMapFailureSnapshot>(*snapshot);
     }
   }
+  assessment.completed=true;
   return assessment;
 }
 
@@ -761,9 +763,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
     const auto count=static_cast<size_t>(std::ceil((end-from)/step));
     for(size_t i=0;i<=count;++i) positions.push_back(curve.evaluateDeBoorT(std::min(end,from+i*step)));
   };
-  const double old_end=pending_trajectory_ ?
-      pending_trajectory_->start_time_.seconds()-local_data_.start_time_.seconds() :
-      std::numeric_limits<double>::infinity();
+  const double old_end=std::numeric_limits<double>::infinity();
   collect(local_data_,old_end);
   if(pending_trajectory_) collect(*pending_trajectory_,std::numeric_limits<double>::infinity());
   const auto view=captureExecutionView(positions,now_s,true);

@@ -11,7 +11,7 @@
 | 阶段 | 当前真实状态 |
 |---|---|
 | D1 | 已迁移并定向验证：GridRouteCell/queryRouteCell 与 execute 分离；统一有限 Advisory 代价，A* 无 warning 拒绝／fallback 重搜；未知原目标保留路线身份，GuideIdentity 分开三个目标 |
-| D2 | 待迁移：正常局部目标允许非零末速，发布仍有直线停止空间授权；实际 spline、物理／motion／时效／接续检查已存在 |
+| D2 | 已迁移并定向验证：执行点／体素边查询截取连续前缀；新正常曲线实际 PVA 起点及零末 V/A；停止空间／非零末速授权退出；发布和监督检查完整 active 尾段；空检查默认不可执行 |
 | D3 | 待实现：一次执行连接恢复及必要观察、实际新证据收益、共享预算余量和一次质量修正 |
 | D4 | 尚未运行本轮原完整 ON；不得沿用历史现场作为本轮到达 |
 
@@ -33,8 +33,8 @@
 ## 当前主线与待迁移接口
 
 原 FSM → beginPlanningView 冻结地图／motion／risk 和预算 → LocalTarget 集合 →
-BsplineOptimizer::searchRecoveryGuide（同一个 A*，route 语义及有限软代价）→ guide 拟合／优化 →
-assessTrajectory → guide retention 硬门 → 最新实际曲线及相关 corridor → 原子提交 →
+BsplineOptimizer::searchRecoveryGuide（同一个 A*，route 语义及有限软代价）→ 连续执行前缀 → 静止末端 guide 拟合／优化 →
+assessTrajectory（completed 必须为真）→ guide retention 硬门（D3 待迁移） → 最新实际曲线及相关 corridor → 原子提交 →
 原 traj_server accepted/pending/active 反馈和 FSM 监督。
 
 迁移顺序 D1 → D2 → D3 → D4；D1 单独提交不代表未知路线获得执行许可。
@@ -61,3 +61,10 @@ D1 定向证据：route 未知保留 execute 拒绝且检查 known obstacle，�
 A* 唯一 warning 通路、较低风险路线选择和断连多目标共三项通过。
 原目标未知身份和原目标侧向越过两项真实 FSM 回归通过。
 尚未迁移的 D2/D3 不能作为新策略执行合格结论。
+
+D2 定向证据：非零起始 P/V/A 的未知尾部 guide 仅提交已观测前缀，
+mission/route/committed endpoint 分开，最终实际末 V/A 小于 1e-5；冷运行总量
+0.00402 s、优化 0.000713 s、候选检查 0.000122 s（合成 free-map，非现场性能保证）。
+真实 captured guide 拟合、retime 导数、采样间越界和撤销后的旧尾段拒绝检查通过。
+新 fixture 首次遗漏既有 swarm 初始化导致崩溃，补齐 fixture 初始化后定向通过。
+默认空检查不能放行；正常末速和直线停止空间已无在线授权调用。

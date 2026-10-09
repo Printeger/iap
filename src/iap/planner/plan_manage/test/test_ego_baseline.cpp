@@ -2984,8 +2984,8 @@ TEST(EgoBaseline, RealGuideFitUsesItsSampledTerminalApproachAndExactPva) {
   // Saved corrected production initialization, original frozen replay 20261007T144136Z_739.
   const Eigen::Vector3d nominal_terminal(.3006475512865261,.3294719681943509,.22596298829577421);
   const Eigen::Vector3d terminal=nominal_terminal.normalized();
-  EXPECT_GT(target.velocity.norm(),0.);
-  EXPECT_NEAR(target.velocity.normalized().dot(terminal),1.,1e-12);
+  EXPECT_EQ(target.velocity.norm(),0.);
+  EXPECT_EQ(target.acceleration.norm(),0.);
   ego_planner::UniformBspline curve(q,3,interval);
   auto derivative=curve.getDerivative(),second=derivative.getDerivative();
   for(const auto& boundary:std::vector<std::tuple<double,Eigen::Vector3d,Eigen::Vector3d,Eigen::Vector3d>>{
@@ -3201,4 +3201,33 @@ TEST(EgoBaseline, UnknownMissionGoalRetainsRouteIdentityWithoutExecutePermission
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::target(fsm).isApprox(goal,1e-9));
   EXPECT_EQ(manager->queryPlanningViewCell(goal).execution_reason,GridExecutionReason::ENVIRONMENT_UNOBSERVED);
   EXPECT_TRUE(manager->queryRouteViewCell(goal).routable());
+}
+
+TEST(EgoBaseline, UnknownGuideTailCommitsCheckedRestingPrefixWithSeparateGoalIdentities) {
+  auto node=makeNode(true,1.,false,false);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  const Eigen::Vector3d velocity(.12,0,0),acceleration(.02,0,0);
+  GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  for(double y=-.2;y<.2;y+=.1) GridMapTestAccess::clearObserved(*manager.grid_map_,{0,y,1});
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
+  const auto began=PlanningBudget::Clock::now();
+  ASSERT_TRUE(manager.reboundReplan(start,velocity,acceleration,goal,{1,0,0},true,false));
+  auto curve=manager.local_data_.position_traj_;auto vel=curve.getDerivative();auto acc=vel.getDerivative();
+  EXPECT_TRUE(manager.guideIdentity().mission_goal.isApprox(goal,1e-9));
+  EXPECT_TRUE(manager.guideIdentity().route_target.isApprox(goal,1e-9));
+  EXPECT_LT(manager.guideIdentity().committed_endpoint.x(),0.);
+  EXPECT_LT((vel.evaluateDeBoorT(0)-velocity).norm(),1e-5);
+  EXPECT_LT((acc.evaluateDeBoorT(0)-acceleration).norm(),1e-5);
+  EXPECT_LT(vel.evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
+  EXPECT_LT(acc.evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
+  EXPECT_TRUE(manager.assessTrajectory(curve,0,node->now().seconds()).executable());
+  EXPECT_FALSE(ego_planner::EGOPlannerManager::TrajectoryAssessment{}.executable());
+  const auto& timings=manager.planningTimings();
+  std::cout<<"STOP_PREFIX_COLD total_s="<<std::chrono::duration<double>(PlanningBudget::Clock::now()-began).count()
+      <<" backend_s="<<timings.backend_s<<" check_s="<<timings.final_checks_s<<std::endl;
 }

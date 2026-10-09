@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <cmath>
+#include <plan_env/raycast.h>
 #include <iap/util/run_log_manager.hpp>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
 
@@ -1056,6 +1057,50 @@ namespace ego_planner
     }
   }
 
+  EGOPlannerManager::ExecutablePrefix EGOPlannerManager::selectExecutablePrefix(
+      const std::vector<Eigen::Vector3d>& guide) const {
+    ExecutablePrefix prefix;
+    if(!planning_view_ || guide.empty()) return prefix;
+    const auto& epoch=*planning_view_->physical;
+    const auto check=[&](const Eigen::Vector3d& point) {
+      if(planning_budget_->expired()) { prefix.budget_exhausted=true; return false; }
+      const auto cell=queryPlanningViewCell(point,0.,false);
+      if(!cell.executable()) {
+        prefix.blocked_reason=cell.execution_reason;prefix.blocked_position=point;return false;
+      }
+      return true;
+    };
+    if(!check(guide.front())) return prefix;
+    prefix.points.push_back(guide.front());
+    for(size_t i=1;i<guide.size();++i) {
+      const auto& from=guide[i-1];const auto& to=guide[i];
+      // Reuse the grid ray traversal used by A*. Endpoint voxels use exact
+      // endpoints; all interior cells require execution observation/clearance.
+      RayCaster ray;Eigen::Vector3d voxel;
+      const auto begin=(from-epoch.lattice_origin)/epoch.resolution_m;
+      const auto end=(to-epoch.lattice_origin)/epoch.resolution_m;
+      const Eigen::Vector3i first=begin.array().floor().cast<int>();
+      const Eigen::Vector3i last=end.array().floor().cast<int>();
+      if(ray.setInput(begin,end)) {
+        bool more;
+        do {
+          more=ray.step(voxel);
+          const Eigen::Vector3i index=voxel.cast<int>();
+          if(index!=first && index!=last && !check(epoch.lattice_origin+
+              (voxel.array()+.5).matrix()*epoch.resolution_m)) return prefix;
+        } while(more);
+      }
+      const int count=std::max(1,int(std::ceil((to-from).norm()/(epoch.resolution_m*.5))));
+      for(int j=1;j<=count;++j) {
+        const Eigen::Vector3d point=from+(to-from)*(double(j)/count);
+        if(!check(point)) return prefix;
+        const double length=(point-prefix.points.back()).norm();
+        prefix.length_m+=length;prefix.points.push_back(point);
+      }
+    }
+    return prefix;
+  }
+
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
       Eigen::Vector3d start_acc, Eigen::Vector3d target_pt, Eigen::Vector3d target_vel,
       bool /* polynomial_init */, bool /* random_polynomial */) {
@@ -1159,7 +1204,6 @@ namespace ego_planner
     double interval=std::max(.05,pp_.ctrl_pt_dist/std::max(.1,pp_.max_vel_)*1.5);
     const double nominal_guide_interval=interval; // Fresh-guide time owner, independent of fit/retime outputs.
     std::vector<Eigen::Vector3d> points;
-    if((target_pt-start_pt).norm()<.2) return fail(PlanFailure::Target);
     Eigen::MatrixXd control;
     const auto bind_boundaries=[&]() {
       UniformBspline::enforceBoundaryStates(control,interval,start_pt,start_vel,start_acc,
@@ -1172,35 +1216,32 @@ namespace ego_planner
     optimizer.initializeFromGuide(Eigen::MatrixXd::Zero(3,7));
     if(!optimizer.searchRecoveryGuide()) return fail(PlanFailure::Search);
     const auto initialize_guide=[&]() {
-      const auto& guide=optimizer.recoveryGuide();
-      if(guide.size()<2) return false;
+      const auto prefix=selectExecutablePrefix(optimizer.recoveryGuide());
+      guide_identity_.route_target=optimizer.recoveryGuide().back();
+      if(prefix.budget_exhausted) { last_plan_failure_=PlanFailure::Budget;return false; }
+      const bool final=prefix.points.size()>1 &&
+          (prefix.points.back()-guide_identity_.mission_goal).norm()<1e-6;
+      if(prefix.points.size()<2 || (!final && prefix.length_m<std::max(.2,2*grid_map_->getResolution()))) {
+        last_plan_failure_=prefix.blocked_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ?
+            PlanFailure::ObservationBlocked : PlanFailure::Target;
+        RCLCPP_INFO(node_->get_logger(),"Guide prefix blocked: reason=%s length=%.3f (no claim of observed disconnection)",
+            gridExecutionReasonName(prefix.blocked_reason),prefix.length_m);return false;
+      }
       const auto index=optimizer.a_star_->lastResult().selected_goal;
       if(index<target_indices.size()) selected=planning_targets_[target_indices[index]];
-      selected.position=guide.back();
-      guide_identity_.route_target=selected.position;
+      selected.position=prefix.points.back();selected.velocity.setZero();selected.acceleration.setZero();
+      guide_identity_.s_end=prefix.length_m;
+      guide_identity_.committed_endpoint=selected.position;
+      optimizer.setGuidePath(prefix.points);
+      const auto& guide=optimizer.recoveryGuide();
       optimizer.setPlanningEndpoints(start_pt,selected.position);
       optimizer.setPlanningGoals(goals,target_region_center);
-      const bool terminal_stop=!global_data_.global_traj_.getTimes().empty() ?
-          (selected.position-global_data_.getPosition(global_data_.global_duration_)).norm()<1e-6 :
-          selected.velocity.norm()<1e-9;
-      if(!fitGuideCurve(guide,start_vel,start_acc,terminal_stop,selected,nominal_guide_interval,interval,points,control)) return false;
+      if(!fitGuideCurve(guide,start_vel,start_acc,true,selected,nominal_guide_interval,interval,points,control)) return false;
       recordCurveStage("guide_fit",control,interval,selected,NAN,nullptr,false,nominal_guide_interval);
       bind_boundaries(); recordCurveStage("guide_bound",control,interval,selected);
       optimizer.initializeFromGuide(control); return true;
     };
-    if(optimizer.needsGuideReinitialization() && !initialize_guide()) return fail(PlanFailure::Search);
-    const auto shorten_target=[&]() {
-      if(target_indices.size()<2 || !planning_budget_->tryRepair(PlanningBudget::Repair::TargetShortening)) return false;
-      const auto failed=std::find_if(target_indices.begin(),target_indices.end(),[&](size_t i) {
-        return planning_targets_[i].position.isApprox(selected.position,1e-8);
-      });
-      if(failed==target_indices.end()) return false;
-      target_indices.erase(failed); goals.clear();
-      for(size_t i:target_indices) goals.push_back(planning_targets_[i].position);
-      optimizer.setPlanningGoals(goals,target_region_center);
-      // Existing ordered forward targets, one guide at a time, shared budget.
-      return optimizer.searchRecoveryGuide() && initialize_guide();
-    };
+    if(optimizer.needsGuideReinitialization() && !initialize_guide()) return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Curve : last_plan_failure_);
     TrajectoryAssessment assessment;
     UniformBspline curve;
     for(;;) {
@@ -1216,7 +1257,6 @@ namespace ego_planner
       const bool optimized=optimizer.BsplineOptimizeTrajRebound(control,interval);
       recordCurveStage(optimized ? "optimized" : "optimized_failed",control,interval,selected,NAN,nullptr,true);
       if(!optimized) {
-        if(shorten_target()) continue;
         return fail(PlanFailure::Curve);
       }
       planning_timings_.backend_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-backend_start).count();
@@ -1255,6 +1295,14 @@ namespace ego_planner
         bind_boundaries(); recordCurveStage("refined_bound",control,interval,selected);
       }
       if(!feasible) return fail(PlanFailure::Curve);
+      auto velocity=curve.getDerivative();auto acceleration=velocity.getDerivative();
+      const double duration=curve.getTimeSum();
+      if((curve.evaluateDeBoorT(0)-start_pt).norm()>1e-5 ||
+         (velocity.evaluateDeBoorT(0)-start_vel).norm()>1e-5 ||
+         (acceleration.evaluateDeBoorT(0)-start_acc).norm()>1e-5 ||
+         (curve.evaluateDeBoorT(duration)-selected.position).norm()>1e-5 ||
+         velocity.evaluateDeBoorT(duration).norm()>1e-5 ||
+         acceleration.evaluateDeBoorT(duration).norm()>1e-5) return fail(PlanFailure::Curve);
       const auto check_start=PlanningBudget::Clock::now();
       assessment=assessTrajectory(curve,planning_view_->risk_version,planning_view_->time_s,
           false,0,std::numeric_limits<double>::infinity(),&planning_view_->physical_context);
@@ -1267,9 +1315,6 @@ namespace ego_planner
       if(capture_failure_map_) failed_candidate_curve_=curve;
       if(assessment.budget_exhausted) return fail(PlanFailure::Budget);
       if(!assessment.guide_retention.checked) return fail(PlanFailure::Curve);
-      // Terminal speed is rechecked after optimization against the same input.
-      if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6)
-        return fail(PlanFailure::Target);
       const bool advisory_violation=advisory_guidance_enabled_ && assessment.advisory_avoid_samples && !optimizer.advisoryFallbackUsed();
       const bool route_loss=assessment.guide_retention.route_lost ||
           (advisory_guidance_enabled_ && assessment.guide_retention.risk_preference_lost);
@@ -1286,7 +1331,6 @@ namespace ego_planner
       } else {
         const auto correction=correctCurveCandidate(optimizer,control,interval,assessment);
         if(correction!=PlanFailure::None) {
-          if(correction==PlanFailure::Curve && shorten_target()) continue;
           return fail(correction);
         }
       }
@@ -1312,15 +1356,14 @@ namespace ego_planner
       if(!release.executable() || !release.physical_epoch) {
         return fail(PlanFailure::Release);
       }
-      if(selected.velocity.norm()>terminalSpeedLimit(selected.position,selected.velocity)+1e-6) return fail(PlanFailure::Target);
       {
         // One latest corridor owns all evidence needed through the switch and
-        // terminal stopping space. Ordinary map updates outside it are allowed.
+        // both switch and cancellation branches. Remote map updates are allowed.
         std::vector<ReleasePathSample> samples;
         const double spacing=std::min(.01,grid_map_->getResolution()/(4*std::max(.1,pp_.max_vel_)));
         if(connection_time_) {
           const double from=std::max(0.0,now-local_data_.start_time_.seconds());
-          const double to=connection_time_->seconds()-local_data_.start_time_.seconds();
+          const double to=local_data_.duration_; // Complete old tail also covers CANCEL_PENDING.
           auto old=local_data_.position_traj_;
           for(double t=from;t<=to+spacing;t+=spacing) {
             if(planning_budget_->expired()) return fail(PlanFailure::Budget);
@@ -1331,13 +1374,6 @@ namespace ego_planner
         for(double t=0;t<=duration+spacing;t+=spacing) {
           if(planning_budget_->expired()) return fail(PlanFailure::Budget);
           samples.push_back({curve.evaluateDeBoorT(std::min(t,duration)),"actual_curve",std::min(t,duration)});
-        }
-        if(selected.velocity.norm()>1e-9) {
-          const double stopping=selected.velocity.squaredNorm()/(2*std::max(.1,pp_.max_acc_))+2*grid_map_->getResolution();
-          for(double d=0;d<=stopping+grid_map_->getResolution()*.5;d+=grid_map_->getResolution()*.5) {
-            if(planning_budget_->expired()) return fail(PlanFailure::Budget);
-            samples.push_back({selected.position+selected.velocity.normalized()*std::min(d,stopping),"terminal_stopping_space",std::min(d,stopping)});
-          }
         }
         release=assessReleaseCorridor(samples,now);
         recordCurveStage("release_corridor_checked",control,interval,selected,NAN,&release,false,std::nullopt,false);
@@ -1403,7 +1439,7 @@ namespace ego_planner
   }
 
   bool EGOPlannerManager::fitGuideCurve(const std::vector<Eigen::Vector3d>& guide,
-      const Eigen::Vector3d& start_vel,const Eigen::Vector3d& start_acc,bool terminal_stop,
+      const Eigen::Vector3d& start_vel,const Eigen::Vector3d& start_acc,bool /* terminal_stop */,
       LocalTarget& selected,double nominal_interval,double& interval,
       std::vector<Eigen::Vector3d>& points,Eigen::MatrixXd& control) {
     if(!std::isfinite(nominal_interval) || nominal_interval<=0 || guide.size()<2 || !std::isfinite(pp_.ctrl_pt_dist) || pp_.ctrl_pt_dist<=0 ||
@@ -1427,17 +1463,7 @@ namespace ego_planner
     };
     if(!sample_guide(count)) return false;
     selected.velocity.setZero();
-    if(!terminal_stop) {
-      // The nominal guide sampling owns the terminal approach window.
-      // A tiny lattice-to-target connector can point backwards or vertically;
-      // treating that connector as a full-speed approach contradicts the
-      // resampled curve and forces a loop when the P/V/A triplets are bound.
-      const Eigen::Vector3d tangent=points.back()-points[points.size()-2];
-      if(tangent.norm()>1e-9) {
-        const Eigen::Vector3d direction=tangent.normalized();
-        selected.velocity=direction*terminalSpeedLimit(selected.position,direction*pp_.max_vel_);
-      }
-    }
+    selected.acceleration.setZero();
     interval=std::max(nominal_interval,1.5*arc.back()/(std::max(.1,pp_.max_vel_)*(count-1)));
     // The nominal sampling still owns terminal approach and total duration.
     // Refine the initialization mesh to the physical guide's voxel scale:

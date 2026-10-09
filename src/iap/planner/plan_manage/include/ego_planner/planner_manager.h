@@ -89,6 +89,8 @@ namespace ego_planner
       std::string physical_check_scope = "actual_curve";
       std::string first_execution_section;
       double first_execution_stopping_distance_m = std::numeric_limits<double>::quiet_NaN();
+      bool completed = false;
+      const char* check_model = "existing_sampled_clearance";
       bool budget_exhausted = false;
       GridExecutionReason execution_reason = GridExecutionReason::OK;
       double first_execution_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -119,7 +121,7 @@ namespace ego_planner
       uint8_t evaluated_motion_quality = 0;
       double evaluated_motion_error_proxy_m =
           std::numeric_limits<double>::quiet_NaN();
-      bool executable() const { return !budget_exhausted && execution_reason == GridExecutionReason::OK; }
+      bool executable() const { return completed && !budget_exhausted && execution_reason == GridExecutionReason::OK; }
     };
     GridMotionContext currentMotionContext(bool allow_bridged = false) const;
     TrajectoryAssessment assessTrajectory(const UniformBspline& trajectory,
@@ -138,6 +140,14 @@ namespace ego_planner
         const TrajectoryAssessment& assessment,const Eigen::Vector3d& position) const;
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
+    struct ExecutablePrefix {
+      std::vector<Eigen::Vector3d> points;
+      double length_m=0.;
+      GridExecutionReason blocked_reason=GridExecutionReason::OK;
+      Eigen::Vector3d blocked_position=Eigen::Vector3d::Constant(NAN);
+      bool budget_exhausted=false;
+    };
+    ExecutablePrefix selectExecutablePrefix(const std::vector<Eigen::Vector3d>& guide) const;
     GridRouteCell queryRouteViewCell(const Eigen::Vector3d& position,
                                     double clearance_reserve_m = 0.) const;
     struct GuideIdentity {
@@ -164,7 +174,7 @@ namespace ego_planner
         double command_time_s = -std::numeric_limits<double>::infinity());
     bool publicationStillTimely() const;
     void discardUnpublishedTrajectory(const LocalTrajData& predecessor);
-    enum class PlanFailure { None, Budget, Target, Search, Curve, Release, Connection };
+    enum class PlanFailure { None, Budget, Target, Search, Curve, Release, Connection, ObservationBlocked };
     PlanFailure lastPlanFailure() const { return last_plan_failure_; }
     void recordTargetSelectionFailure(const Eigen::Vector3d& start, const Eigen::Vector3d& velocity,
         const Eigen::Vector3d& acceleration, const Eigen::Vector3d& requested_target);
