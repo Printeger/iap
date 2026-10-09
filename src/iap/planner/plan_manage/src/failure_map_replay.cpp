@@ -2,6 +2,7 @@
 #include <plan_env/grid_map.h>
 #include <ego_planner/prediction_input.h>
 #include <ego_planner/risk_display.h>
+#include <bspline_opt/bspline_optimizer.h>
 
 #include <algorithm>
 #include <chrono>
@@ -282,6 +283,7 @@ void pointJson(std::ostream& out, const Point& p) {
 // Production multi-terminal search, unlike component attribution (Dijkstra).
 // Missing saved PL is UNCOMPUTED; this mode never fabricates a low-risk field.
 void planningSearch(const Input& in, const std::string& mode, const char* risk_path, const char* goal_indices = nullptr) {
+  const bool recovery=std::getenv("IAP_REPLAY_RECOVERY") && std::string(std::getenv("IAP_REPLAY_RECOVERY"))=="1";
   const bool profile=!(std::getenv("IAP_REPLAY_PROFILE") && std::string(std::getenv("IAP_REPLAY_PROFILE"))=="0");
   const bool fallback=std::getenv("IAP_REPLAY_ADVISORY_FALLBACK") &&
       std::string(std::getenv("IAP_REPLAY_ADVISORY_FALLBACK"))=="1";
@@ -380,7 +382,8 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
     if(cell.executable()) cell.advisory=advisory(p);
     return cell;
   };
-  AStar search; search.initGridMap(map,in.pool); search.setFrozenEpoch(epoch);
+  auto search_owner=std::make_shared<AStar>();auto& search=*search_owner;
+  search.initGridMap(map,in.pool); search.setFrozenEpoch(epoch);
   search.setTaskGoal(task_goal); search.setPerformanceDiagnostics(profile);
   search.setPlanningQuery(query,fallback); search.setAdvisoryQuery(advisory);
   double warm_s=0.;bool warm_found=false;
@@ -394,7 +397,19 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
   const auto gnss_before=prediction_stats->gnss_advisory_duration_ns;
   const auto lidar_before=prediction_stats->lidar_advisory_duration_ns;
   const auto fusion_before=prediction_stats->fusion_advisory_duration_ns;
-  const bool found=search.AstarSearchGoals(in.step_m,in.start,search_goals,in.budget_s,in.center);
+  bool found;
+  std::vector<ego_planner::BsplineOptimizer::RecoverySearchEvidence> recovery_trace;
+  std::shared_ptr<PlanningBudget> recovery_budget;
+  if(recovery) {
+    if(mode=="warm" || fallback || goal_indices || in.step_m!=.1 || in.budget_s!=1.)
+      throw std::invalid_argument("recovery requires the unchanged production search contract");
+    ego_planner::BsplineOptimizer optimizer;optimizer.a_star_=search_owner;
+    recovery_budget=std::make_shared<PlanningBudget>(in.budget_s);
+    optimizer.setPlanningQuery(query);optimizer.setPlanningBudget(recovery_budget);
+    optimizer.setPlanningEndpoints(in.start,search_goals.front());
+    optimizer.setPlanningGoals(search_goals,in.center);
+    found=optimizer.searchRecoveryGuide();recovery_trace=optimizer.recoverySearchEvidence();
+  } else found=search.AstarSearchGoals(in.step_m,in.start,search_goals,in.budget_s,in.center);
   const auto& r=search.lastResult();
   const auto path=search.getPath();
   const auto measured=[&](double seconds) {
@@ -436,6 +451,21 @@ void planningSearch(const Input& in, const std::string& mode, const char* risk_p
       <<",\"failure\":"<<std::quoted(AStar::failureName(g.failure))<<",\"lattice_m\":";
     if(g.lattice.allFinite())pointJson(std::cout,g.lattice);else std::cout<<"null";
     std::cout<<'}';
+  }
+  std::cout<<"],\"production_recovery\":"<<(recovery?"true":"false")
+    <<",\"recovery_actions\":"<<(recovery_budget?recovery_budget->used():0)
+    <<",\"recovery_search_calls\":"<<(recovery_budget?recovery_budget->searches.calls:0)
+    <<",\"recovery_searches\":[";
+  for(size_t i=0;i<recovery_trace.size();++i) {
+    if(i)std::cout<<',';const auto& e=recovery_trace[i];
+    std::cout<<"{\"start_reason\":"<<std::quoted(gridExecutionReasonName(e.start_reason))
+      <<",\"normal_attempted\":"<<(e.normal_attempted?"true":"false")
+      <<",\"normal_failure\":"<<std::quoted(AStar::failureName(e.normal_failure))
+      <<",\"fallback_eligible\":"<<(e.fallback_eligible?"true":"false")
+      <<",\"fallback_entered\":"<<(e.fallback_entered?"true":"false")
+      <<",\"initial_remaining_s\":"<<e.initial_remaining_s
+      <<",\"fallback_remaining_s\":"<<e.fallback_remaining_s
+      <<",\"final_failure\":"<<std::quoted(AStar::failureName(e.final_failure))<<'}';
   }
   std::cout<<"],\"path_m\":[";
   for(size_t i=0;i<path.size();++i) {if(i)std::cout<<',';pointJson(std::cout,path[i]);}

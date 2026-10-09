@@ -150,6 +150,15 @@ namespace ego_planner
       curve_bounds_ = std::make_pair(lower, upper);
     }
     bool searchRecoveryGuide();
+    struct RecoverySearchEvidence {
+      GridExecutionReason start_reason = GridExecutionReason::OK;
+      GridAdvisoryClass start_advisory = GridAdvisoryClass::UNKNOWN;
+      bool normal_attempted = false, fallback_eligible = false, fallback_entered = false;
+      AStar::Failure normal_failure = AStar::Failure::NONE, final_failure = AStar::Failure::NONE;
+      double initial_remaining_s = 0., fallback_remaining_s = 0.;
+      bool guide_found = false;
+    };
+    const std::vector<RecoverySearchEvidence>& recoverySearchEvidence() const { return recovery_search_evidence_; }
     void strengthenGuideTracking() { guide_weight_ *= 2.0; }
     // Constrain violating actual samples toward the one existing legal guide.
     // This is a route preference; final physical/motion checks remain independent.
@@ -189,6 +198,7 @@ namespace ego_planner
       guide_reinitialization_ = false;
       planning_endpoints_.reset();
       planning_goals_.clear();
+      recovery_search_evidence_.clear();
       guide_pts_.clear();
       guide_weight_ = 1.0;
       curve_clearance_constraints_.clear();
@@ -256,6 +266,7 @@ namespace ego_planner
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> guide_query_;
     bool planning_advisory_fallback_ = false;
+    std::vector<RecoverySearchEvidence> recovery_search_evidence_;
     bool initialization_failed_ = false;
     std::optional<Eigen::Vector3d> planning_goal_center_;
     bool guide_tracking_ = false;

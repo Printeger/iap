@@ -103,7 +103,7 @@ add_executable(traj_server src/traj_server.cpp)
 
 add_executable(failure_map_replay src/failure_map_replay.cpp)
 ament_target_dependencies(failure_map_replay
-  plan_env path_searching rclcpp Eigen3 nav_msgs visualization_msgs
+  plan_env path_searching bspline_opt traj_utils quadrotor_msgs rclcpp Eigen3 nav_msgs visualization_msgs
   geometry_msgs sensor_msgs iap cv_bridge pcl_conversions)
 target_link_libraries(failure_map_replay prediction_input iap::iap)
 

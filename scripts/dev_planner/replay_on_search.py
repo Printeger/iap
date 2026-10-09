@@ -94,7 +94,10 @@ def main():
     parser.add_argument('--diagnose',action='store_true',help='three cold measurements, same-cache warm control and offline extended search; never online authorization')
     parser.add_argument('--diagnostic-goal-indices', help='Offline subset of captured terminals; full endpoint clearance context retained')
     parser.add_argument('--advisory-fallback',action='store_true',help='Offline existing high-cost fallback; never an online guide gate')
+    parser.add_argument('--recovery',action='store_true',help='Invoke the production optimizer recovery chain with the original shared search allowance')
     args=parser.parse_args()
+    if args.recovery and (not args.payload or args.diagnose or args.advisory_fallback or args.diagnostic_goal_indices or args.budget_s!=1.):
+        raise ValueError('recovery needs complete input and unchanged production search budget/goals')
     if args.advisory_fallback and (args.require_guide or args.diagnose or not args.payload):
         raise ValueError('fallback is an offline complete-input witness, not an online gate')
     if args.diagnostic_goal_indices and (args.require_guide or args.diagnose):
@@ -134,7 +137,8 @@ def main():
             if args.diagnostic_goal_indices:command.append(args.diagnostic_goal_indices)
             completed=subprocess.run(command,input=replay_input(m,params,budget),text=True,capture_output=True,timeout=budget+35,
                 env={**os.environ,'IAP_REPLAY_PROFILE':'1' if measurement_profile(m,label) else '0',
-                     'IAP_REPLAY_ADVISORY_FALLBACK':'1' if args.advisory_fallback else '0'})
+                     'IAP_REPLAY_ADVISORY_FALLBACK':'1' if args.advisory_fallback else '0',
+                     'IAP_REPLAY_RECOVERY':'1' if args.recovery else '0'})
             name=label+'_'+str(repetition) if args.diagnose else label
             (out/(name+'.stderr.log')).write_text(completed.stderr)
             if completed.returncode: raise RuntimeError(f"{mode} replay exit {completed.returncode}: {completed.stderr}")

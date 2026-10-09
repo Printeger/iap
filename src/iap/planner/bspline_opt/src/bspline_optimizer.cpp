@@ -94,17 +94,56 @@ namespace ego_planner
     if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::Search)) return false;
     const auto start=planning_endpoints_->first;
     const Eigen::Vector3d center=planning_goal_center_.value_or((start+planning_goals_.front())/2);
-    bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,-1,center);
+    // One original 1 s search allowance, also bounded by the round's budget.
+    // A retry consumes the remainder, never another fresh search allowance.
+    const auto deadline=PlanningBudget::Clock::now()+std::chrono::duration_cast<PlanningBudget::Clock::duration>(
+        std::chrono::duration<double>(std::min(1.,budget_ ? budget_->remaining() : 1.)));
+    const auto remaining=[&]() { return std::max(0.,std::chrono::duration<double>(deadline-PlanningBudget::Clock::now()).count()); };
+    recovery_search_evidence_.emplace_back();
+    auto& evidence=recovery_search_evidence_.back();evidence.initial_remaining_s=remaining();
+    const auto origin=guide_query_ ? guide_query_(start) : GridPlanningCell{};
+    evidence.start_reason=origin.execution_reason;evidence.start_advisory=origin.advisory.classification;
+    const auto reject=[&](AStar::Failure failure) {
+      a_star_->recordPresearchFailure(failure,start,planning_goals_.front(),GridSearchCell(origin));
+      evidence.final_failure=failure;initialization_failed_=true;
+      reportSearchFailure(a_star_->lastResult(),cps_.points,0,cps_.size-1,"whole_curve_recovery");
+      return false;
+    };
+    if(remaining()<=0 || (budget_ && budget_->expired()))return reject(AStar::Failure::TIME_BUDGET);
+    if(!origin.executable())return reject(
+        origin.execution_reason==GridExecutionReason::ENVIRONMENT_STALE ? AStar::Failure::MAP_STALE :
+        origin.execution_reason==GridExecutionReason::CURRENT_MOTION_UNAVAILABLE ||
+        origin.execution_reason==GridExecutionReason::CURRENT_MOTION_STALE ||
+        origin.execution_reason==GridExecutionReason::CURRENT_MOTION_BUDGET ? AStar::Failure::CURRENT_MOTION : AStar::Failure::START_BLOCKED);
+    const bool warned=origin.advisory.classification==GridAdvisoryClass::AVOID ||
+        origin.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED;
+    if(warned && !planning_advisory_fallback_) {
+      // A legal warning origin cannot satisfy a strict advisory connector.
+      // Enter the existing high-cost policy once, before searching, and keep
+      // that same policy through the actual-curve checks. Physics is unchanged.
+      evidence.fallback_eligible=true;
+      if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback))return reject(AStar::Failure::TIME_BUDGET);
+      planning_advisory_fallback_=true;a_star_->setPlanningQuery(guide_query_,true);
+    }
+    evidence.normal_attempted=!planning_advisory_fallback_;
+    evidence.fallback_entered=planning_advisory_fallback_;
+    if(evidence.fallback_entered)evidence.fallback_remaining_s=remaining();
+    bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center);
     const auto result=a_star_->lastResult();
-    if(!found && result.exhausted && result.rejected_advisory && !planning_advisory_fallback_) {
-      if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) return false;
+    if(evidence.normal_attempted)evidence.normal_failure=result.failure;
+    if(!found && result.failure==AStar::Failure::ADVISORY_NO_PATH && result.exhausted &&
+        result.rejected_advisory && !planning_advisory_fallback_ && remaining()>0 && !(budget_ && budget_->expired())) {
+      evidence.fallback_eligible=true;
+      if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback))return reject(AStar::Failure::TIME_BUDGET);
       planning_advisory_fallback_=true;
       a_star_->setPlanningQuery(guide_query_,true);
-      found=a_star_->AstarSearchGoals(.1,start,planning_goals_,-1,center);
+      evidence.fallback_entered=true;evidence.fallback_remaining_s=remaining();
+      found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center);
       RCLCPP_WARN(rclcpp::get_logger("one_guide"),
           "Search exhausted with advisory rejections; high-cost retry %s",
           found ? "found a physical route" : "failed without proving advisory causality");
     }
+    evidence.final_failure=a_star_->lastResult().failure;evidence.guide_found=found;
     if(!found) {
       initialization_failed_=true;
       reportSearchFailure(a_star_->lastResult(),cps_.points,0,cps_.size-1,"whole_curve_recovery");

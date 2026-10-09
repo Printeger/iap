@@ -132,6 +132,8 @@ namespace ego_planner
     const double effective_time = connection_time_ ? connection_time_->seconds() : 0.;
     const double budget_elapsed = planning_budget_ ? planning_budget_->elapsed() : 0.;
     const unsigned repairs = planning_budget_ ? planning_budget_->used() : 0;
+    const auto recovery_evidence=bspline_optimizer_ ? bspline_optimizer_->recoverySearchEvidence() :
+        std::vector<BsplineOptimizer::RecoverySearchEvidence>{};
     const unsigned failure_phase = static_cast<unsigned>(last_plan_failure_);
     const auto guide = bspline_optimizer_ && bspline_optimizer_->a_star_->lastResult().occupancy_generation==snapshot->generation
         ? bspline_optimizer_->recoveryGuide() : std::vector<Eigen::Vector3d>{};
@@ -320,7 +322,21 @@ namespace ego_planner
           << "  \"shared_budget_elapsed_s\": " << number(budget_elapsed) << ",\n"
           << "  \"shared_budget_repairs\": " << repairs << ",\n"
           << "  \"plan_failure_phase\": " << failure_phase << ",\n"
-          << "  \"guide_m\": [";
+          << "  \"recovery_searches\": [";
+      for(size_t i=0;i<recovery_evidence.size();++i) {
+        const auto& e=recovery_evidence[i];
+        metadata << (i ? "," : "") << "{\"start_reason\":" << std::quoted(gridExecutionReasonName(e.start_reason))
+            << ",\"start_advisory\":" << static_cast<unsigned>(e.start_advisory)
+            << ",\"normal_attempted\":" << (e.normal_attempted ? "true" : "false")
+            << ",\"normal_failure\":" << std::quoted(AStar::failureName(e.normal_failure))
+            << ",\"fallback_eligible\":" << (e.fallback_eligible ? "true" : "false")
+            << ",\"fallback_entered\":" << (e.fallback_entered ? "true" : "false")
+            << ",\"initial_remaining_s\":" << number(e.initial_remaining_s)
+            << ",\"fallback_remaining_s\":" << number(e.fallback_remaining_s)
+            << ",\"final_failure\":" << std::quoted(AStar::failureName(e.final_failure))
+            << ",\"guide_found\":" << (e.guide_found ? "true" : "false") << '}';
+      }
+      metadata << "],\n  \"guide_m\": [";
       for(size_t i=0;i<guide.size();++i) metadata << (i ? "," : "") << vector(guide[i]);
       metadata << "],\n  \"guide_fitting_reserve_m\": " << number(fitting_reserve_m)
           << ",\n  \"guide_reserve_taper_distance_m\": 0.5,\n  \"planning_goals_m\": [";
@@ -1039,7 +1055,7 @@ namespace ego_planner
           start_cell.execution_reason==GridExecutionReason::CURRENT_MOTION_UNAVAILABLE ||
           start_cell.execution_reason==GridExecutionReason::CURRENT_MOTION_STALE ||
           start_cell.execution_reason==GridExecutionReason::CURRENT_MOTION_BUDGET ? AStar::Failure::CURRENT_MOTION :
-          AStar::Failure::START_BLOCKED,start_pt,target_pt);
+          AStar::Failure::START_BLOCKED,start_pt,target_pt,GridSearchCell(start_cell));
       if(capture_failure_map_) captureFailureMap("endpoint",start_pt,target_pt,start_cell);
       return fail(PlanFailure::Connection);
     }

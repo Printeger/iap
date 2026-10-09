@@ -2181,3 +2181,40 @@ and rank/regularization rejection never becomes zero risk or default STOP.
 The report, immutable inputs, policy-only old-source overlay identity, figures,
 all request denominators and reproduction commands are registered in
 `log/20261009T021209Z_034/export/analysis/fusion_risk_time_result/REPORT.md`.
+
+
+### Warning-origin recovery and bounded retry
+
+The whole-guide recovery entry now queries the real origin before searching.
+A physically executable `AVOID`/`PREDICTED_DEGRADED` origin enters the existing
+high-cost advisory mode immediately, consuming exactly one existing
+`AdvisoryFallback` action. It does not require a strict advisory start connector
+first. A normal origin still starts strict search. Only an exhausted
+`ADVISORY_NO_PATH` result with advisory rejections can enter one high-cost retry;
+`TIME_BUDGET`, physical/environment and current-motion refusals cannot do so.
+Normal and retry share the original 1 s search allowance and the original
+round/action budget. No threshold, weight, lattice, dynamics, curve or release
+authority changes. The same policy remains attached to the sole guide and
+actual curve; unsuccessful candidates retain the running predecessor.
+
+Failure-map snapshots retain recovery-entry reason, normal disposition,
+fallback eligibility/entry and remaining allowance alongside the existing
+map, complete prediction input, guide and candidate control points/knots.
+`replay_on_search.py --recovery` runs this actual optimizer entry on complete
+frozen input, without a second implementation of the policy. Pure AStar replay
+remains available as a diagnostic of the strict search alone. Historical ID5
+is a recovery fixture, not qualification of the new IMU time interface.
+
+The warning-origin red test demonstrates two strict/fallback searches before
+the change, versus the required single high-cost search. Focused regression
+also covers normal success, advisory-only exhaustion, timeout and physical,
+unobserved and current-motion origin refusals. The focused regression passes, as do all 15 functional/selected lint Planner
+targets and three path-search targets (the three existing Planner formatting
+targets are tracked separately). Complete ID5 replay now produces an ON guide
+in 0.965 s, one high-cost search/two existing actions, versus strict-search
+ADVISORY_NO_PATH. Preparation is 0.096 s and does not use display prediction. This
+is a guide witness; actual curve and publication still require their gates.
+Live status follows one paired 120 s OFF/ON development experiment on the
+canonical forest scene.
+Formal 9+9 calibration, six complete task comparisons, empirical coverage and
+fused fault-integrity qualification remain deferred and unverified.

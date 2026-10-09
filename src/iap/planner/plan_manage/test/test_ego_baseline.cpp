@@ -1206,7 +1206,7 @@ TEST(EgoBaseline, GuideRecoveryUsesActualStartEvenWhenInitialTailHasNoExit) {
   EXPECT_EQ(budget->used(),1u);
 }
 
-TEST(EgoBaseline, WarnedPhysicalOriginUsesOneCountedFallbackAfterExhaustion) {
+TEST(EgoBaseline, WarnedPhysicalOriginUsesOneCountedHighCostSearch) {
   auto node=makeNode();
   auto map=std::make_shared<GridMap>(); map->initMap(node);
   const Eigen::Vector3d start(-2,0,1), target(2,0,1);
@@ -1227,6 +1227,65 @@ TEST(EgoBaseline, WarnedPhysicalOriginUsesOneCountedFallbackAfterExhaustion) {
   EXPECT_EQ(budget->count(PlanningBudget::Repair::AdvisoryFallback),1u);
   EXPECT_TRUE(optimizer.recoveryGuide().front().isApprox(start,1e-9));
   EXPECT_TRUE(optimizer.recoveryGuide().back().isApprox(target,1e-9));
+}
+
+TEST(EgoBaseline, WarnedOriginStartsOneHighCostSearchWithoutStrictExit) {
+  auto node=makeNode();
+  auto map=std::make_shared<GridMap>(); map->initMap(node);
+  const Eigen::Vector3d start(-2,0,1),target(2,0,1);
+  ego_planner::BsplineOptimizer optimizer; optimizer.setParam(node); optimizer.setEnvironment(map);
+  optimizer.a_star_=std::make_shared<AStar>(); optimizer.a_star_->initGridMap(map,Eigen::Vector3i(60,60,10));
+  optimizer.setPlanningQuery([](const Eigen::Vector3d&) {
+    GridPlanningCell c;c.execution_reason=GridExecutionReason::OK;
+    c.advisory.classification=GridAdvisoryClass::AVOID;c.advisory.cost_multiplier=1.;return c;
+  });
+  auto budget=std::make_shared<PlanningBudget>();optimizer.setPlanningBudget(budget);
+  optimizer.setPlanningEndpoints(start,target);
+  ASSERT_TRUE(optimizer.searchRecoveryGuide());
+  EXPECT_EQ(budget->searches.calls,1u);
+  EXPECT_EQ(optimizer.a_star_->lastResult().rejected_advisory,0u);
+  EXPECT_TRUE(optimizer.advisoryFallbackUsed());
+  EXPECT_EQ(budget->count(PlanningBudget::Repair::AdvisoryFallback),1u);
+  EXPECT_EQ(budget->used(),2u);
+  EXPECT_NEAR(optimizer.a_star_->lastResult().risk_cost_m,8.,1e-6);
+}
+
+TEST(EgoBaseline, RecoverySeparatesNormalAdvisoryTimeoutAndPhysicalRefusals) {
+  for(const std::string mode:{"normal","advisory_wall","timeout","obstacle","unobserved","motion"}) {
+    SCOPED_TRACE(mode);
+    auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+    ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+    optimizer.a_star_=std::make_shared<AStar>();optimizer.a_star_->initGridMap(map,Eigen::Vector3i(60,20,10));
+    size_t calls=0;
+    optimizer.setPlanningQuery([&](const Eigen::Vector3d& point) {
+      GridPlanningCell c;c.execution_reason=GridExecutionReason::OK;
+      c.advisory.classification=GridAdvisoryClass::VALID;c.advisory.cost_multiplier=1.;
+      if(mode=="advisory_wall" && std::abs(point.x())<.2)c.advisory.classification=GridAdvisoryClass::AVOID;
+      if(mode=="timeout" && ++calls>1)std::this_thread::sleep_for(std::chrono::milliseconds(15));
+      if(mode=="obstacle")c.execution_reason=GridExecutionReason::PHYSICAL_OBSTACLE;
+      if(mode=="unobserved")c.execution_reason=GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+      if(mode=="motion")c.execution_reason=GridExecutionReason::CURRENT_MOTION_UNAVAILABLE;
+      return c;
+    });
+    auto budget=std::make_shared<PlanningBudget>(mode=="timeout" ? .005 : 1.5);
+    optimizer.setPlanningBudget(budget);optimizer.setPlanningEndpoints(Eigen::Vector3d(-2,0,1),Eigen::Vector3d(2,0,1));
+    const bool found=optimizer.searchRecoveryGuide();
+    EXPECT_EQ(found,mode=="normal" || mode=="advisory_wall");
+    EXPECT_EQ(budget->count(PlanningBudget::Repair::AdvisoryFallback),mode=="advisory_wall" ? 1u : 0u);
+    ASSERT_EQ(optimizer.recoverySearchEvidence().size(),1u);
+    const auto& e=optimizer.recoverySearchEvidence().front();
+    if(mode=="normal")EXPECT_EQ(budget->searches.calls,1u);
+    if(mode=="advisory_wall") {
+      EXPECT_EQ(e.normal_failure,AStar::Failure::ADVISORY_NO_PATH);EXPECT_TRUE(e.fallback_entered);
+      EXPECT_EQ(budget->searches.calls,2u);EXPECT_LT(e.fallback_remaining_s,e.initial_remaining_s);
+    }
+    if(mode=="timeout") {EXPECT_EQ(e.final_failure,AStar::Failure::TIME_BUDGET);EXPECT_FALSE(e.fallback_eligible);}
+    if(mode=="obstacle" || mode=="unobserved" || mode=="motion") {
+      EXPECT_EQ(budget->searches.calls,0u);EXPECT_FALSE(e.fallback_entered);
+      EXPECT_EQ(optimizer.a_star_->lastResult().start_cell.execution_reason,e.start_reason);
+      EXPECT_TRUE(optimizer.a_star_->lastResult().has_first_rejection);
+    }
+  }
 }
 
 TEST(EgoBaseline, TimeAdjustmentPreservesPhysicalEndpointDerivatives) {

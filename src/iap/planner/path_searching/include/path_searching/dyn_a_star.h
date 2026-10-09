@@ -221,7 +221,8 @@ public:
 	const Result& lastResult() const { return result_; }
 	void clearLastResult() { result_ = Result{}; }
 	void recordPresearchFailure(Failure failure, const Eigen::Vector3d& start,
-	                            const Eigen::Vector3d& end) {
+	                            const Eigen::Vector3d& end,
+                                std::optional<GridSearchCell> start_cell = {}) {
 		sample_cache_.clear();
 		query_stats_at_start_ = grid_map_->planningQueryStats();
         advisory_stats_at_start_ = advisory_statistics_ ? advisory_statistics_() : GridPlanningQueryStats{};
@@ -230,6 +231,14 @@ public:
 		result_.performance_diagnostics = performance_diagnostics_;
 		result_.requested_start = start;
 		result_.requested_end = end;
+        if(start_cell) {
+            result_.start_cell=*start_cell;
+            if(!start_cell->executable()) {
+                result_.first_rejection_position=start;
+                result_.first_rejection_cell=*start_cell;
+                result_.has_first_rejection=true;
+            }
+        }
 		result_.step_size_m = 0.1;
 		result_.pool_dimensions = POOL_SIZE_;
 		result_.pool_center = (start + end) / 2.0;
