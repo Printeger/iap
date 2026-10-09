@@ -186,7 +186,8 @@ struct EGOReplanFSMTestAccess {
     return fsm.flag_escape_emergency_;
   }
   static void shortExecution(EGOReplanFSM& fsm,const Eigen::Vector3d& target,
-      nav_msgs::msg::Odometry::ConstSharedPtr odom) {
+      nav_msgs::msg::Odometry::ConstSharedPtr odom,bool final=false) {
+    if(final) fsm.end_pt_=target;
     fsm.visualization_=std::make_shared<PlanningVisualization>(fsm.node_);
     fsm.local_target_pt_=target;fsm.target_type_=EGOReplanFSM::MANUAL_TARGET;
     fsm.have_target_=fsm.have_trigger_=fsm.have_odom_=true;fsm.have_new_target_=false;
@@ -199,6 +200,8 @@ struct EGOReplanFSMTestAccess {
   }
   static void tick(EGOReplanFSM& fsm) {fsm.execFSMCallback();}
   static bool fromCurrent(EGOReplanFSM& fsm) {return fsm.planFromCurrentTraj();}
+  static bool executing(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::EXEC_TRAJ;}
+  static bool waitingForTarget(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::WAIT_TARGET;}
   static bool select(EGOReplanFSM& fsm, double distance) { return fsm.getLocalTarget(distance); }
   static bool replanning(const EGOReplanFSM& fsm) { return fsm.exec_state_==EGOReplanFSM::REPLAN_TRAJ; }
   static Eigen::Vector3d taskGoal(const EGOReplanFSM& fsm) { return fsm.end_pt_; }
@@ -1284,6 +1287,23 @@ TEST(EgoBaseline, ShortRestingCurveCompletesBeforeReplanThresholdAndRequiresFeed
   EXPECT_LT((curve.evaluateDeBoorT(0)-local).norm(),1e-8);
   EXPECT_TRUE(manager->assessTrajectory(curve,0,node->now().seconds()).executable());
   EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
+  // A final resting curve keeps the original arrival waiting seam while the
+  // actual vehicle settles; elapsed reference completion must not preempt it.
+  const auto final=curve.evaluateDeBoorT(curve.getTimeSum());
+  manager->local_data_.start_time_=node->now()-rclcpp::Duration::from_seconds(curve.getTimeSum()+.05);
+  auto final_odom=std::make_shared<nav_msgs::msg::Odometry>(*odom);
+  final_odom->header.stamp=node->now();final_odom->pose.pose.position.x=final.x();
+  final_odom->pose.pose.position.y=final.y();final_odom->pose.pose.position.z=final.z();
+  final_odom->twist.twist.linear.x=.2;
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,final,final_odom,true);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,manager->local_data_.traj_id_,node->now().seconds());
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
+  final_odom=std::make_shared<nav_msgs::msg::Odometry>(*final_odom);
+  final_odom->twist.twist.linear.x=.05;
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,final,final_odom,true);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::waitingForTarget(fsm));
 }
 
 TEST(EgoBaseline, KnownOccupiedMissionRemainsOriginalAndCannotBeAuthorized) {

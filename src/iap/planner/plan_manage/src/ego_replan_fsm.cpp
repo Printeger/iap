@@ -678,8 +678,9 @@ namespace ego_planner
           changeFSMExecState(WAIT_TARGET, "FSM");
           goto force_return;
         }
-        else if (t_cur > info->duration_ - 1e-2 ||
-                 ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_))
+        // Keep the original final-target settling/arrival seam. The local
+        // completion trigger below applies to nonfinal resting segments only.
+        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
