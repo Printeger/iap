@@ -1218,10 +1218,13 @@ namespace ego_planner
     // longitudinal overshoot still needs a checked trajectory to end_pt_.
 
     const double distance = std::min(target_distance_m, search_pool_target_limit_m_);
+    const Eigen::Vector3d projected_reference=reference.getPosition(projection);
     double target_t = reference.global_duration_;
     for (double t = projection + step; t < reference.global_duration_; t += step) {
       if (expired()) return false;
-      if ((reference.getPosition(t) - start_pt_).norm() >= distance) {
+      // Forward reference lookahead starts at its measured projection. A
+      // lateral detour is a connector for search, not spent forward horizon.
+      if ((reference.getPosition(t) - projected_reference).norm() >= distance) {
         target_t = t;
         break;
       }

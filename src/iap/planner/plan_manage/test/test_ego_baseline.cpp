@@ -1151,6 +1151,24 @@ TEST(EgoBaseline, TerminalReferenceUsesOnlyOriginalGoalIncludingLateralOvershoot
   }
 }
 
+TEST(EgoBaseline, LateralOffsetDoesNotConsumeForwardReferenceHorizon) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(.5,-4.5,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(Eigen::Vector3d(-2,0,1),zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  EXPECT_EQ(ego_planner::EGOPlannerManagerTestAccess::targetCount(*manager),1u);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::target(fsm).isApprox(goal,1e-9));
+  EXPECT_LT(manager->global_data_.last_progress_time_,manager->global_data_.global_duration_);
+}
+
 TEST(EgoBaseline, UnobservedTerminalGoalCannotOfferRecedingVerticalTargets) {
   auto node=makeNode();
   auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
