@@ -1128,6 +1128,17 @@ namespace ego_planner
       return queryGuidanceCell(point,fitting_reserve*std::clamp(endpoint_distance/.5,0.,1.));
     };
     optimizer.setPlanningQuery(query,false,guide_query);
+    optimizer.a_star_->setPlanningQuery([this,start_pt,fitting_reserve](const Eigen::Vector3d& point) {
+      double distance=(point-start_pt).norm();
+      for(const auto& target:planning_targets_) distance=std::min(distance,(point-target.position).norm());
+      return GridSearchCell(queryRouteViewCell(point,fitting_reserve*std::clamp(distance/.5,0.,1.)));
+    });
+    guide_identity_=GuideIdentity{};
+    guide_identity_.mission_goal=global_data_.global_traj_.getTimes().empty() ? target_pt :
+        global_data_.getPosition(global_data_.global_duration_);
+    guide_identity_.map_generation=planning_view_->generation;
+    guide_identity_.risk_version=planning_view_->risk_version;
+    guide_identity_.frame=grid_map_->getFrameId();
     const auto& epoch=*planning_view_->physical;
     Eigen::Vector3d upper=epoch.lattice_origin+epoch.extent_m;
     if(epoch.virtual_ceiling_height_m>0) upper.z()=std::min(upper.z(),epoch.virtual_ceiling_height_m);
@@ -1166,6 +1177,7 @@ namespace ego_planner
       const auto index=optimizer.a_star_->lastResult().selected_goal;
       if(index<target_indices.size()) selected=planning_targets_[target_indices[index]];
       selected.position=guide.back();
+      guide_identity_.route_target=selected.position;
       optimizer.setPlanningEndpoints(start_pt,selected.position);
       optimizer.setPlanningGoals(goals,target_region_center);
       const bool terminal_stop=!global_data_.global_traj_.getTimes().empty() ?

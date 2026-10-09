@@ -138,6 +138,17 @@ namespace ego_planner
         const TrajectoryAssessment& assessment,const Eigen::Vector3d& position) const;
     GridPlanningCell queryLocalTargetCell(const Eigen::Vector3d& position,
                                           double now_s) const;
+    GridRouteCell queryRouteViewCell(const Eigen::Vector3d& position,
+                                    double clearance_reserve_m = 0.) const;
+    struct GuideIdentity {
+      Eigen::Vector3d mission_goal=Eigen::Vector3d::Constant(NAN);
+      Eigen::Vector3d route_target=Eigen::Vector3d::Constant(NAN);
+      Eigen::Vector3d committed_endpoint=Eigen::Vector3d::Constant(NAN);
+      uint64_t map_generation=0, risk_version=0;
+      std::string frame, policy="optimistic_route_stop_lite_v1_1";
+      double s_begin=0., s_end=0.;
+    };
+    const GuideIdentity& guideIdentity() const { return guide_identity_; }
     PlanningBudget::Ptr planningBudget() const { return planning_budget_; }
     bool beginPlanningView(double budget_seconds = 1.5);
     bool hasPlanningView() const { return planning_view_.has_value(); }
@@ -299,6 +310,7 @@ namespace ego_planner
     // Missing older attempts are explicit, never replaced by a fresh capture.
     std::shared_ptr<const PlanningInputBinding> planning_input_binding_;
     PlanningBudget::Ptr planning_budget_;
+    GuideIdentity guide_identity_;
     std::vector<LocalTarget> planning_targets_;
     std::optional<Eigen::Vector3d> planning_target_center_;
     std::optional<LocalTrajData> pending_trajectory_;

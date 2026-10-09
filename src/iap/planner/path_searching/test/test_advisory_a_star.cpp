@@ -938,3 +938,16 @@ TEST(AdvisoryAStar, OfflineSegmentAttributionUsesPhysicalChecksAndBothDirections
   EXPECT_FALSE(checker.diagnosticSegmentCost(a,b));
   EXPECT_FALSE(checker.diagnosticSegmentCost(b,a)); // advisory fallback cannot admit physical unknown
 }
+
+TEST(AdvisoryAStar, SoleWarningConnectionRemainsTraversableWithoutFallback) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(50,20,10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell c;c.execution_reason=std::abs(p.y())>.11 ?
+        GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    c.advisory.classification=GridAdvisoryClass::AVOID;c.advisory.cost_multiplier=2.;return c;
+  });
+  ASSERT_TRUE(search.AstarSearchGoals(.1,{-1,0,1},{{1,0,1}},1.,{},AStar::GoalSearchPurpose::Guide));
+  EXPECT_EQ(search.lastResult().rejected_advisory,0u);
+  EXPECT_NEAR(search.lastResult().risk_cost_m,2.,1e-6);
+}

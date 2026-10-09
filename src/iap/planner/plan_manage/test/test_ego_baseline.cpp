@@ -3185,3 +3185,20 @@ TEST(EgoBaseline, FailedBrakeRequestRemainsOutstandingForFreshQualifiedInput) {
   EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(Eigen::Vector3d(.2,0,0),1e-9));
   EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
 }
+
+TEST(EgoBaseline, UnknownMissionGoalRetainsRouteIdentityWithoutExecutePermission) {
+  auto node=makeNode();auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);GridMapTestAccess::clearObserved(*manager->grid_map_,goal);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::target(fsm).isApprox(goal,1e-9));
+  EXPECT_EQ(manager->queryPlanningViewCell(goal).execution_reason,GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_TRUE(manager->queryRouteViewCell(goal).routable());
+}

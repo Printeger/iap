@@ -19,15 +19,20 @@ GridPlanningRisk classifyCurrentRisk(const GridRiskVoxel& live, const GridPlanni
         : (live.hpl >= policy.hpl_budget_m - policy.reserve_h_m ||
            live.vpl >= policy.vpl_budget_m - policy.reserve_v_m
             ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID);
-    if(planning.classification==GridAdvisoryClass::VALID && policy.hpl_budget_m>0 && policy.vpl_budget_m>0) {
+    if(policy.hpl_budget_m>0 && policy.vpl_budget_m>0 &&
+        std::isfinite(policy.hpl_budget_m) && std::isfinite(policy.vpl_budget_m) &&
+        std::isfinite(policy.reserve_h_m) && std::isfinite(policy.reserve_v_m) &&
+        policy.reserve_h_m>=0 && policy.reserve_v_m>=0 &&
+        std::isfinite(live.hpl) && std::isfinite(live.vpl) && live.hpl>=0 && live.vpl>=0) {
       const double r=std::max((live.hpl+policy.reserve_h_m)/policy.hpl_budget_m,
           (live.vpl+policy.reserve_v_m)/policy.vpl_budget_m);
-      planning.cost_multiplier=1.+.5*r;
-    } else planning.cost_multiplier=1.;
+      planning.cost_multiplier=r<=1 ? 1.+.5*r : std::min(3.,1.5+1.5*(r-1.));
+    } else planning.classification=GridAdvisoryClass::UNKNOWN;
     return planning;
   }
   if (live.status == GridRiskStatus::PREDICTED_DEGRADED) {
     planning.classification = GridAdvisoryClass::PREDICTED_DEGRADED;
+    planning.cost_multiplier = 3.;
     return planning;
   }
   return planning;
@@ -173,8 +178,6 @@ GridPlanningRisk GridMap::classifyPlanningRisk(const GridRiskVoxel& live,
   if(!std::isfinite(age) || age<0 || age>policy.stale_soft_seconds) return planning;
   planning.classification=GridAdvisoryClass::STALE_REFERENCE;
   planning.hpl=history->hpl; planning.vpl=history->vpl;
-  if(planning.hpl>=policy.hpl_budget_m-policy.reserve_h_m || planning.vpl>=policy.vpl_budget_m-policy.reserve_v_m)
-    planning.cost_multiplier+=1-age/policy.stale_soft_seconds;
   return planning;
 }
 
@@ -391,11 +394,29 @@ GridPlanningQueryStats GridMap::planningQueryStats() const {
   return stats;
 }
 
-GridPlanningCell GridMap::queryPlanningCell(
+GridPlanningCell GridMap::queryPlanningCell(const Eigen::Vector3d& position,
+    uint64_t version, double now, const GridPlanningRiskPolicy& policy,
+    const GridMotionContext& motion, bool detailed, const GridPlanningContext* context,
+    bool diagnostics) {
+  return queryCellFacts(position,version,now,policy,motion,detailed,context,diagnostics,false);
+}
+
+GridRouteCell GridMap::queryRouteCell(const Eigen::Vector3d& position,
+    uint64_t version, double now, const GridPlanningRiskPolicy& policy,
+    const GridMotionContext& motion, const GridPlanningContext* context, bool diagnostics) {
+  GridRouteCell result;
+  result.facts=queryCellFacts(position,version,now,policy,motion,false,context,diagnostics,true);
+  result.route_reason=result.facts.execution_reason;
+  if(!result.facts.observed && result.routable())
+    result.facts.execution_reason=GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+  return result;
+}
+
+GridPlanningCell GridMap::queryCellFacts(
     const Eigen::Vector3d& position, const uint64_t version,
     const double now, const GridPlanningRiskPolicy& risk_policy,
     const GridMotionContext& motion, const bool include_rejected_clearance,
-    const GridPlanningContext* context, const bool performance_diagnostics)
+    const GridPlanningContext* context, const bool performance_diagnostics, const bool route)
 {
   GridPlanningCell cell;
   // The prepared path is confined to the serialized frozen PlanningView.
@@ -444,7 +465,7 @@ GridPlanningCell GridMap::queryPlanningCell(
         std::chrono::steady_clock::now() - clearance_started).count();
   };
   if (!observed.available) return cell;
-  if (!observed.observed) {
+  if (!observed.observed && !route) {
     cell.execution_reason = GridExecutionReason::ENVIRONMENT_UNOBSERVED;
     if (include_rejected_clearance) measure_clearance();
     return cell;

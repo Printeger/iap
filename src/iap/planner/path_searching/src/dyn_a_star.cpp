@@ -38,9 +38,7 @@ GridSearchCell AStar::timedPlanningQuery(const Vector3d& position) {
 }
 
 void AStar::recordFirstRejection(const Vector3d& position, const GridSearchCell& cell) {
-    if (!result_.has_first_rejection && (!cell.executable() ||
-        (!advisory_fallback_ && (cell.advisory_class == GridAdvisoryClass::AVOID ||
-         cell.advisory_class == GridAdvisoryClass::PREDICTED_DEGRADED)))) {
+    if (!result_.has_first_rejection && !cell.executable()) {
         result_.has_first_rejection = true;
         result_.first_rejection_position = position;
         result_.first_rejection_cell = cell;
@@ -211,15 +209,6 @@ std::optional<double> AStar::edgeCost(const Vector3d& from,
                 map_changed_ = true;
             return false;
         }
-        const auto cls = cell.advisory_class;
-        if (cls == GridAdvisoryClass::AVOID ||
-            cls == GridAdvisoryClass::PREDICTED_DEGRADED) {
-            if (!advisory_fallback_) {
-                rejected_advisory_ = true;
-                ++result_.rejected_advisory;
-                return false;
-            }
-        }
         return true;
     };
     if (ray.setInput(begin, end)) {
@@ -279,6 +268,7 @@ std::optional<double> AStar::segmentCost(const Vector3d& from, const Vector3d& t
             cell.execution_reason = GridExecutionReason::OK;
             cell.cost_multiplier = 1.;
         } else if (!check_physical && advisory_query_) {
+            if(planning_query_) cell=timedPlanningQuery(position);
             ++result_.risk_integration_calls;
             const auto risk = advisory_query_(position);
             cell.execution_reason = GridExecutionReason::OK;
@@ -293,14 +283,7 @@ std::optional<double> AStar::segmentCost(const Vector3d& from, const Vector3d& t
                 map_changed_ = true;
             return std::nullopt;
         }
-        const bool warning = cell.advisory_class == GridAdvisoryClass::AVOID ||
-            cell.advisory_class == GridAdvisoryClass::PREDICTED_DEGRADED;
-        if (warning && !advisory_fallback_) {
-            rejected_advisory_ = true;
-            ++result_.rejected_advisory;
-            return std::nullopt;
-        }
-        const double multiplier = gridAdvisoryCostMultiplier(cell.advisory_class,cell.cost_multiplier);
+        const double multiplier = gridAdvisoryCostMultiplier(cell.advisory_class,cell.cost_multiplier) + cell.physical_unknown_cost;
         sum += (i == 0 || i == count ? .5 : 1.) * multiplier;
     }
     return length * sum / count;
@@ -441,14 +424,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
             const auto point = a + (b - a) * (static_cast<double>(i) / samples);
             const auto cell = timedPlanningQuery(point);
             if (!cell.executable()) return false;
-            const auto cls = cell.advisory_class;
-            if (!advisory_fallback_ &&
-                (cls == GridAdvisoryClass::AVOID ||
-                 cls == GridAdvisoryClass::PREDICTED_DEGRADED)) {
-                rejected_advisory_ = true;
-                ++result_.rejected_advisory;
-                return false;
-            }
+
         }
         return true;
     };
@@ -634,23 +610,6 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         finishFailure(result_.failure, time_1); return false;
     }
     result_.failure = Failure::NONE;
-    if(!advisory_fallback_) {
-        // A strict final connector must include its real endpoint. Its warning
-        // label can therefore exclude this strict terminal before graph work;
-        // the independently checked physical connector remains eligible for
-        // the existing high-cost recovery, with its original warning cost.
-        valid_goals.erase(std::remove_if(valid_goals.begin(),valid_goals.end(),[&](const Goal& goal) {
-            const auto cls=goal.cell.advisory_class;
-            if(cls!=GridAdvisoryClass::AVOID && cls!=GridAdvisoryClass::PREDICTED_DEGRADED) return false;
-            rejected_advisory_=true;++result_.rejected_advisory;
-            recordFirstRejection(goals[goal.original],goal.cell);
-            return true;
-        }),valid_goals.end());
-        if(valid_goals.empty()) {
-            result_.exhausted=true;
-            finishFailure(Failure::ADVISORY_NO_PATH,time_1);return false;
-        }
-    }
     // Discovery priority is separate from the objective/proof lower bound.
     // With advisory costs, unit-distance A* spends the cold prediction allowance
     // flooding a ball before it reaches any terminal. Use the existing warning
@@ -667,7 +626,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         for (const auto& goal : valid_goals) {
             GridNode terminal; terminal.index = goal.index;
             const double distance=getHeu(node, &terminal)+(Index2Coord(goal.index)-goals[goal.original]).norm();
-            best = std::min(best, (discovering ? gridAdvisoryCostMultiplier(GridAdvisoryClass::AVOID, 1.) : 1.)*distance+goal.terminal);
+            best = std::min(best, (discovering ? 3. : 1.)*distance+goal.terminal);
         }
         if(performance_diagnostics_) result_.heuristic_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-began).count();
         return best;

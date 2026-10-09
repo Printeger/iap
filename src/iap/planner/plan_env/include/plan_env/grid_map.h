@@ -136,9 +136,7 @@ struct GridRiskContext {
   std::function<GridRiskVoxel(const Eigen::Vector3d&)> predict;
 };
 
-// Search preference only. AVOID and PREDICTED_DEGRADED are blocked during
-// the first search attempt, but never become physical occupancy or an
-// execution emergency by themselves.
+// Labels describe preference only; none grants or denies traversal.
 enum class GridAdvisoryClass : uint8_t {
   VALID, AVOID, PREDICTED_DEGRADED, STALE_REFERENCE, UNKNOWN
 };
@@ -159,11 +157,8 @@ struct GridPlanningRisk {
   double cost_multiplier = 1.5;
   uint64_t version = 0;
 };
-// Shared metric preference for search and same-guide curve audit. Warning
-// classes still require the existing explicit search fallback to be admitted.
-inline double gridAdvisoryCostMultiplier(GridAdvisoryClass classification, double multiplier) {
-  if(classification==GridAdvisoryClass::AVOID || classification==GridAdvisoryClass::PREDICTED_DEGRADED)
-    return 3.;
+// Shared finite metric preference; valid warning values retain their continuous cost.
+inline double gridAdvisoryCostMultiplier(GridAdvisoryClass, double multiplier) {
   return std::isfinite(multiplier) ? std::max(1.,multiplier) : 1.5;
 }
 
@@ -216,6 +211,13 @@ struct GridPlanningCell {
   bool executable() const { return execution_reason == GridExecutionReason::OK; }
 };
 
+// Route facts retain execute refusal. Only route_reason is a search authority.
+struct GridRouteCell {
+  GridPlanningCell facts;
+  GridExecutionReason route_reason = GridExecutionReason::OUT_OF_MAP;
+  bool routable() const { return route_reason == GridExecutionReason::OK; }
+};
+
 // Fixed physical conditions for one frozen PlanningView. Spatial rejection
 // precedence remains out-of-map, unobserved, stale, obstacle, then motion.
 struct FrozenOccupancyEpoch;
@@ -244,6 +246,11 @@ struct GridSearchCell {
       : execution_reason(cell.execution_reason),
         advisory_class(cell.advisory.classification),
         cost_multiplier(cell.advisory.cost_multiplier) {}
+  explicit GridSearchCell(const GridRouteCell& cell)
+      : execution_reason(cell.route_reason), advisory_class(cell.facts.advisory.classification),
+        cost_multiplier(cell.facts.advisory.cost_multiplier),
+        physical_unknown_cost(cell.facts.observed ? 0. : 1.5) {}
+  double physical_unknown_cost = 0.; // Independent of advisory, including OFF.
   bool executable() const { return execution_reason == GridExecutionReason::OK; }
 };
 
@@ -519,6 +526,12 @@ public:
   GridFrozenRiskQuery capturePlanningRiskQuery(
       uint64_t version, double evaluation_time_s, const GridPlanningRiskPolicy& policy,
       double* valid_until_s = nullptr, uint64_t frozen_occupancy_generation = 0, bool diagnostics = false);
+private:
+  GridPlanningCell queryCellFacts(const Eigen::Vector3d& position, uint64_t version,
+      double now, const GridPlanningRiskPolicy& risk_policy, const GridMotionContext& motion,
+      bool include_rejected_clearance, const GridPlanningContext* context,
+      bool performance_diagnostics, bool route);
+public:
   GridPlanningCell queryPlanningCell(const Eigen::Vector3d& position,
                                     uint64_t version, double evaluation_time_s,
                                     const GridPlanningRiskPolicy& risk_policy,
@@ -526,6 +539,10 @@ public:
                                     bool include_rejected_clearance = false,
                                     const GridPlanningContext* context = nullptr,
                                     bool performance_diagnostics = false);
+  GridRouteCell queryRouteCell(const Eigen::Vector3d& position,
+      uint64_t version, double evaluation_time_s, const GridPlanningRiskPolicy& risk_policy,
+      const GridMotionContext& motion, const GridPlanningContext* context = nullptr,
+      bool performance_diagnostics = false);
   GridPlanningQueryStats planningQueryStats() const;
   GridPlanningContext preparePlanningQuery(double now,
                                           const GridMotionContext& motion,

@@ -656,6 +656,20 @@ GridPlanningCell EGOPlannerManager::queryPlanningViewCell(
   return cell;
 }
 
+GridRouteCell EGOPlannerManager::queryRouteViewCell(const Eigen::Vector3d& position,
+    double clearance_reserve_m) const {
+  GridRouteCell cell;
+  if(!planning_view_) return cell;
+  const auto& view=*planning_view_;
+  auto physical=view.physical_context;
+  physical.required_clearance_m+=std::max(0.,clearance_reserve_m);
+  cell=grid_map_->queryRouteCell(position,0,view.time_s,planning_risk_policy_,
+      view.motion,&physical,search_performance_diagnostics_);
+  if(cell.routable() && advisory_guidance_enabled_) cell.facts.advisory=queryPlanningViewAdvisory(position);
+  cell.facts.advisory=guidancePreference(cell.facts.advisory);
+  return cell;
+}
+
 GridPlanningCell EGOPlannerManager::queryGuidanceCell(const Eigen::Vector3d& position,
     double clearance_reserve_m) const {
   auto cell=queryPlanningViewCell(position,clearance_reserve_m,advisory_guidance_enabled_);

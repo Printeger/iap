@@ -166,11 +166,7 @@ private:
 		if (!planning_query_) return (bool)grid_map_->getInflateOccupancy(pos);
 		const auto cell = planning_query_(pos);
 		if (!cell.executable()) return true;
-		const auto cls = cell.advisory_class;
-		const bool avoid = cls == GridAdvisoryClass::AVOID ||
-		                   cls == GridAdvisoryClass::PREDICTED_DEGRADED;
-		if (avoid && !advisory_fallback_) rejected_advisory_ = true;
-		return avoid && !advisory_fallback_;
+		return false;
 	}
 
 	std::vector<GridNodePtr> retrievePath(GridNodePtr current);

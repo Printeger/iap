@@ -10,7 +10,7 @@
 
 | 阶段 | 当前真实状态 |
 |---|---|
-| D1 | 待迁移：执行查询同时用于搜索；Advisory strict/fallback 仍在线；目标候选仍使用执行资格 |
+| D1 | 已迁移并定向验证：GridRouteCell/queryRouteCell 与 execute 分离；统一有限 Advisory 代价，A* 无 warning 拒绝／fallback 重搜；未知原目标保留路线身份，GuideIdentity 分开三个目标 |
 | D2 | 待迁移：正常局部目标允许非零末速，发布仍有直线停止空间授权；实际 spline、物理／motion／时效／接续检查已存在 |
 | D3 | 待实现：一次执行连接恢复及必要观察、实际新证据收益、共享预算余量和一次质量修正 |
 | D4 | 尚未运行本轮原完整 ON；不得沿用历史现场作为本轮到达 |
@@ -33,7 +33,7 @@
 ## 当前主线与待迁移接口
 
 原 FSM → beginPlanningView 冻结地图／motion／risk 和预算 → LocalTarget 集合 →
-BsplineOptimizer::searchRecoveryGuide（同一个 A*，strict/fallback）→ guide 拟合／优化 →
+BsplineOptimizer::searchRecoveryGuide（同一个 A*，route 语义及有限软代价）→ guide 拟合／优化 →
 assessTrajectory → guide retention 硬门 → 最新实际曲线及相关 corridor → 原子提交 →
 原 traj_server accepted/pending/active 反馈和 FSM 监督。
 
@@ -56,3 +56,8 @@ assessTrajectory → guide retention 硬门 → 最新实际曲线及相关 corr
 
 交付仅原任务真实到达且必要验证通过可记 DEV_ACCEPTED／Goal complete；
 IMPLEMENTED 或明确范围 BLOCKED 仍非目标完成。
+
+D1 定向证据：route 未知保留 execute 拒绝且检查 known obstacle，分段代价连续；
+A* 唯一 warning 通路、较低风险路线选择和断连多目标共三项通过。
+原目标未知身份和原目标侧向越过两项真实 FSM 回归通过。
+尚未迁移的 D2/D3 不能作为新策略执行合格结论。

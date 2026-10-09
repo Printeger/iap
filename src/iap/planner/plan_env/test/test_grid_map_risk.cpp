@@ -577,3 +577,34 @@ TEST_F(GridRiskTest, FrozenClassificationIsComputedOncePerVoxelAndInvalidatedPer
   EXPECT_EQ(frozen(point).query_status,GridRiskStatus::VALID);
   EXPECT_EQ(calls,2);
 }
+
+TEST_F(GridRiskTest, RouteUnknownRetainsExecuteRefusalAndChecksKnownClearance) {
+  Eigen::Vector3i index; map.posToIndex(point,index);
+  const int address=map.toAddress(index);
+  GridMapTestAccess::setObserved(map,address,false);
+  GridMotionContext motion; motion.quality=1; motion.stamp_s=10.; motion.error_proxy_m=.01;
+  const auto version=map.bindRiskContext(context());
+  auto route=map.queryRouteCell(point,version,10.,{},motion);
+  EXPECT_TRUE(route.routable()); EXPECT_FALSE(route.facts.observed);
+  EXPECT_EQ(route.facts.execution_reason,GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_EQ(map.queryPlanningCell(point,version,10.,{},motion).execution_reason,
+      GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_DOUBLE_EQ(GridSearchCell(route).physical_unknown_cost,1.5);
+  GridMapTestAccess::setRawAndInflated(map,address);
+  route=map.queryRouteCell(point,version,10.,{},motion);
+  EXPECT_FALSE(route.routable()); EXPECT_EQ(route.route_reason,GridExecutionReason::PHYSICAL_OBSTACLE);
+}
+
+TEST_F(GridRiskTest, FiniteAdvisoryCostIsContinuousAcrossWarningAndDegradation) {
+  GridPlanningRiskPolicy policy; policy.hpl_budget_m=policy.vpl_budget_m=1.;
+  policy.reserve_h_m=policy.reserve_v_m=.1;
+  for(double ratio:{0.5,1.-1e-6,1.,1.+1e-6,1.5,3.}) {
+    auto ctx=context();ctx.predict=[ratio](const Eigen::Vector3d&) {
+      GridRiskVoxel value;value.status=GridRiskStatus::VALID;value.hpl=ratio-.1;value.vpl=0.;return value;
+    };
+    const auto version=map.bindRiskContext(ctx);
+    const auto value=map.queryPlanningRisk(point,version,10.,policy);
+    EXPECT_NEAR(value.cost_multiplier,ratio<=1 ? 1+.5*ratio : std::min(3.,1.5+1.5*(ratio-1)),1e-12);
+    EXPECT_DOUBLE_EQ(gridAdvisoryCostMultiplier(value.classification,value.cost_multiplier),value.cost_multiplier);
+  }
+}

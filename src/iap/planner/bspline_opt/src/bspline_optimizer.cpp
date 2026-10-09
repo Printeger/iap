@@ -88,9 +88,7 @@ namespace ego_planner
     for(size_t i=0;i<=count;++i) {
       if (budget_ && budget_->expired()) return true;
       const auto cell=planning_query_(curve.evaluateDeBoorT(std::min(duration,i*spacing)));
-      if(!cell.executable() || (!planning_advisory_fallback_ &&
-          (cell.advisory.classification==GridAdvisoryClass::AVOID ||
-           cell.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED))) return true;
+      if(!cell.executable()) return true;
     }
     return false;
   }
@@ -121,36 +119,10 @@ namespace ego_planner
         origin.execution_reason==GridExecutionReason::CURRENT_MOTION_UNAVAILABLE ||
         origin.execution_reason==GridExecutionReason::CURRENT_MOTION_STALE ||
         origin.execution_reason==GridExecutionReason::CURRENT_MOTION_BUDGET ? AStar::Failure::CURRENT_MOTION : AStar::Failure::START_BLOCKED);
-    const bool warned=origin.advisory.classification==GridAdvisoryClass::AVOID ||
-        origin.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED;
-    if(warned && !planning_advisory_fallback_) {
-      // A legal warning origin cannot satisfy a strict advisory connector.
-      // Enter the existing high-cost policy once, before searching, and keep
-      // that same policy through the actual-curve checks. Physics is unchanged.
-      evidence.fallback_eligible=true;
-      if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback))return reject(AStar::Failure::TIME_BUDGET);
-      planning_advisory_fallback_=true;a_star_->setPlanningQuery(guide_query_,true);
-    }
-    evidence.normal_attempted=!planning_advisory_fallback_;
-    evidence.fallback_entered=planning_advisory_fallback_;
-    if(evidence.fallback_entered)evidence.fallback_remaining_s=remaining();
-    bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center,
+    evidence.normal_attempted=true;
+    const bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center,
         AStar::GoalSearchPurpose::Guide);
-    const auto result=a_star_->lastResult();
-    if(evidence.normal_attempted)evidence.normal_failure=result.failure;
-    if(!found && result.failure==AStar::Failure::ADVISORY_NO_PATH && result.exhausted &&
-        result.rejected_advisory && !planning_advisory_fallback_ && remaining()>0 && !(budget_ && budget_->expired())) {
-      evidence.fallback_eligible=true;
-      if(budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback))return reject(AStar::Failure::TIME_BUDGET);
-      planning_advisory_fallback_=true;
-      a_star_->setPlanningQuery(guide_query_,true);
-      evidence.fallback_entered=true;evidence.fallback_remaining_s=remaining();
-      found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center,
-          AStar::GoalSearchPurpose::Guide);
-      RCLCPP_WARN(rclcpp::get_logger("one_guide"),
-          "Search exhausted with advisory rejections; high-cost retry %s",
-          found ? "found a physical route" : "failed without proving advisory causality");
-    }
+    evidence.normal_failure=a_star_->lastResult().failure;
     evidence.final_failure=a_star_->lastResult().failure;evidence.guide_found=found;
     if(!found) {
       initialization_failed_=true;
@@ -329,10 +301,8 @@ namespace ego_planner
       const auto cell=planning_query_(position);
       const bool physical_boundary=cell.execution_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ||
           cell.execution_reason==GridExecutionReason::OUT_OF_MAP;
-      const bool warning_preference=!planning_advisory_fallback_ &&
-          (cell.advisory.classification==GridAdvisoryClass::AVOID ||
-           cell.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED);
-      const bool preference=warning_preference || (!planning_advisory_fallback_ && risk_preference_loss);
+      const bool warning_preference=false;
+      const bool preference=risk_preference_loss;
       if(!physical_boundary && !preference && !route_loss) continue;
       Eigen::Vector3d nearest=position; double best=std::numeric_limits<double>::infinity();
       double geometric_best=std::numeric_limits<double>::infinity();
@@ -343,12 +313,7 @@ namespace ego_planner
         const Eigen::Vector3d candidate=guide_pts_[j-1]+fraction*segment;
         geometric_best=std::min(geometric_best,(candidate-position).squaredNorm());
         const auto support=guide_query_(candidate);
-        // The recovery search already owns the strict/high-cost policy. A
-        // physically checked high-cost guide remains correction support;
-        // warning labels cannot remove its unknown-boundary gradient.
-        if(!support.executable() || (!planning_advisory_fallback_ &&
-            (support.advisory.classification==GridAdvisoryClass::AVOID ||
-             support.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED))) continue;
+        if(!support.executable()) continue;
         const double distance=(candidate-position).squaredNorm();
         if(distance<best) {best=distance;nearest=candidate;}
       }
@@ -375,9 +340,7 @@ namespace ego_planner
       if(!std::isfinite(best) || best<1e-12) continue;
       Eigen::Vector3d direction=(nearest-position).normalized();
       const auto farther=guide_query_(nearest+reserve*direction);
-      const bool room=farther.executable() && (planning_advisory_fallback_ ||
-          (farther.advisory.classification!=GridAdvisoryClass::AVOID &&
-           farther.advisory.classification!=GridAdvisoryClass::PREDICTED_DEGRADED));
+      const bool room=farther.executable();
       const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
       const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));
       const double u=parameter-first;
@@ -1118,20 +1081,7 @@ namespace ego_planner
     const Eigen::Vector3d pool_center = guide_reinitialization_
         ? (in + out) / 2.0 : (original_in + original_out) / 2.0;
     bool found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
-    if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
-        !planning_advisory_fallback_) {
-      if (budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) {
-        initialization_failed_ = true; return {};
-      }
-      planning_advisory_fallback_ = true;
-      a_star_->setPlanningQuery(guide_query_, true);
-      found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
-      static rclcpp::Clock fallback_clock(RCL_SYSTEM_TIME);
-      RCLCPP_WARN_THROTTLE(rclcpp::get_logger("initControlPoints"),
-                  fallback_clock, 1000,
-                  "advisory avoidance search exhausted; bounded high-cost fallback %s",
-                  found ? "used" : "failed");
-    }
+
     if (!found) {
       reportSearchFailure(a_star_->lastResult(), init_points,
                           segment_ids.front().first, segment_ids.back().second,
@@ -2057,15 +2007,7 @@ namespace ego_planner
       const Eigen::Vector3d out = endpoints ? endpoints->exit : original_out;
       const Eigen::Vector3d pool_center = (original_in + original_out) / 2.0;
       bool found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
-      if (!found && a_star_->lastResult().failure == AStar::Failure::ADVISORY_NO_PATH &&
-          !planning_advisory_fallback_) {
-        if (budget_ && !budget_->tryRepair(PlanningBudget::Repair::AdvisoryFallback)) {
-          force_stop_type_ = STOP_FOR_ERROR; return false;
-        }
-        planning_advisory_fallback_ = true;
-        a_star_->setPlanningQuery(guide_query_, true);
-        found = a_star_->AstarSearch(0.1, in, out, -1.0, pool_center);
-      }
+
       if (!found) {
         reportSearchFailure(a_star_->lastResult(), cps_.points,
                             segment_ids.front().first, segment_ids.back().second,

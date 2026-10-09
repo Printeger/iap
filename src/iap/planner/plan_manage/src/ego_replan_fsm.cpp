@@ -1242,7 +1242,6 @@ namespace ego_planner
       }
     }
     const Eigen::Vector3d nominal = reference.getPosition(target_t);
-    const bool terminal_horizon=target_t >= reference.global_duration_ - 1e-9;
     local_targets_.clear();
     // The reference supplies direction and measured progress only. Endpoint
     // eligibility is independent of reachability, proven by the one search.
@@ -1253,82 +1252,29 @@ namespace ego_planner
     Eigen::Vector3d left=Eigen::Vector3d::UnitZ().cross(direction);
     if(left.norm()<1e-9) left=Eigen::Vector3d::UnitY();
     else left.normalize();
-    const auto add_target = [&](const Eigen::Vector3d& point, bool final) {
-      if(expired() || local_targets_.size()>=16 || !point.allFinite()) return;
-      if(!((point-center).array().abs()<4.8).all()) return;
-      if((point-start_pt_).norm()<.4 && !final) return;
-      // When the original endpoint is not yet physically eligible, retain
-      // checked approaching targets, not a cheap up/down cycle away from it.
-      // This narrows terminal eligibility; the risk objective is unchanged.
-      if(!final && terminal_horizon && (point-end_pt_).norm()+1e-9 >=
-          (start_pt_-end_pt_).norm()) return;
-      for(const auto& target:local_targets_)
-        if((target.position-point).norm()<(final ? 1e-9 : .75)) return;
-      const auto cell=planner_manager_->queryLocalTargetCell(point,node_->now().seconds());
-      if(!cell.executable()) {
-        wait_for_map_reason_=cell.execution_reason;
-        if(final) RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
-            "Task endpoint unavailable: %s",gridExecutionReasonName(cell.execution_reason));
-        return;
-      }
+    const auto add_target = [&](const Eigen::Vector3d& point, bool) {
+      if(expired() || !point.allFinite() || !((point-center).array().abs()<4.8).all()) return;
+      const auto cell=planner_manager_->queryRouteViewCell(point);
+      if(!cell.routable()) { wait_for_map_reason_=cell.route_reason; return; }
       LocalTarget candidate; candidate.position=point;
-      // Diagnostic projection; choosing a target never advances task progress.
       candidate.progress_m=(point-position).dot(direction);
-      if(!final) candidate.velocity=direction*planner_manager_->pp_.max_vel_;
       local_targets_.push_back(candidate);
     };
-    add_target(end_pt_,true); // Priority slot when the fixed endpoint fits the pool.
-    if(terminal_horizon && !local_targets_.empty()) {
-      // Original EGO terminal semantics: once the requested reference horizon
-      // reaches the physically eligible mission endpoint, plan that endpoint
-      // with zero terminal velocity. Intermediate terminals must not compete
-      // with completion under the unchanged length/risk objective.
-      local_target_pt_=end_pt_;
-      local_target_vel_=Eigen::Vector3d::Zero();
-      planner_manager_->setLocalTargets(local_targets_,center);
-      return true;
+    // Mission identity is immutable; observed eligibility belongs to local prefix selection.
+    add_target(end_pt_,true);
+    if(!local_targets_.empty()) {
+      local_target_pt_=end_pt_; local_target_vel_=Eigen::Vector3d::Zero();
+      planner_manager_->setLocalTargets(local_targets_,center); return true;
     }
-    std::array<std::vector<Eigen::Vector3d>,3> regions;
-    const double spacing=std::max(resolution,.5);
-    // Deterministic coarse coverage of the original pool, including lateral
-    // movement with no increase in reference projection. Physical query still
-    // rejects unknown, stale, occupied and insufficient-clearance endpoints.
-    for(double x=-4.5;x<=4.5+1e-9;x+=spacing)
-      for(double y=-4.5;y<=4.5+1e-9;y+=spacing)
-        for(double dz: {0.,-.5,.5}) {
-          if(expired()) return false;
-          Eigen::Vector3d point(center.x()+x,center.y()+y,start_pt_.z()+dz);
-          Eigen::Vector3i index; planner_manager_->grid_map_->posToIndex(point,index);
-          planner_manager_->grid_map_->indexToPos(index,point);
-          const Eigen::Vector3d delta=point-start_pt_;
-          const double side=delta.dot(left),forward=delta.dot(direction);
-          const size_t region=std::abs(side)<=.5*std::max(.5,std::abs(forward)) ? 0 : side>0 ? 1 : 2;
-          regions[region].push_back(point);
-        }
-    const std::array<Eigen::Vector3d,3> anchors{{nominal,
-        start_pt_+direction*distance*.35+left*distance*.65,
-        start_pt_+direction*distance*.35-left*distance*.65}};
-    for(size_t region=0;region<regions.size();++region) {
-      auto& candidates=regions[region];
-      std::sort(candidates.begin(),candidates.end(),[&](const auto& a,const auto& b) {
-        const auto da=std::llround((a-anchors[region]).squaredNorm()*1e9);
-        const auto db=std::llround((b-anchors[region]).squaredNorm()*1e9);
-        if(da!=db) return da<db;
-        for(int axis=0;axis<3;++axis) if(a[axis]!=b[axis]) return a[axis]<b[axis];
-        return false;
-      });
-      const size_t before=local_targets_.size(),quota=region==0 ? 6 : 5;
-      for(const auto& point:candidates) {
-        if(local_targets_.size()-before>=quota || local_targets_.size()>=16) break;
-        add_target(point,false);
-        if(expired()) return false;
-      }
+    if(((end_pt_-center).array().abs()<4.8).all()) {
+      local_target_pt_=end_pt_; return false; // Known occupied/conflicting mission, not a replacement goal.
     }
-    if (local_targets_.empty()) { local_target_pt_=nominal; return false; }
-    local_target_pt_=local_targets_.front().position;
-    local_target_vel_=local_targets_.front().velocity;
-    planner_manager_->setLocalTargets(local_targets_,center);
-    return true;
+    add_target(nominal,false);
+    if(!local_targets_.empty()) {
+      local_target_pt_=nominal; local_target_vel_=Eigen::Vector3d::Zero();
+      planner_manager_->setLocalTargets(local_targets_,center); return true;
+    }
+    local_target_pt_=nominal; return false;
   }
 
 } // namespace ego_planner
