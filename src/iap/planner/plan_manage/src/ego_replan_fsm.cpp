@@ -694,7 +694,15 @@ namespace ego_planner
 
       if (flag_escape_emergency_) // Avoiding repeated calls
       {
-        callEmergencyStop(odom_pos_);
+        const auto input=std::make_pair(applied_odom_stamp_s_,
+            planner_manager_->grid_map_->occupancyGeneration());
+        if(!last_brake_attempt_input_ || *last_brake_attempt_input_!=input) {
+          last_brake_attempt_input_=input;
+          // Rejection retains the executing curve and the outstanding request.
+          // Only changed measured/map evidence may start another bounded call.
+          flag_escape_emergency_=!callEmergencyStop(odom_pos_);
+          if(!flag_escape_emergency_) last_brake_attempt_input_.reset();
+        }
       }
       else
       {
@@ -702,7 +710,6 @@ namespace ego_planner
           changeFSMExecState(GEN_NEW_TRAJ, "FSM");
       }
 
-      flag_escape_emergency_ = false;
       break;
     }
     }
@@ -775,7 +782,8 @@ namespace ego_planner
       // A failed rolling replan must not silence supervision of the trajectory
       // still being executed. In particular, its first violation may move from
       // the replan window into the emergency window while REPLAN_TRAJ retries.
-      if ((exec_state_ != EXEC_TRAJ && exec_state_ != REPLAN_TRAJ) ||
+      if ((exec_state_ != EXEC_TRAJ && exec_state_ != REPLAN_TRAJ &&
+           exec_state_ != EMERGENCY_STOP) ||
           info.start_time_.seconds() < 1e-5)
         return;
       double now = node_->now().seconds();
@@ -869,7 +877,11 @@ namespace ego_planner
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                              "Remaining trajectory %s, lead=%.2fs",
                              gridExecutionReasonName(assessment.execution_reason), lead);
-        if(planner_manager_->hasPendingTrajectory()) {
+        if(exec_state_==EMERGENCY_STOP) {
+          // A rejected brake never stopped this geometry. Keep supervision and
+          // the outstanding checked-brake request; advisory cannot cancel it.
+          flag_escape_emergency_=true;
+        } else if(planner_manager_->hasPendingTrajectory()) {
           // Withdrawal grants no recovery curve. The existing checked braking
           // path still supervises and replaces the active predecessor.
           flag_escape_emergency_=true;
@@ -889,7 +901,7 @@ namespace ego_planner
       }
       // Advisory warnings request an early revision. Missing or brief stale PL
       // does not enter the emergency path.
-      if (planner_manager_->advisoryGuidanceEnabled() && assessment.advisory_avoid_samples != 0 &&
+      if (exec_state_!=EMERGENCY_STOP && planner_manager_->advisoryGuidanceEnabled() && assessment.advisory_avoid_samples != 0 &&
           now - last_advisory_replan_time_s_ > 1.0) {
         last_advisory_replan_time_s_ = now;
         RCLCPP_INFO(node_->get_logger(),

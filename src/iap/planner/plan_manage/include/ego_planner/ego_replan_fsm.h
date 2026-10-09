@@ -111,6 +111,7 @@ namespace ego_planner
     int current_wp_;
 
     bool flag_escape_emergency_;
+    std::optional<std::pair<double,uint64_t>> last_brake_attempt_input_;
 
     /* ROS utils */
     rclcpp::Node::SharedPtr node_;
