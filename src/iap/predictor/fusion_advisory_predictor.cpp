@@ -201,9 +201,13 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
 
   const bool shared_pose=gnss.information_state==PredictorInformationState::Pose6Map ||
       lidar.information_state==PredictorInformationState::Pose6Map;
-  out.cross_source_noise_inflation=shared_pose && out.gnss_used && out.lidar_used ? 2. : 1.;
+  out.cross_source_noise_inflation=shared_pose ? 2. : 1.;
   // Cauchy-Schwarz gives R <= 2 diag(R_g,R_l) for arbitrary cross-source
-  // covariance with the declared marginal noises. This is a covariance bound,
+  // covariance with the declared marginal noises. Keep that same envelope
+  // when either source disappears: R_s <= 2 R_s. Normal information added
+  // to this fixed envelope cannot increase the marginal position covariance.
+  // Uninflated source-only diagnostics below have a separate scope.
+  // This is a covariance bound,
   // not trace normalization or equal source weighting. Unknown map/bias errors
   // and within-source noise miscalibration remain explicitly unqualified.
   out.joint_pose_information=(gnss_pose+lidar_pose)/out.cross_source_noise_inflation;

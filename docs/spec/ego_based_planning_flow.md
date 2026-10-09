@@ -2060,3 +2060,18 @@ uncertainty, time propagation, legal fixed full-route and independent 9+9,
 fused fault risk and online budget qualification remain pending. Defaults and
 formal mission comparison are not promoted. Consolidated evidence and figures:
 `log/20261008T162301Z_891/export/analysis/fusion_scientific_result/REPORT.md`.
+# Consistent normal-error envelope (2026-10-09)
+
+Canonical shared-pose predictions use the same covariance envelope
+`2 diag(R_G,R_L)` with one or two admitted sources. Source loss never removes
+the factor two. For arbitrary cross-source correlation, Cauchy–Schwarz gives
+`R_joint <= 2 diag(R_G,R_L)`; for a single source `R_s <= 2 R_s`.
+These statements condition on the declared marginal measurement noises and
+fixed map. They grant neither calibrated coverage nor fault integrity.
+Uninflated GNSS nominal and LiDAR-only numbers remain source diagnostics,
+separate from the planning envelope. The cache identity includes model
+`pose6_fixed_two_source_envelope_v2`; physical and motion authorization,
+source admission, risk weights and online budgets retain their authorities.
+Regression `AdvisoryNumerics.SharedPoseEnvelopeDoesNotRewardSourceLoss`
+first failed on the old source-count policy (HPL 7.036 → 5 on source loss),
+then checks weakening, disappearance and recovery against `2/(1+strength)`.

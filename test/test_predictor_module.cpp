@@ -4448,7 +4448,11 @@ TEST(PredictorModuleTest, FusionRejectsIndefinitePriorButKeepsGnssOnly) {
             std::string::npos);
   EXPECT_TRUE(std::isfinite(result.hpl));
   EXPECT_TRUE(std::isfinite(result.vpl));
-  EXPECT_TRUE(result.lambda_pred.isApprox(result.lambda_gnss, 1.0e-9));
+  // A rejected prior leaves the GNSS observation intact. The shared-pose
+  // planning envelope still applies with one source; diagnosis is uninflated.
+  EXPECT_DOUBLE_EQ(result.cross_source_noise_inflation,2.);
+  EXPECT_TRUE((2.*result.lambda_pred).isApprox(result.lambda_gnss, 1.0e-9));
+  EXPECT_NEAR(result.hpl,std::sqrt(2.)*result.gnss_information_hpl,1e-8);
 }
 
 TEST(PredictorModuleTest, ModuleNoGnssNoLidarIsUnavailableWithNanPl) {
@@ -4474,6 +4478,27 @@ TEST(PredictorModuleTest, ModuleNoGnssNoLidarIsUnavailableWithNanPl) {
   EXPECT_FALSE(std::isfinite(result.fused.pl_scalar));
   EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_AVAILABLE));
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
+}
+
+TEST(AdvisoryNumerics, SharedPoseEnvelopeDoesNotRewardSourceLoss) {
+  iap::GnssAdvisoryResult g; g.fim_valid=true;
+  iap::LidarAdvisoryResult l; l.valid=true;
+  g.information_state=l.information_state=iap::PredictorInformationState::Pose6Map;
+  l.joint_pose_information=Eigen::Matrix<double,6,6>::Identity();
+  l.lambda_lidar=Eigen::Matrix3d::Identity();
+  double previous=0.;
+  for(double strength:{1.,.1,.01,0.,.01,.1,1.}) {
+    g.joint_pose_information=strength*Eigen::Matrix<double,6,6>::Identity();
+    g.lambda_gnss=strength*Eigen::Matrix3d::Identity();
+    g.fim_valid=strength>0.;
+    const auto r=iap::FusionAdvisoryPredictor().query(make_snapshot(false,false),g,l);
+    ASSERT_TRUE(r.valid)<<r.fallback_reason;
+    EXPECT_DOUBLE_EQ(r.cross_source_noise_inflation,2.);
+    EXPECT_NEAR(r.sigma_pos(0,0),2./(1.+strength),1e-12);
+    EXPECT_NEAR(r.lidar_only_hpl,5.,1e-12); // Raw diagnosis has its own scope.
+    if(strength==0.) EXPECT_GE(r.hpl,previous);
+    previous=r.hpl;
+  }
 }
 
 TEST(AdvisoryNumerics, ComplementaryRankDeficientSourcesSolveJointly) {

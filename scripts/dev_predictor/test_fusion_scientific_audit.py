@@ -4,6 +4,26 @@ from fusion_scientific_audit import position_reference, gnss_reference, skew
 
 
 class IndependentReferenceTest(unittest.TestCase):
+    def test_fixed_envelope_is_conservative_and_monotone_with_shared_nuisance(self):
+        rng=np.random.default_rng(712)
+        a,b=rng.normal(size=(17,6)),rng.normal(size=(19,6))
+        previous=None
+        for strength in (0.,.001,.01,.1,1.):
+            measurement=np.vstack((a,np.sqrt(strength)*b))/np.sqrt(2.)
+            bound=np.linalg.inv(position_reference(measurement))
+            if previous is not None:
+                self.assertGreaterEqual(np.linalg.eigvalsh(previous-bound).min(),-1e-10)
+            previous=bound
+            # Independently sandwich an arbitrary admissible correlated noise
+            # through the actual GLS estimator, including its nuisance states.
+            raw=np.vstack((a,np.sqrt(strength)*b))
+            u,_,vt=np.linalg.svd(rng.normal(size=(17,19)),full_matrices=False)
+            cross=u@np.diag(rng.uniform(-1.,1.,17))@vt
+            noise=np.block([[np.eye(17),cross],[cross.T,np.eye(19)]])
+            gain=np.linalg.pinv(raw)
+            actual=(gain@noise@gain.T)[:3,:3]
+            self.assertGreaterEqual(np.linalg.eigvalsh(bound-actual).min(),-1e-10)
+
     def test_shared_attitude_must_be_eliminated_after_sources_join(self):
         # Each source confounds a different position with the same attitude.
         # Summing individual marginals loses their complementary constraint.
