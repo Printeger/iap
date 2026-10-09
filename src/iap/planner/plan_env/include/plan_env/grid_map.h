@@ -643,11 +643,10 @@ private:
   // Live mutation revokes it by generation; observed/inflated layers remain
   // authoritative full buffers. Entries preserve x/y/z scan and tie order.
   // Clearance bounds only, not another copy of planning/advisory results.
-  // Bound to the frozen index generation and the round's clearance radius.
+  // Bound to the frozen geometry generation, with threshold-independent bounds.
   struct ClearanceBounds { double lower_m, upper_m; };
   std::unordered_map<int, ClearanceBounds> frozen_clearance_bounds_;
   GridPlanningQueryStats planning_query_stats_;
-  double frozen_clearance_radius_m_ = -1.0;
   uint64_t clearance_bounds_generation_ = 0;
   mutable std::shared_ptr<const FrozenOccupancyEpoch> cached_physical_epoch_;
   mutable std::mutex physical_freeze_mutex_;

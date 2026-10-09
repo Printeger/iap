@@ -441,6 +441,19 @@ TEST(GridClearanceBounds, SameVoxelOffsetsDoNotShareAnExactClearanceDecision) {
   EXPECT_GT(stats.bounds_hits, 0u);
   EXPECT_GT(stats.fast_pass, 0u);
   EXPECT_GT(stats.exact_decisions, 0u);
+  // Tapered fitting thresholds reuse geometric bounds, never a prior accept
+  // decision. A larger threshold must still find an obstacle outside the
+  // originally scanned empty stencil via the exact fallback.
+  for(double radius:{.15,.35,.05,.7,.2}) {
+    auto changed=motion;changed.body_radius_m=radius;
+    const auto tapered=map->preparePlanningQuery(10,changed);
+    for(const auto& p:{a,b,Eigen::Vector3d(.15,1.05,1.05),Eigen::Vector3d(1.999,1.05,1.05)}) {
+      const auto exact=map->queryPlanningCell(p,0,10,policy,changed);
+      const auto fast=map->queryPlanningCell(p,0,10,policy,changed,false,&tapered);
+      EXPECT_EQ(exact.execution_reason,fast.execution_reason);
+    }
+  }
+  EXPECT_EQ(map->planningQueryStats().bounds_misses,stats.bounds_misses);
 }
 
 TEST_F(GridRiskTest, BelowWarningCostUsesRawProtectionLevelsContinuously) {

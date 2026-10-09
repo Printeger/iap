@@ -350,10 +350,14 @@ bool GridMap::hasRequiredClearance(const Eigen::Vector3d& position,
     return measureRawClearance(position, index, required, true, nullptr, epoch) >= required;
   const auto generation = epoch ? epoch->generation : occupancyGeneration();
   const double resolution = epoch ? epoch->resolution_m : mp_.resolution_;
-  if (frozen_clearance_radius_m_ != required || clearance_bounds_generation_ != generation) {
+  // Bounds describe obstacle geometry, independent of the caller's clearance
+  // threshold. A finite scan supplies a global lower bound and a witnessed
+  // upper bound; changing the threshold may require the exact fallback below,
+  // but cannot invalidate those bounds. Tapered guide margins must not clear
+  // all previously measured voxels on every sample.
+  if (clearance_bounds_generation_ != generation) {
     clearance_bounds_generation_ = generation;
     frozen_clearance_bounds_.clear();
-    frozen_clearance_radius_m_ = required;
   }
   const int address = epoch ? (index.x()*epoch->voxel_dimensions.y()+index.y())*epoch->voxel_dimensions.z()+index.z() : toAddress(index);
   auto found = frozen_clearance_bounds_.find(address);

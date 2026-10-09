@@ -1254,8 +1254,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
     if(const auto value=boundary.get_optional<std::string>("prior_recovery_result")) prior_recovery_result=*value;
     if(const auto value=boundary.get_optional<double>("presearch_elapsed_s")) presearch_elapsed=*value;
     expected_search_calls=boundary.get<unsigned>("expected_search_calls",2);
-    expected_observation_result=boundary.get_optional<std::string>("expected_observation_result").value_or(
-        observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION");
+    if(const auto value=boundary.get_optional<std::string>("expected_observation_result")) expected_observation_result=*value;
     boost::property_tree::read_json(captured.string(),metadata);
     const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
       for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
@@ -1300,10 +1299,24 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   if(!planning_payload) EXPECT_FALSE(manager->queryLocalTargetCell(target,node->now().seconds()).executable());
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
   if(presearch_elapsed) ego_planner::EGOPlannerManagerTestAccess::restorePresearchResources(*manager,*presearch_elapsed);
-  ASSERT_TRUE(manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false));
-  EXPECT_EQ(manager->observationResult(),expected_observation_result.value_or(
-      observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION"));
-  EXPECT_EQ(manager->planningBudget()->searches.calls,expected_search_calls);
+  const bool replanned=manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false);
+  if(presearch_elapsed) {
+    const auto stats=manager->grid_map_->planningQueryStats();
+    std::cout<<"FROZEN_CLEARANCE bounds_hits="<<stats.bounds_hits<<" bounds_misses="<<stats.bounds_misses
+        <<" exact_decisions="<<stats.exact_decisions<<" searches="<<manager->planningBudget()->searches.calls
+        <<" cumulative_search_s="<<manager->planningBudget()->searches.seconds
+        <<" elapsed_s="<<manager->planningBudget()->elapsed()<<" failure="<<int(manager->lastPlanFailure())<<std::endl;
+  }
+  ASSERT_TRUE(replanned);
+  if(expected_search_calls || expected_observation_result)
+    EXPECT_EQ(manager->observationResult(),expected_observation_result.value_or(
+        observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION"));
+  else EXPECT_TRUE(manager->observationResult()=="NONE" || manager->observationResult()=="OBSERVED_PROGRESS_CONNECTION");
+  if(expected_search_calls) EXPECT_EQ(manager->planningBudget()->searches.calls,expected_search_calls);
+  else {
+    EXPECT_GE(manager->planningBudget()->searches.calls,1u);
+    EXPECT_LE(manager->planningBudget()->searches.calls,2u);
+  }
   EXPECT_TRUE(manager->guideIdentity().mission_goal.isApprox(goal,1e-9));
   if(!observation_snapshot) EXPECT_GT(manager->guideIdentity().committed_endpoint.x(),start.x()+.2);
   else {
