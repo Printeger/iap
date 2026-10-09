@@ -1151,6 +1151,29 @@ TEST(EgoBaseline, TerminalReferenceUsesOnlyOriginalGoalIncludingLateralOvershoot
   }
 }
 
+TEST(EgoBaseline, UnobservedTerminalGoalCannotOfferRecedingVerticalTargets) {
+  auto node=makeNode();
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+  manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(1.2,0,2),goal(2,0,1.5),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),start);
+  GridMapTestAccess::markObserved(*manager->grid_map_);
+  GridMapTestAccess::clearObserved(*manager->grid_map_,goal);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,start);
+  ASSERT_TRUE(manager->planGlobalTraj(Eigen::Vector3d(-2,0,1.5),zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager->beginPlanningView());
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,goal);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+  for(const auto& target:ego_planner::EGOPlannerManagerTestAccess::targetPositions(*manager)) {
+    EXPECT_LT((target-goal).norm(),(start-goal).norm());
+    EXPECT_TRUE(manager->queryLocalTargetCell(target,node->now().seconds()).executable());
+  }
+  EXPECT_EQ(manager->queryLocalTargetCell(goal,node->now().seconds()).execution_reason,
+      GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::taskGoal(fsm).isApprox(goal,1e-9));
+}
+
 TEST(EgoBaseline, TerminalSpeedIsLimitedByObservedBrakingSpace) {
   auto node=makeNode(); ego_planner::EGOPlannerManager manager;
   manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));

@@ -1227,6 +1227,7 @@ namespace ego_planner
       }
     }
     const Eigen::Vector3d nominal = reference.getPosition(target_t);
+    const bool terminal_horizon=target_t >= reference.global_duration_ - 1e-9;
     local_targets_.clear();
     // The reference supplies direction and measured progress only. Endpoint
     // eligibility is independent of reachability, proven by the one search.
@@ -1241,6 +1242,11 @@ namespace ego_planner
       if(expired() || local_targets_.size()>=16 || !point.allFinite()) return;
       if(!((point-center).array().abs()<4.8).all()) return;
       if((point-start_pt_).norm()<.4 && !final) return;
+      // When the original endpoint is not yet physically eligible, retain
+      // checked approaching targets, not a cheap up/down cycle away from it.
+      // This narrows terminal eligibility; the risk objective is unchanged.
+      if(!final && terminal_horizon && (point-end_pt_).norm()+1e-9 >=
+          (start_pt_-end_pt_).norm()) return;
       for(const auto& target:local_targets_)
         if((target.position-point).norm()<(final ? 1e-9 : .75)) return;
       const auto cell=planner_manager_->queryLocalTargetCell(point,node_->now().seconds());
@@ -1257,7 +1263,7 @@ namespace ego_planner
       local_targets_.push_back(candidate);
     };
     add_target(end_pt_,true); // Priority slot when the fixed endpoint fits the pool.
-    if(target_t >= reference.global_duration_ - 1e-9 && !local_targets_.empty()) {
+    if(terminal_horizon && !local_targets_.empty()) {
       // Original EGO terminal semantics: once the requested reference horizon
       // reaches the physically eligible mission endpoint, plan that endpoint
       // with zero terminal velocity. Intermediate terminals must not compete
