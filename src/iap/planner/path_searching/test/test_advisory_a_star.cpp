@@ -76,6 +76,48 @@ TEST(AdvisoryAStar, TimeoutWithAdvisoryRejectionsIsNotExhaustion) {
   EXPECT_FALSE(search.lastResult().exhausted);
 }
 
+TEST(AdvisoryAStar, AllWarnedTerminalsProveStrictIneligibilityBeforeGraphFlood) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,60,20));
+  const std::vector<Eigen::Vector3d> goals={{1,0,1},{1,.6,1}};
+  size_t queries=0;
+  search.setPlanningQuery([&](const Eigen::Vector3d& p) {
+    if(++queries>=4000) search.setPlanningBudget(std::make_shared<PlanningBudget>(0));
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=std::any_of(goals.begin(),goals.end(),[&](const auto& g) {
+      return (p-g).norm()<.08;
+    }) ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=3.;return cell;
+  });
+  EXPECT_FALSE(search.AstarSearchGoals(.1,{-1,0,1},goals,1.));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::ADVISORY_NO_PATH);
+  EXPECT_TRUE(search.lastResult().exhausted);
+  EXPECT_EQ(search.lastResult().expanded,0u);
+  EXPECT_LT(queries,4000u);
+  EXPECT_GE(search.lastResult().rejected_advisory,goals.size());
+  queries=0;search.setPlanningBudget(std::make_shared<PlanningBudget>(1.5,3));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=p.x()>.9 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=3.;return cell;
+  },true);
+  ASSERT_TRUE(search.AstarSearchGoals(.1,{-1,0,1},goals,1.));
+  EXPECT_GT(search.lastResult().risk_cost_m,0.);
+}
+
+TEST(AdvisoryAStar, WarnedTerminalKeepsOtherStrictGoalOriginalIdentity) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,60,20));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=(p-Eigen::Vector3d(1,0,1)).norm()<.1 ?
+        GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;return cell;
+  });
+  ASSERT_TRUE(search.AstarSearchGoals(.1,{-1,0,1},{{1,0,1},{1,1,1}},1.));
+  EXPECT_EQ(search.lastResult().selected_goal,1u);
+  EXPECT_TRUE(search.getPath().back().isApprox(Eigen::Vector3d(1,1,1),1e-9));
+}
+
 TEST(AdvisoryAStar, EndpointTimeoutRetainsMeasuredTimeAndUnexaminedIdentity) {
   auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
   AStar search;search.initGridMap(map,Eigen::Vector3i(40,40,10));

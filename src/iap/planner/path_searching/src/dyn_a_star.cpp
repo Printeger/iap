@@ -626,6 +626,23 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         finishFailure(result_.failure, time_1); return false;
     }
     result_.failure = Failure::NONE;
+    if(!advisory_fallback_) {
+        // A strict final connector must include its real endpoint. Its warning
+        // label can therefore exclude this strict terminal before graph work;
+        // the independently checked physical connector remains eligible for
+        // the existing high-cost recovery, with its original warning cost.
+        valid_goals.erase(std::remove_if(valid_goals.begin(),valid_goals.end(),[&](const Goal& goal) {
+            const auto cls=goal.cell.advisory_class;
+            if(cls!=GridAdvisoryClass::AVOID && cls!=GridAdvisoryClass::PREDICTED_DEGRADED) return false;
+            rejected_advisory_=true;++result_.rejected_advisory;
+            recordFirstRejection(goals[goal.original],goal.cell);
+            return true;
+        }),valid_goals.end());
+        if(valid_goals.empty()) {
+            result_.exhausted=true;
+            finishFailure(Failure::ADVISORY_NO_PATH,time_1);return false;
+        }
+    }
     // Discovery priority is separate from the objective/proof lower bound.
     // With advisory costs, unit-distance A* spends the cold prediction allowance
     // flooding a ball before it reaches any terminal. Use the existing warning

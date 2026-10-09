@@ -124,6 +124,16 @@ attempt102/107完整输入的原终点已物理合法，却仍与中间目标竞
 1.5m的回归旧16目标为红，修复须唯一原终点；原测得参考进度和全部资格
 不变。此horizon修复尚待回归与原300秒现场到达。
 
+122f79c0原300秒任务（20261009T072823Z_934）在第二叉前x≈-10.2持续停滞。
+末attempt245/gen2536/risk2845完整输入原恢复重放：OFF约2ms有物理guide，
+ON严格搜索1秒无候选。全部16个物理终端的HPL加原reserve都超原Advisory预算；
+其严格连接必检查原终端warning，却仍洪泛整图直到超时，未留下既有恢复时间。
+严格模式现在在独立物理终端/连接检查之后排除warning终端；全排除即证明
+无严格终端，ADVISORY_NO_PATH/exhausted，进入既有高代价恢复的原剩余时间。
+警告不会变成物理拒绝；混合终端保留其他严格目标及原索引，高代价仍收原成本。
+不新增超时恢复策略/搜索预算，不跳过物理检查/最终检查。确定性工作上限回归
+原洪泛4000查询为红，修复应0展开即证明；混合终端、超时不是穷尽与未知墙保留。
+
 
 
 
@@ -2544,3 +2554,7 @@ failed candidate remains fully captured; ENVIRONMENT_UNOBSERVED and exhausted
 repair actions are preserved rather than weakened.
 The physical unobserved remaining-curve refusal in this run remains a checked
 execution refusal, not a diagnosis that occupancy can be weakened.
+
+末attempt245完整原输入绿色生产恢复：严格终端排除后，高代价首guide约20ms，
+总搜索0.998334秒，原2次动作/2次搜索、原上限1秒/1.5秒/3动作未扩大；
+风险成本3.557407m。42项A*、72项EGO基线、同输入工具与执行反馈通过。
