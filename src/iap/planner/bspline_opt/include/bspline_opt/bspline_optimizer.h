@@ -265,6 +265,8 @@ namespace ego_planner
     bool guide_reinitialization_ = false;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> planning_query_;
     std::function<GridPlanningCell(const Eigen::Vector3d&)> guide_query_;
+    std::optional<Eigen::MatrixXd> physical_incumbent_;
+    double physical_incumbent_cost_=std::numeric_limits<double>::infinity();
     bool planning_advisory_fallback_ = false;
     std::vector<RecoverySearchEvidence> recovery_search_evidence_;
     bool initialization_failed_ = false;

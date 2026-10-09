@@ -1,5 +1,6 @@
 // Read-only Curve replay. Frozen acquisition times are never refreshed.
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/prediction_input.h>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <filesystem>
@@ -28,11 +29,14 @@ struct CurveBackendReplayAccess {
   }
   static const GridPlanningContext& bind(EGOPlannerManager& manager,rclcpp::Node::SharedPtr node,
       GridMap::Ptr map,const GridPlanningContext& context,const GridMotionContext& motion,
-      double time,PlanningBudget::Ptr budget) {
+      double time,PlanningBudget::Ptr budget, GridFrozenRiskQuery risk={},
+      uint64_t risk_version=0, GridPlanningRiskPolicy policy={}) {
     manager.node_=std::move(node);manager.grid_map_=std::move(map);manager.planning_budget_=std::move(budget);
-    manager.advisory_guidance_enabled_=false; // No captured predictor input in this physical replay.
+    manager.advisory_guidance_enabled_=risk_version!=0;
+    manager.planning_risk_policy_=policy;
     EGOPlannerManager::PlanningView view;view.physical=context.epoch;view.generation=context.generation;
-    view.time_s=time;view.motion=motion;view.physical_context=context;manager.planning_view_=std::move(view);
+    view.time_s=time;view.motion=motion;view.physical_context=context;
+    view.risk_version=risk_version;view.advisory_query=std::move(risk);manager.planning_view_=std::move(view);
     return manager.planning_view_->physical_context;
   }
   static EGOPlannerManager::PlanFailure correct(EGOPlannerManager& manager,
@@ -58,7 +62,8 @@ int main(int argc,char**argv) {
  try {
   rclcpp::init(argc,argv);
   const auto args=rclcpp::remove_ros_arguments(argc,argv);
-  if(args.size()!=3 && !(args.size()==4 && args[3]=="isolated-budget")) throw std::invalid_argument("usage: curve_backend_replay snapshot.json retime|refine|backend|initialize|audit [isolated-budget] [--ros-args --params-file frozen.yaml]");
+  const bool has_payload=args.size()==5 && args[3]=="--payload";
+  if(args.size()!=3 && !(args.size()==4 && args[3]=="isolated-budget") && !has_payload) throw std::invalid_argument("usage: curve_backend_replay snapshot.json retime|refine|backend|initialize|audit [isolated-budget] [--ros-args --params-file frozen.yaml]");
   if(!std::getenv("IAP_RUN_DIR")) throw std::invalid_argument("replay requires resolver-owned IAP_RUN_DIR");
   glim::RunLogManager::initialize("curve_backend_replay");
   auto* artifacts=glim::RunLogManager::get_if_initialized();
@@ -110,7 +115,44 @@ int main(int argc,char**argv) {
   auto map=GridMap::fromFailureSnapshot(snapshot);
   const auto context=map->preparePlanningQuery(time,motion,map->captureFrozenOccupancyEpoch());
   GridPlanningRiskPolicy policy;
-  const auto query=[&](const Eigen::Vector3d& p) { auto cell=map->queryPlanningCell(p,0,time,policy,motion,false,&context);cell.advisory.cost_multiplier=1.;return cell; };
+  GridFrozenRiskQuery risk; uint64_t version=0;
+  if(has_payload) {
+    if(mode!="backend") throw std::invalid_argument("complete Advisory input currently requires backend mode");
+    std::ifstream stream(args[4],std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),{});
+    if(!stream) throw std::invalid_argument("prediction input unavailable");
+    const auto prediction_input=ego_planner::decodePredictionInput(bytes);
+    const auto epoch=context.epoch;
+    if(!prediction_input.occupancy ||
+        prediction_input.reference_time_s!=input.get<double>("risk_reference_time_s") ||
+        prediction_input.occupancy->generation!=epoch->generation ||
+        prediction_input.occupancy->frame_id!=epoch->frame_id ||
+        prediction_input.occupancy->lattice_origin!=epoch->lattice_origin ||
+        prediction_input.occupancy->extent_m!=epoch->extent_m ||
+        prediction_input.occupancy->resolution_m!=epoch->resolution_m ||
+        prediction_input.occupancy->cloud_stamp_s!=epoch->cloud_stamp_s ||
+        prediction_input.occupancy->virtual_ceiling_height_m!=epoch->virtual_ceiling_height_m ||
+        prediction_input.occupancy->map_inflation_m!=epoch->map_inflation_m ||
+        prediction_input.occupancy->cells->flags!=epoch->cells->flags)
+      throw std::invalid_argument("planning payload/map/time identity mismatch");
+    policy.hpl_budget_m=node->declare_parameter("planning/advisory_hpl_budget_m",policy.hpl_budget_m);
+    policy.vpl_budget_m=node->declare_parameter("planning/advisory_vpl_budget_m",policy.vpl_budget_m);
+    policy.reserve_h_m=node->declare_parameter("planning/advisory_hpl_reserve_m",policy.reserve_h_m);
+    policy.reserve_v_m=node->declare_parameter("planning/advisory_vpl_reserve_m",policy.reserve_v_m);
+    policy.unknown_multiplier=node->declare_parameter("planning/advisory_unknown_multiplier",policy.unknown_multiplier);
+    policy.stale_soft_seconds=node->declare_parameter("planning/advisory_stale_soft_s",policy.stale_soft_seconds);
+    std::string rejection;
+    auto prediction=ego_planner::makeRiskPrediction(prediction_input,std::make_shared<std::atomic<uint64_t>>(0),&rejection);
+    if(!rejection.empty()) throw std::invalid_argument("prediction binding rejected: "+rejection);
+    version=map->bindRiskContext(std::move(prediction));
+    risk=map->capturePlanningRiskQuery(version,time,policy,nullptr,epoch->generation,false);
+  }
+  const auto query=[&](const Eigen::Vector3d& p) {
+    auto cell=map->queryPlanningCell(p,0,time,policy,motion,false,&context);
+    if(has_payload && cell.executable()) cell.advisory=risk(p);
+    else cell.advisory.cost_multiplier=1.;
+    return cell;
+  };
   ptree stage; bool found=false;
   for(const auto& child:input.get_child("curve_stages")) {
     const std::string name=child.second.get<std::string>("stage");
@@ -132,7 +174,24 @@ int main(int argc,char**argv) {
   if(!std::isfinite(spent) || spent<0 || used>3) throw std::invalid_argument("invalid captured budget");
   auto budget=std::make_shared<PlanningBudget>(isolated ? 1.5 : std::max(0.,1.5-spent),isolated ? 3 : 3-used);
   optimizer.setPlanningBudget(budget);
-  optimizer.setPlanningQuery(query,true);optimizer.setPlanningEndpoints(start,end);optimizer.setPlanningGoals({end});
+  bool fallback=true;
+  if(has_payload) {
+    const auto& traces=input.get_child("recovery_searches");
+    if(traces.empty()) throw std::invalid_argument("missing captured recovery mode");
+    fallback=traces.back().second.get<bool>("fallback_entered");
+  }
+  const auto guide_query=[&](const Eigen::Vector3d& p) {
+    auto fitting=context;
+    double distance=(p-start).norm();
+    for(const auto& target:input.get_child("planning_goals_m")) distance=std::min(distance,(p-point(target.second)).norm());
+    fitting.required_clearance_m+=input.get<double>("guide_fitting_reserve_m")*
+        std::clamp(distance/input.get<double>("guide_reserve_taper_distance_m"),0.,1.);
+    auto cell=map->queryPlanningCell(p,0,time,policy,motion,false,&fitting);
+    if(has_payload && cell.executable()) cell.advisory=risk(p);
+    else cell.advisory.cost_multiplier=1.;
+    return cell;
+  };
+  optimizer.setPlanningQuery(query,fallback,has_payload ? std::function<GridPlanningCell(const Eigen::Vector3d&)>(guide_query) : std::function<GridPlanningCell(const Eigen::Vector3d&)>{});optimizer.setPlanningEndpoints(start,end);optimizer.setPlanningGoals({end});
   optimizer.setCurvePhysicalBounds(snapshot.origin+Eigen::Vector3d::Constant(.0001),snapshot.max_boundary-Eigen::Vector3d::Constant(.0001));
   std::vector<Eigen::Vector3d> guide;
   const auto stage_guide=stage.get_child_optional("guide_m");
@@ -188,9 +247,10 @@ int main(int argc,char**argv) {
   }
   ego_planner::EGOPlannerManager manager;
   const bool configured_guidance=node->declare_parameter("planning/advisory_guidance_enabled",false);
-  if(configured_guidance && (mode=="backend" || mode=="initialize"))
+  if(has_payload && !configured_guidance) throw std::invalid_argument("ON payload replay requires original guidance=true parameters");
+  if(configured_guidance && !has_payload && (mode=="backend" || mode=="initialize"))
     throw std::invalid_argument("Advisory guidance replay requires original frozen predictor input; this replay is OFF geometry-only");
-  const auto& assessment_context=ego_planner::CurveBackendReplayAccess::bind(manager,node,map,context,motion,time,budget);
+  const auto& assessment_context=ego_planner::CurveBackendReplayAccess::bind(manager,node,map,context,motion,time,budget,risk,version,policy);
   save("captured_initial",q,dt);
   bool terminal_stop=false;std::string stop_policy_source="NOT_REPLAYED";
   double nominal_interval=dt;
@@ -222,7 +282,7 @@ int main(int argc,char**argv) {
     save("guide_fit_replayed",q,dt);
     optimizer.initializeFromGuide(q);
   }
-  const auto assess=[&](Eigen::MatrixXd p,double interval) {return manager.assessTrajectory(UniformBspline(p,3,interval),0,time,false,0,std::numeric_limits<double>::infinity(),&assessment_context,false,&motion);};
+  const auto assess=[&](Eigen::MatrixXd p,double interval,bool advisory=false) {return manager.assessTrajectory(UniformBspline(p,3,interval),advisory ? version : 0,time,false,0,std::numeric_limits<double>::infinity(),&assessment_context,false,&motion);};
   bool backend_ok=true;std::string termination="dynamics_rejected";size_t constraint_samples=0;
   if(mode=="backend" || mode=="initialize") {
     const auto initial=assess(q,dt);constraint_samples+=initial.curve_clearance_violations.size();
@@ -261,16 +321,18 @@ int main(int argc,char**argv) {
     }
   }
   if(!feasible || !complete_backend) break;
-  auto candidate=assess(q,dt);
+  auto candidate=assess(q,dt,true);
   candidate.guide_retention=optimizer.assessGuideRetention(q,dt,
-      [](const Eigen::Vector3d&) {return GridPlanningRisk{};});
+      [&](const Eigen::Vector3d& p) {return has_payload ? risk(p) : GridPlanningRisk{};});
   save("route_checked",q,dt);
   std::cout<<"route checked="<<candidate.guide_retention.checked
       <<" lost="<<candidate.guide_retention.route_lost
       <<" max="<<candidate.guide_retention.max_deviation_m<<" repairs="<<budget->used()<<'\n';
   if(candidate.budget_exhausted || candidate.guide_retention.budget_exhausted ||
       !candidate.guide_retention.checked) {termination="route_check_incomplete";break;}
-  if(candidate.executable() && !candidate.guide_retention.route_lost) break;
+  if(candidate.executable() && !candidate.guide_retention.route_lost &&
+      !(has_payload && candidate.guide_retention.risk_preference_lost) &&
+      !(has_payload && !fallback && candidate.advisory_avoid_samples)) break;
   if(!candidate.executable() && candidate.execution_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
       candidate.execution_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE &&
       candidate.execution_reason!=GridExecutionReason::ENVIRONMENT_UNOBSERVED &&
@@ -292,18 +354,19 @@ int main(int argc,char**argv) {
   save("corrected_bound",q,dt);
   if(!backend_ok) termination="backend_correction_rejected";
   } while(backend_ok);
-  const auto final=feasible ? assess(q,dt) : ego_planner::EGOPlannerManager::TrajectoryAssessment{};
+  const auto final=feasible ? assess(q,dt,true) : ego_planner::EGOPlannerManager::TrajectoryAssessment{};
   const auto retention=feasible ? optimizer.assessGuideRetention(q,dt,
-      [](const Eigen::Vector3d&) {return GridPlanningRisk{};}) : ego_planner::BsplineOptimizer::GuideRetention{};
+      [&](const Eigen::Vector3d& p) {return has_payload ? risk(p) : GridPlanningRisk{};}) : ego_planner::BsplineOptimizer::GuideRetention{};
   const bool candidate_valid=backend_ok && feasible && final.executable() && !final.budget_exhausted &&
-      retention.checked && !retention.budget_exhausted && !retention.route_lost;
+      retention.checked && !retention.budget_exhausted && !retention.route_lost &&
+      !(has_payload && retention.risk_preference_lost) && !(has_payload && !fallback && final.advisory_avoid_samples);
   std::cout<<"final_check="<<(feasible ? gridExecutionReasonName(final.execution_reason) : "not_checked")<<" elapsed="<<budget->elapsed()<<'\n';
   std::ofstream result(output);
   result<<std::setprecision(17)<<"{\"schema\":\"iap_curve_backend_replay_v1\",\"identity\":\"OFFLINE_MECHANISM_REPLAY\",\"mode\":"<<std::quoted(mode)
       <<",\"planning_attempt_id\":"<<input.get<uint64_t>("planning_attempt_id")<<",\"generation\":"<<snapshot.generation
       <<",\"physical_geometric_candidate_valid\":"<<(candidate_valid ? "true" : "false")
       <<",\"execution_authorized\":false,\"correction_authority\":\"EGOPlannerManager::correctCurveCandidate\""
-      <<",\"advisory_scope\":\"OFF_GEOMETRY_ONLY\""
+      <<",\"advisory_scope\":"<<std::quoted(has_payload ? "ORIGINAL_FROZEN_MODEL" : "OFF_GEOMETRY_ONLY")
       <<",\"original_time_s\":"<<time<<",\"original_cloud_stamp_s\":"<<snapshot.cloud_stamp_s
       <<",\"dynamics_feasible\":"<<(feasible ? "true" : "false")<<",\"final_check_state\":"<<std::quoted(!feasible ? "not_checked" : final.budget_exhausted ? "incomplete" : "checked")
       <<",\"physical_executable\":"<<(feasible && final.executable() ? "true" : "false")<<",\"final_check_reason\":"<<std::quoted(!feasible ? "not_checked" : final.budget_exhausted ? "budget_exhausted" : gridExecutionReasonName(final.execution_reason))
@@ -312,7 +375,13 @@ int main(int argc,char**argv) {
       <<",\"guide_retention_budget_exhausted\":"<<(retention.budget_exhausted ? "true" : "false")
       <<",\"guide_route_preserved\":"<<(retention.checked && !retention.route_lost ? "true" : "false")
       <<",\"guide_max_deviation_m\":"<<retention.max_deviation_m<<",\"guide_corridor_m\":"<<retention.corridor_m
-      <<",\"risk_evidence\":\"NOT_AVAILABLE\",\"captured_target_velocity_mps\":["<<captured_ev.x()<<','<<captured_ev.y()<<','<<captured_ev.z()<<']'
+      <<",\"captured_risk_version\":"<<input.get<uint64_t>("risk_version",0)
+      <<",\"advisory_fallback\":"<<(fallback ? "true" : "false")
+      <<",\"guide_length_m\":"<<retention.guide_length_m<<",\"curve_length_m\":"<<retention.curve_length_m
+      <<",\"guide_risk_cost_m\":"<<retention.guide_risk_cost_m<<",\"curve_risk_cost_m\":"<<retention.curve_risk_cost_m
+      <<",\"comparable_model_cost\":"<<(retention.comparable_model_cost ? "true" : "false")
+      <<",\"risk_preference_lost\":"<<(retention.risk_preference_lost ? "true" : "false")
+      <<",\"risk_evidence\":"<<std::quoted(has_payload ? "ORIGINAL_FROZEN_MODEL" : "NOT_AVAILABLE")<<",\"captured_target_velocity_mps\":["<<captured_ev.x()<<','<<captured_ev.y()<<','<<captured_ev.z()<<']'
       <<",\"replayed_target_velocity_mps\":["<<ev.x()<<','<<ev.y()<<','<<ev.z()<<']'
       <<",\"terminal_stop\":"<<(mode=="initialize" ? (terminal_stop ? "true" : "false") : "null")
       <<",\"terminal_stop_policy_source\":"<<std::quoted(stop_policy_source)

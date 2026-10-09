@@ -769,3 +769,25 @@ C真实低风险收益仍依赖B。逐项JSON、四面板图、脚本和输入ha
 登记safety_feedback_prediction_error；原报告关于“8次生效前”的分类由本节及补充
 纠正，原产物不改写。
 [图文补充报告](../../log/20261007T091820Z_056/export/analysis/safety_feedback_live/prediction_error_report.md)。
+
+
+## 原终点完整 ON 任务：观测曲线取证与修复
+
+本轮以021d3956为报告基线，保持原300s窗口及到达规则。末输入
+`051626Z_339/terminal_final` attempt50/gen792/risk856已做完整ON后端重放。
+首违格flags0、source16仅历史current_replace，不具本帧射线支持（20480 beams，
+prefix0/occluded0）；不能补自由或据历史丢失追认当前覆盖。原目标及guide可拟合出
+物理合法曲线，优化后出现未知点、仍在原偏离界内；没有证据要求改目标范围。
+
+最小warning guide物理修正回归244ms红：高代价模式仍用strict warning过滤支撑点。
+仅修支撑过滤后回归绿，但原候选修正推入别处未知，原完整后端仍红。
+一次正常求解现在按原成本保留本次物理可行incumbent；非正常退出仍拒绝，
+独立最终授权不变。完整原输入053929Z_903红 → 054601Z_888绿：
+动力学/物理/guide均过，最大偏离.065399m < .136603m，新增修复0。
+全模型后端重放明确绑定payload/map/time、原PL策略、guide余量和高代价模式，
+不再把OFF几何机制当ON重放。诊断图及hash在053613Z_713/export/analysis。
+Release构建/安装、15选定Planner目标（首轮新增fixture漏A*初始化导致1失败，
+修正后2项重跑通过）、搜索3项、入口45项通过；0tests错误目录命令不计通过。
+图文与原payload/hash见[本轮修复报告](../../log/20261009T053613Z_713/export/analysis/REPORT.md)。
+干净提交后的针对性300s现场及到达后的同版本同seed开发OFF对照待完成；
+Goal仍active，不能以本案例修复结束。模型身份/未校准项与正式0/9+0/9、0/6保持。

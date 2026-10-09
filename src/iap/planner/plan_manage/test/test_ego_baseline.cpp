@@ -2476,6 +2476,75 @@ TEST(EgoBaseline, ActualUnknownCurveUsesObservedGuideSampleConstraints) {
   EXPECT_FALSE(optimizer.curveViolates(q,.4)) << q;
 }
 
+TEST(EgoBaseline, WarnedPhysicalGuideStillCorrectsUnknownCurve) {
+  auto node=makeNode(false,1.,false,false);auto map=std::make_shared<GridMap>();map->initMap(node);
+  const Eigen::Vector3d start(-2,0,1);GridMapTestAccess::input(*map,{},10.,start);GridMapTestAccess::markObserved(*map);
+  for(double x=-.4;x<.5;x+=.1) for(double y=-.2;y<.3;y+=.1) for(double z=.6;z<1.5;z+=.1)
+    GridMapTestAccess::clearObserved(*map,Eigen::Vector3d(x,y,z));
+  GridMotionContext motion;motion.quality=1;motion.stamp_s=10.;motion.error_proxy_m=.05;
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  const auto context=map->preparePlanningQuery(10.1,motion,map->captureFrozenOccupancyEpoch());
+  const auto query=[&](const Eigen::Vector3d& p) { auto cell=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&context); cell.advisory.classification=GridAdvisoryClass::AVOID; cell.advisory.cost_multiplier=3.; return cell; };
+  optimizer.setPlanningQuery(query,true);
+  Eigen::MatrixXd q(3,12);for(int i=0;i<12;++i) q.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+  ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);optimizer.setDroneId(0);
+  optimizer.a_star_=std::make_shared<AStar>();optimizer.a_star_->initGridMap(map,Eigen::Vector3i(60,60,30));
+  optimizer.setPlanningQuery(query,true);
+  optimizer.setPlanningBudget(std::make_shared<PlanningBudget>());
+  optimizer.setPlanningEndpoints(start,Eigen::Vector3d(2,0,1));
+  optimizer.initControlPoints(q,true);ASSERT_FALSE(optimizer.initializationFailed());
+  ASSERT_GE(optimizer.recoveryGuide().size(),2u);
+  for(const auto& p:optimizer.recoveryGuide()) ASSERT_TRUE(query(p).executable());
+  optimizer.setLocalTargetPt(Eigen::Vector3d(2,0,1));
+  optimizer.initializeFromGuide(q);
+  EXPECT_TRUE(optimizer.curveViolates(q,.4));
+  // A checked high-cost guide remains physical correction support.
+  // Advisory warnings cannot erase its gradient at an unknown boundary.
+  for(int correction=0;correction<2 && optimizer.curveViolates(q,.4);++correction) {
+    ASSERT_TRUE(optimizer.addCurveGuideConstraints(q,.4));
+    ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,.4));
+  }
+  EXPECT_FALSE(optimizer.curveViolates(q,.4)) << q;
+}
+
+TEST(EgoBaseline, ObservedFitRetainsFeasibleOriginalCostIncumbent) {
+  auto node=makeNode(false,1.,false,true,.1,.5);auto map=std::make_shared<GridMap>();map->initMap(node);
+  boost::property_tree::ptree fixture;
+  boost::property_tree::read_json((std::filesystem::path(__FILE__).parent_path()/
+      "fixtures/curve_attempt50_observed_fit.json").string(),fixture);
+  const auto shifted=[](const boost::property_tree::ptree& p) {
+    Eigen::Vector3d value;int i=0;for(const auto& x:p)value[i++]=x.second.get_value<double>();
+    value.x()+=7.;return value;
+  };
+  std::vector<Eigen::Vector3d> guide;
+  for(const auto& p:fixture.get_child("guide_m"))guide.push_back(shifted(p.second));
+  Eigen::MatrixXd q(3,fixture.get_child("control_points_m").size());int column=0;
+  for(const auto& p:fixture.get_child("control_points_m"))q.col(column++)=shifted(p.second);
+  const auto initial=q;const auto gap=shifted(fixture.get_child("unknown_voxel_center_m"));
+  GridMapTestAccess::input(*map,{},10.,guide.front());GridMapTestAccess::markObserved(*map);
+  GridMapTestAccess::clearObserved(*map,gap);
+  GridMotionContext motion;motion.quality=1;motion.stamp_s=10.;motion.error_proxy_m=.01;
+  const auto context=map->preparePlanningQuery(10.1,motion,map->captureFrozenOccupancyEpoch());
+  const auto query=[&](const Eigen::Vector3d& p) {
+    auto cell=map->queryPlanningCell(p,0,10.1,GridPlanningRiskPolicy{},motion,false,&context);
+    cell.advisory.classification=GridAdvisoryClass::AVOID;cell.advisory.cost_multiplier=3.;return cell;
+  };
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  ego_planner::SwarmTrajData swarm;optimizer.setSwarmTrajs(&swarm);optimizer.setDroneId(0);
+  optimizer.setPlanningQuery(query,true);optimizer.setPlanningEndpoints(guide.front(),guide.back());
+  optimizer.initializeFromGuide(q);optimizer.setGuidePath(guide);optimizer.initializeFromGuide(q);
+  optimizer.a_star_=std::make_shared<AStar>();optimizer.a_star_->initGridMap(map,Eigen::Vector3i(60,60,30));
+  optimizer.setLocalTargetPt(guide.back());
+  optimizer.setPlanningBudget(std::make_shared<PlanningBudget>(1.5,3));
+  const double interval=fixture.get<double>("interval_s");
+  ASSERT_FALSE(optimizer.curveViolates(q,interval));
+  ASSERT_TRUE(optimizer.BsplineOptimizeTrajRebound(q,interval));
+  EXPECT_FALSE(optimizer.curveViolates(q,interval));
+  EXPECT_EQ(query(gap).execution_reason,GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  EXPECT_TRUE(q.leftCols(3).isApprox(initial.leftCols(3),1e-12));
+  EXPECT_TRUE(q.rightCols(3).isApprox(initial.rightCols(3),1e-12));
+}
+
 TEST(EgoBaseline, TerminalRegionIncludesBothSidesBeyondReferenceBall) {
   auto node=makeNode();
   auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();

@@ -1369,3 +1369,14 @@ map误差／条件覆盖不代表ENU米数、传播或正式9＋9资格。撤销
 本轮A/B/C/D代码、自动化、真实现场、失败和资格阻塞统一见
 [图文交付索引](log/20261007T091820Z_056/export/analysis/delivery_report_20261007.md)。
 该索引分别声明机制完成项与未通过现场资格；正式B0/9＋0/9、D0/6，默认未推广。
+
+### 完整 ON 曲线同输入重放
+
+`replay_curve_backend.py --mode backend --payload <同attempt的planning_input.bin>
+--parameters <原参数YAML> --binary <curve_backend_replay> --require-candidate`
+绑定已登记的原payload、物理地图/时刻、guide和剩余时间/动作；完整生产
+Predictor及原PL策略参与风险/路线检查。没有payload时保持OFF几何机制资格。
+原始参数JSON可在resolver run的metadata/config下转成ROS参数YAML，不使用当前
+默认值替换历史输入。输出仍是离线候选证据，不能授权现场发布或任务到达。
+正常B-spline求解保留本次原目标成本最小的物理可行候选，再经全部独立最终门；
+未观测格保持未知，预算、来源模型及风险权重保持。

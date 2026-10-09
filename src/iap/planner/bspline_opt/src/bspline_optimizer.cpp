@@ -335,8 +335,12 @@ namespace ego_planner
         const Eigen::Vector3d candidate=guide_pts_[j-1]+fraction*segment;
         geometric_best=std::min(geometric_best,(candidate-position).squaredNorm());
         const auto support=guide_query_(candidate);
-        if(!support.executable() || support.advisory.classification==GridAdvisoryClass::AVOID ||
-            support.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED) continue;
+        // The recovery search already owns the strict/high-cost policy. A
+        // physically checked high-cost guide remains correction support;
+        // warning labels cannot remove its unknown-boundary gradient.
+        if(!support.executable() || (!planning_advisory_fallback_ &&
+            (support.advisory.classification==GridAdvisoryClass::AVOID ||
+             support.advisory.classification==GridAdvisoryClass::PREDICTED_DEGRADED))) continue;
         const double distance=(candidate-position).squaredNorm();
         if(distance<best) {best=distance;nearest=candidate;}
       }
@@ -363,8 +367,9 @@ namespace ego_planner
       if(!std::isfinite(best) || best<1e-12) continue;
       Eigen::Vector3d direction=(nearest-position).normalized();
       const auto farther=guide_query_(nearest+reserve*direction);
-      const bool room=farther.executable() && farther.advisory.classification!=GridAdvisoryClass::AVOID &&
-          farther.advisory.classification!=GridAdvisoryClass::PREDICTED_DEGRADED;
+      const bool room=farther.executable() && (planning_advisory_fallback_ ||
+          (farther.advisory.classification!=GridAdvisoryClass::AVOID &&
+           farther.advisory.classification!=GridAdvisoryClass::PREDICTED_DEGRADED));
       const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
       const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));
       const double u=parameter-first;
@@ -1419,7 +1424,14 @@ namespace ego_planner
 
     double cost;
     opt->combineCostRebound(x, grad, cost, n);
-
+    // Retain the best admissible point of this solve under its original
+    // objective. Smoothness alone can cut across unobserved voxel gaps even
+    // when the initial fit is physical; the solver output must retain that
+    // physical constraint. This is candidate selection, never authorization.
+    if(opt->planning_query_ && opt->planning_endpoints_ && std::isfinite(cost) &&
+        cost<opt->physical_incumbent_cost_ && !opt->curveViolates(opt->cps_.points,opt->bspline_interval_)) {
+      opt->physical_incumbent_cost_=cost;opt->physical_incumbent_=opt->cps_.points;
+    }
     opt->iter_num_ += 1;
     return cost;
   }
@@ -2262,6 +2274,7 @@ namespace ego_planner
       flag_occ = false;
       success = false;
 
+      physical_incumbent_.reset();physical_incumbent_cost_=std::numeric_limits<double>::infinity();
       // 控制点数组初始化
       double q[variable_num_];
       memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
@@ -2289,6 +2302,12 @@ namespace ego_planner
           result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
           result == lbfgs::LBFGS_STOP)
       {
+        // The line-search callback owns the last evaluated trial, which need
+        // not be physically admissible. A normal solve selects its lowest
+        // original-cost admissible incumbent before the manager's full checks.
+        if(physical_incumbent_) {
+          cps_.points=*physical_incumbent_;final_cost=physical_incumbent_cost_;
+        }
         // ROS_WARN("Solver error in planning!, return = %s", lbfgs::lbfgs_strerror(result));
         flag_force_return = false;
 

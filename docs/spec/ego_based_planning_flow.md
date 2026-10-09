@@ -2,6 +2,25 @@
 
 ## 状态与依据
 
+本轮完整任务目标仍为原起点至原终点、原到达规则和300s任务窗口，
+Advisory ON/prior OFF；短程14条曲线不再作为本轮完成标准。
+当前修复：B-spline正常求解按原目标成本保留本次求解内的物理可行incumbent，
+避免平滑目标把已观测初始拟合切入未知间隙。每次求解重新清空incumbent；
+非正常solver退出仍拒绝。该候选仍需完整动力学、guide风险/路线、实际曲线、
+release及publication检查，不授予新的执行权。高代价guide修正支撑沿用搜索
+已选择的strict/high-cost语义，物理合法warning不能在高代价模式下丢掉梯度。
+搜索1s、轮次1.5s/三动作、风险权重/PL阈值、观测地图及模型不变。
+
+末保存attempt50/gen792/risk856原payload、地图/时刻/剩余预算的ON后端重放
+先红（未知且动作耗尽），后绿（动力学/物理/路线均通过、新增修复0）；
+证据 `log/20261009T053929Z_903` → `log/20261009T054601Z_888`。
+后端重放新增显式 `--payload`，校验同身份payload/map/time与原strict/high-cost
+模式，并使用原guide支撑余量、PL策略及生产Predictor。`--require-candidate`
+提供候选通过的退出码门。没有payload的旧OFF几何重放资格保持；重放不能
+授权发布或追认最新release时序。完整300s现场与到达后的同版本同seed OFF/ON
+开发对照仍待提交、回归及现场交付；不标记Goal完成，不启动正式9+9或六次对照。
+
+
 **2026-10-09 当前开发结论：Advisory ON 短程连续执行已恢复。** 修复提交
 `7fe8cb2f`、`bb0290b8`；最终干净修订的 canonical 森林100s参考
 `20261009T051626Z_339`有14条真实前进B-spline、10次scheduled接续，

@@ -19,9 +19,13 @@ def main():
     parser.add_argument("--parameters", type=Path, required=True,
                         help="explicit frozen ROS parameters YAML; no current-default substitution")
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--payload", type=Path, help="same-attempt complete Predictor input for ON backend replay")
+    parser.add_argument("--require-candidate", action="store_true", help="fail unless complete backend candidate passes captured checks")
     parser.add_argument("--mode", choices=("retime", "refine", "backend", "initialize", "audit"), default="backend")
     parser.add_argument("--isolated-budget", action="store_true", help="separate mechanism experiment; does not reproduce captured remaining resources")
     args = parser.parse_args()
+    if args.payload and (args.mode != "backend" or args.isolated_budget):
+        parser.error("complete ON payload requires backend mode and captured remaining budget")
     if args.mode == "audit" and args.isolated_budget:
         parser.error("audit diagnoses captured stages without running an online budget")
     data = json.loads(args.snapshot.read_text())
@@ -38,8 +42,13 @@ def main():
         frozen.write_bytes(args.parameters.read_bytes())
         register_config_snapshot(run, frozen)
         binary = args.binary.resolve(strict=True)
+        if args.payload:
+            from replay_on_search import verify_planning_capture
+            result["capture_authority"] = verify_planning_capture(args.snapshot.parent, args.payload, data)
+            result["payload_sha256"] = sha(args.payload)
         command = [str(binary), str(args.snapshot.resolve()), args.mode,
                    *(["isolated-budget"] if args.isolated_budget else []),
+                   *(["--payload", str(args.payload.resolve())] if args.payload else []),
                    "--ros-args", "--params-file", str(frozen)]
         result.update(source_identity())
         result["backend_source_sha256"] = {str(p.relative_to(REPO)): sha(p)
@@ -53,6 +62,10 @@ def main():
         with (run / "runtime/curve_replay.log").open("x") as log:
             process = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=15)
         result["exit_code"] = process.returncode
+        if any(sha(path) != digest for path, digest in result["input_sha256"].items()):
+            raise RuntimeError("captured snapshot or map changed during replay")
+        if args.payload and sha(args.payload) != result["payload_sha256"]:
+            raise RuntimeError("captured Predictor payload changed during replay")
         output = run / "export/planner/curve_replay/result.json"
         if output.exists():
             result["result_sha256"] = sha(output)
@@ -76,7 +89,8 @@ def main():
                        physical_executable=verdict.get("physical_executable"),
                        guide_route_preserved=verdict.get("guide_route_preserved"))
     print(json.dumps(summary))
-    return 0 if status == "completed" else 1
+    return 0 if status == "completed" and (not args.require_candidate or
+        verdict.get("physical_geometric_candidate_valid") is True) else 1
 
 
 if __name__ == "__main__":
