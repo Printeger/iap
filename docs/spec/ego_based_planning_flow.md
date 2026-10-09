@@ -2218,3 +2218,29 @@ Live status follows one paired 120 s OFF/ON development experiment on the
 canonical forest scene.
 Formal 9+9 calibration, six complete task comparisons, empirical coverage and
 fused fault-integrity qualification remain deferred and unverified.
+
+
+### Development source diagnosis scope
+
+`diagnose_injected_noise.py` reads the immutable clean-run simulator injection
+ledger and checks the exact white-noise plus injected-bias decomposition. It
+stratifies by visibility/elevation and satellite, preserving the emitted
+request denominator. A single run's temporal samples are explicitly not
+independent calibration trials. In the prior moving run, LOS 10–20° draws have
+0.990 m white scatter versus a 42.8–96.1 m policy floor; NLOS groups have roughly
+15 m injected mean bias and 4 m white scatter. This supports the declared draw
+scale and identifies the uncalibrated floor; it does not justify replacing
+final FGO/Advisory sigma with raw receiver sigma. The max-with-declared-noise,
+Doppler conversion and GNSS-epoch IMU fixes already implemented remain intact.
+
+Actual VGICP frame/level/source/target repetitions and 0.48–0.52 cross-level
+correlations remain evidence of correlated registration, not a universal
+Advisory support-group discount. The existing geometric primitive/support
+identity normalization passes duplicate-representation and dual-degradation
+regressions. No demonstrated new source interface/counting error warrants
+changing model parameters in this recovery round. Independent source-envelope,
+shared nuisance and free-map-alignment algebra passes eight checks; the native
+Predictor suite passes 121 cases. Fixed-map conditioning, missing independent
+map/alignment error evidence and the strict sampled GPU asymmetry rejection
+remain explicit limits. No posterior prior, map covariance, risk weight or
+noise-scale authority is added by this diagnostic tool.
