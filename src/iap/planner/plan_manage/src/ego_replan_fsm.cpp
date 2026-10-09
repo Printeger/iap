@@ -1214,7 +1214,8 @@ namespace ego_planner
     }
     reference.last_progress_time_ = std::max(old_progress, projection);
     projection = reference.last_progress_time_;
-    if (projection >= reference.global_duration_ - 1e-9) return false;
+    // Reference progress reaching its end is not task arrival. A lateral or
+    // longitudinal overshoot still needs a checked trajectory to end_pt_.
 
     const double distance = std::min(target_distance_m, search_pool_target_limit_m_);
     double target_t = reference.global_duration_;
@@ -1256,6 +1257,16 @@ namespace ego_planner
       local_targets_.push_back(candidate);
     };
     add_target(end_pt_,true); // Priority slot when the fixed endpoint fits the pool.
+    if(target_t >= reference.global_duration_ - 1e-9 && !local_targets_.empty()) {
+      // Original EGO terminal semantics: once the requested reference horizon
+      // reaches the physically eligible mission endpoint, plan that endpoint
+      // with zero terminal velocity. Intermediate terminals must not compete
+      // with completion under the unchanged length/risk objective.
+      local_target_pt_=end_pt_;
+      local_target_vel_=Eigen::Vector3d::Zero();
+      planner_manager_->setLocalTargets(local_targets_,center);
+      return true;
+    }
     std::array<std::vector<Eigen::Vector3d>,3> regions;
     const double spacing=std::max(resolution,.5);
     // Deterministic coarse coverage of the original pool, including lateral

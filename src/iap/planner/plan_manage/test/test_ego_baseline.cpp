@@ -152,6 +152,7 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static size_t targetCount(const EGOPlannerManager& manager) { return manager.planning_targets_.size(); }
   static EGOPlannerManager::TrajectoryAssessment expiredRelease(EGOPlannerManager& manager) {
     manager.last_candidate_assessment_.sampled_points=11;
     manager.last_candidate_assessment_.execution_reason=GridExecutionReason::TRACKING_ERROR;
@@ -1119,6 +1120,29 @@ TEST(EgoBaseline, IllegalFinalTaskGoalIsPreservedWhileSelectingIntermediateTarge
   const auto selected=ego_planner::EGOReplanFSMTestAccess::target(fsm);
   EXPECT_GT((selected-goal).norm(),.45);
   EXPECT_TRUE(manager->queryLocalTargetCell(selected,node->now().seconds()).executable());
+}
+
+TEST(EgoBaseline, TerminalReferenceUsesOnlyOriginalGoalIncludingLateralOvershoot) {
+  const Eigen::Vector3d original_start(-2,0,1), goal(2,0,1), zero=Eigen::Vector3d::Zero();
+  for(const Eigen::Vector3d position : {Eigen::Vector3d(1,1,1),Eigen::Vector3d(2.5,1,1)}) {
+    auto node=makeNode();
+    auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto* manager=owner.get();
+    manager->initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+    GridMapTestAccess::input(*manager->grid_map_,{},node->now().seconds(),position);
+    GridMapTestAccess::markObserved(*manager->grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(*manager,node->now().seconds(),1,position);
+    ASSERT_TRUE(manager->planGlobalTraj(original_start,zero,zero,goal,zero,zero));
+    if(position.x()>goal.x())
+      manager->global_data_.last_progress_time_=manager->global_data_.global_duration_;
+    ASSERT_TRUE(manager->beginPlanningView());
+    ego_planner::EGOReplanFSM fsm;
+    ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,position,goal);
+    ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,3));
+    EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::target(fsm).isApprox(goal,1e-9));
+    EXPECT_EQ(ego_planner::EGOPlannerManagerTestAccess::targetCount(*manager),1u);
+    EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::taskGoal(fsm).isApprox(goal,1e-9));
+    EXPECT_LE(manager->planningBudget()->used(),3u);
+  }
 }
 
 TEST(EgoBaseline, TerminalSpeedIsLimitedByObservedBrakingSpace) {
