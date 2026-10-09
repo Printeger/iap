@@ -104,6 +104,68 @@ TEST(AdvisoryAStar, StartInsideWarningUsesSameHighCostSearch) {
   EXPECT_FALSE(search.getPath().empty());
 }
 
+TEST(AdvisoryAStar, HighCostDiscoveryDeliversBeforePredictionWorkIsExhausted) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,60,20));
+  size_t queries=0;
+  search.setPlanningQuery([&](const Eigen::Vector3d&) {
+    // A deterministic finite work allowance reproduces a cold Predictor
+    // deadline without making the regression depend on machine speed.
+    if(++queries>=4000) search.setPlanningBudget(std::make_shared<PlanningBudget>(0));
+    GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+    cell.advisory.classification=GridAdvisoryClass::AVOID;
+    cell.advisory.cost_multiplier=3.;return cell;
+  },true);
+  ASSERT_TRUE(search.AstarSearch(.1,{-1,0,1},{1,0,1},1.,Eigen::Vector3d(0,0,1)));
+  EXPECT_TRUE(search.lastResult().search_budget_exhausted);
+  EXPECT_FALSE(search.lastResult().optimality_proven);
+  EXPECT_NEAR(search.lastResult().path_cost,6.,1e-9);
+  EXPECT_TRUE(search.getPath().back().isApprox(Eigen::Vector3d(1,0,1),1e-9));
+}
+
+TEST(AdvisoryAStar, HighCostDiscoveryStillProvesTheCheaperDetour) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(60,40,10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason=std::abs(p.z()-1)<.06 ? GridExecutionReason::OK : GridExecutionReason::PHYSICAL_OBSTACLE;
+    const bool warning=std::abs(p.x())<.8 && std::abs(p.y())<.3;
+    cell.advisory.classification=warning ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=warning ? 3. : 1.;return cell;
+  },true);
+  ASSERT_TRUE(search.AstarSearch(.1,{-1,0,1},{1,0,1},1.,Eigen::Vector3d(0,0,1)));
+  EXPECT_TRUE(search.lastResult().optimality_proven);
+  EXPECT_LT(search.lastResult().path_cost,3.);
+  double lateral=0.;for(const auto& p:search.getPath())lateral=std::max(lateral,std::abs(p.y()));
+  EXPECT_GE(lateral,.3-1e-9);
+}
+
+TEST(AdvisoryAStar, HighCostMultipleConnectorsMatchExhaustiveComponentCost) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(30,30,10));
+  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason=std::abs(p.z()-1)<.06 && std::abs(p.x())<.9 && std::abs(p.y())<.6
+        ? GridExecutionReason::OK : GridExecutionReason::PHYSICAL_OBSTACLE;
+    const bool warning=std::abs(p.x())<.3 && std::abs(p.y())<.2;
+    cell.advisory.classification=warning ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=warning ? 3. : 1.2;return cell;
+  },true);
+  const Eigen::Vector3d start(-.73,.01,1), task(2,0,1);
+  const std::vector<Eigen::Vector3d> goals={{.63,.01,1},{.64,.02,1},{.43,.41,1}};
+  search.setTaskGoal(task);
+  ASSERT_TRUE(search.AstarSearchGoals(.1,start,goals,1.,Eigen::Vector3d(0,0,1)));
+  const auto result=search.lastResult();
+  ASSERT_TRUE(result.optimality_proven);
+  AStar::ComponentDiagnostic component;
+  search.setComponentDiagnostic(&component);
+  ASSERT_TRUE(search.AstarSearchGoals(.1,start,goals,1.,Eigen::Vector3d(0,0,1)));
+  ASSERT_TRUE(search.lastResult().exhausted);
+  EXPECT_EQ(result.selected_goal,search.lastResult().selected_goal);
+  EXPECT_NEAR(result.path_cost,search.lastResult().path_cost,1e-10);
+  EXPECT_NEAR(result.terminal_cost_m,search.lastResult().terminal_cost_m,1e-12);
+}
+
 TEST(AdvisoryAStar, RejectedIncomingEdgeDoesNotDiscoverItsNeighbor) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);

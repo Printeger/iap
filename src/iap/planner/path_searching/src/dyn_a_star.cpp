@@ -626,13 +626,23 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         finishFailure(result_.failure, time_1); return false;
     }
     result_.failure = Failure::NONE;
+    // Discovery priority is separate from the objective/proof lower bound.
+    // In high-cost mode, unit-distance A* spends the cold prediction allowance
+    // flooding a ball before it reaches any terminal. Use the existing warning
+    // multiplier only to order discovery, then reopen every discovered node
+    // under the original admissible bound as soon as a complete guide exists.
+    // This priority never changes measured edge/risk/terminal costs or grants
+    // optimality, and component diagnostics keep their original ordering.
+    bool discovering = advisory_fallback_ && !component_diagnostic_;
+    std::vector<GridNodePtr> discovered;
     const auto heuristic = [&](GridNodePtr node) {
         if (component_diagnostic_ && !component_diagnostic_->stop_on_first_goal) return 0.0;
         const auto began=performance_diagnostics_ ? PlanningBudget::Clock::now() : PlanningBudget::Clock::time_point{};
         double best = inf;
         for (const auto& goal : valid_goals) {
             GridNode terminal; terminal.index = goal.index;
-            best = std::min(best, getHeu(node, &terminal)+(Index2Coord(goal.index)-goals[goal.original]).norm()+goal.terminal);
+            const double distance=getHeu(node, &terminal)+(Index2Coord(goal.index)-goals[goal.original]).norm();
+            best = std::min(best, (discovering ? gridAdvisoryCostMultiplier(GridAdvisoryClass::AVOID, 1.) : 1.)*distance+goal.terminal);
         }
         if(performance_diagnostics_) result_.heuristic_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-began).count();
         return best;
@@ -674,6 +684,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     startPtr->fScore = *start_connector+heuristic(startPtr);
     startPtr->state = GridNode::OPENSET; //put start node in open set
     startPtr->cameFrom = NULL;
+    if(discovering) discovered.push_back(startPtr);
     ++result_.queue_pushes;
     openSet_.push({startPtr, startPtr->fScore});
 
@@ -700,7 +711,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         // if ( num_iter < 10000 )
         //     cout << "current=" << current->index.transpose() << endl;
 
-        if(!component_diagnostic_ && std::isfinite(incumbent) && current->fScore>=incumbent-1e-9)
+        if(!discovering && !component_diagnostic_ && std::isfinite(incumbent) && current->fScore>=incumbent-1e-9)
             return finish_success(true);
         for(const auto& goal:valid_goals) {
             if((component_diagnostic_ && goal.original>=requested_goals.size()) || current->index!=goal.index) continue;
@@ -720,6 +731,21 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         if (component_diagnostic_ && component_diagnostic_->stop_on_first_goal && !gridPath_.empty())
             return finish_success(false); // Explicit diagnostic early exit never claims optimality.
         if(deadlineExpired()) {if(!gridPath_.empty()) return finish_success(false);finishFailure(Failure::TIME_BUDGET,time_1);return false;}
+        if(discovering && !gridPath_.empty()) {
+            discovering=false;
+            decltype(openSet_) proof_queue;
+            for(auto node:discovered) {
+                if(deadlineExpired()) return finish_success(false);
+                node->state=GridNode::OPENSET;
+                node->fScore=node->gScore+heuristic(node);
+                proof_queue.push({node,node->fScore});
+                ++result_.queue_pushes;
+            }
+            openSet_.swap(proof_queue);
+            // Reopening includes CLOSED nodes: discovery scores are not an
+            // admissible settled-cost proof and cannot suppress a cheaper route.
+            continue;
+        }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.
         ++result_.expanded;
         if (component_diagnostic_ && component_diagnostic_->visit)
@@ -788,6 +814,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
                         // Otherwise a later legal edge can inherit scores or
                         // CLOSED state from a previous search round.
                         neighborPtr->rounds = rounds_;
+                        if(discovering) discovered.push_back(neighborPtr);
                         neighborPtr->state = GridNode::OPENSET;
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;

@@ -932,8 +932,14 @@ start/terminal connector costs share quarter-voxel trapezoidal sampling, matchin
 the fine actual-curve audit (half-voxel remains its numerical convergence comparison). Full voxel
 physical checks remain in addition to this cost quadrature. The heuristic is the
 minimum lattice metric distance + terminal connector lower bound + endpoint
-remaining distance; its old amplification is removed. A* retains the best complete
-incumbent and waits for a lower-bound proof. Budget expiry returns an existing
+remaining distance. In the existing high-cost advisory mode, discovery queue
+priority uses the existing warning multiplier on geometric distance only until
+the first completely checked guide. This is an ordering priority, never an edge
+cost or admissible proof. All discovered nodes, including CLOSED nodes, then reopen
+under the original unit-distance lower bound in the same search/deadline; this
+allows cheaper risk detours to replace the incumbent. Normal/component searches
+keep their original ordering. A* retains the best complete incumbent and waits
+for a lower-bound proof. Budget expiry returns an existing
 complete route as unproven; no complete route yields TIME_BUDGET. Changed advisory
 costs suppress an optimality claim. A stale physical geometry still rejects.
 Every actual candidate and release independently passes the original checks.
@@ -2306,3 +2312,47 @@ repair. Existing three formatting failures and the prior strict GPU covariance
 failure remain reported. No default/formal promotion is authorized by these
 results. Full figures, commands, identity hashes, request denominators and
 limitations are in `log/20261009T035423Z_499/export/analysis/on_recovery_result/REPORT.md`.
+
+
+### Cold high-cost guide delivery (2026-10-09, live verification pending)
+
+The clean baseline is `4d356f51`. Targeted capture `20261009T050500Z_551`
+verified the split physical/prediction-time writer in the canonical forest and
+stopped after a registered full search payload. Attempt1/gen14/risk17 payload
+SHA256 is `13f96815f9d65e52752d3520d2ea3cb588231ca6b606deebd3b38c03e28df4c2`.
+Original production recovery repeats TIME_BUDGET with no incumbent. A separately
+profiled same-input recovery spends 0.765 s predicting 18,258 new voxels,
+0.364/0.276/0.077 s in LiDAR/GNSS/fusion, with 14,626 expansions. Heuristic
+computation takes only 0.0034 s. Extended offline high-cost diagnosis first
+reaches a complete route at 2.197 s/35,927 expansions, so it is not online
+capability. It shows the unit-distance frontier grows before delivering any
+route in an approximately all-warning local region.
+
+The repair separates first-guide discovery order from cost/proof authority as
+described above. It does not increase 1 s search/1.5 s round limits or repair
+actions, neutralize physical checks, change PL/noise/risk weights, reduce goals,
+or publish a search result directly. There is still one guide; a failed Curve
+never replaces the executing predecessor. Deterministic work-budget regression
+is red before the repair and green after it; a high-cost detour regression
+requires the cheaper route and an original-bound proof. All 38 A* cases pass, including an exhaustive Dijkstra component comparison
+with multiple non-lattice connectors and terminal costs. Planner 15/15 and
+path-search 3/3 functional/selected lint targets pass (existing package-wide
+formatting failures are excluded and remain limitations). Same original
+production recovery input now delivers its first complete guide at 0.03749 s
+and returns that incumbent at 0.99969 s in the original 1 s allowance; cost is
+4.292962 length + 8.585923 risk + 31.953208 terminal = 44.832093 m. It is
+explicitly unproven at that deadline; separate extended original-order
+diagnosis obtains the same cost with proof. No extended result is online
+authorization. Real B-spline/continuation verification remains pending;
+discovery alone is not execution acceptance.
+
+New independent source evidence is in
+`log/20261009T050544Z_634/export/analysis/SOURCE_REPORT.md`: 28/28 GNSS
+raw-to-factor/Advisory chains, same-input three-source QR/SVD 3/3, actual
+1041-primitive duplication 1/2/4 (654 groups), and 60,526 native GPU residual
+samples pass their respective checks. No demonstrated new source software
+error warrants a model change. GNSS elevation/NLOS floor, LiDAR cross-group
+correlation and proxy/match lineage, absolute map/alignment/extrinsic error
+remain uncalibrated; the model remains fixed-map conditional. The historical
+single GPU asymmetry rejection remains a qualification limit. Formal 9+9 and
+six complete task comparisons remain deferred.
