@@ -134,7 +134,8 @@ namespace ego_planner
     evidence.normal_attempted=!planning_advisory_fallback_;
     evidence.fallback_entered=planning_advisory_fallback_;
     if(evidence.fallback_entered)evidence.fallback_remaining_s=remaining();
-    bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center);
+    bool found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center,
+        AStar::GoalSearchPurpose::Guide);
     const auto result=a_star_->lastResult();
     if(evidence.normal_attempted)evidence.normal_failure=result.failure;
     if(!found && result.failure==AStar::Failure::ADVISORY_NO_PATH && result.exhausted &&
@@ -144,7 +145,8 @@ namespace ego_planner
       planning_advisory_fallback_=true;
       a_star_->setPlanningQuery(guide_query_,true);
       evidence.fallback_entered=true;evidence.fallback_remaining_s=remaining();
-      found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center);
+      found=a_star_->AstarSearchGoals(.1,start,planning_goals_,remaining(),center,
+          AStar::GoalSearchPurpose::Guide);
       RCLCPP_WARN(rclcpp::get_logger("one_guide"),
           "Search exhausted with advisory rejections; high-cost retry %s",
           found ? "found a physical route" : "failed without proving advisory causality");

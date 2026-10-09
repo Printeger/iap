@@ -2319,8 +2319,8 @@ TEST(EgoBaseline, AdvisoryPriorToggleSharesExportAndPreservesMotionAuthority) {
 }
 
 TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
-  // Preserve the original ON input as a bounded rejection regression. OFF
-  // isolates the same physical/connection path without consuming fallback slots.
+  // Preserve the original OFF/ON input and unchanged gates. A checked ON
+  // incumbent may now arrive before optional cost proof exhausts the quota.
   for(bool guidance : {false,true}) {
   auto node=makeNode(true,1.,false,guidance);
   // Deterministic frozen-input CPU regression. Steady-clock search/repair
@@ -2373,8 +2373,7 @@ TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
   manager.setPlanningConnection(connection,predecessor.traj_id_);
   const bool connected=manager.reboundReplan(position,velocity,acceleration,goal,zero,false,false);
   const auto retention=ego_planner::EGOPlannerManagerTestAccess::retention(manager);
-  if(guidance) {
-    EXPECT_FALSE(connected);
+  if(guidance && !connected) {
     if(manager.lastPlanFailure()==ego_planner::EGOPlannerManager::PlanFailure::Search) {
       // The finer shared quadrature may exhaust the unchanged one-second
       // fallback search before it has any complete route on this input.
@@ -2394,6 +2393,18 @@ TEST(EgoBaseline, ObservationOnlyWeakWallPublishesPhysicalCurve) {
   ASSERT_TRUE(manager.hasPendingTrajectory());
   ASSERT_TRUE(manager.publicationStillTimely());
   auto successor=manager.publicationTrajectory();
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  EXPECT_TRUE(manager.local_data_.position_traj_.getControlPoint().isApprox(predecessor.position_traj_.getControlPoint(),0.));
+  EXPECT_LE(manager.planningBudget()->used(),3u);
+  EXPECT_FALSE(manager.planningBudget()->denied());
+  if(guidance) {
+    EXPECT_TRUE(retention.checked);
+    EXPECT_FALSE(retention.route_lost);
+    EXPECT_FALSE(retention.risk_preference_lost);
+  }
+  const auto physical=manager.assessTrajectory(successor.position_traj_,successor.traj_id_,now,
+      false,0,std::numeric_limits<double>::infinity(),nullptr,false);
+  EXPECT_TRUE(physical.executable());
   EXPECT_TRUE(successor.position_traj_.evaluateDeBoorT(0).isApprox(position,1e-8));
   EXPECT_TRUE(successor.velocity_traj_.evaluateDeBoorT(0).isApprox(velocity,1e-8));
   EXPECT_TRUE(successor.acceleration_traj_.evaluateDeBoorT(0).isApprox(acceleration,1e-8));

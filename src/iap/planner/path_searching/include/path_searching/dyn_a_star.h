@@ -260,6 +260,11 @@ public:
 	                     double max_duration_s = -1.0,
 	                     std::optional<Eigen::Vector3d> center_override = std::nullopt);
 
+    enum class GoalSearchPurpose { Guide, CostProof };
+    bool AstarSearchGoals(double step_size, const Eigen::Vector3d& start,
+                         const std::vector<Eigen::Vector3d>& goals, double max_duration_s,
+                         std::optional<Eigen::Vector3d> center_override, GoalSearchPurpose purpose);
+
 	std::vector<Eigen::Vector3d> getPath();
 };
 

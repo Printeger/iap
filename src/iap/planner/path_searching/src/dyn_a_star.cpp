@@ -552,6 +552,14 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
                             const std::vector<Vector3d>& requested_goals, double max_duration_s,
                             std::optional<Vector3d> center_override)
 {
+    return AstarSearchGoals(step_size,start_pt,requested_goals,max_duration_s,
+        center_override,GoalSearchPurpose::CostProof);
+}
+
+bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
+                            const std::vector<Vector3d>& requested_goals, double max_duration_s,
+                            std::optional<Vector3d> center_override,GoalSearchPurpose purpose)
+{
     std::vector<Vector3d> diagnostic_goals;
     if (component_diagnostic_) {
         diagnostic_goals = requested_goals;
@@ -646,8 +654,8 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     // Discovery priority is separate from the objective/proof lower bound.
     // With advisory costs, unit-distance A* spends the cold prediction allowance
     // flooding a ball before it reaches any terminal. Use the existing warning
-    // multiplier only to order discovery, then reopen every discovered node
-    // under the original admissible bound as soon as a complete guide exists.
+    // multiplier only to order discovery. CostProof then reopens discovered
+    // nodes under the original admissible bound; Guide returns a checked route.
     // This priority never changes measured edge/risk/terminal costs or grants
     // optimality, and component diagnostics keep their original ordering.
     bool discovering = planning_query_ && !component_diagnostic_;
@@ -745,6 +753,8 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
                 result_.path_cost=complete;result_.terminal_cost_m=goal.terminal;
             }
         }
+        if(purpose==GoalSearchPurpose::Guide && !component_diagnostic_ && !gridPath_.empty())
+            return finish_success(false); // Feasibility is not an optimality proof.
         if (component_diagnostic_ && component_diagnostic_->stop_on_first_goal && !gridPath_.empty())
             return finish_success(false); // Explicit diagnostic early exit never claims optimality.
         if(deadlineExpired()) {if(!gridPath_.empty()) return finish_success(false);finishFailure(Failure::TIME_BUDGET,time_1);return false;}
