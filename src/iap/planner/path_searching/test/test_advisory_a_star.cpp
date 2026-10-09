@@ -347,6 +347,41 @@ TEST(AdvisoryAStar, UnobservedBarrierHasItsOwnFailureReason) {
       static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)], 0u);
 }
 
+TEST(AdvisoryAStar, UnknownFrontierDoesNotHideExhaustedAdvisoryRejections) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(*map);
+  AStar search;
+  search.initGridMap(map, Eigen::Vector3i(30, 30, 10));
+  const auto query = [](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason = std::abs(p.y()) > .11 || std::abs(p.z()-1) > .11
+        ? GridExecutionReason::ENVIRONMENT_UNOBSERVED : GridExecutionReason::OK;
+    cell.advisory.classification = std::abs(p.x()) < .25
+        ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier = 1;
+    return cell;
+  };
+  const Eigen::Vector3d start(-1,0,1), goal(1,0,1);
+  search.setPlanningQuery(query);
+  EXPECT_FALSE(search.AstarSearch(.1,start,goal));
+  EXPECT_TRUE(search.lastResult().exhausted);
+  EXPECT_GT(search.lastResult().rejected_advisory,0u);
+  EXPECT_GT(search.lastResult().rejected_execution[
+      static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)],0u);
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::ADVISORY_NO_PATH);
+  search.setPlanningQuery(query,true);
+  ASSERT_TRUE(search.AstarSearch(.1,start,goal));
+  for(const auto& p:search.getPath()) EXPECT_TRUE(query(p).executable());
+  // Retrying with high costs still cannot cross an actual unknown barrier.
+  search.setPlanningQuery([query](const Eigen::Vector3d& p) {
+    auto cell=query(p);
+    if(std::abs(p.x())<.11) cell.execution_reason=GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+    return cell;
+  },true);
+  EXPECT_FALSE(search.AstarSearch(.1,start,goal));
+  EXPECT_EQ(search.lastResult().failure,AStar::Failure::NO_PATH_WITH_UNOBSERVED);
+}
+
 TEST(AdvisoryAStar, ReusesPhysicalAndRiskQueriesWithinOneSearch) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);

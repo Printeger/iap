@@ -851,9 +851,13 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     result_.exhausted = true;
     const bool unknown_rejected = result_.rejected_execution[
         static_cast<size_t>(GridExecutionReason::ENVIRONMENT_UNOBSERVED)] != 0;
-    finishFailure(unknown_rejected ? Failure::NO_PATH_WITH_UNOBSERVED :
-        result_.rejected_advisory != 0 && !advisory_fallback_
-            ? Failure::ADVISORY_NO_PATH : Failure::NO_PATH, time_1);
+    // Unknown cells bound every partially observed component. They must not
+    // hide strict advisory rejections on its frontier: the existing bounded
+    // high-cost retry can still discover a fully observed route. This is no
+    // proof of advisory causality; preserve all physical rejection counters.
+    finishFailure(result_.rejected_advisory != 0 && !advisory_fallback_
+        ? Failure::ADVISORY_NO_PATH : unknown_rejected
+            ? Failure::NO_PATH_WITH_UNOBSERVED : Failure::NO_PATH, time_1);
     return false;
 }
 
