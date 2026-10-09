@@ -334,7 +334,8 @@ struct EGOPlannerManagerTestAccess {
   static void replayMap(EGOPlannerManager& manager,GridMap::Ptr map) {
     manager.grid_map_=map;manager.bspline_optimizer_->setEnvironment(map);
   }
-  static void frozenPrediction(EGOPlannerManager& manager,const std::filesystem::path& payload) {
+  static void frozenPrediction(EGOPlannerManager& manager,const std::filesystem::path& payload,
+      std::optional<std::filesystem::path> observation_snapshot={}) {
     std::ifstream stream(payload,std::ios::binary);std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(stream),{});
     auto input=decodePredictionInput(bytes);ASSERT_TRUE(input.occupancy);
     ASSERT_EQ(input.occupancy->cells->flags,manager.planning_view_->physical->cells->flags);
@@ -346,6 +347,35 @@ struct EGOPlannerManagerTestAccess {
     auto& view=*manager.planning_view_;view.risk_version=manager.grid_map_->bindRiskContext(std::move(prediction));
     view.advisory_query=manager.grid_map_->capturePlanningRiskQuery(view.risk_version,view.time_s,manager.planning_risk_policy_);
     manager.advisory_guidance_enabled_=true;
+    if(observation_snapshot) {
+      // Restore the original pose from its captured lidar/map beam pairs,
+      // and the original FOV from the same input's sensor identity. No flags
+      // or beam coverage are synthesized or changed by this replay seam.
+      ASSERT_TRUE(input.occupancy->local_evidence_snapshot);
+      const auto& identity=input.occupancy->local_evidence_snapshot->identity();
+      boost::property_tree::ptree metadata;boost::property_tree::read_json(observation_snapshot->string(),metadata);
+      RegisteredLidarFrameMetadata sensor;
+      sensor.frame_id=metadata.get<int64_t>("current_frame.frame_id");
+      sensor.stamp_s=metadata.get<double>("current_frame.stamp_s");
+      sensor.scan_end_stamp_s=metadata.get<double>("current_frame.scan_end_stamp_s");
+      int axis=0;for(const auto& item:metadata.get_child("current_frame.sensor_position_m"))
+        sensor.T_map_lidar.translation()[axis++]=item.second.get_value<double>();
+      sensor.horizontal_fov_rad=identity.horizontal_fov_rad;
+      sensor.vertical_min_rad=identity.vertical_min_rad;sensor.vertical_max_rad=identity.vertical_max_rad;
+      sensor.min_range_m=identity.min_range_m;sensor.max_range_m=identity.max_range_m;
+      std::ifstream beams(observation_snapshot->parent_path()/metadata.get<std::string>("current_frame.beams_file"));
+      std::string line;std::getline(beams,line);
+      Eigen::Matrix3d a=Eigen::Matrix3d::Zero(),b=Eigen::Matrix3d::Zero();size_t count=0;
+      while(std::getline(beams,line)) {
+        std::replace(line.begin(),line.end(),',',' ');std::istringstream row(line);
+        Eigen::Vector3d lidar,map;double outcome,range;
+        ASSERT_TRUE(bool(row>>lidar.x()>>lidar.y()>>lidar.z()>>outcome>>range>>map.x()>>map.y()>>map.z()));
+        a+=lidar*lidar.transpose();b+=map*lidar.transpose();++count;
+      }
+      ASSERT_GT(count,3u);sensor.T_map_lidar.linear()=b*a.inverse();
+      ASSERT_LT((sensor.T_map_lidar.linear().transpose()*sensor.T_map_lidar.linear()-Eigen::Matrix3d::Identity()).norm(),1e-6);
+      auto epoch=std::make_shared<FrozenOccupancyEpoch>(*view.physical);epoch->observation_frame=sensor;view.physical=epoch;
+    }
   }
   static void injectAdvisory(EGOPlannerManager& manager) {
     manager.planning_view_->advisory_query.query=[](const Eigen::Vector3d& p) {
@@ -1192,12 +1222,14 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   auto vis = std::make_shared<ego_planner::PlanningVisualization>(node);
   manager->initPlanModules(node, vis);
   std::optional<std::filesystem::path> planning_payload;
+  std::optional<std::filesystem::path> observation_snapshot;
   Eigen::Vector3d captured_route,captured_center,start_velocity=Eigen::Vector3d::Zero(),start_acceleration=Eigen::Vector3d::Zero();
   Eigen::Vector3d start(-2,0,1),goal(5.8,0,1);const Eigen::Vector3d zero=Eigen::Vector3d::Zero();
   if(frozen_input) {
     boost::property_tree::ptree boundary,metadata;
     boost::property_tree::read_json(frozen_input,boundary);
     const std::filesystem::path captured=boundary.get<std::string>("snapshot");
+    if(boundary.get<bool>("expect_observation",false)) observation_snapshot=captured;
     boost::property_tree::read_json(captured.string(),metadata);
     const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
       for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
@@ -1230,7 +1262,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   }
   ASSERT_TRUE(manager->planGlobalTraj(start, zero, zero, goal, zero, zero));
   ASSERT_TRUE(manager->beginPlanningView());
-  if(planning_payload) ego_planner::EGOPlannerManagerTestAccess::frozenPrediction(*manager,*planning_payload);
+  if(planning_payload) ego_planner::EGOPlannerManagerTestAccess::frozenPrediction(*manager,*planning_payload,observation_snapshot);
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm, std::move(owner), node, start, goal);
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::select(fsm,frozen_input ? 5. : 3.));
@@ -1239,14 +1271,25 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   if(!planning_payload) EXPECT_FALSE(manager->queryLocalTargetCell(target,node->now().seconds()).executable());
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
   ASSERT_TRUE(manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false));
-  EXPECT_EQ(manager->observationResult(),"OBSERVED_PROGRESS_CONNECTION");
+  EXPECT_EQ(manager->observationResult(),observation_snapshot ? "EXECUTING" : "OBSERVED_PROGRESS_CONNECTION");
   EXPECT_EQ(manager->planningBudget()->searches.calls,2u);
   EXPECT_TRUE(manager->guideIdentity().mission_goal.isApprox(goal,1e-9));
-  EXPECT_GT(manager->guideIdentity().committed_endpoint.x(),start.x()+.2);
+  if(!observation_snapshot) EXPECT_GT(manager->guideIdentity().committed_endpoint.x(),start.x()+.2);
+  else {
+    EXPECT_GE((manager->guideIdentity().committed_endpoint-start).norm(),.2);
+    EXPECT_TRUE(manager->guideIdentity().committed_endpoint.isApprox(manager->guideIdentity().route_target,1e-6));
+  }
   EXPECT_TRUE(manager->queryLocalTargetCell(manager->guideIdentity().committed_endpoint,node->now().seconds()).executable());
   auto curve=manager->publicationTrajectory().position_traj_;
   EXPECT_LT(curve.getDerivative().evaluateDeBoorT(curve.getTimeSum()).norm(),1e-5);
   EXPECT_TRUE(manager->assessTrajectory(curve,0,node->now().seconds()).executable());
+  if(observation_snapshot) {
+    const auto budget=manager->planningBudget();
+    std::cout<<"FROZEN_OBSERVATION endpoint="<<manager->guideIdentity().committed_endpoint.transpose()
+        <<" duration_s="<<curve.getTimeSum()<<" elapsed_s="<<budget->elapsed()
+        <<" cumulative_search_s="<<budget->searches.seconds<<" searches="<<budget->searches.calls
+        <<" repairs="<<budget->used()<<std::endl;
+  }
 }
 
 TEST(EgoBaseline, ShortRestingCurveCompletesBeforeReplanThresholdAndRequiresFeedback) {

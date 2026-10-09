@@ -338,7 +338,7 @@ TEST(AdvisoryAStar, RoundedEndpointNeedsAnExecutableConnector) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(*map);
   AStar search;
-  search.initGridMap(map, Eigen::Vector3i(100, 100, 20));
+  search.initGridMap(map, Eigen::Vector3i(40, 10, 6));
   search.setPlanningQuery([](const Eigen::Vector3d& p) {
     GridPlanningCell cell;
     cell.execution_reason = p.x() > 0.99 && p.x() < 1.03
@@ -347,7 +347,9 @@ TEST(AdvisoryAStar, RoundedEndpointNeedsAnExecutableConnector) {
   });
   EXPECT_FALSE(search.AstarSearch(0.1, Eigen::Vector3d(-1.0, 0, 1),
                                   Eigen::Vector3d(1.04, 0, 1)));
-  EXPECT_EQ(search.lastResult().failure, AStar::Failure::END_BLOCKED);
+  // An attachment beyond the plane exists, but no route from the real start
+  // crosses the physical plane. Endpoint eligibility is not connectivity.
+  EXPECT_EQ(search.lastResult().failure, AStar::Failure::NO_PATH);
 }
 
 TEST(AdvisoryAStar, NegativePoolCoordinatesUseNearestLattice) {
@@ -877,19 +879,32 @@ TEST(AdvisoryAStar, SharedGoalVoxelMatchesIndependentOneDimensionalCost) {
 
 
 TEST(AdvisoryAStar, FineCornerIntegralRejectsWarningBetweenOldHalfVoxelSamples) {
+  for(bool unknown:{false,true}) {
   auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
   AStar search;search.initGridMap(map,Eigen::Vector3i(8,8,8));
-  search.setPlanningQuery([](const Eigen::Vector3d& p) {
+  search.setPlanningQuery([unknown](const Eigen::Vector3d& p) {
     GridPlanningCell c;c.execution_reason=std::abs(p.x()-p.y())<1e-8 &&
         p.x()>-1e-8 && p.x()<.10000001 && std::abs(p.z()-1)<.06 ?
         GridExecutionReason::OK : GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+    if(unknown && p.x()>.012 && p.x()<.020) c.execution_reason=GridExecutionReason::ENVIRONMENT_UNOBSERVED;
     c.advisory.classification=p.x()>.012 && p.x()<.020 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
     c.advisory.cost_multiplier=c.advisory.classification==GridAdvisoryClass::AVOID ? 3. : 1.;return c;
   });
-  ASSERT_TRUE(search.AstarSearch(.1,Eigen::Vector3d(0,0,1),Eigen::Vector3d(.1,.1,1),-1,Eigen::Vector3d(0,0,1)));
+  search.setAdvisoryQuery([](const Eigen::Vector3d& p) {
+    GridPlanningRisk r;r.classification=p.x()>.012 && p.x()<.020 ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    r.cost_multiplier=r.classification==GridAdvisoryClass::AVOID ? 3. : 1.;return r;
+  });
+  const bool found=search.AstarSearch(.1,Eigen::Vector3d(0,0,1),Eigen::Vector3d(.1,.1,1),-1,Eigen::Vector3d(0,0,1));
+  EXPECT_EQ(found,!unknown);
   EXPECT_EQ(search.lastResult().rejected_advisory,0u);
+  if(unknown) {
+    EXPECT_EQ(search.lastResult().failure,AStar::Failure::NO_PATH_WITH_UNOBSERVED);
+    EXPECT_TRUE(search.getPath().empty());
+  } else {
   EXPECT_GT(search.lastResult().risk_cost_m,0.);
   EXPECT_FALSE(search.getPath().empty());
+  }
+  }
 }
 
 TEST(AdvisoryAStar, DominatedIncomingEdgesDoNotSpendRiskIntegrationWork) {

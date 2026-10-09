@@ -13,6 +13,43 @@
 namespace ego_planner
 {
   namespace {
+  std::array<Eigen::Vector3d,8> observationOffsets(const Eigen::Vector3d& forward,
+      const Eigen::Vector3d& left,const RegisteredLidarFrameMetadata& sensor,
+      const Eigen::Vector3d& key,double resolution) {
+    Eigen::Vector3d horizontal=forward;horizontal.z()=0.;
+    if(horizontal.norm()<1e-6) horizontal=Eigen::Vector3d::UnitX();else horizontal.normalize();
+    std::array<Eigen::Vector3d,8> offsets{{.5*horizontal,-.5*horizontal,.5*left,-.5*left,
+        .5*Eigen::Vector3d::UnitZ(),-.5*Eigen::Vector3d::UnitZ(),.5*(horizontal+left),.5*(horizontal-left)}};
+    // Six axis positions remain fixed. The two combinations may translate in
+    // height to bring the fixed critical voxel inside the ORIGINAL sensor FOV.
+    // A half-metre vertical jump can skip a narrow observable band completely.
+    // This is only a forecast; endpoints, connectivity and the actual curve
+    // still require their original execution checks and post-action evidence.
+    for(size_t i=6;i<offsets.size();++i) {
+      const auto pitch=[&](double z) {
+        Eigen::Vector3d displacement=offsets[i];displacement.z()=z;
+        const Eigen::Vector3d p=sensor.T_map_lidar.linear().transpose()*
+            (key-sensor.T_map_lidar.translation()-displacement);
+        return p.norm()>1e-6 ? std::asin(std::clamp(p.z()/p.norm(),-1.,1.)) : NAN;
+      };
+      const double initial=pitch(0.);
+      if(!std::isfinite(initial) || (initial>=sensor.vertical_min_rad && initial<=sensor.vertical_max_rad)) continue;
+      // Use a small fraction of one map voxel, rather than a fraction of an
+      // asymmetric full FOV that can push the endpoint out of observed space.
+      const double range=(key-sensor.T_map_lidar.translation()-offsets[i]).norm();
+      const double inset=std::min(.05*(sensor.vertical_max_rad-sensor.vertical_min_rad),
+          std::atan2(.1*resolution,range));
+      const double desired=initial<sensor.vertical_min_rad ? sensor.vertical_min_rad+inset : sensor.vertical_max_rad-inset;
+      double low=-.5,high=.5;
+      if(!(pitch(low)>=desired && pitch(high)<=desired)) continue;
+      for(int j=0;j<12;++j) {
+        const double middle=(low+high)*.5;
+        if(pitch(middle)>desired) low=middle;else high=middle;
+      }
+      offsets[i].z()=(low+high)*.5;
+    }
+    return offsets;
+  }
   std::string clearanceText(const double value) {
     if (std::isnan(value)) return "not_measured";
     if (std::isinf(value)) return "no_raw_obstacle_in_scan";
@@ -1195,10 +1232,7 @@ namespace ego_planner
         }
         return true;
       };
-      Eigen::Vector3d horizontal=forward;horizontal.z()=0.;
-      if(horizontal.norm()<1e-6) horizontal=Eigen::Vector3d::UnitX();else horizontal.normalize();
-      const std::array<Eigen::Vector3d,8> offsets{{.5*horizontal,-.5*horizontal,.5*left,-.5*left,
-          .5*Eigen::Vector3d::UnitZ(),-.5*Eigen::Vector3d::UnitZ(),.5*(horizontal+left),.5*(horizontal-left)}};
+      const auto offsets=observationOffsets(forward,left,*sensor,attempt.key,epoch.resolution_m);
       for(const auto& offset:offsets) {
         const Eigen::Vector3d p=start+offset;
         if(!queryPlanningViewCell(p,0.,false).executable() || !((p-center).array().abs()<4.8).all()) continue;
@@ -1401,6 +1435,10 @@ namespace ego_planner
       const auto prefix=selectExecutablePrefix(optimizer.recoveryGuide());
       guide_identity_.route_target=optimizer.recoveryGuide().back();
       if(prefix.budget_exhausted) { last_plan_failure_=PlanFailure::Budget;return false; }
+      if(observation_attempt_.selected_observation && observation_attempt_.result=="SELECTED_OBSERVATION" &&
+          (prefix.points.empty() || !prefix.points.back().isApprox(guide_identity_.route_target,1e-6))) {
+        last_plan_failure_=PlanFailure::ObservationBlocked;return false;
+      }
       const bool final=prefix.points.size()>1 &&
           (prefix.points.back()-guide_identity_.mission_goal).norm()<1e-6;
       if(prefix.points.size()<2 || (!final && prefix.length_m<std::max(.2,2*grid_map_->getResolution()))) {

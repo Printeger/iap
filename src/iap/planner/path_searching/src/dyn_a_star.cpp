@@ -271,7 +271,9 @@ std::optional<double> AStar::segmentCost(const Vector3d& from, const Vector3d& t
             if(planning_query_) cell=timedPlanningQuery(position);
             ++result_.risk_integration_calls;
             const auto risk = advisory_query_(position);
-            cell.execution_reason = GridExecutionReason::OK;
+            // Fine samples may cross an unobserved voxel near a corner even
+            // when endpoint/midpoint/voxel-centre checks passed. Advisory is
+            // a cost and must never overwrite this actual execution refusal.
             cell.advisory_class = risk.classification;
             cell.cost_multiplier = risk.cost_multiplier;
         } else {
@@ -418,6 +420,22 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
     const auto connector_ok = [this](const Vector3d& a, const Vector3d& b) {
         if (!planning_query_) return true;
+        // Use the same interior-voxel checks as guide prefix validation. A
+        // sampled connector alone does not establish that the guide can be
+        // handed to EGO without truncating the selected observation target.
+        const Vector3d origin=frozen_epoch_ ? frozen_epoch_->lattice_origin : grid_map_->getOrigin();
+        const double resolution=frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution();
+        const Vector3d begin=(a-origin)/resolution,end=(b-origin)/resolution;
+        const Vector3i first=begin.array().floor().cast<int>(),last=end.array().floor().cast<int>();
+        RayCaster ray;Vector3d voxel;
+        if(ray.setInput(begin,end)) {
+          bool more;
+          do {
+            more=ray.step(voxel);const Vector3i index=voxel.cast<int>();
+            if(index!=first && index!=last && !timedPlanningQuery(
+                origin+(voxel.array()+.5).matrix()*resolution).executable()) return false;
+          } while(more);
+        }
         const int samples = std::max(1, static_cast<int>(std::ceil(
             (a - b).norm() / ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * 0.5))));
         for (int i = 0; i <= samples; ++i) {
@@ -428,22 +446,19 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
         }
         return true;
     };
-    result_.start_lattice = Index2Coord(start_idx);
-    result_.end_lattice = Index2Coord(end_idx);
-    if (!queryLatticePoint(start_idx).executable() ||
-        !connector_ok(start_pt, Index2Coord(start_idx))) {
-        // Recover the search lattice attachment, never the measured real start.
-        // Use the same existing 1 m endpoint bound, deterministic nearest first,
-        // and the complete physical connector under the shared search deadline.
+    // Reuse one nearest-first attachment procedure for both exact endpoints.
+    // The original 1 m bound and deadline remain; only lattice attachments move.
+    // A line toward the start can miss an adjacent observed endpoint lattice.
+    const auto attach=[&](const Vector3d& point,Vector3i& endpoint_index) {
         struct Attachment { Vector3i index; double distance2; };
         std::vector<Attachment> attachments;
-        const int radius = std::min(static_cast<int>(std::ceil(1.0 / step_size_)), POOL_SIZE_.maxCoeff());
-        for (int x=-radius; x<=radius; ++x) {
-          if (deadlineExpired()) { result_.failure=Failure::TIME_BUDGET; return false; }
-          for (int y=-radius; y<=radius; ++y) for (int z=-radius; z<=radius; ++z) {
-            const Vector3i index=start_idx+Vector3i(x,y,z);
+        const int radius=std::min(static_cast<int>(std::ceil(1.0/step_size_)),POOL_SIZE_.maxCoeff());
+        for(int x=-radius;x<=radius;++x) {
+          if(deadlineExpired()) return false;
+          for(int y=-radius;y<=radius;++y) for(int z=-radius;z<=radius;++z) {
+            const Vector3i index=endpoint_index+Vector3i(x,y,z);
             if((index.array()<0).any() || (index.array()>=POOL_SIZE_.array()).any()) continue;
-            const double distance2=(Index2Coord(index)-start_pt).squaredNorm();
+            const double distance2=(Index2Coord(index)-point).squaredNorm();
             if(distance2<=1.0+1e-12) attachments.push_back({index,distance2});
           }
         }
@@ -452,56 +467,25 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
           for(int i=0;i<3;++i) if(a.index[i]!=b.index[i]) return a.index[i]<b.index[i];
           return false;
         });
-        bool attached=false;
         for(const auto& candidate:attachments) {
-          if(deadlineExpired()) { result_.failure=Failure::TIME_BUDGET; return false; }
-          if(!queryLatticePoint(candidate.index).executable() ||
-             !connector_ok(start_pt,Index2Coord(candidate.index))) continue;
-          start_idx=candidate.index; attached=true; break;
+          if(deadlineExpired()) return false;
+          if(!queryLatticePoint(candidate.index).executable() || !connector_ok(point,Index2Coord(candidate.index))) continue;
+          endpoint_index=candidate.index;return true;
         }
-        if(!attached) { result_.failure=Failure::START_BLOCKED; return false; }
-        result_.start_lattice=Index2Coord(start_idx);
-        result_.start_attachment_recovered=true;
+        return false;
+    };
+    result_.start_lattice=Index2Coord(start_idx);result_.end_lattice=Index2Coord(end_idx);
+    if(!queryLatticePoint(start_idx).executable() || !connector_ok(start_pt,Index2Coord(start_idx))) {
+      if(!attach(start_pt,start_idx)) {
+        result_.failure=deadlineExpired() ? Failure::TIME_BUDGET : Failure::START_BLOCKED;return false;
+      }
+      result_.start_lattice=Index2Coord(start_idx);result_.start_attachment_recovered=true;
     }
-    if (!queryLatticePoint(end_idx).executable()) {
-        // Rounding to the search lattice can place an otherwise valid target
-        // in a blocked cell. Only accept a nearby lattice endpoint when the
-        // connector back to the *requested* endpoint is fully executable.
-        bool adjusted = false;
-        const Vector3d direction = (start_pt - end_pt).normalized();
-        if (direction.allFinite()) {
-            for (double shift = step_size_; shift <= 1.0 + 1e-9;
-                 shift += step_size_) {
-                Vector3i candidate_index;
-                const auto candidate = end_pt + direction * shift;
-                if (!Coord2Index(candidate, candidate_index)) break;
-                if (!queryLatticePoint(candidate_index).executable()) continue;
-                const auto candidate_position = Index2Coord(candidate_index);
-                const int samples = std::max(1, static_cast<int>(std::ceil(
-                    (candidate_position - end_pt).norm() /
-                    ((frozen_epoch_ ? frozen_epoch_->resolution_m : grid_map_->getResolution()) * 0.5))));
-                bool connected = true;
-                for (int i = 0; i <= samples; ++i) {
-                    const auto p = end_pt + (candidate_position - end_pt) *
-                        (static_cast<double>(i) / samples);
-                    if (planning_query_ ? !timedPlanningQuery(p).executable()
-                                        : grid_map_->getInflateOccupancy(p) != 0) {
-                        connected = false;
-                        break;
-                    }
-                }
-                if (connected) {
-                    end_idx = candidate_index;
-                    result_.end_lattice = candidate_position;
-                    adjusted = true;
-                    break;
-                }
-            }
-        }
-        if (!adjusted) {
-            result_.failure = Failure::END_BLOCKED;
-            return false;
-        }
+    if(!queryLatticePoint(end_idx).executable() || !connector_ok(end_pt,Index2Coord(end_idx))) {
+      if(!attach(end_pt,end_idx)) {
+        result_.failure=deadlineExpired() ? Failure::TIME_BUDGET : Failure::END_BLOCKED;return false;
+      }
+      result_.end_lattice=Index2Coord(end_idx);
     }
 
     if (!connector_ok(start_pt, Index2Coord(start_idx))) {
