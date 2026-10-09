@@ -643,7 +643,8 @@ void GnssExtensionModule::on_smoother_update_(
         Eigen::Matrix<double,7,1> preceding=queue.front();
         for(const auto& v:queue) {
           if(v(0)<start){preceding=v;continue;}
-          if(last_epoch_imu_samples_.empty())for(int i=0;i<7;++i)last_epoch_imu_samples_.push_back(preceding(i));
+          if(last_epoch_imu_samples_.empty() && preceding(0)<v(0))
+            for(int i=0;i<7;++i)last_epoch_imu_samples_.push_back(preceding(i));
           if(last_epoch_imu_samples_.size()+7>2048)return {};
           for(int i=0;i<7;++i)last_epoch_imu_samples_.push_back(v(i));
           if(v(0)>=end)break;
@@ -824,8 +825,7 @@ void GnssExtensionModule::on_smoother_update_(
     }
 
     // Store a snapshot for post-optimization residual evaluation
-    // Both PseudorangeFactor and DopplerFactor now have 4 keys.
-    // Distinguish: DopplerFactor includes V(frame_id); PseudorangeFactor does not.
+    // Composed PR also contains velocity. Factor type owns measurement kind.
     {
       std::lock_guard<std::mutex> lk(factors_mutex_);
       last_pr_factors_.clear();
@@ -849,12 +849,8 @@ void GnssExtensionModule::on_smoother_update_(
                        consumed.size(), frame_id);
       }
       for (const auto& f : gnss_factors) {
-        bool has_vel = false;
-        for (const auto k : f->keys()) {
-          if (k == V(static_cast<std::uint64_t>(frame_id))) { has_vel = true; break; }
-        }
-        if (has_vel) last_dop_factors_.push_back(f);
-        else         last_pr_factors_.push_back(f);
+        if(std::dynamic_pointer_cast<PseudorangeFactor>(f))last_pr_factors_.push_back(f);
+        else if(std::dynamic_pointer_cast<DopplerFactor>(f))last_dop_factors_.push_back(f);
       }
     }
 

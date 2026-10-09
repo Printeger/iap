@@ -242,6 +242,11 @@ def _setup(context):
     if not output_dir.is_absolute():
         raise RuntimeError("output_dir must be an absolute path")
     output_dir.mkdir(parents=True, exist_ok=True)
+    if context.launch_configurations.get("capture_advisory_residuals", "false").lower() == "true":
+        # Reuse the opt-in real residual capture and the canonical resolver.
+        # This changes evidence only, never the simulator noise or random draws.
+        gnss_params.update(enable_csv_log=True,
+                           csv_log_path=str(output_dir / "export/simulation/gnss_injected_noise.csv"))
     manifest_dir = output_dir / "metadata" / "manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     (manifest_dir / "scenario.json").write_text(

@@ -877,6 +877,12 @@ struct SatelliteEval
   double doppler_bias_mps = 0.0;
   double psr_std_scale = 1.0;
   double doppler_std_scale = 1.0;
+  bool observation_emitted = false;
+  double raw_pr_m = 0.0;
+  double raw_pr_sigma_m = 0.0;
+  double injected_pr_white_noise_m = 0.0;
+  double injected_dop_white_noise_mps = 0.0;
+  double raw_dop_sigma_mps = 0.0;
   VisibilityState visibility = VisibilityState::kLos;
 };
 
@@ -1350,7 +1356,7 @@ private:
       if (csv_.is_open()) {
       csv_ << "stamp,scenario_time_s,prn,visibility_state,az_deg,el_deg,cn0_dbhz,"
         "psr_extra_bias_m_nlos_multipath_fault,doppler_bias_mps,"
-        "raycast_hit_x,raycast_hit_y,raycast_hit_z\n";
+        "raycast_hit_x,raycast_hit_y,raycast_hit_z,sat_id,constellation,observation_emitted,raw_pr_m,raw_pr_sigma_m,injected_pr_white_noise_m,injected_pr_total_error_m,raw_dop_sigma_mps,injected_dop_white_noise_mps\n";
       } else {
         RCLCPP_WARN(get_logger(), "Failed to open GNSS sim CSV log: %s", csv_log_path_.c_str());
       }
@@ -1623,8 +1629,8 @@ private:
       if (!sat) {
         continue;
       }
-      evals.push_back(*sat);
       append_observation_if_usable(*sat, gpst_rx_time, receiver_ecef, receiver_vel_ecef, receiver_lla, obs_list);
+      evals.push_back(*sat);
     }
     for (const auto& geph : constellation_.glo_ephems()) {
       auto sat = evaluate_satellite(
@@ -1633,8 +1639,8 @@ private:
       if (!sat) {
         continue;
       }
-      evals.push_back(*sat);
       append_observation_if_usable(*sat, gpst_rx_time, receiver_ecef, receiver_vel_ecef, receiver_lla, obs_list);
+      evals.push_back(*sat);
     }
 
     const bool enough_sats = obs_list.size() >= 4;
@@ -1819,7 +1825,7 @@ private:
   }
 
   void append_observation_if_usable(
-    const SatelliteEval& sat,
+    SatelliteEval& sat,
     const gnss_comm::gtime_t& gpst_rx_time,
     const Eigen::Vector3d& receiver_ecef,
     const Eigen::Vector3d& receiver_vel_ecef,
@@ -1867,6 +1873,14 @@ private:
       receiver_clock_drift_mps_ - sat.svddt_sps * LIGHT_SPEED +
       sat.doppler_bias_mps + dop_noise;
     const double dopp_hz = -range_rate_raw * sat.freq_hz / LIGHT_SPEED;
+    // Capture the exact existing random draw, never draw a new diagnostic
+    // sample or infer noise from post-fit residuals.
+    sat.observation_emitted = true;
+    sat.raw_pr_m = psr_raw;
+    sat.raw_pr_sigma_m = pr_std;
+    sat.injected_pr_white_noise_m = pr_noise;
+    sat.injected_dop_white_noise_mps = dop_noise;
+    sat.raw_dop_sigma_mps = dop_std_mps;
 
     auto obs = std::make_shared<gnss_comm::Obs>();
     obs->time = gpst_rx_time;
@@ -2361,7 +2375,7 @@ private:
       return;
     }
     for (const auto& sat : evals) {
-      csv_ << std::fixed << std::setprecision(6)
+      csv_ << std::fixed << std::setprecision(17)
         << stamp_to_sec(state.stamp) << ","
         << scenario_time_s << ","
         << sat.prn << ","
@@ -2377,6 +2391,16 @@ private:
           << sat.raycast_hit_enu.z();
       } else {
         csv_ << ",,";
+      }
+      csv_ << "," << sat.sat_id << "," << sys_to_constellation_name(sat.sys)
+           << "," << (sat.observation_emitted ? 1 : 0);
+      if (sat.observation_emitted) {
+        csv_ << "," << sat.raw_pr_m << "," << sat.raw_pr_sigma_m
+             << "," << sat.injected_pr_white_noise_m
+             << "," << sat.injected_pr_white_noise_m + sat.psr_extra_bias_m
+             << "," << sat.raw_dop_sigma_mps << "," << sat.injected_dop_white_noise_mps;
+      } else {
+        csv_ << ",,,,,,";
       }
       csv_ << "\n";
     }

@@ -12,6 +12,9 @@
 
 namespace iap {
 struct GnssClockInjectionTestAccess {
+  static void imu(GnssExtensionModule& module,double stamp) {
+    module.epoch_imu_.insert_imu(stamp,Eigen::Vector3d(2.,0.,9.81),Eigen::Vector3d::Zero());
+  }
   static void prepare(GnssExtensionModule& module, bool gps_owned, const GnssEpoch& epoch) {
     module.reset_clock_chain_state_("test_reset", epoch.stamp);
     module.ext_vars_inserted_ = false;
@@ -272,4 +275,83 @@ TEST(GnssEpochMotion, StationaryVerticalProcessNoiseHasIndependentDiscreteIntegr
   EXPECT_NEAR(q(5,5),.0025*(t*t*t/3.-h*h*t/12.)+.000001*t,1e-12);
   EXPECT_NEAR(q(8,8),.0025*t,1e-12);
   EXPECT_NEAR(q(5,8),.0025*t*t/2.,1e-12);
+}
+
+TEST(GnssNoiseAuthority, LargerDeclaredMeasurementNoiseCannotBeReplacedByFloor) {
+  iap::GnssHandler handler;iap::GnssEpoch epoch;epoch.stamp=100.;
+  iap::SatObs sat;sat.elevation=1.;sat.pr_sigma=100.;sat.dop_sigma=10.;epoch.sats.push_back(sat);
+  handler.insert_epoch(epoch);const auto graph=handler.get_factors(1,100.,Eigen::Vector3d::Zero());
+  ASSERT_EQ(graph.size(),2u);
+  const auto pr=std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(graph[0]);
+  const auto dop=std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(graph[1]);
+  EXPECT_GE(std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(pr->noiseModel())->sigma(0),100.);
+  EXPECT_GE(std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(dop->noiseModel())->sigma(0),10.);
+}
+
+TEST(GnssEpochMotion, SmootherFinishKeepsPrEpochAfterVelocityEntersPrFactor) {
+  const auto root=std::filesystem::temp_directory_path()/("iap_epoch_smoother_"+std::to_string(::getpid()));
+  struct Cleanup {std::filesystem::path path;~Cleanup(){std::filesystem::remove_all(path);}} cleanup{root};
+  std::filesystem::create_directories(root);
+  std::ofstream(root/"config.json")<<R"({"global":{"config_path":"","config_gnss":"config_gnss.json","config_odometry":"config_odometry.json","config_sensors":"config_sensors.json"}})";
+  std::ofstream(root/"config_gnss.json")<<R"({"gnss":{"enable_debug_csv":false}})";
+  std::ofstream(root/"config_odometry.json")<<R"({"odometry_estimation":{"clock_owner_mode":"gnss"}})";
+  std::ofstream(root/"config_sensors.json")<<R"({"sensors":{"imu_acc_noise":0.05,"imu_gyro_noise":0.02,"imu_int_noise":0.001}})";
+  glim::GlobalConfig::instance(root.string(),true);
+  iap::GnssExtensionModule extension;iap::GnssEpoch epoch;
+  epoch.stamp=100.08;epoch.gps_sec=118.08;epoch.source_identity=1718;
+  for(int i=0;i<8;++i) {
+    iap::SatObs sat;sat.sat_id=i+1;sat.elevation=1.;
+    sat.sat_pos=Eigen::Vector3d(21000000+i*300000,14000000-i*170000,17000000+(i%3)*400000);
+    const Eigen::Vector3d p(1.6064,0.,0.),v(20.16,0.,0.);
+    const auto los=(p-sat.sat_pos).normalized();
+    const double omega_over_c=7.2921151467e-5/2.99792458e8;
+    sat.pr_meas=(p-sat.sat_pos).norm()-omega_over_c*sat.sat_pos.y()*p.x();
+    sat.dop_meas=los.dot(v)-omega_over_c*sat.sat_pos.y()*v.x();epoch.sats.push_back(sat);
+  }
+  iap::GnssClockInjectionTestAccess::prepare(extension,true,epoch);
+  iap::GnssClockInjectionTestAccess::steer_frame_only(extension,1,100.);
+  for(int i=0;i<51;++i)iap::GnssClockInjectionTestAccess::imu(extension,100.+i*.002);
+  using namespace gtsam::symbol_shorthand;
+  gtsam::Values values;values.insert(X(1),gtsam::Pose3());values.insert(V(1),gtsam::Vector3(20.,0.,0.));
+  values.insert(B(1),gtsam::imuBias::ConstantBias());
+  gtsam::NonlinearFactorGraph graph;
+  graph.addPrior<gtsam::Pose3>(X(1),gtsam::Pose3(),gtsam::noiseModel::Isotropic::Sigma(6,.001));
+  graph.addPrior<gtsam::Vector3>(V(1),gtsam::Vector3(20.,0.,0.),gtsam::noiseModel::Isotropic::Sigma(3,.001));
+  graph.addPrior<gtsam::imuBias::ConstantBias>(B(1),gtsam::imuBias::ConstantBias(),gtsam::noiseModel::Isotropic::Sigma(6,.001));
+  std::map<std::uint64_t,double> stamps{{X(1),100.},{V(1),100.},{B(1),100.}};
+  gtsam_points::IncrementalFixedLagSmootherExtWithFallback smoother(5,production_clock_params());
+  iap::GnssClockInjectionTestAccess::inject(extension,smoother,graph,values,stamps);
+  ASSERT_NO_THROW(smoother.update(graph,values,stamps));
+  ASSERT_NO_THROW(iap::GnssClockInjectionTestAccess::finish(extension,smoother));
+  const auto bundle=iap::IapSharedState::instance().get_gnss_postopt_bundle();
+  ASSERT_TRUE(bundle.epoch);EXPECT_EQ(bundle.epoch->sats.size(),8u);
+  EXPECT_EQ(bundle.state.propagation,"IMU_TO_GNSS_EPOCH");
+  EXPECT_DOUBLE_EQ(bundle.state.state_stamp,100.);EXPECT_DOUBLE_EQ(bundle.coordinates.stamp,100.08);
+  EXPECT_NEAR(bundle.coordinates.T_world_imu(0,3),1.6064,1e-4);
+  ASSERT_TRUE(bundle.state.covariance_valid)<<bundle.state.failure_reason;
+  EXPECT_EQ(bundle.state.propagation_transition.size(),23u*23u);
+  EXPECT_FALSE(bundle.state.imu_measurements.empty());
+}
+
+TEST(GnssEpochMotion, RotatedPoseAndComposedAnalyticJacobiansMatchNumericalMeasurement) {
+  using namespace gtsam::symbol_shorthand;
+  auto params=gtsam::PreintegrationParams::MakeSharedU(9.81);
+  auto motion=std::make_shared<gtsam::PreintegratedImuMeasurements>(params);
+  for(int i=0;i<30;++i)motion->integrateMeasurement(gtsam::Vector3(.8,.4,9.81),gtsam::Vector3(.1,.05,.3),.002);
+  auto noise=gtsam::noiseModel::Isotropic::Sigma(1,1.);
+  iap::PseudorangeFactor pr(X(1),C(1),E(0),R(0),2e7,gtsam::Vector3(2e7,1e7,1e7),0.,100.,{},noise,Eigen::Vector3d(.4,.2,.1));
+  iap::DopplerFactor dop(X(1),V(1),C(1),R(0),0.,gtsam::Vector3(2e7,1e7,1e7),gtsam::Vector3(300.,100.,200.),gtsam::Vector3::Zero(),noise);
+  gtsam::Values v;v.insert(X(1),gtsam::Pose3(gtsam::Rot3::RzRyRx(.1,.2,.6),gtsam::Point3(3.,4.,2.)));
+  v.insert(V(1),gtsam::Vector3(2.,1.,.3));v.insert(B(1),gtsam::imuBias::ConstantBias());
+  v.insert(C(1),gtsam::Vector2(2.,.3));v.insert(E(0),gtsam::Vector3::Zero().eval());v.insert(R(0),gtsam::Rot3());
+  pr.bind_epoch_motion(V(1),B(1),motion);dop.bind_epoch_motion(B(1),motion);
+  for(const gtsam::NoiseModelFactor* factor:{static_cast<const gtsam::NoiseModelFactor*>(&pr),static_cast<const gtsam::NoiseModelFactor*>(&dop)}) {
+    std::vector<gtsam::Matrix> h;factor->unwhitenedError(v,&h);
+    for(std::size_t k=0;k<factor->keys().size();++k)for(std::size_t j=0;j<v.at(factor->keys()[k]).dim();++j) {
+      gtsam::VectorValues d;for(const auto& item:v)d.insert(item.key,gtsam::Vector::Zero(item.value.dim()));
+      d.at(factor->keys()[k])(j)=.001;const auto plus=factor->unwhitenedError(v.retract(d));
+      d.at(factor->keys()[k])(j)=-.001;const auto minus=factor->unwhitenedError(v.retract(d));
+      EXPECT_NEAR(h[k](0,j),(plus(0)-minus(0))/.002,5e-4)<<k<<","<<j;
+    }
+  }
 }

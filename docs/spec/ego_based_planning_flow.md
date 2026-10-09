@@ -2117,3 +2117,33 @@ added conditional p-p blocks and epsilon as official information; it now checks
 the joint envelope, independent SVD nuisance projection and exact accepted
 covariance inverse. Existing repository-wide flake8, lint_cmake and uncrustify
 failures remain reported; they do not grant live acceptance.
+
+## Source and live integration corrections (2026-10-09)
+
+The first acquisition-time live attempt (run `20261009T024130Z_455`) preserved
+all requests but did not deliver qualified movement. It exposed two concrete
+integration defects: PR was classified as Doppler because both composed factors
+now include velocity, and per-key numerical factor differentiation raised
+smoother median time from 21 ms in the historical reference to 150 ms (p95
+327 ms). Residual dispatch now uses the actual factor type. Composed Jacobians
+use the existing GTSAM preintegration transition and bias derivatives, with
+independent numerical checks on rotated poses, velocity and bias. Pose3
+translation derivatives use the right-local body rotation, rather than a world
+translation tangent. A real smoother regression verifies the PR epoch survives
+this composition and owns the propagated pose/covariance.
+
+A separate red test proved that receiver noise 100 m / 10 m/s was overwritten
+by floors 7.06 m / 0.706 m/s. Effective GNSS factor noise now uses
+`max(receiver_declared_sigma, existing_elevation_canopy_floor)`, then adds the
+conservative IMU-transfer contribution. This preserves the existing noise
+configuration authority and does not lower uncalibrated floors to raw sigma.
+Advisory continues to consume final factor sigma exactly once and its own
+candidate canopy floor. Nominal 1–4 m input still lies below the 5/sin²(elevation)
+floor; this floor is a policy, not a fitted noise calibration.
+
+Opt-in residual capture now records the simulator's exact existing white-noise
+draw, total injected bias/noise, raw sigma, satellite identity and epoch in
+`export/simulation/gnss_injected_noise.csv`, below the canonical run resolver.
+No extra random draws occur. The read-only short-run driver disables the grid
+visualizer, so collecting independent figures does not consume display
+prediction work. Neither risk weights nor online planning budgets change.

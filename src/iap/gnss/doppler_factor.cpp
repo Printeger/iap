@@ -78,7 +78,7 @@ gtsam::Vector DopplerFactor::evaluateError(
     *H_pose = gtsam::Matrix::Zero(1, 6);
     if (rho > kEps) {
       const Eigen::RowVector3d row =
-          -v_rel.transpose() * (Eigen::Matrix3d::Identity() - e * e.transpose()) / rho * R_mat;
+          -v_rel.transpose() * (Eigen::Matrix3d::Identity() - e * e.transpose()) / rho * R_mat * pose.rotation().matrix();
       (*H_pose)(0, 3) = row(0);
       (*H_pose)(0, 4) = row(1);
       (*H_pose)(0, 5) = row(2);
@@ -136,29 +136,21 @@ void DopplerFactor::bind_epoch_motion(gtsam::Key bias,
 gtsam::Vector DopplerFactor::unwhitenedError(const gtsam::Values& values,
     gtsam::OptionalMatrixVecType H) const {
   if(!epoch_motion_) return gtsam::NoiseModelFactor4<gtsam::Pose3,gtsam::Vector3,gtsam::Vector2,gtsam::Rot3>::unwhitenedError(values,H);
+  const auto pose=values.at<gtsam::Pose3>(keys_[0]);
+  gtsam::Matrix9 transition;gtsam::Matrix96 bias_transition;
   const auto predicted=epoch_motion_->predict(
-      gtsam::NavState(values.at<gtsam::Pose3>(keys_[0]),values.at<gtsam::Vector3>(keys_[1])),
-      values.at<gtsam::imuBias::ConstantBias>(keys_[4]));
-  auto clock=values.at<gtsam::Vector2>(keys_[2]);
-  clock(0)+=epoch_motion_->deltaTij()*clock(1);
-  const auto error=evaluateError(predicted.pose(),predicted.velocity(),clock,values.at<gtsam::Rot3>(keys_[3]));
+      gtsam::NavState(pose,values.at<gtsam::Vector3>(keys_[1])),
+      values.at<gtsam::imuBias::ConstantBias>(keys_[4]),transition,bias_transition);
+  const auto clock=values.at<gtsam::Vector2>(keys_[2]);
+  gtsam::Matrix hp,hv,hc,hr;
+  const auto error=evaluateError(predicted.pose(),predicted.velocity(),clock,values.at<gtsam::Rot3>(keys_[3]),
+      H ? &hp : nullptr,H ? &hv : nullptr,H ? &hc : nullptr,H ? &hr : nullptr);
   if(H) {
-    H->resize(keys_.size());
-    gtsam::Values inputs;for(const auto key:keys_)inputs.insert(key,values.at(key));
-    // Differentiate the composed measurement on each actual GTSAM manifold.
-    // Includes velocity, bias, clock drift, lever rotation and E/R cross terms.
-    for(std::size_t i=0;i<keys_.size();++i) {
-      const auto& value=values.at(keys_[i]);
-      (*H)[i].resize(1,value.dim());
-      for(std::size_t j=0;j<value.dim();++j) {
-        gtsam::Vector d=gtsam::Vector::Zero(value.dim());d(j)=1e-5;
-        gtsam::VectorValues delta;
-        for(const auto& kv:inputs)delta.insert(kv.key,gtsam::Vector::Zero(kv.value.dim()));
-        delta.at(keys_[i])=d;const auto plus=inputs.retract(delta);
-        delta.at(keys_[i])=-d;const auto minus=inputs.retract(delta);
-        (*H)[i].col(j)=(unwhitenedError(plus)-unwhitenedError(minus))/(2e-5);
-      }
-    }
+    H->resize(5);gtsam::Matrix hn=gtsam::Matrix::Zero(1,9);
+    hn.leftCols(6)=hp;hn.rightCols(3)=hv*predicted.attitude().matrix();
+    (*H)[0]=hn*transition.leftCols(6);
+    (*H)[1]=hn*transition.rightCols(3)*pose.rotation().matrix().transpose();
+    (*H)[2]=hc;(*H)[3]=hr;(*H)[4]=hn*bias_transition;
   }
   return error;
 }

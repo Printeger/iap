@@ -268,7 +268,10 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
 
       // ── PseudorangeFactor ────────────────────────────────────────────────
       // Keys: X(i), constellation receiver clock(i), E(0), R(0)
-      const double sigma_pr = pr_sigma(sat.elevation, sat.kappa);
+      // The receiver-declared sigma and modeled floor have one authority.
+      // An elevation/canopy floor must never replace a larger measurement
+      // uncertainty (e.g. deliberate receiver noise degradation).
+      const double sigma_pr = std::max(pr_sigma(sat.elevation, sat.kappa),sat.pr_sigma);
       graph.emplace_shared<PseudorangeFactor>(
         X(frame_idx), clock_key, E(0), R(0),
         sat.pr_meas,
@@ -286,7 +289,7 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
 
       // ── DopplerFactor ──────────────────────────────────────────────────
       // Keys: X(i), V(i), constellation receiver clock(i), R(0)
-      const double sigma_dop = dop_sigma(sat.elevation);
+      const double sigma_dop = std::max(dop_sigma(sat.elevation),sat.dop_sigma);
       graph.emplace_shared<DopplerFactor>(
         X(frame_idx), V(frame_idx), clock_key, R(0),
         sat.dop_meas,

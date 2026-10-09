@@ -136,7 +136,7 @@ def main():
         command = ['ros2', 'launch', 'iap', 'iap_sim.launch.py', f'run_dir:={run}',
                    'run_lifecycle_owner:=driver',
                    'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:=false',
-                   'start_grid_map_visualizer:=true', 'advisory_posterior_prior:=false',
+                   'start_grid_map_visualizer:=false', 'advisory_posterior_prior:=false',
                    'advisory_guidance:='+args.guidance, 'capture_failure_map:=true',
                    f'run_duration_s:={args.duration}']
         if args.rinex_nav_file:
@@ -219,6 +219,14 @@ def main():
         manifest(run,'planning_input_capture',{'source':identity,'inputs':planning_inputs,
             'first_input_only_requested':args.stop_after_planning_input,
             'status':'CAPTURED' if planning_inputs else 'NO_MATCHING_PLANNING_INPUT'},owner=True)
+        if args.capture_advisory_residuals:
+            noise_path = run / 'export/simulation/gnss_injected_noise.csv'
+            manifest(run, 'gnss_injected_noise_capture', {
+                'path': str(noise_path.relative_to(run)),
+                'sha256': sha(noise_path) if noise_path.is_file() else None,
+                'status': 'CAPTURED' if noise_path.is_file() else 'MISSING',
+                'scope': 'simulator injection draws; postfit residuals are separate evidence',
+            }, owner=True)
         manifest(run, 'forest_process_result', {'identity': 'LIVE_REFERENCE_MEASUREMENT',
                  'revision': identity['revision'], 'commands': command,
                  'elapsed_s': time.monotonic() - started,
