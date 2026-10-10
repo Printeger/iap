@@ -28,7 +28,9 @@ Advisory 当前语义为 `pose6_fixed_two_source_envelope_v2`：GNSS 独占星�
 只能授予配对诊断，不能授予同一误差随机变量或覆盖资格。误差审计仍保留原绝对误差、
 原条件H/V和两次超界；不改数学计算、K/sigma、prior OFF、风险权重或物理执行规则。
 诊断1102原请求11/14在传播前已有z误差约-.4044/-.4536 m；传播与真值运动之差为
-毫米量级，不能解释该持续误差。新独立数据尚待模型/参数冻结后采集。
+毫米量级，不能解释该持续误差。独立seed3101已在模型/参数冻结后采集，
+`log/20261010T170315Z_470`绑定干净d43fe8af；18请求/17时间合格配对/15实际执行
+运动点，H/V诊断超界0/0，平均z偏差-.094457 m。未拟合、未授予绝对误差覆盖资格。
 接口验证：`log/20261010T163030Z_438/export/analysis/vertical_object_corrected/diagnosis.json`
 的6份完整原输入重放通过对象声明检查；原H/V保持至1e-10、原2次超界保留。
 来源去重/噪声尺度4项`AdvisoryCalibration.*`通过；该结果不授予绝对误差覆盖资格。
@@ -52,9 +54,19 @@ Advisory 当前语义为 `pose6_fixed_two_source_envelope_v2`：GNSS 独占星�
 CSV保留producer raw/inflated/observed及comparison_mask：7为实际受检voxel，1为仅raw
 净空邻域；不能把邻域observed位授予执行许可，也不能把voxel受检称精确点/时刻受检。
 同点比较器支持稀疏提交证据，对缺地址和未受检位保留缺失；新采集不能补造历史提交。
-验证：原ID11 final-check缺mask反例保留；预算内原epoch在生产map更新后逐行导出一致，
+验证：原预算内final-check缺mask反例保留；预算内原epoch在生产map更新后逐行导出一致，
 原full-map_available仍false。相关4项原生执行/取证检查、22项map工具与48项启动接口
-检查通过。历史ID10/24提交缺失及ID11/13最终地图缺失继续声明，不由新接口追认。
+检查通过。按完整样条匹配，历史ID10/13/24分别对应committed_13/23/33，
+final gen264/352/595缺mask；ID11没有匹配提交。此前按attempt文件名描述ID的说明
+已更正。更早同曲线地图的同拒绝点raw距离减少可复核，但不是最终提交代，不能由此
+确定配准/观测/采样中唯一根因。新OFF保存指定4个真实owner提交走廊，均与实际wire
+完全一致；该窗口4身份未拒绝且保证失效日志0，不能补历史mask或恢复连续保证。
+
+针对性A/B/C工作完成，保留模型资格与执行能力边界不通过。图文报告及机器结论：
+`log/20261010T163030Z_438/export/analysis/targeted_report_v2/REPORT.md`和`summary.json`。
+冻结hash为870a39db2fc2c7f637c452258b0ddd0d11e287b5fccfe7832c728f5c2ecc389f，
+数学引擎/噪声/K/风险权重未变。新ON预算内成本仍高于原OFF及充足离散参考；
+后端证据为离线实际样条，无新ON命令或任务收益，配对ON收益实验没有启动。
 
 完整新冻结使用 v9，保留原 state/GNSS/cloud/map/reference/receipt；合格正向短区间
 由真实 IMU 传播均值、F、Q 和交叉状态，原后验 envelope `2(FPFᵀ+Q)` 只作对照，
