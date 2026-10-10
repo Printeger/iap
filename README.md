@@ -301,11 +301,24 @@ ros2 launch iap iap_sim.launch.py \
 | `capture_failure_map` | `false` | 四分叉故障诊断时按端点、穷尽、超时、曲线拒绝、持续无可执行局部目标、跟踪误差、剩余轨迹失败、最终停止、实际曲线首个未观测点和地图变化各保存首份 GridMap 快照，最多十份 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
+需要带提交／GPU／Release 安装门禁的可视化取证时，复用现场 driver：
+
+```bash
+python3 src/iap/scripts/dev_planner/run_curve_channel_live.py \
+  --duration 300 --guidance true --visualization full --label visual_on \
+  --rinex-nav-file /home/dev/ws_iap/src/iap/log/20261009T051626Z_339/metadata/config/historical_nav.rnx
+```
+
+`--visualization none`（默认）关闭显示，`map` 仅开启独立 PL 显示，`full` 同时开启 RViz。
+显示读取最近规划轮的保留输入，避免每秒额外冻结实时地图；PL 时间身份与历史标记保留。
+此开关只选择显示进程，不改变场景、规划预算或执行检查。此前关闭显示的一次到达记录
+不保证可视化运行重复到达；当前首岔路停滞的修复和复验状态见 `docs/spec/ego_based_planning_flow.md`。
+
 本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 已把有效 advisory 预警用于局部绕行偏好，真实执行仍以物理环境、当前融合运动质量与最终曲线检查为准。
 
 默认星历依赖上表指定的已保存文件，请保留该文件或显式指定同历史时段的合格 NAV。
 显式 `rinex_nav_file:=''` 选择 synthetic 机制输入。当前默认 ON 是开发主线选择，
-不代表真实 PL 校准或森林任务验收通过；冷输入 ON 搜索交付已修复并取得短程实际接续；完整任务、来源校准与正式验收仍未通过。
+不代表真实 PL 校准或正式统计验收；原 ON 任务曾在关闭可视化时真实到达，开启可视化后的持续停滞仍待修复及现场复验。
 
 诊断规划停滞时显式打开一次性地图取证：
 

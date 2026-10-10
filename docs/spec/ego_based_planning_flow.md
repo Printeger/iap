@@ -27,6 +27,14 @@ assessTrajectory 完成实际曲线硬检查 → 可选质量报告／一次修�
 最新 corridor、当前 motion、PVA、时效及接续检查 → 原子提交 →
 publicationStillTimely → 原 traj_server accepted/pending/active 反馈 → 原 FSM 监督。
 
+独立地图可视化通过既有 GetGridMapPredictionInput 的 planning_input=true、attempt=0
+读取最近规划轮保留的不可变输入，不额外冻结实时地图，不更新规划／执行状态。
+尚无保留输入时显式显示缺失，不回退实时冻结；PL 时间身份／历史标记及失效判断保留。
+实际 visualizer 进程测试在修改前捕获到 planning_input=false 并失败，修改后要求
+所有显示请求使用保留输入，继续检查 PL、历史切换和清理。原在线预算及全部硬检查不变。
+既有现场 driver 的 --visualization none/map/full 仅选择显示进程，仍执行 GPU、
+干净提交与 Release 安装一致性门禁；开启地图显示时额外绑定其执行文件身份。
+
 GridRouteCell/queryRouteCell 允许物理未知但保留已知障碍、净空、motion、时效拒绝；
 execute 查询始终要求合法观测。route 许可不会隐式转成 execute 许可。
 Advisory 根据合法 HPL/VPL 与原 budget/reserve 得到统一有限代价；warning 不再
@@ -155,7 +163,8 @@ warning 通路及受影响曲线反例通过，pipeline／full_stack_feedback �
 发现同一曲线点距最近 raw 障碍约 0.54645 m，小于要求 0.54667 m，进入制动状态后
 不能交付受检替换。generation 206 的传感器位置净空约 0.53555 m，要求约 0.55016 m。
 这是已观测到的阻塞链，不是地图模型与需求冲突的证明。可视化／在线调度与该变化
-的因果关系，以及最早可修复的软件不变量仍待定位；尚无相关代码修复，未追加完整现场。
+的因果关系，以及最早可修复的软件不变量仍待定位。已修正显示每秒额外实时冻结地图的
+干扰路径；仍需现场确认该修复是否消除持续停滞，不能把显示接口测试当成到达。
 
 支持当前缓存接口的冻结证据继续复用：`20261009T195356Z_457` generation=2554，
 渐变拟合阈值不再反复清空净空缓存。同体素交替阈值保持所有精确物理结论，

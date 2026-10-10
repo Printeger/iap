@@ -69,6 +69,8 @@ def main():
     parser.add_argument('--duration', type=float, default=300)
     parser.add_argument('--label', default='curve_capture')
     parser.add_argument('--guidance',choices=('false','true'),default='false')
+    parser.add_argument('--visualization',choices=('none','map','full'),default='none',
+                        help='Display only: map enables PL display, full also starts RViz; planning inputs and budgets unchanged')
     parser.add_argument('--stop-after-planning-input',action='store_true',help='bounded first-input capture; stop owned launch when input.bin is saved')
     parser.add_argument('--rinex-nav-file', default='', help='Explicit strict historical GPS+BDS input')
     parser.add_argument('--capture-fork-entries',action='store_true',help='freeze physical fork entrance inputs with a read-only helper')
@@ -120,6 +122,9 @@ def main():
             return result
         runtime_binary = verified_binary('ego_planner', executable, 'ego_planner_node')
         input_binaries = {}
+        if args.visualization != 'none':
+            installed = Path(get_package_prefix('ego_planner')) / 'lib/ego_planner/grid_map_visualizer'
+            input_binaries['grid_map_visualizer'] = verified_binary('ego_planner', installed, 'grid_map_visualizer')
         for package, binary in [('gnss_sim', 'gnss_sim_node'),
                                 ('so3_quadrotor_simulator', 'so3_quadrotor_simulator'),
                                 ('local_sensing', 'pcl_render_node'), ('iap', 'iap_rosnode')]:
@@ -135,8 +140,8 @@ def main():
         input_binaries['gpu_match_evidence'] = verified_binary('iap',installed_gpu,'libiap_gpu_match_evidence.so')
         command = ['ros2', 'launch', 'iap', 'iap_sim.launch.py', f'run_dir:={run}',
                    'run_lifecycle_owner:=driver',
-                   'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:=false',
-                   'start_grid_map_visualizer:=false', 'advisory_posterior_prior:=false',
+                   'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:='+str(args.visualization=='full').lower(),
+                   'start_grid_map_visualizer:='+str(args.visualization!='none').lower(), 'advisory_posterior_prior:=false',
                    'advisory_guidance:='+args.guidance, 'capture_failure_map:=true',
                    f'run_duration_s:={args.duration}']
         if args.rinex_nav_file:

@@ -71,9 +71,10 @@ class EgoPipelineTest(unittest.TestCase):
                            env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             wire=Path(str(payload)+"_on").read_bytes()
             rclpy.init(args=[]); node=rclpy.create_node("readonly_display_fixture")
-            clouds, surfaces, statuses, paths=[],[],[],[]; exports=[]
+            clouds, surfaces, statuses, paths=[],[],[],[]; exports=[]; export_requests=[]
             def export(request,response):
                 exports.append(time.monotonic())
+                export_requests.append((request.planning_input,request.planning_attempt_id))
                 response.available=True; response.frame_id="map"; response.geometry_id="fixture"; response.generation=1
                 response.payload=wire; return response
             service=node.create_service(GetGridMapPredictionInput,"/grid_map/prediction_input",export)
@@ -101,6 +102,10 @@ class EgoPipelineTest(unittest.TestCase):
                 self.assertEqual(len([c for c in clouds if c.width]),2)
                 self.assertEqual(len({seconds(c.header.stamp) for c in clouds if c.width}),1)
                 self.assertGreaterEqual(len(exports),2)
+                # A live display must read the retained immutable planning
+                # input; fresh exports freeze the map again on the sensor path.
+                self.assertTrue(all(retained and attempt==0 for retained,attempt in export_requests),
+                                "display requested an extra live-map freeze")
                 self.assertTrue(any(" vpl historical " in m.text for m in statuses))
                 self.assertEqual(references,{m.text.split("ref=")[-1].split(" age=")[0] for m in statuses if "ref=" in m.text})
                 on_cloud=next(c for c in clouds if c.width)

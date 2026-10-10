@@ -290,7 +290,13 @@ class GridMapVisualizer : public rclcpp::Node {
     if (request_in_flight_ || !input_->service_is_ready()) return;
     request_in_flight_=true; request_started_=Clock::now();
     const auto token=++request_token_;
-    const auto handle=input_->async_send_request(std::make_shared<iap::srv::GetGridMapPredictionInput::Request>(),
+    auto request=std::make_shared<iap::srv::GetGridMapPredictionInput::Request>();
+    // Display the latest retained planning identity. Freezing a fresh map for
+    // every display tick takes the sensor/update mutex on the execution path.
+    // Missing retained input is reported by the existing service; a display
+    // must not fall back to a new live-map freeze.
+    request->planning_input=true;
+    const auto handle=input_->async_send_request(request,
       [this,token](rclcpp::Client<iap::srv::GetGridMapPredictionInput>::SharedFuture future){
         if (token!=request_token_) return;
         request_in_flight_=false;
