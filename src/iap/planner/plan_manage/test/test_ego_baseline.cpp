@@ -495,7 +495,9 @@ rclcpp::Node::SharedPtr makeNode(bool performance_diagnostics = false, double sm
                                double resolution = .2, double max_vel = 1.) {
   if (!rclcpp::ok()) rclcpp::init(0,nullptr);
   rclcpp::NodeOptions opts;
-  opts.parameter_overrides({
+  const char* captured_parameters=std::getenv("IAP_D4_BOUNDARY_PARAMETERS");
+  if(captured_parameters) opts.arguments({"--ros-args","--params-file",captured_parameters});
+  else opts.parameter_overrides({
     {"planning/search_performance_diagnostics", performance_diagnostics},
     {"planning/advisory_guidance_enabled",advisory_guidance},
     {"grid_map/resolution",resolution}, {"grid_map/map_size_x",12.0},
@@ -1263,6 +1265,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
       if(boundary.get<bool>("use_original_normal_target",false))
         captured_route=point(metadata.get_child("recovery_searches").front().second.get_child("requested_goals_m").front().second);
       captured_center=point(metadata.get_child("search_pool_center_m"));
+      if(const auto center=boundary.get_child_optional("planning_pool_center_m")) captured_center=point(*center);
       start_velocity=point(metadata.get_child("real_start_v_mps"));start_acceleration=point(metadata.get_child("real_start_a_mps2"));
     }
     start=point(metadata.get_child("real_start_p_m"));goal=point(boundary.get_child("mission_goal_m"));
