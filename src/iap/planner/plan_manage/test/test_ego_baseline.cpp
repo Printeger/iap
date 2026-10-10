@@ -1903,6 +1903,38 @@ TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredece
   EXPECT_GT(manager.local_data_.traj_id_,withdrawn_id);
 }
 
+TEST(EgoBaseline, KnownUnsafeTailBeforeConnectionRequestsCheckedBrake) {
+  auto node=makeNode();
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),end(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},100.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
+  auto predecessor=manager.local_data_;
+  GridMapTestAccess::clearObserved(*manager.grid_map_,predecessor.position_traj_.evaluateDeBoorT(1.3));
+  const auto assessment=manager.assessRemainingTrajectory(100.);
+  ASSERT_FALSE(assessment.executable());
+  ASSERT_GT(assessment.first_execution_time_s,1.);
+  ASSERT_LT(assessment.first_execution_time_s,1.6);
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,end);
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,
+      node->create_publisher<traj_utils::msg::Bspline>("unsafe_connection_brake",10));
+  // A known failure before the scheduled 1.6 s handover rules out the normal
+  // continuation. Do not spend its budget before requesting a checked brake.
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.));
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  EXPECT_FALSE(manager.hasPendingTrajectory());
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));
+  EXPECT_GT(manager.local_data_.traj_id_,predecessor.traj_id_);
+  EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
+}
+
 TEST(EgoBaseline, EmergencyStateSupervisesUnreplacedExecutingAndPendingCurves) {
   auto node=makeNode();
   ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);

@@ -6,6 +6,7 @@
 
 namespace ego_planner
 {
+  namespace { constexpr double continuation_lead_s = 1.6; }
 
   void EGOReplanFSM::init(rclcpp::Node::SharedPtr &node)
   {
@@ -749,7 +750,7 @@ namespace ego_planner
     auto& info=planner_manager_->local_data_;
     const auto now=node_->now();
     const double remaining=info.start_time_.seconds()+info.duration_-now.seconds();
-    const double advance=std::min(1.6,remaining);
+    const double advance=std::min(continuation_lead_s,remaining);
     if(advance<=.1) {
       // A short resting local curve may finish before the rolling-replan
       // threshold. Its elapsed time only requests planning; actual command
@@ -909,6 +910,15 @@ namespace ego_planner
           // path still supervises and replaces the active predecessor.
           flag_escape_emergency_=true;
           changeFSMExecState(EMERGENCY_STOP, "pending execution conditions revoked");
+        } else if (assessment.execution_reason!=GridExecutionReason::TRACKING_ERROR &&
+            info.start_time_.seconds()+assessment.first_execution_time_s <=
+                std::min(info.start_time_.seconds()+info.duration_,
+                    node_->now().seconds()+continuation_lead_s)) {
+          // The old curve is already known to fail before normal handover.
+          // Its mandatory tail check cannot authorize that continuation; do
+          // not consume a futile replan before the existing checked brake.
+          flag_escape_emergency_=true;
+          changeFSMExecState(EMERGENCY_STOP,"unsafe before connection");
         } else if (lead > emergency_time_) {
           changeFSMExecState(REPLAN_TRAJ, "SAFETY");
         } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
