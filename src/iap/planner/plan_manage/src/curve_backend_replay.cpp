@@ -262,6 +262,7 @@ int main(int argc,char**argv) {
     const auto nominal=stage.get_optional<double>("nominal_interval_s");
     if(model || nominal) {
       if(!model || (*model!=ego_planner::kGuideInitializationSamplingModel &&
+                   *model!="guide_arc_voxel_diagonal_arc_time_v2" &&
                    *model!="guide_arc_voxel_diagonal_v1") || !nominal ||
           !std::isfinite(*nominal) || *nominal<=0)
         throw std::invalid_argument("initialize requires supported sampling model and positive captured nominal interval");

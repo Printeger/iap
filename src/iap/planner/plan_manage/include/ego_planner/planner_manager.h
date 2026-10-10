@@ -33,7 +33,7 @@
 
 namespace ego_planner
 {
-  inline constexpr const char* kGuideInitializationSamplingModel = "guide_arc_voxel_diagonal_arc_time_v2";
+  inline constexpr const char* kGuideInitializationSamplingModel = "guide_arc_half_voxel_arc_time_v3";
 
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called

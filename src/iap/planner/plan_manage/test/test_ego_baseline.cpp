@@ -2277,12 +2277,16 @@ void checkSafetyFeedbackTiming(int timing) {
     // ignored cancellation cannot restore the predecessor locally.
     ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,activated.traj_id_,101.7);
   }
-  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,101.7));
+  // Feedback must choose the actual executing identity before protection.
+  // Its complete tail is genuinely unknown in this fixture. The current
+  // contract requests a checked stop even for a distant hard violation;
+  // lead time alone cannot authorize a replacement search.
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,101.7));
   if(timing==1 || timing==3) {EXPECT_TRUE(delivered);}
   const int expected_id=timing==3 ? predecessor.traj_id_ : activated.traj_id_;
   EXPECT_FALSE(manager.hasPendingTrajectory());
   EXPECT_EQ(manager.local_data_.traj_id_,expected_id);
-  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::emergency(fsm));
   const auto assessment=manager.assessRemainingTrajectory(101.7);
   EXPECT_FALSE(assessment.executable()); // physical unknown is still refused
   EXPECT_EQ(assessment.trajectory_id,expected_id);

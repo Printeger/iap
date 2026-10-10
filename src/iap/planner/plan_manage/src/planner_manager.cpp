@@ -1796,7 +1796,8 @@ namespace ego_planner
     if(!grid_map_) return false;
     const double voxel_diagonal=std::sqrt(3.)*grid_map_->getResolution();
     if(!std::isfinite(voxel_diagonal) || voxel_diagonal<=0) return false;
-    const size_t subdivisions=std::max<size_t>(1,std::ceil(pp_.ctrl_pt_dist/voxel_diagonal));
+    const size_t subdivisions=std::max<size_t>(std::ceil(pp_.ctrl_pt_dist/voxel_diagonal),
+        std::ceil(sample_spacing/(.5*grid_map_->getResolution())));
     if(subdivisions>1) {
       if(!sample_guide(subdivisions*(count-1)+1)) return false;
       interval/=subdivisions;
