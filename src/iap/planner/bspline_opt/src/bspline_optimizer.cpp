@@ -312,7 +312,11 @@ namespace ego_planner
             (position-guide_pts_[j-1]).dot(segment)/segment.squaredNorm(),0.,1.) : 0.;
         const Eigen::Vector3d candidate=guide_pts_[j-1]+fraction*segment;
         geometric_best=std::min(geometric_best,(candidate-position).squaredNorm());
-        const auto support=guide_query_(candidate);
+        // A connector found under execution semantics remains physical
+        // support even when the route's extra fitting-room preference rejects
+        // it. Unknown/map-boundary correction uses the actual-curve query;
+        // fitting/quality preferences retain their own guide query.
+        const auto support=physical_boundary ? planning_query_(candidate) : guide_query_(candidate);
         if(!support.executable()) continue;
         const double distance=(candidate-position).squaredNorm();
         if(distance<best) {best=distance;nearest=candidate;}
@@ -339,7 +343,8 @@ namespace ego_planner
       }
       if(!std::isfinite(best) || best<1e-12) continue;
       Eigen::Vector3d direction=(nearest-position).normalized();
-      const auto farther=guide_query_(nearest+reserve*direction);
+      const auto farther=physical_boundary ? planning_query_(nearest+reserve*direction) :
+          guide_query_(nearest+reserve*direction);
       const bool room=farther.executable();
       const double parameter=std::clamp(time/interval,0.,double(points.cols()-3));
       const int first=std::min(int(std::floor(parameter)),int(points.cols()-4));

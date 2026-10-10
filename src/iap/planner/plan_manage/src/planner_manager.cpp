@@ -1160,9 +1160,10 @@ namespace ego_planner
   bool EGOPlannerManager::tryObservationApproach(const Eigen::Vector3d& start,
       const ExecutablePrefix& blocked) {
     const bool allow_observation=blocked.blocked_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED;
-    const bool timed_search=bspline_optimizer_->a_star_->lastResult().failure==AStar::Failure::TIME_BUDGET;
-    if(!allow_observation && !timed_search && blocked.blocked_reason!=GridExecutionReason::PHYSICAL_OBSTACLE &&
-        blocked.blocked_reason!=GridExecutionReason::INSUFFICIENT_CLEARANCE) return false;
+    // The caller owns recovery eligibility. An available endpoint is not a
+    // connector: do not reject the same bounded execution search solely
+    // because the route target itself is legal. Only unknown evidence permits
+    // adding observation goals; observed progression remains first priority.
     auto& attempt=observation_attempt_;
     const auto& epoch=*planning_view_->physical;
     const auto evidence=[&](const Eigen::Vector3d& p) {
@@ -1507,7 +1508,12 @@ namespace ego_planner
     };
     if(!normal_guide_found) {
       const auto search_failure=optimizer.a_star_->lastResult().failure;
-      if(search_failure!=AStar::Failure::END_BLOCKED && search_failure!=AStar::Failure::TIME_BUDGET)
+      // The real start already passed the execution query. A route search
+      // includes extra fitting room, so its blocked attachment or NO_PATH
+      // cannot prove that the same execution-semantic connector is absent.
+      // Reuse the one bounded recovery, with unchanged execution conditions.
+      if(search_failure!=AStar::Failure::END_BLOCKED && search_failure!=AStar::Failure::TIME_BUDGET &&
+          search_failure!=AStar::Failure::START_BLOCKED && search_failure!=AStar::Failure::NO_PATH)
         return fail(PlanFailure::Search);
       ExecutablePrefix blocked;blocked.blocked_position=target_pt;
       blocked.blocked_reason=queryPlanningViewCell(target_pt,0.,false).execution_reason;

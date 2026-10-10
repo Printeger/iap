@@ -1267,6 +1267,8 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   // Synthetic known start: the captured v2 repair start is unobserved and
   // cannot stand in for a captured GLIO connection state.
   const char* frozen_input=std::getenv("IAP_D4_BOUNDARY_INPUT");
+  if(frozen_input && std::getenv("IAP_RUN_DIR") && !glim::RunLogManager::get_if_initialized())
+    glim::RunLogManager::initialize("ego_baseline_frozen_replay");
   auto node = makeNode(false,1.,false,false,frozen_input ? .1 : .2,frozen_input ? .5 : 1.);
   auto owner = std::make_unique<ego_planner::EGOPlannerManager>();
   auto* manager = owner.get();
@@ -3215,6 +3217,20 @@ TEST(EgoBaseline, WarnedPhysicalGuideStillCorrectsUnknownCurve) {
   optimizer.setLocalTargetPt(Eigen::Vector3d(2,0,1));
   optimizer.initializeFromGuide(q);
   EXPECT_TRUE(optimizer.curveViolates(q,.4));
+  // Production route fitting can reject a support that the bounded execution
+  // connector accepts. A preference for extra fitting room must not erase
+  // the physical gradient of this checked guide, including Advisory warning.
+  const auto checked_guide=optimizer.recoveryGuide();
+  optimizer.setPlanningQuery(query,true,[&](const Eigen::Vector3d& p) {
+    auto cell=query(p);
+    if((p-start).norm()>.1) cell.execution_reason=GridExecutionReason::INSUFFICIENT_CLEARANCE;
+    return cell;
+  });
+  // Setting a query starts a new optimizer context and clears its guide.
+  // Deliver the same execution-checked guide as the production recovery does.
+  optimizer.setPlanningEndpoints(start,Eigen::Vector3d(2,0,1));
+  optimizer.setGuidePath(checked_guide);
+  optimizer.initializeFromGuide(q);
   // A checked high-cost guide remains physical correction support.
   // Advisory warnings cannot erase its gradient at an unknown boundary.
   for(int correction=0;correction<2 && optimizer.curveViolates(q,.4);++correction) {
