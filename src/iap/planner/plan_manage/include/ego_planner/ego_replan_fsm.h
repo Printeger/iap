@@ -137,6 +137,7 @@ namespace ego_planner
     bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
     bool planFromGlobalTraj();
     bool planFromCurrentTraj();
+    bool executingTrajectoryRestConfirmed();
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);

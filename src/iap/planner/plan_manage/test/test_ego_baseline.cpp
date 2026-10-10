@@ -202,6 +202,14 @@ struct EGOReplanFSMTestAccess {
   static bool fromCurrent(EGOReplanFSM& fsm) {return fsm.planFromCurrentTraj();}
   static bool executing(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::EXEC_TRAJ;}
   static bool waitingForTarget(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::WAIT_TARGET;}
+  static bool emergency(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::EMERGENCY_STOP;}
+  static bool generating(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::GEN_NEW_TRAJ;}
+  static void acceptedBrakeExecution(EGOReplanFSM& fsm,
+      nav_msgs::msg::Odometry::ConstSharedPtr odom) {
+    shortExecution(fsm,fsm.end_pt_,odom);
+    fsm.exec_state_=EGOReplanFSM::EMERGENCY_STOP;
+    fsm.flag_escape_emergency_=false;fsm.enable_fail_safe_=true;
+  }
   static bool select(EGOReplanFSM& fsm, double distance) { return fsm.getLocalTarget(distance); }
   static bool replanning(const EGOReplanFSM& fsm) { return fsm.exec_state_==EGOReplanFSM::REPLAN_TRAJ; }
   static Eigen::Vector3d taskGoal(const EGOReplanFSM& fsm) { return fsm.end_pt_; }
@@ -3517,6 +3525,41 @@ TEST(EgoBaseline, FailedBrakeRequestRemainsOutstandingForFreshQualifiedInput) {
   EXPECT_GT(manager.local_data_.traj_id_,previous.traj_id_);
   EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(Eigen::Vector3d(.2,0,0),1e-9));
   EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
+}
+
+TEST(EgoBaseline, AcceptedBrakeNeedsCompletedCommandAndFreshMeasuredRest) {
+  auto node=makeNode();
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},100.,start);GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,{2,0,1});
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,node->create_publisher<traj_utils::msg::Bspline>("brake_completion",10));
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));
+  const auto brake=manager.local_data_;ASSERT_NEAR(brake.duration_,.5,1e-9);
+  auto odom=std::make_shared<nav_msgs::msg::Odometry>();odom->header.frame_id="map";
+  odom->header.stamp=node->now();odom->pose.pose.position.x=start.x();odom->pose.pose.position.z=start.z();
+  ego_planner::EGOReplanFSMTestAccess::acceptedBrakeExecution(fsm,odom);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,brake.traj_id_,100.);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::emergency(fsm)) << "old low speed is not brake completion";
+  const double completed=100.+brake.duration_+.1;
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),int64_t(completed*1e9)),RCL_RET_OK);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,brake.traj_id_,completed);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::emergency(fsm)) << "pre-end odom cannot confirm rest";
+  odom=std::make_shared<nav_msgs::msg::Odometry>(*odom);odom->header.stamp=node->now();
+  ego_planner::EGOReplanFSMTestAccess::acceptedBrakeExecution(fsm,odom);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,brake.traj_id_+99,completed);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::emergency(fsm)) << "another ID cannot confirm brake completion";
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,brake.traj_id_,completed);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::generating(fsm));
 }
 
 TEST(EgoBaseline, UnknownMissionGoalRetainsRouteIdentityWithoutExecutePermission) {
