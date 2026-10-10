@@ -68,7 +68,8 @@ namespace ego_planner
                                 bool retain_planning_input = false);
     bool planCheckedBrake(const Eigen::Vector3d& position,
                           const Eigen::Vector3d& velocity,
-                          const Eigen::Vector3d& acceleration);
+                          const Eigen::Vector3d& acceleration,
+                          std::optional<rclcpp::Time> connection = std::nullopt);
     bool planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                         const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc);
     bool planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
@@ -136,7 +137,8 @@ namespace ego_planner
                                           const GridPlanningContext* physical_context = nullptr,
                                           bool check_connection = true,
                                           const GridMotionContext* bound_motion = nullptr);
-    TrajectoryAssessment assessRemainingTrajectory(double now_s);
+    TrajectoryAssessment assessRemainingTrajectory(double now_s,
+                                                   bool pending_checked_stop = false);
     // Forensic scalar query, tied to the assessed epoch/time/motion. Missing
     // proof returns nullopt and never substitutes the current live map.
     std::optional<GridPlanningCell> queryAssessmentCell(
@@ -360,6 +362,10 @@ namespace ego_planner
     ExecutionView captureExecutionView(
         const std::vector<Eigen::Vector3d>& positions, double earliest_time_s,
         bool allow_bridged, PlanningBudget::Ptr budget = {});
+    // Authorization of the actual old interval followed by a complete checked
+    // stop. It never certifies the old tail for a cancellation branch.
+    TrajectoryAssessment assessCheckedStopConnection(LocalTrajData stop,
+        const ExecutionView& view, PlanningBudget::Ptr budget = {});
     TrajectoryAssessment last_candidate_assessment_; // Original frozen route/Advisory metrics.
     std::optional<TrajectoryAssessment> last_release_assessment_; // Latest physical publication proof.
     std::function<nav_msgs::msg::Odometry::ConstSharedPtr()>

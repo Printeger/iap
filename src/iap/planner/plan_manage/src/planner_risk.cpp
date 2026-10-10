@@ -735,8 +735,64 @@ std::optional<uint64_t> EGOPlannerManager::planningEvidenceFingerprint(
   return hash;
 }
 
+EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessCheckedStopConnection(
+    LocalTrajData stop, const ExecutionView& view, PlanningBudget::Ptr budget) {
+  TrajectoryAssessment failed;
+  failed.trajectory_id=local_data_.traj_id_;
+  failed.evaluation_time_s=view.time_s;
+  failed.execution_reason=GridExecutionReason::TRACKING_ERROR;
+  failed.budget_exhausted=budget && budget->expired();
+  const double seam=stop.start_time_.seconds()-local_data_.start_time_.seconds();
+  const double elapsed=std::max(0.,view.time_s-local_data_.start_time_.seconds());
+  const auto odom=latest_odom_provider_ ? latest_odom_provider_() : std::atomic_load(&risk_odom_);
+  if(failed.budget_exhausted || !view.physical.epoch || !odom ||
+      odom->header.frame_id!=grid_map_->getFrameId() || seam<elapsed || seam>local_data_.duration_ ||
+      view.time_s<stampToSec(odom->header.stamp) ||
+      view.time_s-stampToSec(odom->header.stamp)>view.motion.max_motion_age_s) return failed;
+  const auto& op=odom->pose.pose.position;
+  const Eigen::Vector3d actual(op.x,op.y,op.z);
+  const double measured=std::clamp(stampToSec(odom->header.stamp)-local_data_.start_time_.seconds(),0.,local_data_.duration_);
+  if(!actual.allFinite() || (actual-local_data_.position_traj_.evaluateDeBoorT(measured)).norm()>motion_start_tolerance_m_ ||
+      (stop.position_traj_.evaluateDeBoorT(0)-local_data_.position_traj_.evaluateDeBoorT(seam)).norm()>1e-6 ||
+      (stop.velocity_traj_.evaluateDeBoorT(0)-local_data_.velocity_traj_.evaluateDeBoorT(seam)).norm()>1e-6 ||
+      (stop.acceleration_traj_.evaluateDeBoorT(0)-local_data_.acceleration_traj_.evaluateDeBoorT(seam)).norm()>1e-6 ||
+      stop.velocity_traj_.evaluateDeBoorT(stop.duration_).norm()>1e-5 ||
+      stop.acceleration_traj_.evaluateDeBoorT(stop.duration_).norm()>1e-5) return failed;
+  auto prefix=assessTrajectory(local_data_.position_traj_,0,view.time_s,true,
+      elapsed,seam,&view.physical,false,&view.motion);
+  prefix.trajectory_id=local_data_.traj_id_;
+  if(!prefix.executable()) return prefix;
+  auto checked=assessTrajectory(stop.position_traj_,0,view.time_s,true,
+      0,stop.duration_,&view.physical,false,&view.motion);
+  checked.trajectory_id=stop.traj_id_;
+  if(!checked.executable()) return checked;
+  // Preserve peer separation for both intervals that will actually execute.
+  for(int section=0;section<2;++section) {
+    auto data=section ? stop : local_data_;
+    const double from=section ? 0. : elapsed,to=section ? stop.duration_ : seam;
+    for(double t=from;t<=to+.02;t+=.02) {
+      if(budget && budget->expired()) {checked.budget_exhausted=true;return checked;}
+      const double sample=std::min(t,to);const auto p=data.position_traj_.evaluateDeBoorT(sample);
+      for(auto peer:swarm_trajs_buf_) {
+        if(peer.drone_id<0 || peer.drone_id==pp_.drone_id) continue;
+        const double pt=data.start_time_.seconds()+sample-peer.start_time_.seconds();
+        if(pt>=0 && pt<=peer.duration_ &&
+            (p-peer.position_traj_.evaluateDeBoorT(pt)).norm()<getSwarmClearance()) {
+          checked.execution_reason=GridExecutionReason::PHYSICAL_OBSTACLE;
+          checked.trajectory_id=data.traj_id_;checked.first_execution_time_s=sample;
+          checked.first_execution_position=p;return checked;
+        }
+      }
+    }
+  }
+  checked.physical_check_scope="checked_stop_connection";
+  checked.trajectory_id=local_data_.traj_id_;
+  checked.sampled_points+=prefix.sampled_points;
+  return checked;
+}
+
 EGOPlannerManager::TrajectoryAssessment
-EGOPlannerManager::assessRemainingTrajectory(double now_s) {
+EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_stop) {
   if (local_data_.start_time_.seconds() <= 0.0)
     return {};
   // The physical/current check runs at the FSM supervision rate. A full
@@ -779,9 +835,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
   }
   now_s=view.time_s;
   const double elapsed = std::max(0.0,now_s - local_data_.start_time_.seconds());
-  // Continue to find physical obstacles over the entire remaining curve.
-  // The bridge is a current authorization with a wall-clock expiry, checked
-  // again on every supervision tick; it is not a spatial lookahead cutoff.
+  // Always inspect the complete old tail, including the cancellation branch.
   auto assessment = assessTrajectory(local_data_.position_traj_, version,
                                      now_s, true, elapsed, old_end,&view.physical,true,&view.motion);
   assessment.trajectory_id=local_data_.traj_id_;
@@ -817,6 +871,11 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
       if(!std::isfinite(assessment.first_advisory_time_s) || warning<assessment.first_advisory_time_s)
         assessment.first_advisory_time_s=warning;
     }
+  }
+  if(pending_checked_stop && pending_trajectory_ && !pending_withdrawal_requested_s_ &&
+      !executing_tail_executable) {
+    const auto stop=assessCheckedStopConnection(*pending_trajectory_,view);
+    if(stop.executable()) assessment=stop;
   }
   assessment.executing_tail_executable=executing_tail_executable;
   return assessment;

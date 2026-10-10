@@ -555,8 +555,10 @@ namespace ego_planner
     planner_manager_->observationReadyToPlan();
     applyLatestOdometry();
     if(planner_manager_->hasPendingTrajectory() && node_->now().seconds()>
-        planner_manager_->publicationTrajectory().start_time_.seconds()+.1)
+        planner_manager_->publicationTrajectory().start_time_.seconds()+.1) {
+      flag_escape_emergency_=true;
       changeFSMExecState(EMERGENCY_STOP,"connection command missing");
+    }
     exec_timer_->cancel(); // To avoid blockage
 
     static int fsm_num = 0;
@@ -877,7 +879,8 @@ namespace ego_planner
       if (elapsed >= info.duration_) return;
       const auto scheduled=planner_manager_->publicationTrajectory();
       recordExecutionEvent("physical_check_begin",scheduled.traj_id_,scheduled.start_time_.seconds(),NAN,checked_active_id);
-      auto assessment = planner_manager_->assessRemainingTrajectory(now);
+      auto assessment = planner_manager_->assessRemainingTrajectory(now,
+          exec_state_==EMERGENCY_STOP && !flag_escape_emergency_);
       recordExecutionEvent("physical_check_end",scheduled.traj_id_,scheduled.start_time_.seconds(),NAN,checked_active_id,assessment.trajectory_id);
       applyLatestCommandFeedback();
       if(identity_changed()) continue;
@@ -1276,11 +1279,28 @@ namespace ego_planner
   bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)
   {
     applyLatestCommandFeedback();
-
+    applyLatestOdometry();
+    stop_pos=odom_pos_;
+    const auto predecessor=planner_manager_->local_data_;
+    std::optional<rclcpp::Time> connection;
+    const auto now=node_->now();
+    if(!planner_manager_->hasPendingTrajectory() && applied_command_ &&
+        applied_command_->trajectory_id==static_cast<unsigned>(predecessor.traj_id_)) {
+      const double stamp=rclcpp::Time(applied_command_->header.stamp).seconds();
+      const auto timing=continuationTiming(now);
+      if(timing.moving && stamp<=now.seconds() &&
+          now.seconds()-stamp<=planner_manager_->currentMotionContext(true).max_motion_age_s)
+        connection=timing.connection;
+    }
     if (!planner_manager_->planCheckedBrake(stop_pos, odom_vel_,
-                                            Eigen::Vector3d::Zero())) {
+                                            Eigen::Vector3d::Zero(),connection)) {
       RCLCPP_ERROR_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
           "Checked braking rejected; no replacement authorized; current trajectory retained");
+      return false;
+    }
+    if(planner_manager_->hasPendingTrajectory() &&
+        planner_manager_->publicationTrajectory().start_time_.seconds()-node_->now().seconds()<.1) {
+      planner_manager_->discardUnpublishedTrajectory(predecessor);
       return false;
     }
 

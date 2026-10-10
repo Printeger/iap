@@ -2171,17 +2171,25 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
     ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,end,odom);
     ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,
         node->create_publisher<traj_utils::msg::Bspline>("unsafe_connection_brake",10));
-    // Publication checks the complete old tail, including the cancellation
-    // branch after the 1.6 s handover. Any known tail violation rules it out.
-    // A time margin alone cannot prove the replacement activation interval
-    // or a failed-replacement stop. Retain checked braking at every distance.
+    // A normal continuation still requires the complete cancellation tail.
+    // A protected stopping connection additionally needs its own old interval
+    // and complete stop proof; a time margin alone never grants permission.
     const bool brake=ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.);
     EXPECT_TRUE(brake);
     EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
     EXPECT_FALSE(manager.hasPendingTrajectory());
+    ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,predecessor.traj_id_,100.);
     ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));
-    EXPECT_GT(manager.local_data_.traj_id_,predecessor.traj_id_);
-    EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
+    auto stop=manager.publicationTrajectory();
+    EXPECT_GT(stop.traj_id_,predecessor.traj_id_);
+    EXPECT_EQ(manager.hasPendingTrajectory(),unsafe_time>1.6);
+    if(manager.hasPendingTrajectory()) {
+      EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+      EXPECT_GT(stop.velocity_traj_.evaluateDeBoorT(0).norm(),.1);
+      EXPECT_TRUE(manager.assessRemainingTrajectory(100.,true).executable());
+      EXPECT_FALSE(manager.assessRemainingTrajectory(100.).executable());
+    }
+    EXPECT_LT(stop.velocity_traj_.evaluateDeBoorT(stop.duration_).norm(),1e-9);
   }
 }
 
@@ -2198,7 +2206,7 @@ TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof
   ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
   const double now=input.get<double>("evaluation_time_s");
   ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),std::llround(now*1e9)),RCL_RET_OK);
-  ego_planner::EGOPlannerManager manager;
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
   manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
   GridMapFailureSnapshot snapshot;snapshot.origin=point(saved.get_child("origin_m"));
   snapshot.max_boundary=point(saved.get_child("max_boundary_m"));
@@ -2252,11 +2260,53 @@ TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof
   manager.endPlanningView();
   const auto risk_before=GridMapTestAccess::riskVersion(*manager.grid_map_);
   const auto brake_started=std::chrono::steady_clock::now();
-  EXPECT_TRUE(manager.planCheckedBrake(actual,point(input.get_child("actual_v_mps")),Eigen::Vector3d::Zero()));
+  const Eigen::Vector3d actual_velocity=point(input.get_child("actual_v_mps"));
+  const bool immediate=manager.planCheckedBrake(actual,actual_velocity,Eigen::Vector3d::Zero());
+  EXPECT_EQ(immediate,actual_velocity.norm()<=manager.pp_.max_vel_*(1+manager.pp_.feasibility_tolerance_));
   std::cout<<"CAPTURED_IMMEDIATE_BRAKE elapsed="<<std::chrono::duration<double>(
       std::chrono::steady_clock::now()-brake_started).count()<<std::endl;
   EXPECT_EQ(GridMapTestAccess::riskVersion(*manager.grid_map_),risk_before)
       << "A checked stop has no route preference to rank; optional prediction must not delay protection";
+  // The real hard-refusal timing must preserve the qualified old reference
+  // until a checked stopping action connects at the SAME future P/V/A.
+  manager.local_data_.position_traj_=old;manager.local_data_.velocity_traj_=velocity;
+  manager.local_data_.acceleration_traj_=acceleration;manager.local_data_.duration_=old.getTimeSum();
+  manager.local_data_.start_time_=rclcpp::Time(std::llround(start*1e9),node->get_clock()->get_clock_type());
+  const int old_id=input.get<int>("next_brake_id")-1;manager.local_data_.traj_id_=old_id;
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,actual,{18,0,1.5});
+  auto odom=std::make_shared<nav_msgs::msg::Odometry>();odom->header.frame_id="map";
+  odom->header.stamp=rclcpp::Time(std::llround(input.get<double>("actual_stamp_s")*1e9));
+  odom->pose.pose.position.x=actual.x();odom->pose.pose.position.y=actual.y();odom->pose.pose.position.z=actual.z();
+  odom->twist.twist.linear.x=actual_velocity.x();odom->twist.twist.linear.y=actual_velocity.y();odom->twist.twist.linear.z=actual_velocity.z();
+  ego_planner::EGOReplanFSMTestAccess::acceptedBrakeExecution(fsm,odom);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,old_id,now);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,actual,actual_velocity));
+  ASSERT_TRUE(manager.hasPendingTrajectory()) << "Distant revocation must use the proven future stopping connection";
+  EXPECT_EQ(manager.local_data_.traj_id_,old_id);
+  auto stop=manager.publicationTrajectory();auto stop_curve=stop.position_traj_;
+  const double seam=stop.start_time_.seconds()-start;
+  EXPECT_TRUE(stop_curve.evaluateDeBoorT(0).isApprox(old.evaluateDeBoorT(seam),1e-6));
+  EXPECT_TRUE(stop.velocity_traj_.evaluateDeBoorT(0).isApprox(velocity.evaluateDeBoorT(seam),1e-6));
+  EXPECT_TRUE(stop.acceleration_traj_.evaluateDeBoorT(0).isApprox(acceleration.evaluateDeBoorT(seam),1e-6));
+  EXPECT_GT(stop.velocity_traj_.evaluateDeBoorT(0).norm(),.1);
+  EXPECT_LT(stop.velocity_traj_.evaluateDeBoorT(stop.duration_).norm(),1e-5);
+  EXPECT_LT(stop.acceleration_traj_.evaluateDeBoorT(stop.duration_).norm(),1e-5);
+  const auto supervised=manager.assessRemainingTrajectory(now,true);
+  ASSERT_TRUE(supervised.executable());
+  EXPECT_FALSE(supervised.executing_tail_executable) << "A stop connection never certifies the complete cancellation tail";
+  EXPECT_EQ(supervised.physical_check_scope,"checked_stop_connection");
+  EXPECT_FALSE(manager.assessRemainingTrajectory(now).executable())
+      << "Normal pending policy retains its complete predecessor check";
+  EXPECT_FALSE(manager.planCheckedBrake(actual,actual_velocity,Eigen::Vector3d::Zero(),
+      node->now()-rclcpp::Duration::from_seconds(.1)));
+  EXPECT_EQ(manager.local_data_.traj_id_,old_id);
+  EXPECT_EQ(manager.publicationTrajectory().traj_id_,stop.traj_id_);
+  GridMapTestAccess::clearObserved(*manager.grid_map_,stop_curve.evaluateDeBoorT(stop.duration_));
+  EXPECT_FALSE(manager.assessRemainingTrajectory(now,true).executable());
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,input.get<double>("actual_stamp_s"),true))
+      << "Revoked stopping proof must withdraw and request original checked protection";
+  EXPECT_EQ(manager.local_data_.traj_id_,old_id);
 }
 
 TEST(EgoBaseline, EmergencyStateSupervisesUnreplacedExecutingAndPendingCurves) {

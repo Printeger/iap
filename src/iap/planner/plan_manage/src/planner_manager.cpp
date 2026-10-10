@@ -1844,7 +1844,7 @@ namespace ego_planner
 
   bool EGOPlannerManager::planCheckedBrake(
       const Eigen::Vector3d& position, const Eigen::Vector3d& velocity,
-      const Eigen::Vector3d& acceleration)
+      const Eigen::Vector3d& acceleration, std::optional<rclcpp::Time> connection)
   {
     if (!position.allFinite() || !velocity.allFinite() ||
         !acceleration.allFinite() || pp_.max_acc_ <= 0.0) {
@@ -1855,19 +1855,37 @@ namespace ego_planner
     // A protective stop has no route preference to optimize. Binding the
     // optional full-map predictor here delays the measured-state boundary;
     // only the unchanged actual-curve execution checks authorize this action.
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    // This is the existing protective action, not a fresh search/recovery
+    // opportunity. Reuse an active round's budget; otherwise bound this stop
+    // action by the same 1.5 s cap. Future and immediate trials share the
+    // original three constructions and never reset that budget.
+    const auto budget=planning_view_ ? planning_budget_ : std::make_shared<PlanningBudget>(1.5);
+    const auto predecessor=local_data_;
+    if(connection && (pending_trajectory_ || server_feedback_id_!=predecessor.traj_id_ ||
+        connection->seconds()-now<.1 || connection->seconds()<=predecessor.start_time_.seconds() ||
+        connection->seconds()>=predecessor.start_time_.seconds()+predecessor.duration_)) return false;
+    bool scheduled=connection.has_value();
+    int immediate_attempt=0;
+    for (int attempt = 0; attempt < 3 && budget && !budget->expired(); ++attempt) {
+      Eigen::Vector3d p=position,v=velocity,a=acceleration;
+      if(scheduled) {
+        const double t=connection->seconds()-predecessor.start_time_.seconds();
+        auto old=predecessor;
+        p=old.position_traj_.evaluateDeBoorT(t);v=old.velocity_traj_.evaluateDeBoorT(t);
+        a=old.acceleration_traj_.evaluateDeBoorT(t);
+      }
       const double duration = std::max(0.5,
-          2.0 * velocity.norm() / pp_.max_acc_) * std::pow(1.5, attempt);
-      const Eigen::Vector3d end = position + velocity * duration * 0.5;
+          2.0 * v.norm() / pp_.max_acc_) * std::pow(1.5, scheduled ? attempt : immediate_attempt++);
+      const Eigen::Vector3d end = p + v * duration * 0.5;
       auto polynomial = PolynomialTraj::one_segment_traj_gen(
-          position, velocity, acceleration, end, Eigen::Vector3d::Zero(),
+          p, v, a, end, Eigen::Vector3d::Zero(),
           Eigen::Vector3d::Zero(), duration);
       const double dt = duration / 10.0;
       std::vector<Eigen::Vector3d> samples;
       for (int i = 0; i <= 10; ++i)
         samples.push_back(polynomial.evaluate(i * dt));
       std::vector<Eigen::Vector3d> derivatives{
-          velocity, Eigen::Vector3d::Zero(), acceleration,
+          v, Eigen::Vector3d::Zero(), a,
           Eigen::Vector3d::Zero()};
       Eigen::MatrixXd controls;
       UniformBspline::parameterizeToBspline(dt, samples, derivatives, controls);
@@ -1879,8 +1897,54 @@ namespace ego_planner
         RCLCPP_WARN(node_->get_logger(),"Checked brake rejected: attempt=%d reason=DYNAMICS ratio=%.6f trajectory=%d",attempt,ratio,local_data_.traj_id_);
         continue;
       }
-      const auto assessment = assessTrajectory(candidate, 0,
-                                               now, true);
+      if(scheduled) {
+        LocalTrajData stop;stop.start_time_=*connection;stop.position_traj_=candidate;
+        stop.velocity_traj_=candidate.getDerivative();stop.acceleration_traj_=stop.velocity_traj_.getDerivative();
+        stop.start_pos_=p;stop.duration_=candidate.getTimeSum();
+        stop.traj_id_=std::max(next_trajectory_id_,predecessor.traj_id_)+1;
+        std::vector<Eigen::Vector3d> positions;
+        const auto collect=[&](LocalTrajData data,double from,double to) {
+          const auto controls=data.velocity_traj_.getControlPoint();double speed=.1;
+          for(int i=0;i<controls.cols();++i) speed=std::max(speed,controls.col(i).norm());
+          const double step=std::min(.02,grid_map_->getResolution()/(2*speed));
+          for(double t=from;t<=to+step;t+=step) {
+            if(budget->expired()) return;
+            positions.push_back(data.position_traj_.evaluateDeBoorT(std::min(t,to)));
+          }
+          for(double t:data.position_traj_.coordinateExtremaTimes(from,to))
+            positions.push_back(data.position_traj_.evaluateDeBoorT(t));
+        };
+        collect(predecessor,std::clamp(node_->now().seconds()-predecessor.start_time_.seconds(),0.,predecessor.duration_),predecessor.duration_);
+        collect(stop,0,stop.duration_);
+        const auto view=captureExecutionView(positions,now,true,budget);
+        // Inspect the complete old tail; only the proven stop connection may
+        // replace its revoked far end. Cancellation never inherits this proof.
+        if(view.physical.epoch) assessTrajectory(predecessor.position_traj_,0,view.time_s,true,
+            std::max(0.,view.time_s-predecessor.start_time_.seconds()),predecessor.duration_,&view.physical,false,&view.motion);
+        const auto checked=assessCheckedStopConnection(stop,view,budget);
+        if(!checked.executable() || !checked.physical_epoch || connection->seconds()-node_->now().seconds()<.1) {
+          scheduled=false;continue; // Remaining original trials use the measured boundary.
+        }
+        const auto gate=grid_map_->commitFrozenCorridor(*checked.physical_epoch,node_->now().seconds(),
+            checked.evaluated_motion.max_environment_age_s,[&]() {
+          const auto current=currentMotionContext(true);const double commit_time=node_->now().seconds();
+          if(budget->expired() || local_data_.traj_id_!=predecessor.traj_id_ || pending_trajectory_ ||
+              connection->seconds()-commit_time<.1 || current.quality!=view.motion.quality ||
+              !std::isfinite(current.error_proxy_m) || current.error_proxy_m>view.motion.error_proxy_m+1e-9 ||
+              commit_time<current.stamp_s || commit_time-current.stamp_s>current.max_motion_age_s) return false;
+          auto latest=view;latest.time_s=commit_time;
+          if(!assessCheckedStopConnection(stop,latest,budget).executable()) return false;
+          next_trajectory_id_=stop.traj_id_;pending_trajectory_=stop;pending_withdrawal_requested_s_.reset();
+          return true;
+        },budget);
+        if(gate==GridMap::CorridorCommit::Committed) {
+          RCLCPP_WARN(node_->get_logger(),"Checked stopping connection committed: predecessor=%d trajectory=%d effective_ros_time_s=%.9f duration_s=%.6f elapsed_s=%.6f",
+              predecessor.traj_id_,stop.traj_id_,stop.start_time_.seconds(),stop.duration_,budget->elapsed());return true;
+        }
+        if(gate==GridMap::CorridorCommit::Changed && budget->tryRepair(PlanningBudget::Repair::PublicationRecheck)) continue;
+        scheduled=false;continue;
+      }
+      const auto assessment = assessTrajectory(candidate, 0, node_->now().seconds(), true);
       if (!assessment.executable()) {
         RCLCPP_WARN(node_->get_logger(),
             "Checked brake rejected: attempt=%d reason=%s trajectory=%d generation=%lu evaluation_ros_time_s=%.9f violation_t=%.6f",
@@ -1888,9 +1952,11 @@ namespace ego_planner
             assessment.evaluated_generation,assessment.evaluation_time_s,assessment.first_execution_time_s);
         continue;
       }
+      if(budget->expired()) return false;
       updateTrajInfo(candidate, node_->now());
       RCLCPP_WARN(node_->get_logger(),
-                  "Checked continuous braking trajectory committed");
+                  "Checked continuous braking trajectory committed: predecessor=%d trajectory=%d duration_s=%.6f elapsed_s=%.6f",
+                  predecessor.traj_id_,local_data_.traj_id_,local_data_.duration_,budget->elapsed());
       return true;
     }
     return false;
