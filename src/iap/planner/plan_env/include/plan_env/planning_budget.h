@@ -25,6 +25,11 @@ class PlanningBudget {
   bool workExpired() const { return expired() || (optional_work_ && optionalRemaining()<=0.); }
   bool expired() const { return Clock::now() >= deadline_; }
   bool tryRepair(Repair reason) {
+    // Optional quality (including its optimizer restarts) cannot consume the
+    // last original allowance needed by current corridor publication. A soft
+    // refusal keeps the already checked working curve; it is not a hard
+    // exhausted-budget disposition. No allowance is added or replenished.
+    if (optional_work_ && (used_ >= limit_ || limit_ - used_ <= 1)) return false;
     if (expired() || used_ >= limit_) { denied_ = true; return false; }
     ++used_; ++counts_[static_cast<size_t>(reason)]; return true;
   }

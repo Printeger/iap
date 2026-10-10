@@ -1648,6 +1648,26 @@ TEST(EgoBaseline, TerminalSpeedIsLimitedByObservedBrakingSpace) {
 }
 
 TEST(EgoBaseline, OneBudgetBoundsNestedRepairsAndExpiredSearch) {
+  // Real attempt 185: two searches, a physically qualified curve, optional
+  // quality consumed repair 3, then a needed publication recapture was denied.
+  PlanningBudget optional(1.5,3);
+  ASSERT_TRUE(optional.tryRepair(PlanningBudget::Repair::Search));
+  ASSERT_TRUE(optional.tryRepair(PlanningBudget::Repair::Search));
+  optional.beginOptionalWork();
+  EXPECT_FALSE(optional.tryRepair(PlanningBudget::Repair::CurveCorrection));
+  optional.endOptionalWork();
+  EXPECT_FALSE(optional.denied());
+  EXPECT_TRUE(optional.tryRepair(PlanningBudget::Repair::PublicationRecheck));
+  EXPECT_EQ(optional.used(),3u);
+  // Optional denial is a quality disposition, not a hard publication failure.
+  PlanningBudget available(1.5,3);
+  available.beginOptionalWork();
+  EXPECT_TRUE(available.tryRepair(PlanningBudget::Repair::CurveCorrection));
+  EXPECT_TRUE(available.tryRepair(PlanningBudget::Repair::BackendRestart));
+  EXPECT_FALSE(available.tryRepair(PlanningBudget::Repair::BackendRestart));
+  available.endOptionalWork();
+  EXPECT_FALSE(available.denied());
+  EXPECT_TRUE(available.tryRepair(PlanningBudget::Repair::PublicationRecheck));
   PlanningBudget budget(1.5, 3);
   EXPECT_TRUE(budget.tryRepair(PlanningBudget::Repair::Search));
   EXPECT_TRUE(budget.tryRepair(PlanningBudget::Repair::Reinitialize));
