@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import sys
+import weakref
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -25,6 +28,7 @@ if str(_INCLUDES) not in sys.path:
     sys.path.insert(0, str(_INCLUDES))
 from run_directory import (  # noqa: E402
     adopt_run_directory,
+    finalize_run,
     finalize_run_from_shutdown,
     register_config_snapshot,
     register_validation_trial,
@@ -41,6 +45,30 @@ def _catalog(iap_share: Path) -> dict:
     if not isinstance(value, dict) or not value:
         raise RuntimeError("IAP simulation scenario catalog is empty or invalid")
     return value
+
+
+def _hold_simulation_lease(context, run_dir: Path):
+    # These canonical nodes use fixed topics and one historical /clock. Keep
+    # ownership until the launch context/process ends, including child shutdown;
+    # releasing it in OnShutdown would admit a new graph while children exit.
+    domain = int(os.environ.get("ROS_DOMAIN_ID", "0"))
+    lease = (run_dir.parent / f".iap_sim_domain_{domain}.lock").open("a+")
+    try:
+        fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        lease.seek(0)
+        owner = lease.read().strip()
+        lease.close()
+        raise RuntimeError(
+            f"SIM_RUN_IN_USE: ROS domain {domain}, owner={owner}; "
+            "stop the previous iap_sim launch and wait for its processes to exit"
+        ) from error
+    lease.seek(0)
+    lease.truncate()
+    lease.write(json.dumps({"pid": os.getpid(), "run_dir": str(run_dir)}))
+    lease.flush()
+    context._iap_sim_run_lease = lease
+    weakref.finalize(context, lease.close)
 
 
 def _setup(context):
@@ -64,6 +92,12 @@ def _setup(context):
     lifecycle_owner = context.launch_configurations.get("run_lifecycle_owner", "launch")
     if lifecycle_owner not in ("launch", "driver") or (lifecycle_owner == "driver" and not internal_run):
         raise ValueError("driver lifecycle owner requires a preallocated run_dir")
+    try:
+        _hold_simulation_lease(context, output_dir)
+    except RuntimeError:
+        if lifecycle_owner == "launch":
+            finalize_run(output_dir, lifecycle="failed")
+        raise
     register_config_snapshot(
         output_dir, output_dir / "metadata" / "config"
     )

@@ -301,18 +301,24 @@ ros2 launch iap iap_sim.launch.py \
 | `capture_failure_map` | `false` | 四分叉故障诊断时按端点、穷尽、超时、曲线拒绝、持续无可执行局部目标、跟踪误差、剩余轨迹失败、最终停止、实际曲线首个未观测点和地图变化各保存首份 GridMap 快照，最多十份 |
 | `run_duration_s` | `0.0` | 正数用于定时结束；0 表示持续运行 |
 
-需要带提交／GPU／Release 安装门禁的可视化取证时，复用现场 driver：
+运行原四分叉 ON 任务及可视化，直接使用唯一仿真入口：
 
 ```bash
-python3 src/iap/scripts/dev_planner/run_curve_channel_live.py \
-  --duration 300 --guidance true --visualization full --label visual_on \
-  --rinex-nav-file /home/dev/ws_iap/src/iap/log/20261009T051626Z_339/metadata/config/historical_nav.rnx
+ros2 launch iap iap_sim.launch.py \
+  scenario:=icra_dense_forest_four_fork_v2 \
+  advisory_guidance:=true advisory_posterior_prior:=false \
+  rinex_nav_file:=/home/dev/ws_iap/src/iap/log/20261009T051626Z_339/metadata/config/historical_nav.rnx \
+  start_rviz:=true start_grid_map_visualizer:=true \
+  capture_failure_map:=true run_duration_s:=300
 ```
 
-`--visualization none`（默认）关闭显示，`map` 仅开启独立 PL 显示，`full` 同时开启 RViz。
+用 `start_rviz` 和 `start_grid_map_visualizer` 控制显示。
 显示读取最近规划轮的保留输入，避免每秒额外冻结实时地图；PL 时间身份与历史标记保留。
-此开关只选择显示进程，不改变场景、规划预算或执行检查。`6bb431f4` 的完整可视化
-原 ON 任务于 275.919 s 到达；证据与开发验收边界见 `docs/spec/ego_based_planning_flow.md`。
+同一运行根目录及 ROS domain 的第二个仿真在创建节点前报 `SIM_RUN_IN_USE`；
+停止上一终端的 launch，等全部子进程退出后再启动下一次。不要同时运行两套固定话题。
+已有 `run_curve_channel_live.py` 仅供开发取证：它调用同一 launch，另外启动记录器、
+执行提交／GPU／Release 检查并负责收尾，不是用户运行的必要依赖。
+当前现场停滞的诊断与状态见 `docs/spec/ego_based_planning_flow.md`。
 
 本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 已把有效 advisory 预警用于局部绕行偏好，真实执行仍以物理环境、当前融合运动质量与最终曲线检查为准。
 
@@ -1036,11 +1042,14 @@ attempt480/gen2762搜索成功、Curve失败且候选未保存；固定路线和
 ```bash
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-python3 src/iap/scripts/dev_planner/run_curve_channel_live.py --duration 300 --label curve_capture
+ros2 launch iap iap_sim.launch.py \
+  scenario:=icra_dense_forest_four_fork_v2 \
+  advisory_guidance:=false advisory_posterior_prior:=false \
+  capture_failure_map:=true run_duration_s:=300
 ```
 
-工具只使用`iap_sim.launch.py`与四分叉，prior/guidance OFF；运行目录由共享resolver
-分配并打印。GPU预检、完整输入、失败请求、实际执行事件与进程健康均归入该run。
+此诊断示例使用`iap_sim.launch.py`与四分叉，prior/guidance OFF；运行目录由共享resolver
+分配并打印。现场前核对提交／安装与 GPU，失败请求和实际执行事件归入该run。
 `curve_stages`保存最多24份当次候选；实际分量峰值与授权门禁的控制点包络分列。
 没有最终检查时保持null，不代表检查通过。正式历史多星座及配对任务仍待后续阶段。
 

@@ -133,6 +133,39 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                 self.assertEqual(environment._historical_process_exit(SimpleNamespace(returncode=-2),
                     SimpleNamespace(is_shutdown=True), run, "gnss_sim"), [])
 
+    def test_sim_launch_rejects_overlap_before_starting_another_graph(self):
+        canonical = self._load_launch("iap_sim.launch.py")
+        def context():
+            value = LaunchContext()
+            value.launch_configurations.update(scenario="icra_dense_forest_four_fork_v2",
+                rinex_nav_file="", start_rviz="false", start_grid_map_visualizer="false",
+                planner_start_delay_s="0", run_duration_s="0")
+            return value
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ,
+                {"IAP_RUN_ROOT": temporary, "ROS_DOMAIN_ID": "0"}), mock.patch.object(
+                canonical, "get_package_share_directory", return_value=str(REPO)):
+            first = context()
+            canonical._setup(first)
+            try:
+                # A second canonical launch must fail before its include actions
+                # can start clock, planner, controller or RViz publishers.
+                with self.assertRaisesRegex(RuntimeError, "SIM_RUN_IN_USE"):
+                    canonical._setup(context())
+                states = [json.loads(p.read_text())["lifecycle"]
+                          for p in Path(temporary).glob("20*/metadata/run_manifest.json")]
+                self.assertCountEqual(states, ["active", "failed"])
+            finally:
+                lease = getattr(first, "_iap_sim_run_lease", None)
+                if lease:
+                    lease.close()
+            # Once the first launch process has released its ownership, the
+            # normal entrypoint is usable again without a separate wrapper.
+            third = context()
+            canonical._setup(third)
+            lease = getattr(third, "_iap_sim_run_lease", None)
+            if lease:
+                lease.close()
+
     def test_recorder_clock_policy_comes_from_run_owner(self):
         runs = self._load_launch("_includes/run_directory.py")
         with tempfile.TemporaryDirectory() as temporary:
