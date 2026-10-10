@@ -897,19 +897,27 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
         assessment.first_advisory_time_s=warning;
     }
   }
+  const auto in_execution_time=[&](TrajectoryAssessment branch,const LocalTrajData& data) {
+    if(branch.trajectory_id==data.traj_id_) {
+      const double offset=data.start_time_.seconds()-local_data_.start_time_.seconds();
+      branch.first_execution_time_s+=offset;
+      branch.first_unobserved_time_s+=offset;
+      branch.first_advisory_time_s+=offset;
+    }
+    return branch;
+  };
   if((pending_checked_stop || pending_branch_proof_) && pending_trajectory_ &&
       pendingConfirmed() && !pending_withdrawal_requested_s_ &&
       !executing_tail_executable) {
-    const auto stop=assessCheckedStopConnection(*pending_trajectory_,view);
-    if(stop.executable()) {
-      assessment=stop;
-    }
+    // The actual branch owns BOTH success and rejection. A failure of B must
+    // not be mislabeled with A's already excluded far-tail refusal.
+    assessment=in_execution_time(assessCheckedStopConnection(*pending_trajectory_,view),*pending_trajectory_);
   }
   // A missing replacement result leaves either B or C executable at the
   // server. Check C even if the complete predecessor happens to remain valid.
   if(replacement_candidate_ && assessment.executable()) {
     const auto candidate=assessCheckedStopConnection(*replacement_candidate_,view);
-    if(!candidate.executable()) assessment=candidate;
+    if(!candidate.executable()) assessment=in_execution_time(candidate,*replacement_candidate_);
   }
   assessment.executing_tail_executable=executing_tail_executable;
   return assessment;

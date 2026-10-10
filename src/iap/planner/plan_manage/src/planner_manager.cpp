@@ -823,16 +823,19 @@ namespace ego_planner
     if (!capture_failure_map_) return;
     auto* evidence_curve=&local_data_.position_traj_;
     TrajectoryAssessment curve_assessment;
-    if(assessment && pending_trajectory_ && assessment->trajectory_id==pending_trajectory_->traj_id_) {
+    auto* queued_owner=assessment && pending_trajectory_ && assessment->trajectory_id==pending_trajectory_->traj_id_
+        ? &*pending_trajectory_ : assessment && replacement_candidate_ &&
+          assessment->trajectory_id==replacement_candidate_->traj_id_ ? &*replacement_candidate_ : nullptr;
+    if(queued_owner) {
       // Supervision uses the executing start as a shared lead-time origin;
       // saved curve samples must use the owning pending curve's local time.
       curve_assessment=*assessment;
-      const double offset=pending_trajectory_->start_time_.seconds()-local_data_.start_time_.seconds();
+      const double offset=queued_owner->start_time_.seconds()-local_data_.start_time_.seconds();
       curve_assessment.first_execution_time_s-=offset;
       curve_assessment.first_unobserved_time_s-=offset;
       curve_assessment.first_advisory_time_s-=offset;
       assessment=&curve_assessment;
-      evidence_curve=&pending_trajectory_->position_traj_;
+      evidence_curve=&queued_owner->position_traj_;
     }
     // A previously captured physical failure must not conceal a later hole
     // on the executing curve.

@@ -7,7 +7,10 @@
 
 namespace ego_planner
 {
-  namespace { constexpr double continuation_lead_s = 1.6; }
+  namespace {
+    constexpr double continuation_lead_s = 1.6;
+    constexpr auto supervision_period = std::chrono::milliseconds(200);
+  }
 
   void EGOReplanFSM::init(rclcpp::Node::SharedPtr &node)
   {
@@ -81,7 +84,7 @@ namespace ego_planner
     exec_timer_ = node_->create_wall_timer(std::chrono::milliseconds(10),
                                            std::bind(&EGOReplanFSM::execFSMCallback, this));
 
-    safety_timer_ = node_->create_wall_timer(std::chrono::milliseconds(200),
+    safety_timer_ = node_->create_wall_timer(supervision_period,
                                              std::bind(&EGOReplanFSM::checkCollisionCallback, this));
 
     odom_callback_group_ = node_->create_callback_group(
@@ -551,7 +554,7 @@ namespace ego_planner
         return result->accepted;
       }
       if(mode==traj_utils::msg::Bspline::AT_TIME && PlanningBudget::Clock::now()>=next_check) {
-        next_check=PlanningBudget::Clock::now()+std::chrono::milliseconds(200);
+        next_check=PlanningBudget::Clock::now()+supervision_period;
         if(!planner_manager_->inspectPendingStopProof(node_->now().seconds(),budget).executable()) {
           recordExecutionEvent("unconfirmed_backup_proof_lost",id,
               planner_manager_->publicationTrajectory().start_time_.seconds());
@@ -853,8 +856,12 @@ namespace ego_planner
         }
       }
     }
+    // Live ID4's valid window was lost behind one existing safety callback.
+    // Schedule before that callback period plus the original publish reserve;
+    // the actual connection remains 1.6 s ahead and all budgets are unchanged.
     const double trigger=start+std::max(0.,std::min(replan_thresh_,
-        terminal_deceleration_s_-start-continuation_lead_s-.1));
+        terminal_deceleration_s_-start-continuation_lead_s-.1-
+        std::chrono::duration<double>(supervision_period).count()));
     if(changed) recordExecutionEvent("rolling_window",info.traj_id_,terminal_deceleration_s_,trigger,info.traj_id_);
     const auto connection=now+rclcpp::Duration::from_seconds(continuation_lead_s);
     const double elapsed=connection.seconds()-start;
@@ -1396,6 +1403,18 @@ namespace ego_planner
         planner_manager_->local_data_.traj_id_==predecessor.traj_id_) {
       // B has reached the ONLY execution owner before spending anything on C.
       const auto checked=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false);
+      if(!checked.executable()) {
+        const std::string event=std::string("backup_replacement_proof_rejected_")+
+            gridExecutionReasonName(checked.execution_reason);
+        recordExecutionEvent(event.c_str(),checked.trajectory_id,info->start_time_.seconds(),NAN,
+            predecessor.traj_id_,bspline.traj_id,&checked.first_execution_position);
+        RCLCPP_WARN(node_->get_logger(),
+            "Confirmed backup branch proof rejected: active=%d pending=%d checked=%d reason=%s completed=%d; checked protection remains required",
+            predecessor.traj_id_,bspline.traj_id,checked.trajectory_id,
+            gridExecutionReasonName(checked.execution_reason),checked.completed);
+        flag_escape_emergency_=true;
+        return false;
+      }
       auto next_check=PlanningBudget::Clock::now();
       budget->setExecutionGuard([this,&next_check,predecessor,ts=info->start_time_.seconds()]() {
         if(node_->now().seconds()+.1>=ts) return false;
@@ -1403,7 +1422,7 @@ namespace ego_planner
         if(!command || command->trajectory_id!=static_cast<unsigned>(predecessor.traj_id_)) return false;
         const auto current=PlanningBudget::Clock::now();
         if(current<next_check) return true;
-        next_check=current+std::chrono::milliseconds(200);
+        next_check=current+supervision_period;
         const auto branch=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false);
         if(!branch.executable()) {
           recordExecutionEvent("replacement_execution_proof_lost",branch.trajectory_id,ts,NAN,predecessor.traj_id_);

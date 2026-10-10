@@ -212,6 +212,10 @@ struct EGOReplanFSMTestAccess {
     fsm.odometryCallback(odom);
   }
   static void tick(EGOReplanFSM& fsm) {fsm.execFSMCallback();}
+  static std::pair<double,bool> timing(EGOReplanFSM& fsm) {
+    const auto value=fsm.continuationTiming(fsm.node_->now());
+    return {value.trigger_s,value.moving};
+  }
   static bool fromCurrent(EGOReplanFSM& fsm) {return fsm.planFromCurrentTraj();}
   static bool executing(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::EXEC_TRAJ;}
   static bool waitingForTarget(const EGOReplanFSM& fsm) {return fsm.exec_state_==EGOReplanFSM::WAIT_TARGET;}
@@ -1516,7 +1520,7 @@ TEST(EgoBaseline, RollingContinuationTriggersBeforeDecelerationAndRejectsRestHan
       v.evaluateDeBoorT(t).dot(a.evaluateDeBoorT(t))>=0) {deceleration=t;break;}
   ASSERT_GT(deceleration,1.6);
   const double elapsed=std::max(.01,deceleration-1.6-.01);
-  ASSERT_LT(elapsed,1.);
+  if(!std::getenv("IAP_D4_CONTINUATION_INPUT")) ASSERT_LT(elapsed,1.);
   const auto prepare=[&](double time) {
     ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),
         static_cast<int64_t>((100.+time)*1e9)),RCL_RET_OK);
@@ -1532,6 +1536,15 @@ TEST(EgoBaseline, RollingContinuationTriggersBeforeDecelerationAndRejectsRestHan
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,p,goal);
   ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,local,odom);
+  if(std::getenv("IAP_D4_CONTINUATION_INPUT")) {
+    const auto timing=ego_planner::EGOReplanFSMTestAccess::timing(fsm);
+    // Live ID4 missed its nominal trigger behind a 200 ms safety callback.
+    // Scheduling must reserve that existing callback period, within the same
+    // 1.6 s connection and original budget; no physical permission changes.
+    prepare(std::max(0.,timing.first-100.)+.2);
+    EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::timing(fsm).second);
+    prepare(elapsed);
+  }
   ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,predecessor.traj_id_,100.+elapsed);
   ego_planner::EGOReplanFSMTestAccess::tick(fsm);
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
@@ -2207,6 +2220,12 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
       EXPECT_TRUE(manager.assessRemainingTrajectory(100.,true).executable());
       EXPECT_FALSE(manager.assessRemainingTrajectory(100.).executing_tail_executable);
       EXPECT_FALSE(manager.requestPendingWithdrawal());
+      GridMapTestAccess::clearObserved(*manager.grid_map_,stop.position_traj_.evaluateDeBoorT(stop.duration_));
+      const auto revoked=manager.assessRemainingTrajectory(100.,true,false);
+      EXPECT_FALSE(revoked.executable());
+      EXPECT_EQ(revoked.trajectory_id,stop.traj_id_)
+          << "Report the actual B branch failure, rather than the old unreachable A far tail";
+      EXPECT_GE(revoked.first_execution_time_s,stop.start_time_.seconds()-predecessor.start_time_.seconds());
     }
     EXPECT_LT(stop.velocity_traj_.evaluateDeBoorT(stop.duration_).norm(),1e-9);
   }
@@ -2332,6 +2351,10 @@ TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof
             auto invalid=std::make_shared<traj_utils::msg::Bspline>(*request);invalid->predecessor_id=-1;bsplineCallback(invalid);
           } else bsplineCallback(request);
           if(last_feedback.accepted) accepted_ids.push_back(last_feedback.request_id);
+          if(request->start_mode==traj_utils::msg::Bspline::AT_TIME && std::string(atomic_mode)=="backup_revoked") {
+            auto backup=pending_traj->curves[0];
+            GridMapTestAccess::changeEvidence(*manager.grid_map_,backup.evaluateDeBoorT(pending_traj->duration),false,false,false);
+          }
           if(request->start_mode==traj_utils::msg::Bspline::AT_TIME && std::string(atomic_mode)=="backup_feedback_lost") return;
           if(request->start_mode==traj_utils::msg::Bspline::REPLACE_PENDING && std::string(atomic_mode)=="feedback_lost") return;
           ego_planner::EGOReplanFSMTestAccess::serverResult(fsm,last_feedback);
@@ -2342,6 +2365,21 @@ TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof
   const bool stopped=ego_planner::EGOReplanFSMTestAccess::stop(fsm,actual,actual_velocity);
   if(atomic_mode) {
     done=true;receiver.join();executor.remove_node(node);
+    if(std::string(atomic_mode)=="backup_revoked") {
+      ASSERT_FALSE(stopped);ASSERT_EQ(accepted_ids.size(),1u);
+      const int backup=accepted_ids.front();
+      EXPECT_EQ(manager.planningBudget()->searches.calls,0u);
+      EXPECT_FALSE(manager.assessRemainingTrajectory(now,true,false).executable());
+      EXPECT_FALSE(manager.requestPendingWithdrawal());
+      ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,actual,actual_velocity));
+      for(int i=0;i<100 && accepted_ids.size()<2;++i) {rclcpp::spin_some(node);std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+      ASSERT_EQ(accepted_ids.size(),2u);EXPECT_GT(traj_id_,backup);EXPECT_FALSE(pending_traj);
+      cmdCallbackAt(node->now());EXPECT_EQ(cmd.trajectory_id,accepted_ids.back());EXPECT_NE(cmd.trajectory_id,old_id);
+      cmdCallbackAt(node->now()+rclcpp::Duration::from_seconds(traj_duration_));
+      EXPECT_LT(Eigen::Vector3d(cmd.velocity.x,cmd.velocity.y,cmd.velocity.z).norm(),1e-9);
+      std::cout<<"FROZEN_ATOMIC revoked_B="<<backup<<" checked_protection="<<traj_id_<<" C_searches=0 no_cancel_or_A_fallback=1"<<std::endl;
+      server_subscription.reset();pos_cmd_pub.reset();trajectory_curve_pub.reset();server_node.reset();return;
+    }
     ASSERT_TRUE(stopped);ASSERT_TRUE(pending_traj);
     if(std::string(atomic_mode)=="revoke") {
       ASSERT_EQ(accepted_ids.size(),2u);
