@@ -76,11 +76,14 @@ def main():
     parser.add_argument('--capture-fork-entries',action='store_true',help='freeze physical fork entrance inputs with a read-only helper')
     parser.add_argument('--stop-after-task',action='store_true',help='stop owned jobs when the original FSM records task_reached')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
+    parser.add_argument('--gnss-seed', type=int, default=None, help='Independent simulation observation seed; all noise/planner settings retained')
     args = parser.parse_args()
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
     safe_label(args.label)
+    from full_stack_runtime import gnss_observation_seed
+    gnss_observation_seed(args.gnss_seed)
     identity = source_identity()
     if identity['dirty']:
         raise RuntimeError('LIVE_BLOCKED_BY_UNRELATED_DIRTY_WORKTREE: commit task changes first')
@@ -148,6 +151,8 @@ def main():
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
         if args.capture_advisory_residuals:
             command.append('capture_advisory_residuals:=true')
+        if args.gnss_seed is not None:
+            command.append('gnss_observation_seed:=' + str(args.gnss_seed))
         manifest(run, 'forest_runtime_identity', {'schema': 'iap_forest_runtime_identity_v1',
                  **identity, 'command': command, 'preflight': gpu,
                  'runtime_binary': runtime_binary,

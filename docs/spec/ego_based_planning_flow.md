@@ -7,6 +7,13 @@
 `b8b8bcba15b672ca902c93eec50de171d39df05b`，当前分支 `dev/iap_refactor`，开始时工作树干净。
 原版 `src/ego-planner-swarm` 只读；历史运行与证据只读。
 
+本轮 Advisory 轻量验证正在进行，连续飞行主线不变。仿真可显式指定
+`gnss_observation_seed`（driver `--gnss-seed`），只改变 GNSS 随机抽样 seed；
+与 `advisory_trial` 的 seed 权威互斥。默认留空维持原 seed，实际 seed 登记在
+full_stack 与 scenario 清单；地图、噪声幅值、任务、风险权重、物理检查与在线预算均保持。
+诊断 OFF seeds 1101/1102，留出 OFF seed2101，禁止使用留出结果调整本轮模型。
+该接口的 launch 取参验证比较全部 GNSS 参数，要求只有 random_seed 改变。
+
 ## 主线与实际执行范围
 
 保留 D1 route/execute 分离、有限 Advisory 软代价、三个目标身份；D2 原 EGO、真实零末

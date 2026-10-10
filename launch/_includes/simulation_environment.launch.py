@@ -227,7 +227,7 @@ def _setup(context):
         raise RuntimeError(f"unknown IAP simulation scenario '{scenario_name}'; valid: {valid}")
     scenario = catalog[scenario_name]
     trial_path=context.launch_configurations.get("advisory_trial", "")
-    from full_stack_runtime import load_advisory_trial, historical_gnss_parameters
+    from full_stack_runtime import load_advisory_trial, historical_gnss_parameters, gnss_observation_seed
     trial=load_advisory_trial(trial_path,scenario)
     observation=trial["degradation_schedule"]["conditions"][trial["condition"]] if trial else {}
     lidar_range=observation.get("lidar_max_range_m",10.)
@@ -237,6 +237,9 @@ def _setup(context):
     gnss_params.update(historical_gnss_parameters(nav_path))
     if trial:
         gnss_params.update(random_seed=trial["seed"],pseudorange_noise_std_m=observation["gnss_pseudorange_sigma_m"])
+    seed = gnss_observation_seed(context.launch_configurations.get("gnss_observation_seed", ""), trial)
+    if seed is not None:
+        gnss_params["random_seed"] = seed
     initial = [float(value) for value in scenario["initial"]]
     output_dir = Path(LaunchConfiguration("output_dir").perform(context)).expanduser()
     if not output_dir.is_absolute():

@@ -68,6 +68,18 @@ def advisory_observation_schedule():
         "lidar_degraded":{"gnss_pseudorange_sigma_m":1.,"lidar_max_range_m":3.}}}
 
 
+def gnss_observation_seed(value, trial=None):
+    """Optional simulation draw seed; does not alter route or noise policy."""
+    if value in (None, ""):
+        return None
+    text = str(value)
+    if not text.isdecimal() or not 0 <= int(text) <= 2147483647:
+        raise ValueError("gnss_observation_seed must be an integer in [0, 2147483647]")
+    if trial:
+        raise ValueError("gnss_observation_seed conflicts with advisory_trial seed authority")
+    return int(text)
+
+
 def load_advisory_trial(path, scenario):
     """Optional fixed-route experiment inputs; never bypass live curve checks."""
     if not path: return {}
@@ -236,7 +248,8 @@ def _setup(context):
             str(share / "launch/_includes/simulation_environment.launch.py")),
             launch_arguments={"scenario": name, "output_dir": str(run),
                               "rinex_nav_file":context.launch_configurations.get("rinex_nav_file", ""),
-                              "advisory_trial":context.launch_configurations.get("advisory_trial", "")}.items()),
+                              "advisory_trial":context.launch_configurations.get("advisory_trial", ""),
+                              "gnss_observation_seed":context.launch_configurations.get("gnss_observation_seed", "")}.items()),
         Node(package="iap", executable="iap_rosnode", name="glio_integrity", output="screen",
              parameters=[{"config_path": runtime, "imu_topic": "/sim/drone_0/imu_iap",
                           "points_topic": "/sim/drone_0/lidar_body"}]),

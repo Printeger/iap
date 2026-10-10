@@ -112,6 +112,26 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertEqual(gnss["ephemeris_source"], "rinex")
             self.assertEqual(gnss["enabled_constellations_csv"], "GPS,BDS")
             self.assertFalse(gnss["fallback_to_synthetic_on_rinex_error"])
+            context.launch_configurations["gnss_observation_seed"] = "1101"
+            nodes.clear()
+            with mock.patch.object(environment, "get_package_share_directory", return_value=str(REPO)), \
+                    mock.patch.object(environment, "Node", side_effect=capture):
+                environment._setup(context)
+            seeded = next(n for n in nodes if n.get("executable")=="gnss_sim_node")["parameters"][0]
+            self.assertEqual(seeded["random_seed"], 1101)
+            self.assertEqual({k:v for k,v in seeded.items() if k!="random_seed"},
+                             {k:v for k,v in gnss.items() if k!="random_seed"})
+
+    def test_independent_observation_seed_rejects_ambiguous_authority(self):
+        runtime = self._load_launch("_includes/full_stack_runtime.py")
+        self.assertIsNone(runtime.gnss_observation_seed(""))
+        for seed in ("0", "1102", "2101", "2147483647"):
+            self.assertEqual(runtime.gnss_observation_seed(seed), int(seed))
+        for seed in ("-1", "1.2", "nan", "2147483648"):
+            with self.assertRaisesRegex(ValueError, "integer"):
+                runtime.gnss_observation_seed(seed)
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            runtime.gnss_observation_seed("1101", {"seed": 1102})
 
     def test_historical_input_loss_fails_both_owners_and_preserves_first_failure(self):
         environment = self._load_launch("_includes/simulation_environment.launch.py")

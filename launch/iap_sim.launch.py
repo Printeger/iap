@@ -123,6 +123,8 @@ def _setup(context):
         calibration=str(frozen)
 
     trial_path=context.launch_configurations.get("advisory_trial", "")
+    from full_stack_runtime import gnss_observation_seed
+    observation_seed = gnss_observation_seed(context.launch_configurations.get("gnss_observation_seed", ""), trial_path)
     if trial_path:
         from full_stack_runtime import load_advisory_trial, planner_parameters
         trial=load_advisory_trial(trial_path,catalog[scenario])
@@ -160,6 +162,7 @@ def _setup(context):
         "grid_map_visualizer_enabled": context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true",
         "advisory_calibration": calibration,
         "advisory_trial": trial_path,
+        "gnss_observation_seed": observation_seed,
         "advisory_guidance_enabled": context.launch_configurations.get("advisory_guidance", "false").lower()=="true",
         "capture_advisory_residuals": context.launch_configurations.get("capture_advisory_residuals", "false").lower()=="true",
         "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
@@ -201,6 +204,7 @@ def _setup(context):
                 "rinex_nav_file": nav_path,
                 "advisory_calibration": calibration,
                 "advisory_trial": trial_path,
+                "gnss_observation_seed": context.launch_configurations.get("gnss_observation_seed", ""),
                 "advisory_guidance": context.launch_configurations.get("advisory_guidance", "false"),
                 "capture_advisory_residuals": context.launch_configurations.get("capture_advisory_residuals", "false"),
                 "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
@@ -248,6 +252,8 @@ def generate_launch_description():
                                  description="Absolute frozen empirical Advisory JSON; empty preserves uncalibrated defaults"),
             DeclareLaunchArgument("advisory_trial",default_value="",
                                  description="Absolute fixed-route/seed/observation trial JSON with real physical/frame proof"),
+            DeclareLaunchArgument("gnss_observation_seed", default_value="",
+                                 description="Optional independent simulation draw seed; preserves noise, map, goal and planner policy; conflicts with advisory_trial"),
             DeclareLaunchArgument("advisory_posterior_prior", default_value="false",
                                  choices=["true", "false"],
                                  description="Include FGO posterior proxy in Advisory (legacy A/B only)"),
