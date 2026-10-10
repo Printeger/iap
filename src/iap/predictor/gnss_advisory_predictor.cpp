@@ -6,9 +6,11 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -33,7 +35,21 @@ struct VisibleGeometrySet {
   std::vector<int> excluded_sat_ids;
   double effective_sigma_sum = 0.0;
   double effective_sigma_max = std::numeric_limits<double>::quiet_NaN();
+  std::string failure_reason;
 };
+
+bool same_observation(const SatObs& a, const SatObs& b) {
+  // This interface carries one PR/Doppler channel per satellite and epoch,
+  // not identities/covariances for independent additional signals.
+  return std::tie(a.pr_meas,a.dop_meas,a.pr_sigma,a.dop_sigma,a.tgd,a.svddt,
+      a.elevation,a.azimuth,a.kappa,a.pr_residual,a.nis_pr,a.nis_dop,
+      a.excluded,a.admission_hysteresis_pending) ==
+      std::tie(b.pr_meas,b.dop_meas,b.pr_sigma,b.dop_sigma,b.tgd,b.svddt,
+      b.elevation,b.azimuth,b.kappa,b.pr_residual,b.nis_pr,b.nis_dop,
+      b.excluded,b.admission_hysteresis_pending) &&
+      (a.sat_pos.array()==b.sat_pos.array()).all() &&
+      (a.sat_vel.array()==b.sat_vel.array()).all();
+}
 
 VisibleGeometrySet visible_geometry(
     const GnssEpoch& epoch,
@@ -41,9 +57,21 @@ VisibleGeometrySet visible_geometry(
     const std::vector<bool>* satellite_mask = nullptr, double noise_scale = 1.0) {
   VisibleGeometrySet out;
   out.geom.reserve(static_cast<std::size_t>(visibility.n_vis));
+  std::map<std::pair<char,int>,const SatObs*> seen;
   for (std::size_t i = 0; i < epoch.sats.size(); ++i) {
     if (satellite_mask != nullptr &&
         (i >= satellite_mask->size() || !(*satellite_mask)[i])) {
+      continue;
+    }
+    const auto& observation=epoch.sats[i];
+    const auto [previous,inserted]=seen.emplace(
+        std::make_pair(observation.constellation,observation.sat_id),&observation);
+    if(!inserted) {
+      if(!same_observation(*previous->second,observation)) {
+        VisibleGeometrySet invalid;
+        invalid.failure_reason="conflicting_duplicate_observation";
+        return invalid;
+      }
       continue;
     }
     const bool excluded = epoch.sats[i].excluded ||
@@ -91,6 +119,12 @@ std::size_t receiver_epoch_identity(const GnssEpoch& epoch) {
     combine(std::hash<int>{}(sat.sat_id));
     combine(std::hash<char>{}(sat.constellation));
     combine(std::hash<bool>{}(sat.excluded));
+    combine(std::hash<bool>{}(sat.admission_hysteresis_pending));
+    for(double value:{sat.pr_meas,sat.dop_meas,sat.dop_sigma,sat.tgd,sat.svddt,
+                      sat.kappa,sat.pr_residual,sat.nis_pr,sat.nis_dop})
+      combine(std::hash<double>{}(value));
+    for(double value:sat.sat_pos) combine(std::hash<double>{}(value));
+    for(double value:sat.sat_vel) combine(std::hash<double>{}(value));
     combine(std::hash<double>{}(sat.elevation));
     combine(std::hash<double>{}(sat.azimuth));
     combine(std::hash<double>{}(sat.pr_sigma));
@@ -318,6 +352,11 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
           ? LocalMapSupportStatus::MODEL_COMPLETE
           : visibility.support_status;
   const auto visible_set = visible_geometry(epoch, visibility, satellite_mask, params_.measurement_noise_scale);
+  if(!visible_set.failure_reason.empty()) {
+    out.valid=false;out.fim_valid=false;
+    out.fim_fallback_reason=visible_set.failure_reason;
+    return out;
+  }
   copy_geometry_set_diagnostics(visible_set, out);
   const auto& geom = visible_set.geom;
   if (out.n_used == 0) {
@@ -425,6 +464,11 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
       query_time_s, evaluation_time_s, unknown_as_open_bound);
   const auto visible_set = visible_geometry(
       snapshot.gnss_epoch, visibility, satellite_mask, params_.measurement_noise_scale);
+  if(!visible_set.failure_reason.empty()) {
+    auto out=fallback(visible_set.failure_reason);
+    out.fim_fallback_reason=visible_set.failure_reason;
+    return out;
+  }
   const auto& geom = visible_set.geom;
   if (static_cast<int>(geom.size()) < params_.geometry_params.min_sats) {
     auto out = fallback(visibility.n_unknown > 0

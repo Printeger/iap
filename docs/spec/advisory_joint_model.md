@@ -2,6 +2,15 @@
 
 Status: experimental; no empirical error or fused integrity qualification.
 
+At a frozen GNSS epoch, the interface supplies one observable channel per
+`(constellation, sat_id)`. Exact representation copies enter the shared visible
+geometry set once, for both nominal information and fault subsets. Conflicting
+copies reject that GNSS source as `conflicting_duplicate_observation`; they are
+not independent signals with an invented covariance. Masks apply to original
+row indices; the original payload and certified epoch identity stay intact.
+LiDAR grouping still handles its own support representation copies. Neither
+deduplication proves independence between distinct identities or surfaces.
+
 The required result is a frozen spatial prediction of IMU/body position in map
 coordinates, with shared pose nuisance variables handled once. The observed
 ID5 result is HPL/VPL 0.283971/0.275938 m, almost entirely from LiDAR. The first
@@ -17,7 +26,8 @@ for a common uncertainty model.
 GNSS measurement producer is `gnss_sim_node.cpp`; noise std comes from the
 canonical scenario and per-trial schedule. `gnss_extension.cpp` reads the raw
 `psr_std`, but `GnssHandler::pr_sigma` constructs the actual factor sigma from
-`pr_noise_base / sin(elevation)^elev_noise_exp` and the canopy floor. Postopt
+`max(raw_sigma, pr_noise_base / sin(elevation)^elev_noise_exp, canopy_floor)`
+and the recorded IMU-transfer row envelope. Postopt
 factor evaluation overwrites `SatObs::pr_sigma` with that final factor sigma.
 Visibility adds the maximum of that sigma and the candidate canopy sigma;
 Advisory multiplies `measurement_noise_scale` once. Thus archived `pr_sigma`
@@ -79,8 +89,9 @@ only and does not improve an admitted covariance.
 
 Canonical pose-source fusion uses `R <= 2 blockdiag(R_g,R_l)` as a conservative
 Cauchy bound for unknown cross-source residual covariance with the declared
-marginal noises. Thus joint measurement information is `(H_g+H_l)/2` when both
-sources participate; a single source retains its declared information. This is
+marginal noises. Joint measurement information is `(H_g+H_l)/2`; a single
+source keeps the same factor-two envelope (`H_s/2`). Source removal cannot
+revoke that policy and produce an optimistic risk discontinuity. This is
 not source trace normalization or a 50/50 information share. A weak source can
 contribute almost nothing. It bounds neither incorrect marginal noise nor
 unknown systematic/map error. The historical explicit 3D position-information

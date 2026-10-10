@@ -14,6 +14,27 @@ full_stack 与 scenario 清单；地图、噪声幅值、任务、风险权重�
 诊断 OFF seeds 1101/1102，留出 OFF seed2101，禁止使用留出结果调整本轮模型。
 该接口的 launch 取参验证比较全部 GNSS 参数，要求只有 random_seed 改变。
 
+Advisory 当前语义为 `pose6_fixed_two_source_envelope_v2`：GNSS 独占星座钟差先消元，
+两源共同 map pose（位置＋左局部姿态）先联合、再边缘化位置；两源或单源均保留
+相同 factor-two 零均值跨源包络。官方条件 H/V 为未正则化位置边缘协方差的
+`K_H sqrt(lambda_max(C_xy)) + b_H + s_H` / `K_V sqrt(C_zz) + b_V + s_V`，
+本配置 K_H=K_V=5。它是固定地图／对齐／外参、声明源内噪声条件下的未校准几何代理；
+正常误差包络、经验误差界和故障完整性 PL 不互换。数值资格与 Current Monitor 执行许可分开。
+
+完整新冻结使用 v9，保留原 state/GNSS/cloud/map/reference/receipt；合格正向短区间
+由真实 IMU 传播均值、F、Q 和交叉状态，原后验 envelope `2(FPFᵀ+Q)` 只作对照，
+不作为新的独立观测先验。旧记录不重编码授予时间资格，不刷新 stamp 或扩大配对门槛。
+
+本轮 GNSS 表示重复反例：16 条观测复制一次成为32条，名义 FIM trace 翻倍。
+最早错误在 Advisory 的可见几何集合逐行累加。修复后，同 epoch 的
+`(constellation,sat_id)` 完全相同记录只授予一次几何/故障假设；同身份不同观测
+拒绝 GNSS 为 `conflicting_duplicate_observation`，不得赋予新独立信息。
+原始冻结 payload、监测身份、可见性数组不改写；masked/receiver/Fusion 共用此权威集合，
+receiver/visibility cache 身份覆盖用于重复一致性判断的字段。
+该修复不改 GLIO、Current Monitor、风险权重或执行政策。
+已采集 seed2101 保留修复前冻结模型身份；修复后独立留出改用未查看的 seed2102，
+追加运行只为此确定的软件反例，不拟合经验参数。
+
 ## 主线与实际执行范围
 
 保留 D1 route/execute 分离、有限 Advisory 软代价、三个目标身份；D2 原 EGO、真实零末

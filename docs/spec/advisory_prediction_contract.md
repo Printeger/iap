@@ -26,7 +26,7 @@ monitor PL are distinct diagnostic quantities, never reconstructed into FIM.
 The shared result carries numerical status, original eigenvalues and weak
 direction; GridMap does not store per-cell matrices.
 
-Frozen inputs write `iap_prediction_input_v8`; v1–v7 remain readable for historical
+Frozen inputs write `iap_prediction_input_v9`; v1–v8 remain readable for historical
 diagnostics. New numerical parameters are serialized and hashed in the input
 identity. Historic payloads are not relabelled as new real recordings. Prediction
 queries use saved reference time. Per-source expiry never grants renewed

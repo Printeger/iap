@@ -4575,6 +4575,75 @@ TEST(AdvisoryAdmission, DiscardedPriorDoesNotExpireFreshLidar) {
   EXPECT_GT(module.admission(q).valid_until_s,100.);EXPECT_TRUE(module.query(q).valid);
 }
 
+TEST(AdvisoryCalibration, RepeatedGnssObservationsDoNotCreateInformation) {
+  auto params=make_params();
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate([](const Eigen::Vector3d&){return true;});
+  predictor.set_occupancy_query([](const Eigen::Vector3d&){return 0;},.2);
+  const auto snapshot=make_snapshot(true,false);
+  const auto baseline=predictor.query(Eigen::Vector3d::Zero(),snapshot);
+  ASSERT_TRUE(baseline.fim_valid);
+  for(int copies:{2,4}) {
+    auto repeated=snapshot;
+    for(int i=1;i<copies;++i) repeated.gnss_epoch.sats.insert(repeated.gnss_epoch.sats.end(),
+        snapshot.gnss_epoch.sats.begin(),snapshot.gnss_epoch.sats.end());
+    repeated.current.gnss_epoch_identity=iap::gnss_epoch_identity(repeated.gnss_epoch,
+        repeated.current.excluded_prns);
+    const auto result=predictor.query(Eigen::Vector3d::Zero(),repeated);
+    ASSERT_TRUE(result.fim_valid);
+    EXPECT_EQ(result.n_used,baseline.n_used);
+    EXPECT_EQ(result.used_sat_ids,baseline.used_sat_ids);
+    EXPECT_EQ(result.n_hypotheses,baseline.n_hypotheses);
+    EXPECT_TRUE(result.lambda_gnss.isApprox(baseline.lambda_gnss,1e-12));
+    EXPECT_DOUBLE_EQ(result.hpl,baseline.hpl);
+    EXPECT_DOUBLE_EQ(result.vpl,baseline.vpl);
+  }
+}
+
+TEST(AdvisoryCalibration, ConflictingGnssIdentityCannotCreateNominalInformation) {
+  auto params=make_params();
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate([](const Eigen::Vector3d&){return true;});
+  predictor.set_occupancy_query([](const Eigen::Vector3d&){return 0;},.2);
+  auto snapshot=make_snapshot(true,false);
+  auto conflicting=snapshot.gnss_epoch.sats.front();conflicting.pr_sigma*=2.;
+  snapshot.gnss_epoch.sats.push_back(conflicting);
+  snapshot.current.gnss_epoch_identity=iap::gnss_epoch_identity(snapshot.gnss_epoch,
+      snapshot.current.excluded_prns);
+  const auto result=predictor.query(Eigen::Vector3d::Zero(),snapshot);
+  EXPECT_FALSE(result.fim_valid);
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.fim_fallback_reason,"conflicting_duplicate_observation");
+  EXPECT_TRUE(result.information_los_map.empty());
+}
+
+TEST(AdvisoryCalibration, RepeatedGnssRowsKeepFusionAndMaskedInformation) {
+  auto params=make_params();
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  module.set_observation_predicate([](const Eigen::Vector3d&){return true;});
+  module.set_occupancy_query([](const Eigen::Vector3d&){return 0;},.2);
+  auto original=make_snapshot(true,false),repeated=original;
+  repeated.gnss_epoch.sats.insert(repeated.gnss_epoch.sats.end(),
+      original.gnss_epoch.sats.begin(),original.gnss_epoch.sats.end());
+  repeated.current.gnss_epoch_identity=iap::gnss_epoch_identity(repeated.gnss_epoch,
+      repeated.current.excluded_prns);
+  auto a=module.query(iap::PredictorQueryInput(Eigen::Vector3d::Zero(),original,100.));
+  auto b=module.query(iap::PredictorQueryInput(Eigen::Vector3d::Zero(),repeated,100.));
+  ASSERT_TRUE(a.valid);ASSERT_TRUE(b.valid);
+  EXPECT_TRUE(a.fused.lambda_pred.isApprox(b.fused.lambda_pred,1e-12));
+  EXPECT_DOUBLE_EQ(a.fused.hpl,b.fused.hpl);EXPECT_DOUBLE_EQ(a.fused.vpl,b.fused.vpl);
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate([](const Eigen::Vector3d&){return true;});
+  predictor.set_occupancy_query([](const Eigen::Vector3d&){return 0;},.2);
+  std::vector<bool> mask(repeated.gnss_epoch.sats.size(),true);mask.front()=false;
+  auto masked=predictor.query_with_satellite_mask(Eigen::Vector3d::Zero(),repeated,mask);
+  EXPECT_TRUE(masked.lambda_gnss.isApprox(a.gnss.lambda_gnss,1e-12));
+  ASSERT_TRUE(predictor.query_receiver_measured(repeated).fim_valid);
+  auto conflict=repeated;conflict.gnss_epoch.sats.back().pr_meas+=1.;
+  EXPECT_FALSE(predictor.query_receiver_measured(conflict).fim_valid);
+}
+
 TEST(AdvisoryCalibration, GnssNoiseScaleChangesInformationWithoutAnchorInversion) {
   auto params=make_params(); const auto snapshot=make_snapshot(true,false);
   iap::GnssAdvisoryPredictor one(params.gnss);
