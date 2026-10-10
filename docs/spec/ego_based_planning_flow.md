@@ -7,7 +7,7 @@
 `b8b8bcba15b672ca902c93eec50de171d39df05b`，当前分支 `dev/iap_refactor`，开始时工作树干净。
 原版 `src/ego-planner-swarm` 只读；历史运行与证据只读。
 
-本轮 Advisory 轻量验证闭环完成（包含不通过结论），连续飞行主线不变。仿真可显式指定
+上一轮 Advisory 轻量验证闭环完成（包含不通过结论），连续飞行主线不变。仿真可显式指定
 `gnss_observation_seed`（driver `--gnss-seed`），只改变 GNSS 随机抽样 seed；
 与 `advisory_trial` 的 seed 权威互斥。默认留空维持原 seed，实际 seed 登记在
 full_stack 与 scenario 清单；地图、噪声幅值、任务、风险权重、物理检查与在线预算均保持。
@@ -20,6 +20,18 @@ Advisory 当前语义为 `pose6_fixed_two_source_envelope_v2`：GNSS 独占星�
 `K_H sqrt(lambda_max(C_xy)) + b_H + s_H` / `K_V sqrt(C_zz) + b_V + s_V`，
 本配置 K_H=K_V=5。它是固定地图／对齐／外参、声明源内噪声条件下的未校准几何代理；
 正常误差包络、经验误差界和故障完整性 PL 不互换。数值资格与 Current Monitor 执行许可分开。
+
+当前针对性开发首先澄清预测对象：`FusionAdvisoryResult.prediction_target` 为
+`LOCAL_LINEARIZED_POSE_INCREMENT_FIXED_MAP`，`bounds_estimator_absolute_error=false`，
+验证输出显式序列化这两个字段。瞬时固定地图信息逆矩阵描述局部线性化位姿增量，
+不含 GLIO 历史漂移/地图/对齐偏差的绝对定位误差模型。同参考时刻、同map轴、同单位
+只能授予配对诊断，不能授予同一误差随机变量或覆盖资格。误差审计仍保留原绝对误差、
+原条件H/V和两次超界；不改数学计算、K/sigma、prior OFF、风险权重或物理执行规则。
+诊断1102原请求11/14在传播前已有z误差约-.4044/-.4536 m；传播与真值运动之差为
+毫米量级，不能解释该持续误差。新独立数据尚待模型/参数冻结后采集。
+接口验证：`log/20261010T163030Z_438/export/analysis/vertical_object_corrected/diagnosis.json`
+的6份完整原输入重放通过对象声明检查；原H/V保持至1e-10、原2次超界保留。
+来源去重/噪声尺度4项`AdvisoryCalibration.*`通过；该结果不授予绝对误差覆盖资格。
 
 完整新冻结使用 v9，保留原 state/GNSS/cloud/map/reference/receipt；合格正向短区间
 由真实 IMU 传播均值、F、Q 和交叉状态，原后验 envelope `2(FPFᵀ+Q)` 只作对照，

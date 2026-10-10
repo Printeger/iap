@@ -2,6 +2,18 @@
 
 Status: experimental; no empirical error or fused integrity qualification.
 
+The explicit output target is `LOCAL_LINEARIZED_POSE_INCREMENT_FIXED_MAP`;
+`bounds_estimator_absolute_error=false`. The covariance is the inverse of
+instantaneous local linearized information at the queried map point, with
+shared pose nuisance variables marginalized and the map/alignment/extrinsics
+conditioned as known. It does not represent the covariance of the historical
+GLIO absolute localization error. Source support geometry is also a proxy for
+future measurement availability. Equal metres, axes and reference epoch do
+not make these the same error random variable. H/V may inform a conditional
+geometric route preference; absolute truth-error comparison remains a
+diagnostic that can expose missing uncertainty, not estimator coverage proof.
+Original absolute errors and model exceedances must remain visible.
+
 At a frozen GNSS epoch, the interface supplies one observable channel per
 `(constellation, sat_id)`. Exact representation copies enter the shared visible
 geometry set once, for both nominal information and fault subsets. Conflicting

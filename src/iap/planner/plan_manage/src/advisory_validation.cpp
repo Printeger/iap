@@ -396,6 +396,9 @@ void evaluate(const Input& source,const std::string& label,const std::string& id
     poseMatrix(matrices,"lidar_pose_information",result.lidar.joint_pose_information,called);
     matrices<<",\"cross_source_noise_inflation\":";number(matrices,f.cross_source_noise_inflation);
     matrices<<",\"qualification\":"<<std::quoted(f.qualification);
+    matrices<<",\"prediction_target\":"<<std::quoted(f.prediction_target)
+      <<",\"bounds_estimator_absolute_error\":"
+      <<(f.bounds_estimator_absolute_error?"true":"false");
     matrices<<",\"weak_direction_prior_fraction\":";
     if(result.valid) {
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(f.lambda_pred);

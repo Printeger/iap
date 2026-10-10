@@ -118,6 +118,14 @@ def main():
                 continue
             directory = run/'export/advisory/validation'/(label+'_current')
             meta = json.loads((directory/'input.json').read_text())
+            model = json.loads((directory/'matrices.jsonl').read_text().splitlines()[0])
+            if (model.get('prediction_target') != 'LOCAL_LINEARIZED_POSE_INCREMENT_FIXED_MAP' or
+                    model.get('bounds_estimator_absolute_error') is not False):
+                raise ValueError('explicit predictor error target required for error diagnosis')
+            item.update(prediction_target=model['prediction_target'],
+                        evaluated_error_target='GLIO_ABSOLUTE_LOCALIZATION_ERROR_MAP_AT_REFERENCE',
+                        same_error_random_variable=False,
+                        bounds_estimator_absolute_error=False)
             row = rows(directory/'points.csv')[0]
             try:
                 coordinate = audit(meta)
@@ -170,7 +178,9 @@ def main():
                             map_up_enu_angle_deg=coordinate['map_up_enu_angle_deg'],
                             reason='UNCALIBRATED_MARGINAL_NOISE_MAP_AND_FUSED_FAULTS')
                 item['qualified']=bool(item['reference_time_qualified'] and item['predictor_valid'])
-                item['qualification_scope']='SAME_REFERENCE_CONDITIONAL_ERROR_PAIR'
+                # Keep the original values/exceedances. Frame/time pairing is
+                # not equality of error random variables or error coverage.
+                item['qualification_scope']='SAME_REFERENCE_MODEL_VS_ABSOLUTE_ERROR_DIAGNOSTIC'
                 item['empirical_bound_qualified']=False
                 if item['qualified']:item['reason']=''
                 else:item['reason']='REFERENCE_TIME_OR_PREDICTOR_UNAVAILABLE'

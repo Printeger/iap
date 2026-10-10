@@ -306,6 +306,12 @@ enum class AdvisoryNumericalStatus { NOT_EVALUATED, OBSERVATION_SUPPORTED,
   INVALID_INFORMATION, RANK_DEFICIENT, REGULARIZATION_DOMINATED };
 
 struct FusionAdvisoryResult {
+  // Instantaneous likelihood information describes a local pose increment
+  // with map/alignment/extrinsics conditioned as known. It is not historical
+  // GLIO absolute localization-error covariance, even in the same map epoch.
+  static constexpr const char* prediction_target =
+      "LOCAL_LINEARIZED_POSE_INCREMENT_FIXED_MAP";
+  static constexpr bool bounds_estimator_absolute_error = false;
   bool available = false;
   bool valid = false;
   bool fallback = true;
