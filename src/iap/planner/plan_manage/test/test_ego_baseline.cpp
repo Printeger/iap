@@ -217,6 +217,7 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static uint64_t attempt(const EGOPlannerManager& manager) {return manager.planning_attempt_id_;}
   static void soleWarning(EGOPlannerManager& manager) {
     const auto version=manager.planning_view_->risk_version;
     manager.planning_view_->advisory_query.query=[version](const Eigen::Vector3d&) {
@@ -1405,6 +1406,98 @@ TEST(EgoBaseline, ShortRestingCurveCompletesBeforeReplanThresholdAndRequiresFeed
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::waitingForTarget(fsm));
 }
 
+TEST(EgoBaseline, RollingContinuationTriggersBeforeDecelerationAndRejectsRestHandover) {
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),local(-1.2,0,1),goal(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},100.,start);GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+  ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,goal,zero,zero));
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,local,zero,true,false));manager.endPlanningView();
+  // Optional SAME captured spline/PVA geometry tests the real timing seam.
+  // Translation places it inside this observed fixture, which grants no
+  // forest physical authorization and is not a full sensor/map replay.
+  if(const char* path=std::getenv("IAP_D4_CONTINUATION_INPUT")) {
+    boost::property_tree::ptree d;boost::property_tree::read_json(path,d);
+    const auto point=[](const auto& values) {Eigen::Vector3d p;size_t i=0;
+      for(const auto& x:values) p[i++]=x.second.template get_value<double>();return p;};
+    const auto& c=d.get_child("actual_curve");const auto& controls=c.get_child("control_points_m");
+    Eigen::MatrixXd q(3,controls.size());size_t i=0;const Eigen::Vector3d offset=start-point(d.get_child("real_start_p_m"));
+    for(const auto& x:controls) q.col(i++)=point(x.second)+offset;
+    ego_planner::UniformBspline curve(q,3,c.get<double>("interval_s"));
+    Eigen::VectorXd knots(c.get_child("knots_s").size());i=0;
+    for(const auto& x:c.get_child("knots_s")) knots[i++]=x.second.get_value<double>();curve.setKnot(knots);
+    manager.local_data_.position_traj_=curve;manager.local_data_.velocity_traj_=curve.getDerivative();
+    manager.local_data_.acceleration_traj_=manager.local_data_.velocity_traj_.getDerivative();
+    manager.local_data_.duration_=curve.getTimeSum();manager.local_data_.start_time_=node->now();
+  }
+  const auto predecessor=manager.local_data_;const double duration=predecessor.duration_;
+  double deceleration=0;
+  auto v=predecessor.velocity_traj_;auto a=predecessor.acceleration_traj_;
+  for(double t=duration-.02;t>=0;t-=.02) if(v.evaluateDeBoorT(t).norm()>1e-5 &&
+      v.evaluateDeBoorT(t).dot(a.evaluateDeBoorT(t))>=0) {deceleration=t;break;}
+  ASSERT_GT(deceleration,1.6);
+  const double elapsed=std::max(.01,deceleration-1.6-.01);
+  ASSERT_LT(elapsed,1.);
+  const auto prepare=[&](double time) {
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),
+        static_cast<int64_t>((100.+time)*1e9)),RCL_RET_OK);
+    auto curve=predecessor.position_traj_;const auto p=curve.evaluateDeBoorT(time);
+    const double stamp=node->now().seconds();
+    GridMapTestAccess::input(*manager.grid_map_,{},stamp,p);GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,stamp,1,p);
+  };
+  prepare(elapsed);
+  auto odom=std::make_shared<nav_msgs::msg::Odometry>();odom->header.frame_id="map";odom->header.stamp=node->now();
+  auto curve=predecessor.position_traj_;const auto p=curve.evaluateDeBoorT(elapsed);
+  odom->pose.pose.position.x=p.x();odom->pose.pose.position.y=p.y();odom->pose.pose.position.z=p.z();
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,p,goal);
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,local,odom);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,predecessor.traj_id_,100.+elapsed);
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
+  // No future moving window remains. Must retain active, without even a search.
+  prepare(duration-.8);
+  const auto queries=ego_planner::EGOPlannerManagerTestAccess::attempt(manager);
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm));
+  EXPECT_FALSE(manager.hasPendingTrajectory());
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  EXPECT_EQ(ego_planner::EGOPlannerManagerTestAccess::attempt(manager),queries);
+  // Fresh motion BEFORE the braking window can still use the original 1.6 s
+  // AT_TIME protocol with the exact same-time P/V/A and nonzero velocity.
+  prepare(elapsed);
+  const bool connected=ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm);
+  ASSERT_TRUE(connected);
+  ASSERT_TRUE(manager.hasPendingTrajectory());
+  const auto candidate=manager.publicationTrajectory();const double t=candidate.start_time_.seconds()-100.;
+  EXPECT_LT(t,deceleration);
+  auto new_p=candidate.position_traj_;auto new_v=candidate.velocity_traj_;auto new_a=candidate.acceleration_traj_;
+  EXPECT_LT((new_p.evaluateDeBoorT(0)-curve.evaluateDeBoorT(t)).norm(),1e-5);
+  EXPECT_LT((new_v.evaluateDeBoorT(0)-v.evaluateDeBoorT(t)).norm(),1e-5);
+  EXPECT_LT((new_a.evaluateDeBoorT(0)-a.evaluateDeBoorT(t)).norm(),1e-5);
+  EXPECT_GT(new_v.evaluateDeBoorT(0).norm(),.1);
+  EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  // A feedback timestamp is actual activation evidence only at that time;
+  // never inject a future command into the earlier planning callback.
+  prepare(t);
+  auto activated_odom=std::make_shared<nav_msgs::msg::Odometry>(*odom);
+  activated_odom->header.stamp=node->now();
+  const auto handover_p=curve.evaluateDeBoorT(t),handover_v=v.evaluateDeBoorT(t);
+  activated_odom->pose.pose.position.x=handover_p.x();activated_odom->pose.pose.position.y=handover_p.y();
+  activated_odom->pose.pose.position.z=handover_p.z();
+  activated_odom->twist.twist.linear.x=handover_v.x();activated_odom->twist.twist.linear.y=handover_v.y();
+  activated_odom->twist.twist.linear.z=handover_v.z();
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,new_p.evaluateDeBoorT(candidate.duration_),activated_odom);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,candidate.traj_id_,candidate.start_time_.seconds());
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  EXPECT_EQ(manager.local_data_.traj_id_,candidate.traj_id_);
+}
+
 TEST(EgoBaseline, KnownOccupiedMissionRemainsOriginalAndCannotBeAuthorized) {
   auto node=makeNode();
   auto owner=std::make_unique<ego_planner::EGOPlannerManager>(); auto* manager=owner.get();
@@ -2001,21 +2094,10 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
         node->create_publisher<traj_utils::msg::Bspline>("unsafe_connection_brake",10));
     // Publication checks the complete old tail, including the cancellation
     // branch after the 1.6 s handover. Any known tail violation rules it out.
-    // A distant failure still leaves time for the original actual-PVA entry
-    // to publish a fully checked replacement; a near failure needs braking.
+    // A time margin alone cannot prove the replacement activation interval
+    // or a failed-replacement stop. Retain checked braking at every distance.
     const bool brake=ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.);
-    EXPECT_EQ(brake,unsafe_time<2.5 || blocked_mission);
-    if(unsafe_time>2.5 && !blocked_mission) {
-      ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
-      EXPECT_GT(manager.local_data_.traj_id_,predecessor.traj_id_);
-      EXPECT_FALSE(manager.hasPendingTrajectory());
-      EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(start,1e-9));
-      EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(zero,1e-9));
-      EXPECT_GT((manager.local_data_.position_traj_.evaluateDeBoorT(manager.local_data_.duration_)-start).norm(),.2);
-      EXPECT_TRUE(manager.assessTrajectory(manager.local_data_.position_traj_,0,100.).executable());
-      EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
-      continue;
-    }
+    EXPECT_TRUE(brake);
     EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
     EXPECT_FALSE(manager.hasPendingTrajectory());
     ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));

@@ -71,9 +71,9 @@ namespace ego_planner
       if(const auto* log=glim::RunLogManager::get_if_initialized()) {
         const auto name="planner_execution_"+std::to_string(getpid());
         execution_events_.open(log->profiling_path(name+".csv"));
-        execution_events_<<"event,trajectory_id,ros_time_s,steady_time_s,effective_time_s,command_time_s,active_id,assessment_id\n";
+        execution_events_<<"event,trajectory_id,ros_time_s,steady_time_s,effective_time_s,command_time_s,active_id,assessment_id,px,py,pz,vx,vy,vz,ax,ay,az\n";
         std::ofstream registration(log->metadata_path("manifests/"+name+".json"));
-        registration<<"{\"schema\":\"iap_execution_events_v1\",\"artifacts\":[\"profiling/"<<name<<".csv\"]}\n";
+        registration<<"{\"schema\":\"iap_execution_events_v2\",\"artifacts\":[\"profiling/"<<name<<".csv\"]}\n";
       }
     }
     /* callback*/
@@ -303,6 +303,11 @@ namespace ego_planner
     odom_orient_.z() = msg->pose.pose.orientation.z;
 
     have_odom_ = true;
+    if(applied_odom_stamp_s_-last_motion_event_s_>=.1) {
+      last_motion_event_s_=applied_odom_stamp_s_;
+      recordExecutionEvent("measured_motion",applied_command_ ? static_cast<int>(applied_command_->trajectory_id) : -1,
+          NAN,applied_odom_stamp_s_,planner_manager_->local_data_.traj_id_,-1,&odom_pos_,&odom_vel_);
+    }
   }
 
   void EGOReplanFSM::BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg)
@@ -502,19 +507,29 @@ namespace ego_planner
   }
 
   void EGOReplanFSM::recordExecutionEvent(const char* event,int id,
-      double effective,double command_time,int active,int assessment) {
+      double effective,double command_time,int active,int assessment,
+      const Eigen::Vector3d* position,const Eigen::Vector3d* velocity,const Eigen::Vector3d* acceleration) {
     // Receipt callback and FSM timers share only this diagnostic stream. They
     // never read each other's mutable execution state for an event row.
     const double ros=node_->now().seconds();
     const double steady=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     std::lock_guard<std::mutex> lock(execution_events_mutex_);
     if(execution_events_) execution_events_<<std::setprecision(17)<<event<<','<<id<<','<<ros<<','<<steady
-        <<','<<effective<<','<<command_time<<','<<active<<','<<assessment<<'\n';
+        <<','<<effective<<','<<command_time<<','<<active<<','<<assessment;
+    if(execution_events_) {
+      for(const auto* vector:{position,velocity,acceleration})
+        for(int axis=0;axis<3;++axis) execution_events_<<','<<(vector ? (*vector)[axis] : NAN);
+      execution_events_<<'\n';
+    }
     if(std::string(event)=="task_reached") execution_events_.flush();
   }
 
   void EGOReplanFSM::executingCommandCallback(quadrotor_msgs::msg::PositionCommand::ConstSharedPtr command) {
-    recordExecutionEvent("feedback_received",command->trajectory_id,NAN,rclcpp::Time(command->header.stamp).seconds());
+    const Eigen::Vector3d p(command->position.x,command->position.y,command->position.z);
+    const Eigen::Vector3d v(command->velocity.x,command->velocity.y,command->velocity.z);
+    const Eigen::Vector3d a(command->acceleration.x,command->acceleration.y,command->acceleration.z);
+    recordExecutionEvent("feedback_received",command->trajectory_id,NAN,
+        rclcpp::Time(command->header.stamp).seconds(),-1,-1,&p,&v,&a);
     std::atomic_store(&pending_command_,std::move(command));
   }
 
@@ -681,12 +696,12 @@ namespace ego_planner
         }
         // Keep the original final-target settling/arrival seam. The local
         // completion trigger below applies to nonfinal resting segments only.
-        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
+        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && time_now.seconds() >= continuationTiming(time_now).trigger_s)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
       }
-      else if (t_cur > replan_thresh_ || t_cur > info->duration_ - 1e-2)
+      else if (time_now.seconds() >= continuationTiming(time_now).trigger_s || t_cur > info->duration_ - 1e-2)
       {
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
@@ -737,7 +752,10 @@ namespace ego_planner
     start_vel_ = odom_vel_;
     start_acc_.setZero();
 
-    if(planner_manager_->hasPendingTrajectory() || !planner_manager_->beginPlanningView()) return false;
+    if(planner_manager_->hasPendingTrajectory()) return false;
+    recordExecutionEvent("planning_started",planner_manager_->local_data_.traj_id_,node_->now().seconds(),
+        NAN,planner_manager_->local_data_.traj_id_,-1,&start_pt_,&start_vel_,&start_acc_);
+    if(!planner_manager_->beginPlanningView()) return false;
     struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
     return callReboundReplan(true,false);
   }
@@ -749,9 +767,13 @@ namespace ego_planner
     if(planner_manager_->hasPendingTrajectory()) return false;
     auto& info=planner_manager_->local_data_;
     const auto now=node_->now();
-    const double remaining=info.start_time_.seconds()+info.duration_-now.seconds();
-    const double advance=std::min(continuation_lead_s,remaining);
-    if(advance<=.1) {
+    const auto timing=continuationTiming(now);
+    if(!timing.moving) {
+      if(missed_window_trajectory_id_!=info.traj_id_) {
+        missed_window_trajectory_id_=info.traj_id_;
+        recordExecutionEvent("moving_window_missed",info.traj_id_,timing.deceleration_s,
+            timing.connection.seconds(),info.traj_id_);
+      }
       // A short resting local curve may finish before the rolling-replan
       // threshold. Its elapsed time only requests planning; actual command
       // identity and fresh measured rest own the transition to a new start.
@@ -759,15 +781,46 @@ namespace ego_planner
       if(!executingTrajectoryRestConfirmed()) return false;
       return planFromGlobalTraj(); // Same actual-PVA planning and final publication checks.
     }
-    const auto connection=now+rclcpp::Duration::from_seconds(advance);
+    const auto connection=timing.connection;
     const double t=connection.seconds()-info.start_time_.seconds();
     start_pt_=info.position_traj_.evaluateDeBoorT(t);
     start_vel_=info.velocity_traj_.evaluateDeBoorT(t);
     start_acc_=info.acceleration_traj_.evaluateDeBoorT(t);
-    if(!planner_manager_->beginPlanningView(std::min(1.5,advance-.1))) return false;
+    recordExecutionEvent("planning_started",info.traj_id_,connection.seconds(),NAN,info.traj_id_,
+        -1,&start_pt_,&start_vel_,&start_acc_);
+    if(!planner_manager_->beginPlanningView(1.5)) return false;
     struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
     planner_manager_->setPlanningConnection(connection,info.traj_id_);
     return callReboundReplan(false,false);
+  }
+
+  EGOReplanFSM::ContinuationTiming EGOReplanFSM::continuationTiming(const rclcpp::Time& now)
+  {
+    auto& info=planner_manager_->local_data_;
+    const double start=info.start_time_.seconds();
+    const bool changed=timing_trajectory_id_!=info.traj_id_ || timing_start_s_!=start;
+    if(changed) {
+      timing_trajectory_id_=info.traj_id_;timing_start_s_=start;
+      terminal_deceleration_s_=start;
+      // Scan the final decreasing-speed lobe of the ACTUAL spline, once per
+      // active ID. The 0.02 s step is the existing execution sampling scale;
+      // choose the earlier side of the peak. This is scheduling, not a new
+      // physical permission or a continuous envelope proof.
+      for(double t=info.duration_-.02;t>=0.;t-=.02) {
+        const auto v=info.velocity_traj_.evaluateDeBoorT(t);
+        if(v.norm()>1e-5 && v.dot(info.acceleration_traj_.evaluateDeBoorT(t))>=0.) {
+          terminal_deceleration_s_=start+t;break;
+        }
+      }
+    }
+    const double trigger=start+std::max(0.,std::min(replan_thresh_,
+        terminal_deceleration_s_-start-continuation_lead_s-.1));
+    if(changed) recordExecutionEvent("rolling_window",info.traj_id_,terminal_deceleration_s_,trigger,info.traj_id_);
+    const auto connection=now+rclcpp::Duration::from_seconds(continuation_lead_s);
+    const double elapsed=connection.seconds()-start;
+    const bool moving=elapsed>0. && elapsed<info.duration_ && connection.seconds()<terminal_deceleration_s_ &&
+        info.velocity_traj_.evaluateDeBoorT(elapsed).norm()>.1;
+    return {trigger,terminal_deceleration_s_,connection,moving};
   }
 
   bool EGOReplanFSM::executingTrajectoryRestConfirmed()
@@ -912,6 +965,11 @@ namespace ego_planner
             GridExecutionReason::TRACKING_ERROR ? "tracking_error" :
             "remaining_failure", assessment.execution_reason);
         const double lead = assessment.first_execution_time_s - elapsed;
+        const std::string failure_event=std::string("execution_rejected_")+
+            gridExecutionReasonName(assessment.execution_reason);
+        recordExecutionEvent(failure_event.c_str(),assessment.trajectory_id,
+            info.start_time_.seconds()+assessment.first_execution_time_s,NAN,info.traj_id_,
+            assessment.trajectory_id,&odom_pos_,&odom_vel_);
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                              "Remaining trajectory %s, lead=%.2fs",
                              gridExecutionReasonName(assessment.execution_reason), lead);
@@ -934,18 +992,10 @@ namespace ego_planner
           // Scheduled publication checks the COMPLETE predecessor tail for
           // CANCEL_PENDING, including after handover. Any known hard tail
           // failure rules out that continuation, regardless of its lead time.
-          // A distant failure can still admit a checked actual-PVA replacement.
-          // Reuse the original immediate entry only for this revoked-tail
-          // protection case, with the FULL original 1.5 s planning allowance
-          // plus the existing emergency margin before the known violation.
-          // This is never a fallback for a late normal scheduled candidate.
-          if(lead>1.5+emergency_time_ && planFromGlobalTraj()) {
-            changeFSMExecState(EXEC_TRAJ,"checked revoked-tail replacement");
-            publishSwarmTrajs(false);
-          } else {
-            flag_escape_emergency_=true;
-            changeFSMExecState(EMERGENCY_STOP,"unsafe predecessor tail");
-          }
+          // Until both the activation interval and a failed-replacement stop
+          // are checked, distance/time alone cannot authorize a replacement.
+          flag_escape_emergency_=true;
+          changeFSMExecState(EMERGENCY_STOP,"unsafe predecessor tail");
         } else if (lead > emergency_time_) {
           changeFSMExecState(REPLAN_TRAJ, "SAFETY");
         } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
@@ -1145,12 +1195,19 @@ namespace ego_planner
       local_target_vel_=info->velocity_traj_.evaluateDeBoorT(info->duration_);
 
       if(!planner_manager_->publicationStillTimely()) {
+        recordExecutionEvent("publication_late_rejected",info->traj_id_,info->start_time_.seconds(),
+            NAN,planner_manager_->local_data_.traj_id_);
         planner_manager_->discardUnpublishedTrajectory(predecessor);
         last_failed_plan_time_s_=node_->now().seconds();
         return false;
       }
 
       /* 1. publish traj to traj_server */
+      const Eigen::Vector3d p=info->position_traj_.evaluateDeBoorT(0);
+      const Eigen::Vector3d v=info->velocity_traj_.evaluateDeBoorT(0);
+      const Eigen::Vector3d a=info->acceleration_traj_.evaluateDeBoorT(0);
+      recordExecutionEvent("publication_sent",info->traj_id_,info->start_time_.seconds(),
+          NAN,planner_manager_->local_data_.traj_id_,-1,&p,&v,&a);
       bspline_pub_->publish(bspline);
 
       /* 2. publish traj to the next drone of swarm */
@@ -1255,6 +1312,11 @@ namespace ego_planner
       bspline.knots.push_back(knots(i));
     }
 
+    const Eigen::Vector3d p=info->position_traj_.evaluateDeBoorT(0);
+    const Eigen::Vector3d v=info->velocity_traj_.evaluateDeBoorT(0);
+    const Eigen::Vector3d a=info->acceleration_traj_.evaluateDeBoorT(0);
+    recordExecutionEvent("brake_publication_sent",info->traj_id_,info->start_time_.seconds(),
+        NAN,planner_manager_->local_data_.traj_id_,-1,&p,&v,&a);
     bspline_pub_->publish(bspline);
 
     return true;

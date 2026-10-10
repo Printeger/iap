@@ -138,6 +138,12 @@ namespace ego_planner
     bool planFromGlobalTraj();
     bool planFromCurrentTraj();
     bool executingTrajectoryRestConfirmed();
+    // One timing authority in the existing FSM; refreshed only for a new curve.
+    struct ContinuationTiming { double trigger_s, deceleration_s; rclcpp::Time connection; bool moving; };
+    ContinuationTiming continuationTiming(const rclcpp::Time& now);
+    int timing_trajectory_id_ = -1, missed_window_trajectory_id_ = -1;
+    double timing_start_s_ = NAN, terminal_deceleration_s_ = 0.;
+    double last_motion_event_s_ = -std::numeric_limits<double>::infinity();
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);
@@ -159,7 +165,9 @@ namespace ego_planner
     void executingCommandCallback(quadrotor_msgs::msg::PositionCommand::ConstSharedPtr command);
     void recordExecutionEvent(const char* event,int trajectory_id,
         double effective_time_s=NAN,double command_time_s=NAN,
-        int active_id=-1,int assessment_id=-1);
+        int active_id=-1,int assessment_id=-1,
+        const Eigen::Vector3d* position=nullptr,const Eigen::Vector3d* velocity=nullptr,
+        const Eigen::Vector3d* acceleration=nullptr);
     std::ofstream execution_events_;
     std::mutex execution_events_mutex_;
     quadrotor_msgs::msg::PositionCommand::ConstSharedPtr applied_command_;
