@@ -596,9 +596,9 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
     result_.failure = Failure::NONE;
     // Discovery priority is separate from the objective/proof lower bound.
     // With advisory costs, unit-distance A* spends the cold prediction allowance
-    // flooding a ball before it reaches any terminal. Preserve the original
-    // geometric discovery pressure (3) even at the finite warning multiplier
-    // ceiling (3). This is queue priority, not a risk/objective weight.
+    // flooding a ball before it reaches any terminal. Keep discovery pressure
+    // above the finite warning multiplier ceiling (3 plus a unit margin).
+    // This is queue priority, not a risk/objective weight.
     // CostProof then reopens discovered
     // nodes under the original admissible bound; Guide returns a checked route.
     // This priority never changes measured edge/risk/terminal costs or grants
@@ -612,7 +612,7 @@ bool AStar::AstarSearchGoals(double step_size, const Vector3d& start_pt,
         for (const auto& goal : valid_goals) {
             GridNode terminal; terminal.index = goal.index;
             const double distance=getHeu(node, &terminal)+(Index2Coord(goal.index)-goals[goal.original]).norm();
-            best = std::min(best, (discovering ? 3.*3. : 1.)*distance+goal.terminal);
+            best = std::min(best, (discovering ? 3.+1. : 1.)*distance+goal.terminal);
         }
         if(performance_diagnostics_) result_.heuristic_s+=std::chrono::duration<double>(PlanningBudget::Clock::now()-began).count();
         return best;
