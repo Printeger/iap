@@ -157,3 +157,77 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def compare_commit_rejection(committed, rejected):
+    """Same-point diagnostic comparison; never an execution permission."""
+    cd = Path(committed).resolve()
+    commit = json.loads((cd/'snapshot.json').read_text())
+    rd = Path(rejected).resolve()
+    reject = json.loads((rd/'snapshot.json').read_text())
+    current_path = rd/reject['cell_flags_file']
+    current = (np.fromfile(current_path,dtype=np.uint8).reshape(tuple(reject['dimensions']))
+               if current_path.is_file() else None)
+    final = commit.get('final_check')
+    if not final or not final.get('cell_flags_file'):
+        raise ValueError('missing authoritative final-check mask')
+    previous_path = cd / final['cell_flags_file']
+    previous = (np.fromfile(previous_path, dtype=np.uint8).reshape(tuple(final['dimensions']))
+                if previous_path.is_file() else None)
+    if commit['actual_curve'] != reject['actual_curve']:
+        raise ValueError('different spline payloads')
+    t = reject['curve_first_execution_time_s']
+    p = _curve_point(reject['actual_curve'], t)
+    if not np.allclose(p, reject['curve_first_execution_position_m'], atol=1e-8, rtol=0):
+        raise ValueError('rejection position is not on saved spline')
+
+    def evidence(meta, flags, origin, resolution, mask_time, motion, sources=None):
+        index = np.floor((p - np.asarray(origin)) * (1. / resolution)).astype(int)
+        cell = int(flags[tuple(index)])
+        # Bound the nearest raw scan spatially, without interpreting a diagnostic
+        # cached distance or PL sample age as authoritative physical evidence.
+        radius = 1.5
+        low = np.maximum(0, np.floor((p-radius-np.asarray(origin))/resolution).astype(int))
+        high = np.minimum(flags.shape, np.ceil((p+radius-np.asarray(origin))/resolution).astype(int)+1)
+        region = tuple(slice(a,b) for a,b in zip(low,high))
+        raw = np.argwhere((flags[region] & 1) != 0) + low
+        centers = np.asarray(origin) + (raw+.5)*resolution
+        distances = np.linalg.norm(centers-p,axis=1)
+        nearest = int(np.argmin(distances)) if len(distances) else None
+        required = (meta['motion_body_radius_m']+meta['motion_tracking_reserve_m']+
+                    motion+.5*np.sqrt(3)*resolution)
+        result = dict(index=index.tolist(),flags=cell,observed=bool(cell & 4),
+                      required_clearance_m=required,motion_error_proxy_m=motion,
+                      nearest_raw_center_m=centers[nearest].tolist() if nearest is not None else None,
+                      raw_center_distance_m=float(distances[nearest]) if nearest is not None else None,
+                      map_age_s=mask_time-meta['cloud_stamp_s'])
+        if sources is not None:
+            result['source_bits'] = int(sources[tuple(index)])
+        return result
+
+    source = None
+    if current is not None and reject.get('observation_evidence_available') and (rd/reject['observation_sources_file']).is_file():
+        source = np.fromfile(rd/reject['observation_sources_file'],dtype=np.uint8).reshape(current.shape)
+    commit_meta = dict(commit,cloud_stamp_s=final['cloud_stamp_s'])
+    before = (evidence(commit_meta,previous,final['origin_m'],final['resolution_m'],
+                       final['evaluation_time_s'],final['motion_error_proxy_m'])
+              if previous is not None else dict(available=False,reason='final_check_cells_missing',
+                  motion_error_proxy_m=final['motion_error_proxy_m'],
+                  map_age_s=final['evaluation_time_s']-final['cloud_stamp_s']))
+    after = (evidence(reject,current,reject['origin_m'],reject['resolution_m'],
+                      reject['curve_evaluation_time_s'],reject['motion_error_proxy_m'],source)
+             if current is not None else dict(available=False,reason='rejection_cells_missing',
+                 motion_error_proxy_m=reject['motion_error_proxy_m'],
+                 map_age_s=reject['curve_evaluation_time_s']-reject['cloud_stamp_s']))
+    step = reject['curve_sample_step_s']
+    phase = t/step
+    return dict(schema='iap_commit_rejection_comparison_v1',committed=str(cd),rejected=str(rd),
+                trajectory_id=commit['candidate_trajectory_id'],same_spline=True,
+                rejection_curve_time_s=t,rejection_position_m=p.tolist(),
+                commit_same_point=before,rejection_same_point=after,
+                rejection_from_s=reject['curve_checked_from_time_s'],
+                sample_shift_from_zero_s=(phase-round(phase))*step,
+                commit_check_complete=final['execution_reason']=='OK' and not final['budget_exhausted'],
+                rejection_reason=reject['curve_execution_reason'],
+                commit_generation=final['generation'],rejection_generation=reject['generation'],
+                limitation='Same-point mask comparison, not native check replay. Final-check provenance mask and exact commit sample list were not captured; cannot assert same point was sampled at commit or source transition.')

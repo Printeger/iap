@@ -132,7 +132,9 @@ colcon --log-base log build \
 source install/setup.bash
 ```
 
-`traj_utils/Bspline` 新增 `start_mode`（`IMMEDIATE=0`、`AT_TIME=1`、`CANCEL_PENDING=2`）；更新后必须连同 `iap`、`plan_env`、`path_searching`、`bspline_opt`、`ego_planner` 重编译，避免旧消息类型混用。连续接续默认选择 1.6 s 后生效，并保留至少 0.1 s 发布余量，服务端在指定时刻前持续旧命令，拒绝迟到消息；立即恢复取消待生效曲线。物理／接续授权撤销先发送空载荷CANCEL_PENDING及精确队列ID，server继续当前命令；已接受ID单调保留，撤销后的迟到副本拒绝。撤销不代替检查制动，已激活曲线仍需原恢复检查。检查制动失败时不发布新曲线、保留原执行；拒绝日志不表示已取得安全停止保证。未检查的定点悬停生成入口已删除。撤销后若检查制动失败，预定生效时刻之后的旧ID命令可确认server保持原轨迹，释放本地待执行身份；不借此取得新运动授权。server队列切换、求值与命令时间戳共用一次时钟采样，避免跨生效时刻的旧ID被误认作撤销确认。
+`traj_utils/Bspline` 支持 `IMMEDIATE=0`、`AT_TIME=1`、`CANCEL_PENDING=2` 和 `REPLACE_PENDING=3`，scheduled 请求携带 `predecessor_id`，替换另携带 `replace_pending_id`。`TrajectoryFeedback` 在同一 drone 的 `planning/trajectory_feedback` 上报告服务端实际 active／pending、接受或拒绝及请求身份。更新消息或共享 `PlanningBudget` 头后必须重建并安装 `iap`、`plan_env`、`traj_utils`、`path_searching`、`bspline_opt`、`ego_planner`，避免消息和 C++ 接口混用。
+
+接续保留 1.6 s 提前量与至少 0.1 s 发布余量。远端失效先提交受检停止 B，取得权威接受结果后才在同一个 1.5 s／累计搜索 1.0 s 预算内单次生成 C；server 原子核对 active／pending、同一 ts 与 P/V/A，失败保留 B，禁止先取消 B。结果不确定保留可能身份和分支检查，以实际命令确认激活。取消 pending 只有完整旧尾段仍合格才合法；旧尾段失效时用原受检替代／停止处理，不能裸取消回退。受检保护失败必须报告保证失效，保留旧命令不构成安全证明。接口与当前验证边界见[当前流程](docs/spec/ego_based_planning_flow.md)。
 
 `--packages-up-to` 会把选定源码中的依赖包一起纳入构建。`plan_manage` 的包名是 `ego_planner`，`fake_drone` 的包名是 `poscmd_2_odom`。`local_sensing` 依赖 IAP 的消息和类型支持库，应由 colcon 按依赖顺序构建。
 

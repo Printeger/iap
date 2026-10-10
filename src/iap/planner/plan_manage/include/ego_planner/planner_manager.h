@@ -23,6 +23,8 @@
 #include <iap/predictor/predictor_module.hpp>
 
 #include <bspline_opt/bspline_optimizer.h>
+#include "traj_utils/msg/trajectory_feedback.hpp"
+#include "traj_utils/msg/bspline.hpp"
 #include <bspline_opt/uniform_bspline.h>
 #include <traj_utils/msg/data_disp.hpp>
 #include <plan_env/grid_map.h>
@@ -69,7 +71,7 @@ namespace ego_planner
     bool planCheckedBrake(const Eigen::Vector3d& position,
                           const Eigen::Vector3d& velocity,
                           const Eigen::Vector3d& acceleration,
-                          std::optional<rclcpp::Time> connection = std::nullopt);
+                          std::optional<rclcpp::Time> connection = std::nullopt, PlanningBudget::Ptr shared_budget = {});
     bool planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                         const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc);
     bool planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
@@ -138,7 +140,7 @@ namespace ego_planner
                                           bool check_connection = true,
                                           const GridMotionContext* bound_motion = nullptr);
     TrajectoryAssessment assessRemainingTrajectory(double now_s,
-                                                   bool pending_checked_stop = false);
+                                                   bool pending_checked_stop = false, bool include_advisory = true);
     // Forensic scalar query, tied to the assessed epoch/time/motion. Missing
     // proof returns nullopt and never substitutes the current live map.
     std::optional<GridPlanningCell> queryAssessmentCell(
@@ -167,15 +169,21 @@ namespace ego_planner
     };
     const GuideIdentity& guideIdentity() const { return guide_identity_; }
     PlanningBudget::Ptr planningBudget() const { return planning_budget_; }
-    bool beginPlanningView(double budget_seconds = 1.5);
+    bool beginPlanningView(double budget_seconds = 1.5, PlanningBudget::Ptr shared_budget = {});
     bool hasPlanningView() const { return planning_view_.has_value(); }
     void setPlanningConnection(rclcpp::Time start_time, int predecessor_id);
     bool advisoryGuidanceEnabled() const { return advisory_guidance_enabled_; }
     GridPlanningCell queryGuidanceCell(const Eigen::Vector3d& position,double clearance_reserve_m=0) const;
     bool hasPendingTrajectory() const { return pending_trajectory_.has_value(); }
     const LocalTrajData& publicationTrajectory() const {
-      return pending_trajectory_ ? *pending_trajectory_ : local_data_;
+      return replacement_candidate_ ? *replacement_candidate_ : pending_trajectory_ ? *pending_trajectory_ : local_data_;
     }
+    void observeServerResult(const traj_utils::msg::TrajectoryFeedback& result);
+    bool pendingConfirmed() const { return pending_trajectory_ && confirmed_pending_id_==pending_trajectory_->traj_id_; }
+    // Construction/receipt monitoring only; an unconfirmed proof grants no authority.
+    TrajectoryAssessment inspectPendingStopProof(double now_s, PlanningBudget::Ptr budget);
+    int replacementPendingId() const { return replacement_pending_id_; }
+    bool preparePendingReplacement();
     std::optional<int> requestPendingWithdrawal();
     void observeExecutingTrajectory(int trajectory_id,
         double command_time_s = -std::numeric_limits<double>::infinity());
@@ -342,6 +350,11 @@ namespace ego_planner
     std::vector<LocalTarget> planning_targets_;
     std::optional<Eigen::Vector3d> planning_target_center_;
     std::optional<LocalTrajData> pending_trajectory_;
+    // B stays authoritative while the one working C is in flight. Both possible
+    // branches remain checked until a matching result/command resolves identity.
+    std::optional<LocalTrajData> replacement_candidate_;
+    int confirmed_pending_id_=-1, replacement_pending_id_=-1;
+    bool pending_branch_proof_=false;
     std::optional<double> pending_withdrawal_requested_s_;
     std::optional<rclcpp::Time> connection_time_;
     int connection_predecessor_ = -1;

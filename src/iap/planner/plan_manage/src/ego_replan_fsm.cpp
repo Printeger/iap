@@ -1,5 +1,6 @@
 
 #include <ego_planner/ego_replan_fsm.h>
+#include <thread>
 #include <iap/util/run_log_manager.hpp>
 #include <iomanip>
 #include <unistd.h>
@@ -100,6 +101,11 @@ namespace ego_planner
             [this](quadrotor_msgs::msg::PositionCommand::ConstSharedPtr msg) {
               executingCommandCallback(msg);
             }, odom_options);
+    server_result_sub_=node_->create_subscription<traj_utils::msg::TrajectoryFeedback>(
+        "planning/trajectory_feedback",rclcpp::QoS(20).reliable(),
+        [this](traj_utils::msg::TrajectoryFeedback::ConstSharedPtr msg) {
+          std::atomic_store(&pending_server_result_,std::move(msg));
+        },odom_options);
     // std::bind(&EGOReplanFSM::odometryCallback, this, std::placeholders::_1));
 
     if (planner_manager_->pp_.drone_id >= 1)
@@ -533,8 +539,40 @@ namespace ego_planner
     std::atomic_store(&pending_command_,std::move(command));
   }
 
+  bool EGOReplanFSM::waitForServerResult(int id,uint8_t mode,PlanningBudget::Ptr budget) {
+    auto next_check=PlanningBudget::Clock::now();
+    while(budget && !budget->workExpired()) {
+      const auto result=std::atomic_load(&pending_server_result_);
+      if(result && result->request_id==id && result->request_mode==mode) {
+        planner_manager_->observeServerResult(*result);
+        recordExecutionEvent(result->accepted ? "server_request_accepted" : "server_request_rejected",
+            id,rclcpp::Time(result->effective_time).seconds(),rclcpp::Time(result->header.stamp).seconds(),
+            result->active_id,result->pending_id);
+        return result->accepted;
+      }
+      if(mode==traj_utils::msg::Bspline::AT_TIME && PlanningBudget::Clock::now()>=next_check) {
+        next_check=PlanningBudget::Clock::now()+std::chrono::milliseconds(200);
+        if(!planner_manager_->inspectPendingStopProof(node_->now().seconds(),budget).executable()) {
+          recordExecutionEvent("unconfirmed_backup_proof_lost",id,
+              planner_manager_->publicationTrajectory().start_time_.seconds());
+          break;
+        }
+      }
+      // Keep the existing publication reserve for returning to protection,
+      // including when an authoritative result never arrives.
+      if(budget->remaining()<=.1 ||
+          planner_manager_->publicationTrajectory().start_time_.seconds()-node_->now().seconds()<.1) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    recordExecutionEvent("server_result_uncertain",id,
+        planner_manager_->publicationTrajectory().start_time_.seconds(),NAN,planner_manager_->local_data_.traj_id_);
+    return false;
+  }
+
   void EGOReplanFSM::applyLatestCommandFeedback()
   {
+    const auto result=std::atomic_load(&pending_server_result_);
+    if(result) planner_manager_->observeServerResult(*result);
     const auto command=std::atomic_load(&pending_command_);
     if(command) {
       planner_manager_->observeExecutingTrajectory(command->trajectory_id,
@@ -954,7 +992,7 @@ namespace ego_planner
       applyLatestCommandFeedback();
       if(identity_changed()) continue;
       if (!assessment.executable()) {
-        if(const auto pending_id=planner_manager_->requestPendingWithdrawal()) {
+        if(const auto pending_id=executing_tail_executable ? planner_manager_->requestPendingWithdrawal() : std::nullopt) {
           // Withdraw at the revocation seam, before evidence export or checked
           // brake construction. The server retains the active predecessor.
           traj_utils::msg::Bspline withdrawal;
@@ -1174,6 +1212,11 @@ namespace ego_planner
       bspline.start_time = info->start_time_;
       bspline.start_mode = planner_manager_->hasPendingTrajectory() ? traj_utils::msg::Bspline::AT_TIME : traj_utils::msg::Bspline::IMMEDIATE;
       bspline.traj_id = info->traj_id_;
+      bspline.predecessor_id=planner_manager_->local_data_.traj_id_;
+      if(planner_manager_->replacementPendingId()>=0) {
+        bspline.start_mode=traj_utils::msg::Bspline::REPLACE_PENDING;
+        bspline.replace_pending_id=planner_manager_->replacementPendingId();
+      }
 
       Eigen::MatrixXd pos_pts = info->position_traj_.getControlPoint();
       bspline.pos_pts.reserve(pos_pts.cols());
@@ -1212,6 +1255,12 @@ namespace ego_planner
       recordExecutionEvent("publication_sent",info->traj_id_,info->start_time_.seconds(),
           NAN,planner_manager_->local_data_.traj_id_,-1,&p,&v,&a);
       bspline_pub_->publish(bspline);
+      if(bspline.start_mode==traj_utils::msg::Bspline::REPLACE_PENDING) {
+        const bool accepted=waitForServerResult(bspline.traj_id,bspline.start_mode,budget);
+        // Missing feedback retains BOTH checked branch identities. A matching
+        // actual command later resolves which one became active.
+        if(!accepted) return false;
+      }
 
       /* 2. publish traj to the next drone of swarm */
 
@@ -1292,10 +1341,12 @@ namespace ego_planner
           now.seconds()-stamp<=planner_manager_->currentMotionContext(true).max_motion_age_s)
         connection=timing.connection;
     }
+    const auto budget=planner_manager_->hasPlanningView() ? planner_manager_->planningBudget() :
+        std::make_shared<PlanningBudget>(1.5);
     if (!planner_manager_->planCheckedBrake(stop_pos, odom_vel_,
-                                            Eigen::Vector3d::Zero(),connection)) {
+                                            Eigen::Vector3d::Zero(),connection,budget)) {
       RCLCPP_ERROR_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
-          "Checked braking rejected; no replacement authorized; current trajectory retained");
+          "Checked braking rejected; execution guarantee lost; no replacement authorized; retained command is not a safety proof");
       return false;
     }
     if(planner_manager_->hasPendingTrajectory() &&
@@ -1313,6 +1364,7 @@ namespace ego_planner
     bspline.start_time = info->start_time_;
     bspline.start_mode = planner_manager_->hasPendingTrajectory() ? traj_utils::msg::Bspline::AT_TIME : traj_utils::msg::Bspline::IMMEDIATE;
     bspline.traj_id = info->traj_id_;
+    bspline.predecessor_id=predecessor.traj_id_;
 
     Eigen::MatrixXd pos_pts = info->position_traj_.getControlPoint();
     bspline.pos_pts.reserve(pos_pts.cols());
@@ -1338,6 +1390,41 @@ namespace ego_planner
     recordExecutionEvent("brake_publication_sent",info->traj_id_,info->start_time_.seconds(),
         NAN,planner_manager_->local_data_.traj_id_,-1,&p,&v,&a);
     bspline_pub_->publish(bspline);
+    if(bspline.start_mode==traj_utils::msg::Bspline::AT_TIME &&
+        waitForServerResult(bspline.traj_id,bspline.start_mode,budget) &&
+        planner_manager_->pendingConfirmed() && !budget->expired() && budget->searchRemaining()>0. &&
+        planner_manager_->local_data_.traj_id_==predecessor.traj_id_) {
+      // B has reached the ONLY execution owner before spending anything on C.
+      const auto checked=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false);
+      auto next_check=PlanningBudget::Clock::now();
+      budget->setExecutionGuard([this,&next_check,predecessor,ts=info->start_time_.seconds()]() {
+        if(node_->now().seconds()+.1>=ts) return false;
+        const auto command=std::atomic_load(&pending_command_);
+        if(!command || command->trajectory_id!=static_cast<unsigned>(predecessor.traj_id_)) return false;
+        const auto current=PlanningBudget::Clock::now();
+        if(current<next_check) return true;
+        next_check=current+std::chrono::milliseconds(200);
+        const auto branch=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false);
+        if(!branch.executable()) {
+          recordExecutionEvent("replacement_execution_proof_lost",branch.trajectory_id,ts,NAN,predecessor.traj_id_);
+          RCLCPP_ERROR(node_->get_logger(),"Replacement execution proof lost: %s; checked protection required",
+              gridExecutionReasonName(branch.execution_reason));
+        }
+        return branch.executable();
+      });
+      struct ClearGuard { PlanningBudget::Ptr budget; ~ClearGuard(){budget->setExecutionGuard({});} } clear_guard{budget};
+      if(checked.executable() && planner_manager_->beginPlanningView(1.5,budget)) {
+        struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
+        if(planner_manager_->preparePendingReplacement()) {
+          start_pt_=p;start_vel_=v;start_acc_=a;
+          recordExecutionEvent("backup_confirmed_replacement_started",bspline.traj_id,
+              info->start_time_.seconds(),NAN,predecessor.traj_id_,-1,&p,&v,&a);
+          if(callReboundReplan(false,false)) {
+            changeFSMExecState(EXEC_TRAJ,"checked pending replaced");
+          }
+        }
+      }
+    }
 
     return true;
   }

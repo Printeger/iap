@@ -547,7 +547,7 @@ GridPlanningCell EGOPlannerManager::queryLocalTargetCell(
                                       currentMotionContext());
 }
 
-bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
+bool EGOPlannerManager::beginPlanningView(double budget_seconds, PlanningBudget::Ptr shared_budget) {
   ++planning_attempt_id_;
   failed_search_result_.reset(); failed_search_context_.reset(); failed_candidate_curve_.reset();
   curve_stages_.clear(); dropped_curve_stages_=0;
@@ -556,7 +556,7 @@ bool EGOPlannerManager::beginPlanningView(double budget_seconds) {
   connection_time_.reset(); connection_predecessor_=-1;
   last_plan_failure_=PlanFailure::Target; last_candidate_assessment_={}; last_release_assessment_.reset();
   bspline_optimizer_->a_star_->clearLastResult();
-  planning_budget_ = std::make_shared<PlanningBudget>(std::min(1.5,std::max(0.0,budget_seconds)));
+  planning_budget_ = shared_budget ? shared_budget : std::make_shared<PlanningBudget>(std::min(1.5,std::max(0.0,budget_seconds)));
   planning_calls_at_start_=predictor_calls_->load();
   planning_timings_.freeze_s=planning_timings_.prediction_preparation_s=0;
   planning_timings_.backend_s=planning_timings_.final_checks_s=0;
@@ -791,15 +791,39 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessCheckedStopConn
   return checked;
 }
 
+EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::inspectPendingStopProof(
+    double now_s, PlanningBudget::Ptr budget) {
+  if(!pending_trajectory_) return {};
+  std::vector<Eigen::Vector3d> positions;
+  const auto collect=[&](const LocalTrajData& data,double from,double to) {
+    auto curve=data.position_traj_;
+    auto velocity=data.velocity_traj_;
+    const auto controls=velocity.getControlPoint();double speed=.1;
+    for(int i=0;i<controls.cols();++i) speed=std::max(speed,controls.col(i).norm());
+    const double step=std::min(.02,grid_map_->getResolution()/(2*speed));
+    for(double t=from;t<=to+step;t+=step) {
+      if(budget && budget->expired()) return;
+      positions.push_back(curve.evaluateDeBoorT(std::min(t,to)));
+    }
+    for(double t:curve.coordinateExtremaTimes(from,to)) positions.push_back(curve.evaluateDeBoorT(t));
+  };
+  const double seam=pending_trajectory_->start_time_.seconds()-local_data_.start_time_.seconds();
+  const double from=std::max(0.,now_s-local_data_.start_time_.seconds());
+  if(from>seam || seam>local_data_.duration_) return {};
+  collect(local_data_,from,seam);collect(*pending_trajectory_,0,pending_trajectory_->duration_);
+  const auto view=captureExecutionView(positions,now_s,true,budget);
+  return assessCheckedStopConnection(*pending_trajectory_,view,budget);
+}
+
 EGOPlannerManager::TrajectoryAssessment
-EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_stop) {
+EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_stop, bool include_advisory) {
   if (local_data_.start_time_.seconds() <= 0.0)
     return {};
   // The physical/current check runs at the FSM supervision rate. A full
   // predictor binding is limited to about 1 Hz so it cannot occupy every
   // 200 ms safety callback; omitted rounds treat advisory as unknown only.
   uint64_t version = 0;
-  if (now_s - last_runtime_advisory_query_s_ >= 1.0) {
+  if (include_advisory && now_s - last_runtime_advisory_query_s_ >= 1.0) {
     last_runtime_advisory_query_s_ = now_s;
     version = beginRiskQuery();
   }
@@ -822,6 +846,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
   const double old_end=std::numeric_limits<double>::infinity();
   collect(local_data_,old_end);
   if(pending_trajectory_) collect(*pending_trajectory_,std::numeric_limits<double>::infinity());
+  if(replacement_candidate_) collect(*replacement_candidate_,std::numeric_limits<double>::infinity());
   const auto view=captureExecutionView(positions,now_s,true);
   if(!view.physical.epoch) {
     TrajectoryAssessment failed;
@@ -872,10 +897,19 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
         assessment.first_advisory_time_s=warning;
     }
   }
-  if(pending_checked_stop && pending_trajectory_ && !pending_withdrawal_requested_s_ &&
+  if((pending_checked_stop || pending_branch_proof_) && pending_trajectory_ &&
+      pendingConfirmed() && !pending_withdrawal_requested_s_ &&
       !executing_tail_executable) {
     const auto stop=assessCheckedStopConnection(*pending_trajectory_,view);
-    if(stop.executable()) assessment=stop;
+    if(stop.executable()) {
+      assessment=stop;
+    }
+  }
+  // A missing replacement result leaves either B or C executable at the
+  // server. Check C even if the complete predecessor happens to remain valid.
+  if(replacement_candidate_ && assessment.executable()) {
+    const auto candidate=assessCheckedStopConnection(*replacement_candidate_,view);
+    if(!candidate.executable()) assessment=candidate;
   }
   assessment.executing_tail_executable=executing_tail_executable;
   return assessment;

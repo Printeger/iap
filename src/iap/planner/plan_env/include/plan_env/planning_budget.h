@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <memory>
+#include <functional>
 // One round owns this budget; nested optimizer/search calls share it.
 class PlanningBudget {
  public:
@@ -22,8 +23,21 @@ class PlanningBudget {
   double optionalRemaining() const { return std::max(0.,remaining()-.4); }
   void beginOptionalWork() { optional_work_=true; }
   void endOptionalWork() { optional_work_=false; }
-  bool workExpired() const { return expired() || (optional_work_ && optionalRemaining()<=0.); }
-  bool expired() const { return Clock::now() >= deadline_; }
+  void setExecutionGuard(std::function<bool()> guard) { execution_guard_=std::move(guard); }
+  bool executionLost() const { return execution_lost_; }
+  // Heavy supervision runs at solver work checkpoints, never from expired():
+  // map commit calls expired() while holding the occupancy authority lock.
+  bool workExpired() const {
+    if(expired()) return true;
+    if(execution_guard_ && !checking_guard_) {
+      checking_guard_=true;
+      const bool valid=execution_guard_();
+      checking_guard_=false;
+      if(!valid) execution_lost_=true;
+    }
+    return expired() || (optional_work_ && optionalRemaining()<=0.);
+  }
+  bool expired() const { return Clock::now() >= deadline_ || execution_lost_; }
   bool tryRepair(Repair reason) {
     // Optional quality (including its optimizer restarts) cannot consume the
     // last original allowance needed by current corridor publication. A soft
@@ -49,6 +63,8 @@ class PlanningBudget {
   unsigned limit_, used_ = 0;
   bool denied_ = false;
   bool optional_work_ = false;
+  std::function<bool()> execution_guard_;
+  mutable bool checking_guard_=false, execution_lost_=false;
   std::array<unsigned, static_cast<size_t>(Repair::Count)> counts_{};
 };
 #endif

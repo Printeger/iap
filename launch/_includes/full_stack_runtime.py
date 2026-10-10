@@ -206,6 +206,7 @@ def _setup(context):
     remaps = [("odom_world", "/drone_0_visual_slam/odom"),
               ("grid_map/odom", "/drone_0_visual_slam/odom"),
               ("planning/bspline", "/drone_0_planning/bspline"),
+              ("planning/trajectory_feedback", "/drone_0_planning/trajectory_feedback"),
               ("/position_cmd", "/drone_0_planning/pos_cmd"),
               ("risk/integrity", "/iap/integrity")]
     for local, remote in [("range", "range_meas"), ("ephem", "ephem"),
@@ -244,6 +245,7 @@ def _setup(context):
         Node(package="ego_planner", executable="traj_server", name="drone_0_traj_server",
              output="screen", parameters=[{"frame_id": "map", "traj_server/time_forward": 1.0}],
              remappings=[("planning/bspline", "/drone_0_planning/bspline"),
+              ("planning/trajectory_feedback", "/drone_0_planning/trajectory_feedback"),
                          ("/position_cmd", "/drone_0_planning/pos_cmd")]),
     ]
     if context.launch_configurations.get("start_grid_map_visualizer", "true").lower() == "true":

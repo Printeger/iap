@@ -9,7 +9,7 @@ import unittest
 import numpy as np
 
 from analyze_failure_map import inspect
-from analyze_curve_observation import inspect as inspect_curve
+from analyze_curve_observation import inspect as inspect_curve, compare_commit_rejection
 
 
 class FailureMapToolsTest(unittest.TestCase):
@@ -51,6 +51,34 @@ class FailureMapToolsTest(unittest.TestCase):
     def write(self):
         (self.directory / "snapshot.json").write_text(json.dumps(self.meta))
         self.flags.tofile(self.directory / "cells.bin")
+
+    def test_commit_comparison_does_not_invent_missing_map_evidence(self):
+        commit = self.directory / 'committed'
+        reject = self.directory / 'rejected'
+        commit.mkdir();reject.mkdir()
+        curve = dict(degree=3,interval_s=.1,control_points_m=[[0.,0.,.25]]*7,
+                     knots_s=[(i-3)*.1 for i in range(11)])
+        base = dict(self.meta,actual_curve=curve,candidate_trajectory_id=3,
+                    curve_first_execution_time_s=.11,curve_first_execution_position_m=[0.,0.,.25],
+                    curve_checked_from_time_s=.01,curve_sample_step_s=.02,
+                    curve_evaluation_time_s=10.1,curve_execution_reason='ENVIRONMENT_UNOBSERVED')
+        base['final_check'] = dict(cell_flags_file='final.bin',dimensions=self.flags.shape,
+            origin_m=self.meta['origin_m'],resolution_m=.1,evaluation_time_s=10.1,
+            motion_error_proxy_m=0.,cloud_stamp_s=10.,generation=3,
+            execution_reason='OK',budget_exhausted=False)
+        for directory in (commit,reject):
+            (directory/'snapshot.json').write_text(json.dumps(base))
+        result=compare_commit_rejection(commit,reject)
+        self.assertTrue(result['same_spline'])
+        self.assertFalse(result['commit_same_point']['available'])
+        self.assertFalse(result['rejection_same_point']['available'])
+        self.assertTrue(result['commit_check_complete'])
+        self.flags.tofile(commit/'final.bin')
+        self.flags[10,10,2]=0
+        self.flags.tofile(reject/'cells.bin')
+        result=compare_commit_rejection(commit,reject)
+        self.assertTrue(result['commit_same_point']['observed'])
+        self.assertFalse(result['rejection_same_point']['observed'])
 
     def test_route_exists_but_online_timed_out(self):
         self.write()

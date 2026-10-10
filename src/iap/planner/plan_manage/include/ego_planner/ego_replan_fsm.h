@@ -23,6 +23,7 @@
 #include "bspline_opt/bspline_optimizer.h"
 #include "plan_env/grid_map.h"
 #include "traj_utils/msg/bspline.hpp"
+#include "traj_utils/msg/trajectory_feedback.hpp"
 #include "traj_utils/msg/multi_bsplines.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "traj_utils/msg/data_disp.hpp"
@@ -101,6 +102,10 @@ namespace ego_planner
     // could acknowledge withdrawal using an old ID and a newer timestamp.
     std::shared_ptr<const quadrotor_msgs::msg::PositionCommand> pending_command_;
     rclcpp::CallbackGroup::SharedPtr odom_callback_group_;
+    std::shared_ptr<const traj_utils::msg::TrajectoryFeedback> pending_server_result_;
+    rclcpp::Subscription<traj_utils::msg::TrajectoryFeedback>::SharedPtr server_result_sub_;
+    bool waitForServerResult(int id,uint8_t mode,PlanningBudget::Ptr budget);
+
     Eigen::Quaterniond odom_orient_;
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state

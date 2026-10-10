@@ -1,6 +1,7 @@
 #include "bspline_opt/uniform_bspline.h"
 #include "nav_msgs/msg/odometry.hpp"
 #include "traj_utils/msg/bspline.hpp"
+#include "traj_utils/msg/trajectory_feedback.hpp"
 #include "quadrotor_msgs/msg/position_command.hpp"
 #include <optional>
 #include "std_msgs/msg/empty.hpp"
@@ -40,6 +41,10 @@ struct ScheduledTrajectory {
   int64_t id;
 };
 std::optional<ScheduledTrajectory> pending_traj;
+rclcpp::Publisher<traj_utils::msg::TrajectoryFeedback>::SharedPtr trajectory_feedback_pub;
+// The same result object is observable by native callback tests.
+traj_utils::msg::TrajectoryFeedback last_feedback;
+
 
 // yaw control
 double last_yaw_, last_yaw_dot_;
@@ -64,6 +69,24 @@ void publishExecutedCurve();
 void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
 {
   const auto now=server_node->now();
+  // Every receive path reports the actual queue after its atomic decision.
+  struct Reply {
+    const traj_utils::msg::Bspline& request;
+    rclcpp::Time receipt;
+    bool accepted=false;
+    std::string reason="REQUEST_REJECTED";
+    ~Reply() {
+      last_feedback.header.stamp=receipt;last_feedback.header.frame_id=command_frame;
+      last_feedback.request_id=request.traj_id;last_feedback.request_mode=request.start_mode;
+      last_feedback.accepted=accepted;last_feedback.reason=reason;
+      last_feedback.active_id=receive_traj_ ? traj_id_ : -1;
+      last_feedback.pending_id=pending_traj ? pending_traj->id : -1;
+      last_feedback.effective_time=request.start_time;
+      if(trajectory_feedback_pub) trajectory_feedback_pub->publish(last_feedback);
+    }
+  } reply{*msg,now};
+  const bool replace=msg->start_mode==traj_utils::msg::Bspline::REPLACE_PENDING;
+  const bool scheduled=replace || msg->start_mode==traj_utils::msg::Bspline::AT_TIME;
   if(msg->start_mode==traj_utils::msg::Bspline::CANCEL_PENDING) {
     if(!msg->pos_pts.empty() || !msg->knots.empty() || !msg->yaw_pts.empty()) {
       RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
@@ -75,7 +98,7 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
       RCLCPP_INFO(server_node->get_logger(),
           "Pending trajectory %ld withdrawn; active trajectory %ld continues; receipt_ros_time_s=%.9f effective_ros_time_s=%.9f steady_time_s=%.9f",
           msg->traj_id,traj_id_,now.seconds(),pending_traj->start.seconds(),executionSteadyTime());
-      pending_traj.reset();
+      pending_traj.reset();reply.accepted=true;reply.reason="PENDING_WITHDRAWN";
     } else {
       RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
           "Pending withdrawal ignored: trajectory %ld is not queued; receipt_ros_time_s=%.9f active_trajectory_id=%ld steady_time_s=%.9f",
@@ -83,7 +106,7 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
     }
     return;
   }
-  if(msg->start_mode!=traj_utils::msg::Bspline::IMMEDIATE && msg->start_mode!=traj_utils::msg::Bspline::AT_TIME) {
+  if(msg->start_mode!=traj_utils::msg::Bspline::IMMEDIATE && !scheduled) {
     RCLCPP_WARN(server_node->get_logger(),"Trajectory rejected: invalid start mode"); return;
   }
   const rclcpp::Time requested(msg->start_time,now.get_clock_type());
@@ -91,8 +114,12 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
     RCLCPP_WARN_THROTTLE(server_node->get_logger(),*server_node->get_clock(),1000,
         "Trajectory %ld rejected: identity already accepted",msg->traj_id); return;
   }
-  if(msg->start_mode==traj_utils::msg::Bspline::AT_TIME &&
-      (!receive_traj_ || requested<=now || pending_traj)) {
+  if(scheduled && (!receive_traj_ || requested<=now ||
+      msg->predecessor_id!=traj_id_ ||
+      (replace ? (!pending_traj || pending_traj->id!=msg->replace_pending_id ||
+                   pending_traj->start!=requested || now>=pending_traj->start)
+               : pending_traj.has_value()))) {
+    reply.reason="SCHEDULE_IDENTITY_OR_TIME_MISMATCH";
     RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: late, duplicate, or missing predecessor"); return;
   }
   if(msg->order!=3 || msg->pos_pts.size()<4 || msg->knots.size()!=msg->pos_pts.size()+4) {
@@ -143,7 +170,7 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
   candidate.start=requested; candidate.id=msg->traj_id;
   candidate.duration=pos_traj.getTimeSum();
   if(!(candidate.duration>0)) return;
-  if(msg->start_mode==traj_utils::msg::Bspline::AT_TIME) {
+  if(scheduled) {
     const double t=(requested-start_time_).seconds();
     if(t<0 || t>traj_duration_) {
       RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: predecessor ends before connection"); return;
@@ -153,14 +180,21 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
         RCLCPP_WARN(server_node->get_logger(),"Scheduled trajectory rejected: boundary derivative %zu",derivative); return;
       }
     }
+    if(replace) for(size_t derivative=0;derivative<3;++derivative)
+      if((pending_traj->curves[derivative].evaluateDeBoorT(0)-
+          candidate.curves[derivative].evaluateDeBoorT(0)).norm()>1e-5) {
+        reply.reason="PENDING_BOUNDARY_MISMATCH";return;
+      }
     highest_accepted_trajectory_id=candidate.id;
     pending_traj=std::move(candidate);
+    reply.accepted=true;reply.reason=replace ? "PENDING_REPLACED" : "PENDING_ACCEPTED";
     RCLCPP_INFO(server_node->get_logger(),"Trajectory %ld scheduled for %.6f",pending_traj->id,pending_traj->start.seconds());
     return;
   }
   pending_traj.reset();
   highest_accepted_trajectory_id=candidate.id;
   activateTrajectory(candidate,now);
+  reply.accepted=true;reply.reason="ACTIVATED";
 
   publishExecutedCurve();
 }
@@ -395,6 +429,9 @@ int main(int argc, char **argv)
   trajectory_curve_pub = node->create_publisher<visualization_msgs::msg::Marker>(
       "planning/trajectory_curve", 2);
 
+  trajectory_feedback_pub=node->create_publisher<traj_utils::msg::TrajectoryFeedback>(
+      "planning/trajectory_feedback",rclcpp::QoS(20).reliable());
+
   auto cmd_timer = node->create_wall_timer(
       std::chrono::milliseconds(10),
       cmdCallback);
@@ -429,6 +466,7 @@ int main(int argc, char **argv)
   bspline_sub.reset();
   pos_cmd_pub.reset();
   trajectory_curve_pub.reset();
+  trajectory_feedback_pub.reset();
   server_node.reset();
   node.reset();
   rclcpp::shutdown();

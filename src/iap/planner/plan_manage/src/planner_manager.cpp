@@ -1062,16 +1062,62 @@ namespace ego_planner
     connection_time_=start_time; connection_predecessor_=predecessor_id;
   }
 
+  void EGOPlannerManager::observeServerResult(const traj_utils::msg::TrajectoryFeedback& result) {
+    const double receipt=rclcpp::Time(result.header.stamp).seconds();
+    if(!std::isfinite(receipt) || receipt>node_->now().seconds() ||
+        result.header.frame_id!=grid_map_->getFrameId() || result.active_id!=local_data_.traj_id_) return;
+    if(replacement_candidate_ && result.request_id==replacement_candidate_->traj_id_ &&
+        result.request_mode==traj_utils::msg::Bspline::REPLACE_PENDING &&
+        rclcpp::Time(result.effective_time).nanoseconds()==replacement_candidate_->start_time_.nanoseconds()) {
+      if(result.accepted && result.pending_id==replacement_candidate_->traj_id_) {
+        pending_trajectory_=*replacement_candidate_;confirmed_pending_id_=result.pending_id;
+        replacement_candidate_.reset();replacement_pending_id_=-1;
+      } else if(!result.accepted && pending_trajectory_ && result.pending_id==pending_trajectory_->traj_id_) {
+        replacement_candidate_.reset();replacement_pending_id_=-1;
+      }
+    } else if(pending_trajectory_ && pending_withdrawal_requested_s_ &&
+        result.request_id==pending_trajectory_->traj_id_ &&
+        result.request_mode==traj_utils::msg::Bspline::CANCEL_PENDING && result.accepted &&
+        result.pending_id==-1 && receipt>=*pending_withdrawal_requested_s_) {
+      pending_trajectory_.reset();pending_withdrawal_requested_s_.reset();
+      confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
+    } else if(pending_trajectory_ && result.request_id==pending_trajectory_->traj_id_ &&
+        result.request_mode==traj_utils::msg::Bspline::AT_TIME && result.accepted &&
+        result.pending_id==pending_trajectory_->traj_id_ &&
+        rclcpp::Time(result.effective_time).nanoseconds()==pending_trajectory_->start_time_.nanoseconds()) {
+      confirmed_pending_id_=result.pending_id;
+    }
+  }
+
+  bool EGOPlannerManager::preparePendingReplacement() {
+    if(!pendingConfirmed() || replacement_candidate_ || pending_withdrawal_requested_s_ ||
+        !planning_budget_ || planning_budget_->expired() ||
+        pending_trajectory_->start_time_.seconds()-node_->now().seconds()<.1) return false;
+    replacement_pending_id_=pending_trajectory_->traj_id_;pending_branch_proof_=true;
+    setPlanningConnection(pending_trajectory_->start_time_,local_data_.traj_id_);
+    return true;
+  }
+
   std::optional<int> EGOPlannerManager::requestPendingWithdrawal() {
-    if(!pending_trajectory_) return std::nullopt;
+    if(!pending_trajectory_ || replacement_candidate_) return std::nullopt;
+    // Removing a branch-proven pending would restore A's revoked far tail.
+    // Reuse the original full-tail authority; uncertainty grants no cancellation.
+    if(!assessRemainingTrajectory(node_->now().seconds(),false).executing_tail_executable)
+      return std::nullopt;
     if(!pending_withdrawal_requested_s_) pending_withdrawal_requested_s_=node_->now().seconds();
     return pending_trajectory_->traj_id_;
   }
 
   void EGOPlannerManager::observeExecutingTrajectory(int trajectory_id,double command_time_s) {
     server_feedback_id_ = trajectory_id;
+    if(replacement_candidate_ && replacement_candidate_->traj_id_==trajectory_id) {
+      local_data_=*replacement_candidate_;replacement_candidate_.reset();pending_trajectory_.reset();
+      confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
+      pending_withdrawal_requested_s_.reset();return;
+    }
     if(pending_trajectory_ && pending_trajectory_->traj_id_==trajectory_id) {
       local_data_=*pending_trajectory_; pending_trajectory_.reset();
+      replacement_candidate_.reset();confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
       pending_withdrawal_requested_s_.reset();
       RCLCPP_INFO(node_->get_logger(),"Trajectory %d executing at its scheduled connection",trajectory_id);
     } else if(pending_trajectory_ && pending_withdrawal_requested_s_ &&
@@ -1095,7 +1141,8 @@ namespace ego_planner
   }
 
   void EGOPlannerManager::discardUnpublishedTrajectory(const LocalTrajData& predecessor) {
-    if(pending_trajectory_) pending_trajectory_.reset();
+    if(replacement_candidate_) { replacement_candidate_.reset();replacement_pending_id_=-1; }
+    else if(pending_trajectory_) {pending_trajectory_.reset();confirmed_pending_id_=-1;pending_branch_proof_=false;}
     else local_data_=predecessor;
     pending_withdrawal_requested_s_.reset();
     last_plan_failure_=planning_budget_ && planning_budget_->expired() ? PlanFailure::Budget : PlanFailure::Connection;
@@ -1385,7 +1432,9 @@ namespace ego_planner
       }
       ++continous_failures_count_; return false;
     };
-    if(pending_trajectory_ || planning_budget_->expired()) return fail(PlanFailure::Connection);
+    const bool replacing=replacement_pending_id_>=0 && pendingConfirmed() &&
+        pending_trajectory_->traj_id_==replacement_pending_id_;
+    if((pending_trajectory_ && !replacing) || planning_budget_->expired()) return fail(PlanFailure::Connection);
     if(!start_pt.allFinite() || !start_vel.allFinite() || !start_acc.allFinite() ||
        !target_pt.allFinite() || !target_vel.allFinite()) return fail(PlanFailure::Target);
     if(planning_targets_.empty()) planning_targets_.push_back({target_pt,target_vel,Eigen::Vector3d::Zero(),0});
@@ -1463,9 +1512,9 @@ namespace ego_planner
     // connected at 0.488 s. Reserve three quarters of the usable
     // search time for that one recovery, in addition to the existing 0.5 s
     // backend/check/commit reserve. No allowance is increased or restarted.
-    const bool normal_guide_found=optimizer.searchRecoveryGuide(.25*planning_budget_->searchRemaining());
+    const bool normal_guide_found=optimizer.searchRecoveryGuide((replacing ? 1. : .25)*planning_budget_->searchRemaining());
     const auto initialize_guide=[&]() {
-      const auto prefix=selectExecutablePrefix(optimizer.recoveryGuide());
+      auto prefix=selectExecutablePrefix(optimizer.recoveryGuide());
       guide_identity_.route_target=optimizer.recoveryGuide().back();
       if(prefix.budget_exhausted) { last_plan_failure_=PlanFailure::Budget;return false; }
       if(observation_attempt_.selected_observation && observation_attempt_.result=="SELECTED_OBSERVATION" &&
@@ -1494,6 +1543,34 @@ namespace ego_planner
       }
       const auto index=optimizer.a_star_->lastResult().selected_goal;
       if(index<target_indices.size()) selected=planning_targets_[target_indices[index]];
+      const bool observation=observation_attempt_.selected_observation && observation_attempt_.result=="SELECTED_OBSERVATION";
+      if(!observation) {
+        // ID6's accepted 6.63 s curve was revoked at t=.109 s in its 4.349 s
+        // far end; ID3's 10+ s curve failed at 8.674 s after .394 s execution.
+        // Keep route reach, but fit enough measured cruise for two original
+        // planning/publication windows plus the actual terminal braking lobe.
+        double stopping_lobe=std::max(.5,2*start_vel.norm()/std::max(.1,pp_.max_acc_));
+        if(local_data_.duration_>0) for(double t=local_data_.duration_-.02;t>=0;t-=.02) {
+          const auto v=local_data_.velocity_traj_.evaluateDeBoorT(t);
+          if(v.norm()>1e-5 && v.dot(local_data_.acceleration_traj_.evaluateDeBoorT(t))>=0) {
+            stopping_lobe=std::max(stopping_lobe,std::min(local_data_.duration_-t,
+                std::max(.5,2*pp_.max_vel_/std::max(.1,pp_.max_acc_))));break;
+          }
+        }
+        const double speed=pp_.ctrl_pt_dist/nominal_guide_interval;
+        const double arc_limit=speed*(2*(1.5+.1)+stopping_lobe);
+        if(prefix.length_m>arc_limit) {
+          double arc=0;size_t end=1;
+          for(;end<prefix.points.size();++end) {
+            const double segment=(prefix.points[end]-prefix.points[end-1]).norm();
+            if(arc+segment>=arc_limit) {
+              prefix.points[end]=prefix.points[end-1]+(prefix.points[end]-prefix.points[end-1])*((arc_limit-arc)/segment);
+              prefix.points.resize(end+1);prefix.length_m=arc_limit;break;
+            }
+            arc+=segment;
+          }
+        }
+      }
       selected.position=prefix.points.back();selected.velocity.setZero();selected.acceleration.setZero();
       guide_identity_.s_end=prefix.length_m;
       guide_identity_.committed_endpoint=selected.position;
@@ -1507,6 +1584,7 @@ namespace ego_planner
       optimizer.initializeFromGuide(control); return true;
     };
     if(!normal_guide_found) {
+      if(replacing) return fail(PlanFailure::Search);
       const auto search_failure=optimizer.a_star_->lastResult().failure;
       // The real start already passed the execution query. A route search
       // includes extra fitting room, so its blocked attachment or NO_PATH
@@ -1521,6 +1599,7 @@ namespace ego_planner
         return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Search : last_plan_failure_);
       last_plan_failure_=PlanFailure::None;
     } else if(optimizer.needsGuideReinitialization() && !initialize_guide()) {
+      if(replacing) return fail(last_plan_failure_);
       const auto blocked=selectExecutablePrefix(optimizer.recoveryGuide());
       if(!tryObservationApproach(start_pt,blocked) || !initialize_guide())
         return fail(last_plan_failure_==PlanFailure::None ? PlanFailure::Curve : last_plan_failure_);
@@ -1680,11 +1759,20 @@ namespace ego_planner
         const double spacing=std::min(.01,grid_map_->getResolution()/(4*std::max(.1,pp_.max_vel_)));
         if(connection_time_) {
           const double from=std::max(0.0,now-local_data_.start_time_.seconds());
-          const double to=local_data_.duration_; // Complete old tail also covers CANCEL_PENDING.
+          const double to=replacing ? connection_time_->seconds()-local_data_.start_time_.seconds() : local_data_.duration_;
+          // Confirmed B replaces the otherwise required complete cancellation tail.
           auto old=local_data_.position_traj_;
           for(double t=from;t<=to+spacing;t+=spacing) {
             if(planning_budget_->expired()) return fail(PlanFailure::Budget);
             samples.push_back({old.evaluateDeBoorT(std::min(t,to)),"predecessor_curve",std::min(t,to)});
+          }
+        }
+        if(replacing) {
+          auto backup=pending_trajectory_->position_traj_;
+          const double end=backup.getTimeSum();
+          for(double t=0;t<=end+spacing;t+=spacing) {
+            if(planning_budget_->expired()) return fail(PlanFailure::Budget);
+            samples.push_back({backup.evaluateDeBoorT(std::min(t,end)),"backup_curve",std::min(t,end)});
           }
         }
         const double duration=curve.getTimeSum();
@@ -1731,7 +1819,9 @@ namespace ego_planner
           candidate.acceleration_traj_=candidate.velocity_traj_.getDerivative();
           candidate.start_pos_=start_pt; candidate.duration_=curve.getTimeSum();
           next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
-          candidate.traj_id_=next_trajectory_id_; pending_trajectory_=candidate;
+          candidate.traj_id_=next_trajectory_id_;
+          if(replacing) replacement_candidate_=candidate;
+          else {pending_trajectory_=candidate;confirmed_pending_id_=-1;pending_branch_proof_=false;}
           pending_withdrawal_requested_s_.reset();
         } else updateTrajInfo(curve,node_->now());
         return true;
@@ -1844,7 +1934,7 @@ namespace ego_planner
 
   bool EGOPlannerManager::planCheckedBrake(
       const Eigen::Vector3d& position, const Eigen::Vector3d& velocity,
-      const Eigen::Vector3d& acceleration, std::optional<rclcpp::Time> connection)
+      const Eigen::Vector3d& acceleration, std::optional<rclcpp::Time> connection, PlanningBudget::Ptr shared_budget)
   {
     if (!position.allFinite() || !velocity.allFinite() ||
         !acceleration.allFinite() || pp_.max_acc_ <= 0.0) {
@@ -1859,7 +1949,8 @@ namespace ego_planner
     // opportunity. Reuse an active round's budget; otherwise bound this stop
     // action by the same 1.5 s cap. Future and immediate trials share the
     // original three constructions and never reset that budget.
-    const auto budget=planning_view_ ? planning_budget_ : std::make_shared<PlanningBudget>(1.5);
+    const auto budget=shared_budget ? shared_budget : planning_view_ ? planning_budget_ : std::make_shared<PlanningBudget>(1.5);
+    planning_budget_=budget;
     const auto predecessor=local_data_;
     if(connection && (pending_trajectory_ || server_feedback_id_!=predecessor.traj_id_ ||
         connection->seconds()-now<.1 || connection->seconds()<=predecessor.start_time_.seconds() ||
@@ -1867,6 +1958,7 @@ namespace ego_planner
     bool scheduled=connection.has_value();
     int immediate_attempt=0;
     for (int attempt = 0; attempt < 3 && budget && !budget->expired(); ++attempt) {
+      if(attempt && !budget->tryRepair(PlanningBudget::Repair::BackendRestart)) break;
       Eigen::Vector3d p=position,v=velocity,a=acceleration;
       if(scheduled) {
         const double t=connection->seconds()-predecessor.start_time_.seconds();
@@ -1935,6 +2027,7 @@ namespace ego_planner
           auto latest=view;latest.time_s=commit_time;
           if(!assessCheckedStopConnection(stop,latest,budget).executable()) return false;
           next_trajectory_id_=stop.traj_id_;pending_trajectory_=stop;pending_withdrawal_requested_s_.reset();
+          confirmed_pending_id_=-1;pending_branch_proof_=true;
           return true;
         },budget);
         if(gate==GridMap::CorridorCommit::Committed) {
@@ -2152,7 +2245,8 @@ namespace ego_planner
 
   void EGOPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now)
   {
-    pending_trajectory_.reset();
+    pending_trajectory_.reset();replacement_candidate_.reset();
+    confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
     pending_withdrawal_requested_s_.reset();
     next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
     local_data_.start_time_ = time_now;
