@@ -311,14 +311,15 @@ python3 src/iap/scripts/dev_planner/run_curve_channel_live.py \
 
 `--visualization none`（默认）关闭显示，`map` 仅开启独立 PL 显示，`full` 同时开启 RViz。
 显示读取最近规划轮的保留输入，避免每秒额外冻结实时地图；PL 时间身份与历史标记保留。
-此开关只选择显示进程，不改变场景、规划预算或执行检查。此前关闭显示的一次到达记录
-不保证可视化运行重复到达；当前首岔路停滞的修复和复验状态见 `docs/spec/ego_based_planning_flow.md`。
+此开关只选择显示进程，不改变场景、规划预算或执行检查。`6bb431f4` 的完整可视化
+原 ON 任务于 275.919 s 到达；证据与开发验收边界见 `docs/spec/ego_based_planning_flow.md`。
 
 本轮统一使用 `icra_dense_forest_four_fork_v2` 检查完整仿真；其他场景保留为定向诊断。规划器和 SO3 控制器均使用 `/drone_0_visual_slam/odom` 的 GLIO 估计；真值仍用于传感器仿真和对照。默认 RViz 配置 `config/sim_ego/grid_map_stage1.rviz` 显示同一 GridMap 的深灰物理障碍、飞行高度 PL 真样本与半透明插值面、青色 EGO 实际 B-spline 曲线及白色 GLIO 连续轨迹。淡色风险历史最多保留 60 秒，障碍显示留存 20 秒；这只是画面历史，旧预测不被当成当前有效 PL。切片约 1 Hz、至多 100 个真实查询点；当前 EGO 已把有效 advisory 预警用于局部绕行偏好，真实执行仍以物理环境、当前融合运动质量与最终曲线检查为准。
 
 默认星历依赖上表指定的已保存文件，请保留该文件或显式指定同历史时段的合格 NAV。
 显式 `rinex_nav_file:=''` 选择 synthetic 机制输入。当前默认 ON 是开发主线选择，
-不代表真实 PL 校准或正式统计验收；原 ON 任务曾在关闭可视化时真实到达，开启可视化后的持续停滞仍待修复及现场复验。
+不代表真实 PL 校准或正式统计验收；显示／连接搜索修复后的原 ON 任务已在开启
+可视化时真实到达，单次开发验收不保证每次重复到达。
 
 诊断规划停滞时显式打开一次性地图取证：
 
