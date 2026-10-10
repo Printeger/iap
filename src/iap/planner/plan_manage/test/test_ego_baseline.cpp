@@ -924,6 +924,28 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
       IAP_CURVE_OBSERVATION_ANALYZER + " " + (root / "curve_unobserved").string() +
       " >/dev/null";
   EXPECT_EQ(std::system(validate_curve.c_str()), 0);
+  // A recovered first rejection must not hide the later executing ID that
+  // causes a persistent stop. Preserve one opt-in snapshot per failed ID.
+  manager.local_data_.position_traj_=curve;
+  for(int id : {11,12}) {
+    auto owned=assessment;owned.trajectory_id=id;
+    manager.local_data_.traj_id_=id;
+    manager.captureRemainingFailure("remaining_failure",Eigen::Vector3d(0,0,1),
+        Eigen::Vector3d(0,0,1),0.,id,10.,.1,.1,owned.execution_reason,&owned);
+    ego_planner::EGOPlannerManagerTestAccess::drain(manager);
+    const auto leaf=root/("remaining_failure_"+std::to_string(id));
+    ASSERT_TRUE(std::filesystem::exists(leaf/"snapshot.json"));
+    boost::property_tree::ptree saved,state;
+    boost::property_tree::read_json((leaf/"snapshot.json").string(),saved);
+    boost::property_tree::read_json((leaf/"state.json").string(),state);
+    EXPECT_EQ(saved.get<uint64_t>("generation"),owned.evaluated_generation);
+    EXPECT_EQ(state.get<int>("failed_curve_id"),id);
+    const auto written=std::filesystem::last_write_time(leaf/"snapshot.json");
+    manager.captureRemainingFailure("remaining_failure",Eigen::Vector3d(0,0,1),
+        Eigen::Vector3d(0,0,1),0.,id,10.,.1,.1,owned.execution_reason,&owned);
+    ego_planner::EGOPlannerManagerTestAccess::drain(manager);
+    EXPECT_EQ(std::filesystem::last_write_time(leaf/"snapshot.json"),written);
+  }
   const auto before = std::filesystem::last_write_time(root / "endpoint/snapshot.json");
   ego_planner::EGOPlannerManagerTestAccess::capture(
       manager, "endpoint", cell, &result, &context);
@@ -932,7 +954,7 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   size_t count = 0;
   for (const auto& leaf : std::filesystem::directory_iterator(root))
     if (leaf.is_directory()) ++count;
-  EXPECT_EQ(count, 13u);
+  EXPECT_EQ(count, 15u); // Includes the two distinct executing-ID failures above.
   manager.capturePlanningStall(Eigen::Vector3d(-1, 0, 1), Eigen::Vector3d(0, 0, 1));
   ego_planner::EGOPlannerManagerTestAccess::drain(manager);
   EXPECT_TRUE(std::filesystem::exists(root / "terminal_1/snapshot.json"));

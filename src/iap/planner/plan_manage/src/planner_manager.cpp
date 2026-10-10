@@ -876,7 +876,18 @@ namespace ego_planner
           << ",\"glio_age_s\":" << odom_age_s
           << ",\"map_age_s\":" << map_age_s << "}\n";
     failure_state_json_ = state.str();
-    captureFailureMap(kind, point, expected, cell, nullptr, nullptr,
+    std::string label=kind;
+    if(kind=="remaining_failure" && assessment && assessment->trajectory_id>=0 &&
+        !captured_execution_failure_ids_.count(assessment->trajectory_id) &&
+        captured_execution_failure_ids_.size()<128) {
+      // The first per-reason failure may have recovered long before the
+      // persistent stop. Preserve the earliest authoritative refusal of each
+      // actual owning ID in the SAME opt-in writer and immutable epoch.
+      if(captured_failure_kinds_.count(kind))
+        label+="_"+std::to_string(assessment->trajectory_id);
+      captured_execution_failure_ids_.insert(assessment->trajectory_id);
+    }
+    captureFailureMap(label, point, expected, cell, nullptr, nullptr,
         assessment ? evidence_curve : nullptr, assessment);
     exportLatestFailure();
   }

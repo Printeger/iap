@@ -242,6 +242,7 @@ namespace ego_planner
     bool search_performance_diagnostics_ = false;
     PlanningTimings planning_timings_;
     std::unordered_set<std::string> captured_failure_kinds_;
+    std::unordered_set<int> captured_execution_failure_ids_; // Opt-in first refusal, bounded like committed captures.
     // One writer, at most two queued exports and one retained immutable failure.
     std::thread failure_writer_;
     std::mutex failure_writer_mutex_;
