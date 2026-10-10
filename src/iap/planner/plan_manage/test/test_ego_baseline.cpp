@@ -1255,6 +1255,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   std::optional<std::string> prior_recovery_result;
   std::optional<double> presearch_elapsed;
   unsigned expected_search_calls=2;
+  bool probe_observed_connection=false;
   std::optional<std::string> expected_observation_result;
   Eigen::Vector3d captured_route,captured_center,start_velocity=Eigen::Vector3d::Zero(),start_acceleration=Eigen::Vector3d::Zero();
   Eigen::Vector3d start(-2,0,1),goal(5.8,0,1);const Eigen::Vector3d zero=Eigen::Vector3d::Zero();
@@ -1266,6 +1267,7 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
     if(const auto value=boundary.get_optional<std::string>("prior_recovery_result")) prior_recovery_result=*value;
     if(const auto value=boundary.get_optional<double>("presearch_elapsed_s")) presearch_elapsed=*value;
     expected_search_calls=boundary.get<unsigned>("expected_search_calls",2);
+    probe_observed_connection=boundary.get<bool>("probe_observed_connection",false);
     if(const auto value=boundary.get_optional<std::string>("expected_observation_result")) expected_observation_result=*value;
     boost::property_tree::read_json(captured.string(),metadata);
     const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
@@ -1313,6 +1315,34 @@ TEST(EgoBaseline, ConflictingLookaheadUsesOneObservedConnectionAndKeepsMission) 
   manager->deliverTrajToOptimizer();manager->setDroneIdtoOpt();
   if(presearch_elapsed) ego_planner::EGOPlannerManagerTestAccess::restorePresearchResources(*manager,*presearch_elapsed);
   const bool replanned=manager->reboundReplan(start,start_velocity,start_acceleration,target,zero,true,false);
+  if(probe_observed_connection) {
+    ASSERT_TRUE(replanned);
+    const Eigen::Vector3d forward=(goal-start).normalized();
+    const auto endpoint=manager->guideIdentity().committed_endpoint;
+    const double progress=(endpoint-start).dot(forward);
+    std::cout<<"OBSERVED_PREFIX original_progress_m="<<progress
+        <<" curve_duration_s="<<manager->local_data_.duration_
+        <<" searches="<<manager->planningBudget()->searches.calls
+        <<" remaining_s="<<manager->planningBudget()->remaining()<<std::endl;
+    if(progress<.2) {
+      ego_planner::EGOPlannerManager::ExecutablePrefix blocked;
+      blocked.blocked_position=target;blocked.blocked_reason=GridExecutionReason::ENVIRONMENT_UNOBSERVED;
+      const bool connected=ego_planner::EGOPlannerManagerTestAccess::recover(*manager,start,goal,blocked);
+      std::cout<<"OBSERVED_PREFIX connected="<<connected
+          <<" searches="<<manager->planningBudget()->searches.calls
+          <<" remaining_s="<<manager->planningBudget()->remaining()<<std::endl;
+      if(!connected) GTEST_SKIP()<<"Same-epoch bounded observed connection not found; missed-connection hypothesis unconfirmed.";
+      const auto& path=ego_planner::EGOPlannerManagerTestAccess::guide(*manager);
+      ASSERT_GT(path.size(),1u);
+      std::cout<<"OBSERVED_PREFIX connected_progress_m="<<(path.back()-start).dot(forward)
+          <<" endpoint="<<path.back().transpose()<<std::endl;
+      EXPECT_GE(progress,.2)<<"A bounded observed advancing connection exists; the normal short reverse prefix must not conceal it.";
+    }
+    EXPECT_LE(manager->planningBudget()->searches.calls,2u);
+    EXPECT_LE(manager->planningBudget()->searches.seconds,1.);
+    EXPECT_EQ(ego_planner::EGOReplanFSMTestAccess::taskGoal(fsm).isApprox(goal,1e-9),true);
+    return;
+  }
   if(presearch_elapsed) {
     const auto stats=manager->grid_map_->planningQueryStats();
     std::cout<<"FROZEN_CLEARANCE bounds_hits="<<stats.bounds_hits<<" bounds_misses="<<stats.bounds_misses

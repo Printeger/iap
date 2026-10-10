@@ -1462,11 +1462,23 @@ namespace ego_planner
       }
       const bool final=prefix.points.size()>1 &&
           (prefix.points.back()-guide_identity_.mission_goal).norm()<1e-6;
-      if(prefix.points.size()<2 || (!final && prefix.length_m<std::max(.2,2*grid_map_->getResolution()))) {
+      const double minimum_prefix=std::max(.2,2*grid_map_->getResolution());
+      const Eigen::Vector3d task_direction=guide_identity_.mission_goal-start_pt;
+      const double progress=prefix.points.empty() || task_direction.norm()<1e-6 ? 0. :
+          (prefix.points.back()-start_pt).dot(task_direction.normalized());
+      // A clipped optimistic attachment can have enough arc length while
+      // ending behind the start, repeatedly yielding tiny resting actions.
+      // It is not evidence that the OBSERVED graph lacks an advancing path.
+      // Before fitting, use the existing one bounded execution connection.
+      // Whole observed detours and qualified observation actions retain their
+      // original endpoint/physical meaning; no direction test authorizes them.
+      const bool clipped_without_progress=!final && prefix.blocked_reason!=GridExecutionReason::OK &&
+          progress<minimum_prefix;
+      if(prefix.points.size()<2 || (!final && prefix.length_m<minimum_prefix) || clipped_without_progress) {
         last_plan_failure_=prefix.blocked_reason==GridExecutionReason::ENVIRONMENT_UNOBSERVED ?
             PlanFailure::ObservationBlocked : PlanFailure::Target;
-        RCLCPP_INFO(node_->get_logger(),"Guide prefix blocked: reason=%s length=%.3f (no claim of observed disconnection)",
-            gridExecutionReasonName(prefix.blocked_reason),prefix.length_m);return false;
+        RCLCPP_INFO(node_->get_logger(),"Guide prefix blocked: reason=%s length=%.3f progress=%.3f (no claim of observed disconnection)",
+            gridExecutionReasonName(prefix.blocked_reason),prefix.length_m,progress);return false;
       }
       const auto index=optimizer.a_star_->lastResult().selected_goal;
       if(index<target_indices.size()) selected=planning_targets_[target_indices[index]];
