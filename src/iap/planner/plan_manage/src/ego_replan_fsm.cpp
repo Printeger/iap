@@ -910,15 +910,13 @@ namespace ego_planner
           // path still supervises and replaces the active predecessor.
           flag_escape_emergency_=true;
           changeFSMExecState(EMERGENCY_STOP, "pending execution conditions revoked");
-        } else if (assessment.execution_reason!=GridExecutionReason::TRACKING_ERROR &&
-            info.start_time_.seconds()+assessment.first_execution_time_s <=
-                std::min(info.start_time_.seconds()+info.duration_,
-                    node_->now().seconds()+continuation_lead_s)) {
-          // The old curve is already known to fail before normal handover.
-          // Its mandatory tail check cannot authorize that continuation; do
-          // not consume a futile replan before the existing checked brake.
+        } else if (assessment.execution_reason!=GridExecutionReason::TRACKING_ERROR) {
+          // Scheduled publication checks the COMPLETE predecessor tail for
+          // CANCEL_PENDING, including after handover. Any known hard tail
+          // failure rules out that continuation, regardless of its lead time.
+          // Request the existing checked brake while a legal stop is possible.
           flag_escape_emergency_=true;
-          changeFSMExecState(EMERGENCY_STOP,"unsafe before connection");
+          changeFSMExecState(EMERGENCY_STOP,"unsafe predecessor tail");
         } else if (lead > emergency_time_) {
           changeFSMExecState(REPLAN_TRAJ, "SAFETY");
         } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
