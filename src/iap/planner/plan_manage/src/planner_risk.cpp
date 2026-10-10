@@ -785,6 +785,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
   auto assessment = assessTrajectory(local_data_.position_traj_, version,
                                      now_s, true, elapsed, old_end,&view.physical,true,&view.motion);
   assessment.trajectory_id=local_data_.traj_id_;
+  const bool executing_tail_executable=assessment.executable();
   if(pending_trajectory_) {
     const auto& pending=*pending_trajectory_;
     const double future_from=std::max(0.0,now_s-pending.start_time_.seconds());
@@ -817,6 +818,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s) {
         assessment.first_advisory_time_s=warning;
     }
   }
+  assessment.executing_tail_executable=executing_tail_executable;
   return assessment;
 }
 

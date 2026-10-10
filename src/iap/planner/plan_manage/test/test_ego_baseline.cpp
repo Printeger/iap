@@ -1681,6 +1681,61 @@ TEST(EgoBaseline, RecoverySeparatesNormalAdvisoryTimeoutAndPhysicalRefusals) {
   }
 }
 
+TEST(EgoBaseline, PendingOnlyFailureRetainsCheckedPredecessor) {
+  for(const std::string mode:{"pending_only","active_unknown","active_tracking","active_swarm"}) {
+    SCOPED_TRACE(mode);
+    auto node=makeNode();
+    ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+    auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+    manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+    manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+    const Eigen::Vector3d start(-2,0,1),end(2,0,1),pending_end(2,1,1),zero=Eigen::Vector3d::Zero();
+    GridMapTestAccess::input(*manager.grid_map_,{},100.,start);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+    ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
+    auto predecessor=manager.local_data_;
+    const auto connection=node->now()+rclcpp::Duration::from_seconds(1.6);
+    const double t=connection.seconds()-predecessor.start_time_.seconds();
+    ASSERT_TRUE(manager.beginPlanningView());manager.setPlanningConnection(connection,predecessor.traj_id_);
+    ASSERT_TRUE(manager.reboundReplan(manager.local_data_.position_traj_.evaluateDeBoorT(t),
+        manager.local_data_.velocity_traj_.evaluateDeBoorT(t),
+        manager.local_data_.acceleration_traj_.evaluateDeBoorT(t),pending_end,zero,false,false));
+    manager.endPlanningView();const auto pending=manager.publicationTrajectory();
+    // Only the new candidate loses authorization. Its failure must not erase
+    // the same-epoch check of the complete, still usable predecessor tail.
+    GridMapTestAccess::changeEvidence(*manager.grid_map_,pending_end,true,true,true);
+    if(mode=="active_unknown") GridMapTestAccess::clearObserved(*manager.grid_map_,end);
+    const auto assessment=manager.assessRemainingTrajectory(100.);
+    ASSERT_FALSE(assessment.executable());
+    EXPECT_EQ(assessment.executing_tail_executable,mode!="active_unknown");
+    ASSERT_EQ(assessment.trajectory_id,mode=="active_unknown" ? predecessor.traj_id_ : pending.traj_id_);
+    if(mode=="active_swarm") {
+      ego_planner::OneTrajDataOfSwarm peer;
+      peer.drone_id=1;peer.start_time_=predecessor.start_time_;
+      peer.position_traj_=predecessor.position_traj_;peer.duration_=predecessor.duration_;
+      manager.swarm_trajs_buf_.push_back(peer);
+    }
+    ego_planner::EGOReplanFSM fsm;
+    ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,
+        mode=="active_tracking" ? start+Eigen::Vector3d(0,2,0) : start,end);
+    ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,node->create_publisher<traj_utils::msg::Bspline>("pending_only_withdrawal",10));
+    const bool brake_requested=ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.);
+    EXPECT_EQ(brake_requested,mode!="pending_only");
+    if(mode=="pending_only") EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
+    EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+    EXPECT_TRUE(manager.local_data_.position_traj_.getControlPoint().isApprox(predecessor.position_traj_.getControlPoint(),0.));
+    EXPECT_TRUE(manager.hasPendingTrajectory()); // Retirement still needs original post-start feedback.
+    manager.observeExecutingTrajectory(predecessor.traj_id_,100.1);
+    EXPECT_TRUE(manager.hasPendingTrajectory());
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),101700000000LL),RCL_RET_OK);
+    manager.observeExecutingTrajectory(predecessor.traj_id_,101.7);
+    EXPECT_FALSE(manager.hasPendingTrajectory());
+    EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
+  }
+}
+
 TEST(EgoBaseline, TimeAdjustmentPreservesPhysicalEndpointDerivatives) {
   Eigen::MatrixXd points=Eigen::MatrixXd::Zero(3,9);
   const Eigen::Vector3d start(0,0,1), end(3,1,1), velocity(.4,.1,0), acceleration(.2,0,0);

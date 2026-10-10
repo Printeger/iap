@@ -838,7 +838,9 @@ namespace ego_planner
       const auto expected = info.position_traj_.evaluateDeBoorT(
           measured_elapsed);
       const double active_tracking_error=(expected-odom_pos_).norm();
+      bool executing_tail_executable=assessment.executing_tail_executable;
       if(active_tracking_error>tracking_error_limit_m_) {
+        executing_tail_executable=false;
         if(assessment.trajectory_id==info.traj_id_) {
           assessment.execution_reason=GridExecutionReason::TRACKING_ERROR;
           assessment.first_execution_time_s=measured_elapsed;
@@ -871,7 +873,7 @@ namespace ego_planner
 
       // Swarm separation retains its physical execution meaning.
       const double swarm_clearance = planner_manager_->getSwarmClearance();
-      for (double t = elapsed; t < info.duration_ && assessment.executable();
+      for (double t = elapsed; t < info.duration_ && executing_tail_executable;
            t += 0.02) {
         const auto p = info.position_traj_.evaluateDeBoorT(t);
         for (const auto& peer : planner_manager_->swarm_trajs_buf_) {
@@ -881,8 +883,11 @@ namespace ego_planner
           if (peer_t < 0.0 || peer_t > peer.duration_) continue;
           auto peer_curve = peer.position_traj_;
           if ((p - peer_curve.evaluateDeBoorT(peer_t)).norm() < swarm_clearance) {
+            executing_tail_executable=false;
+            assessment.trajectory_id=info.traj_id_;
             assessment.execution_reason = GridExecutionReason::PHYSICAL_OBSTACLE;
             assessment.first_execution_time_s = t;
+            assessment.first_execution_position=p;
             break;
           }
         }
@@ -910,7 +915,13 @@ namespace ego_planner
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                              "Remaining trajectory %s, lead=%.2fs",
                              gridExecutionReasonName(assessment.execution_reason), lead);
-        if(exec_state_==EMERGENCY_STOP) {
+        if(executing_tail_executable && assessment.trajectory_id!=info.traj_id_) {
+          // Cancellation removes only the unusable candidate. The manager
+          // checked the complete predecessor in the SAME epoch; current
+          // tracking and swarm checks also passed. Keep its checked motion
+          // while awaiting the original post-start withdrawal feedback.
+          changeFSMExecState(REPLAN_TRAJ,"pending withdrawn; predecessor checked");
+        } else if(exec_state_==EMERGENCY_STOP) {
           // A rejected brake never stopped this geometry. Keep supervision and
           // the outstanding checked-brake request; advisory cannot cancel it.
           flag_escape_emergency_=true;

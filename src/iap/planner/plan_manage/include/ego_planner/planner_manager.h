@@ -86,6 +86,9 @@ namespace ego_planner
 
     struct TrajectoryAssessment {
       int trajectory_id = -1; // Owning curve for two-segment failure evidence.
+      // assessRemainingTrajectory only: same-epoch complete executing tail,
+      // retained even when the separately checked pending curve is rejected.
+      bool executing_tail_executable = false;
       std::string physical_check_scope = "actual_curve";
       std::string first_execution_section;
       double first_execution_stopping_distance_m = std::numeric_limits<double>::quiet_NaN();
