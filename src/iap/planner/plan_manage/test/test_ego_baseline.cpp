@@ -335,6 +335,11 @@ struct EGOPlannerManagerTestAccess {
     return manager.assessTrajectory(curve,0,manager.planning_view_->time_s,false,0,
         std::numeric_limits<double>::infinity(),&manager.planning_view_->physical_context);
   }
+  static EGOPlannerManager::TrajectoryAssessment assessFrozenRange(EGOPlannerManager& manager,
+      const UniformBspline& curve,double from,double to) {
+    return manager.assessTrajectory(curve,0,manager.planning_view_->time_s,false,from,to,
+        &manager.planning_view_->physical_context,false);
+  }
   static EGOPlannerManager::PlanFailure prepareActualCorrection(EGOPlannerManager& manager,
       Eigen::MatrixXd& control,double interval,const EGOPlannerManager::TrajectoryAssessment& assessment) {
     manager.bspline_optimizer_->initializeFromGuide(control);
@@ -2180,6 +2185,80 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
   }
 }
 
+TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof) {
+  const char* path=std::getenv("IAP_D4_BRAKE_BRIDGE_INPUT");
+  if(!path) GTEST_SKIP() << "requires actual executing curve and immutable hard-failure epoch";
+  boost::property_tree::ptree input,saved;
+  boost::property_tree::read_json(path,input);
+  const std::filesystem::path snapshot_path=input.get<std::string>("snapshot");
+  boost::property_tree::read_json(snapshot_path.string(),saved);
+  const auto point=[](const auto& values) {Eigen::Vector3d result;int i=0;
+    for(const auto& item:values) result[i++]=item.second.template get_value<double>();return result;};
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  const double now=input.get<double>("evaluation_time_s");
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),std::llround(now*1e9)),RCL_RET_OK);
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  GridMapFailureSnapshot snapshot;snapshot.origin=point(saved.get_child("origin_m"));
+  snapshot.max_boundary=point(saved.get_child("max_boundary_m"));
+  snapshot.dimensions=point(saved.get_child("dimensions")).template cast<int>();
+  snapshot.resolution_m=saved.get<double>("resolution_m");snapshot.generation=saved.get<uint64_t>("generation");
+  snapshot.cloud_stamp_s=saved.get<double>("cloud_stamp_s");snapshot.frame_id=saved.get<std::string>("frame_id");
+  snapshot.virtual_ceiling_height_m=saved.get<double>("virtual_ceiling_height_m");
+  snapshot.inflation_radius_m=saved.get<double>("inflation_radius_m");
+  std::ifstream cells(snapshot_path.parent_path()/saved.get<std::string>("cell_flags_file"),std::ios::binary);
+  snapshot.cell_flags.assign(std::istreambuf_iterator<char>(cells),{});
+  manager.grid_map_=GridMap::fromFailureSnapshot(snapshot);
+  const Eigen::Vector3d actual=point(input.get_child("actual_p_m"));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,saved.get<double>("motion_stamp_s"),1,actual);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionError(manager,saved.get<double>("motion_error_proxy_m"));
+  ASSERT_TRUE(manager.beginPlanningView());
+  const auto& curve=saved.get_child("actual_curve");Eigen::MatrixXd q(3,curve.get_child("control_points_m").size());
+  int col=0;for(const auto& p:curve.get_child("control_points_m")) q.col(col++)=point(p.second);
+  ego_planner::UniformBspline old(q,3,curve.get<double>("interval_s"));
+  const double start=input.get<double>("old_start_time_s"),elapsed=now-start;
+  const double connect=elapsed+input.get<double>("connection_lead_s");
+  const auto full=ego_planner::EGOPlannerManagerTestAccess::assessFrozenRange(manager,old,elapsed,old.getTimeSum());
+  ASSERT_FALSE(full.executable());ASSERT_EQ(full.execution_reason,GridExecutionReason::ENVIRONMENT_UNOBSERVED);
+  ASSERT_GT(full.first_execution_time_s,connect);
+  EXPECT_LT((old.evaluateDeBoorT(input.get<double>("actual_stamp_s")-start)-actual).norm(),.30);
+  const auto prefix=ego_planner::EGOPlannerManagerTestAccess::assessFrozenRange(manager,old,elapsed,connect);
+  ASSERT_TRUE(prefix.executable());
+  auto velocity=old.getDerivative(),acceleration=velocity.getDerivative();
+  const Eigen::Vector3d p=old.evaluateDeBoorT(connect),v=velocity.evaluateDeBoorT(connect),a=acceleration.evaluateDeBoorT(connect);
+  ASSERT_GT(v.norm(),.1);
+  bool checked_stop=false;
+  // Probe the original checked-brake construction, not a straight-line stop
+  // permission. This remains offline evidence and grants no live authority.
+  for(int attempt=0;attempt<3 && !checked_stop;++attempt) {
+    const double duration=std::max(.5,2*v.norm()/manager.pp_.max_acc_)*std::pow(1.5,attempt);
+    const Eigen::Vector3d end=p+v*duration*.5,zero=Eigen::Vector3d::Zero();
+    auto polynomial=PolynomialTraj::one_segment_traj_gen(p,v,a,end,zero,zero,duration);
+    const double dt=duration/10;std::vector<Eigen::Vector3d> samples;
+    for(int i=0;i<=10;++i) samples.push_back(polynomial.evaluate(i*dt));
+    Eigen::MatrixXd controls;ego_planner::UniformBspline::parameterizeToBspline(dt,samples,{v,zero,a,zero},controls);
+    ego_planner::UniformBspline stop(controls,3,dt);
+    stop.setPhysicalLimits(manager.pp_.max_vel_,manager.pp_.max_acc_,manager.pp_.feasibility_tolerance_);
+    double ratio=1;if(!stop.checkFeasibility(ratio,false)) continue;
+    const auto assessment=ego_planner::EGOPlannerManagerTestAccess::assessFrozenRange(manager,stop,0,stop.getTimeSum());
+    checked_stop=assessment.executable();
+    std::cout<<"BRIDGE_PROBE stop_attempt="<<attempt<<" physical="<<checked_stop<<" duration="<<duration
+        <<" prefix_until="<<connect<<" first_old_failure="<<full.first_execution_time_s
+        <<" speed="<<v.norm()<<" shared_elapsed="<<manager.planningBudget()->elapsed()<<std::endl;
+  }
+  EXPECT_TRUE(checked_stop);
+  EXPECT_EQ(manager.local_data_.traj_id_,0); // No stop or continuation was committed.
+  manager.endPlanningView();
+  const auto risk_before=GridMapTestAccess::riskVersion(*manager.grid_map_);
+  const auto brake_started=std::chrono::steady_clock::now();
+  EXPECT_TRUE(manager.planCheckedBrake(actual,point(input.get_child("actual_v_mps")),Eigen::Vector3d::Zero()));
+  std::cout<<"CAPTURED_IMMEDIATE_BRAKE elapsed="<<std::chrono::duration<double>(
+      std::chrono::steady_clock::now()-brake_started).count()<<std::endl;
+  EXPECT_EQ(GridMapTestAccess::riskVersion(*manager.grid_map_),risk_before)
+      << "A checked stop has no route preference to rank; optional prediction must not delay protection";
+}
+
 TEST(EgoBaseline, EmergencyStateSupervisesUnreplacedExecutingAndPendingCurves) {
   auto node=makeNode();
   ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
@@ -3790,7 +3869,9 @@ TEST(EgoBaseline, AcceptedBrakeNeedsCompletedCommandAndFreshMeasuredRest) {
   ego_planner::EGOReplanFSM fsm;
   ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,{2,0,1});
   ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,node->create_publisher<traj_utils::msg::Bspline>("brake_completion",10));
+  const auto risk_before=GridMapTestAccess::riskVersion(*manager.grid_map_);
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));
+  EXPECT_EQ(GridMapTestAccess::riskVersion(*manager.grid_map_),risk_before);
   const auto brake=manager.local_data_;ASSERT_NEAR(brake.duration_,.5,1e-9);
   auto odom=std::make_shared<nav_msgs::msg::Odometry>();odom->header.frame_id="map";
   odom->header.stamp=node->now();odom->pose.pose.position.x=start.x();odom->pose.pose.position.z=start.z();

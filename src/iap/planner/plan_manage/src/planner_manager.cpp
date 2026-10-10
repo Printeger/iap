@@ -1852,7 +1852,9 @@ namespace ego_planner
       return false;
     }
     const double now = node_->now().seconds();
-    const auto risk_version = beginRiskQuery();
+    // A protective stop has no route preference to optimize. Binding the
+    // optional full-map predictor here delays the measured-state boundary;
+    // only the unchanged actual-curve execution checks authorize this action.
     for (int attempt = 0; attempt < 3; ++attempt) {
       const double duration = std::max(0.5,
           2.0 * velocity.norm() / pp_.max_acc_) * std::pow(1.5, attempt);
@@ -1877,7 +1879,7 @@ namespace ego_planner
         RCLCPP_WARN(node_->get_logger(),"Checked brake rejected: attempt=%d reason=DYNAMICS ratio=%.6f trajectory=%d",attempt,ratio,local_data_.traj_id_);
         continue;
       }
-      const auto assessment = assessTrajectory(candidate, risk_version,
+      const auto assessment = assessTrajectory(candidate, 0,
                                                now, true);
       if (!assessment.executable()) {
         RCLCPP_WARN(node_->get_logger(),
