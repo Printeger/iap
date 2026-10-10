@@ -288,10 +288,11 @@ EGOPlannerManager::ExecutionView EGOPlannerManager::captureExecutionView(
   const auto failed=[&]() {
     motion=currentMotionContext(allow_bridged);
     const double time=node_->now().seconds();
-    auto physical=grid_map_->preparePlanningQuery(time,motion);
+    auto physical=budget && budget->expired() ? GridPlanningContext{} : grid_map_->preparePlanningQuery(time,motion);
     physical.environment_reason=GridExecutionReason::ENVIRONMENT_STALE;
     return ExecutionView{time,motion,std::move(physical)};
   };
+  if(budget && budget->expired()) return failed();
   double radius=grid_map_->preparePlanningQuery(node_->now().seconds(),motion).required_clearance_m;
   for(int attempt=0;attempt<2;++attempt) {
     auto epoch=grid_map_->captureFrozenCorridor(positions,radius,budget,capture_failure_map_);
@@ -363,9 +364,11 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
     const UniformBspline& trajectory, const uint64_t risk_version,
     double now_s, const bool allow_bridged, const double from_time_s,
     const double to_time_s, const GridPlanningContext* physical_context, bool check_connection,
-    const GridMotionContext* bound_motion) {
+    const GridMotionContext* bound_motion, PlanningBudget::Ptr budget) {
   TrajectoryAssessment assessment;
   assessment.evaluation_time_s=now_s;
+  if(!budget && planning_view_) budget=planning_budget_;
+  if(budget && budget->expired()) {assessment.budget_exhausted=true;return assessment;}
   auto curve = trajectory;
   const double duration = curve.getTimeSum();
   const auto latest_odom = latest_odom_provider_
@@ -413,7 +416,6 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   GridPlanningContext corridor_context;
   if (!physical_context) {
     std::vector<Eigen::Vector3d> positions; positions.reserve(intervals+1);
-    const auto budget=planning_view_ && from_time_s<=0.0 ? planning_budget_ : PlanningBudget::Ptr{};
     for (double t:check_times) {
       if (budget && budget->expired()) { assessment.budget_exhausted=true; return assessment; }
       positions.push_back(curve.evaluateDeBoorT(t));
@@ -443,7 +445,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   // The ordinary physical schedule and its diagnostics remain unchanged.
   // Additionally, reject out-of-volume coordinate extrema between samples.
   for(double t:curve.coordinateExtremaTimes(assessment.checked_from_time_s,end)) {
-    if(planning_view_ && planning_budget_ && planning_budget_->expired()) {
+    if(budget && budget->expired()) {
       assessment.budget_exhausted=true; return assessment;
     }
     const auto p=curve.evaluateDeBoorT(t);
@@ -458,7 +460,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
   for (size_t sample = 0; sample <= intervals; ++sample) {
     const double t = std::min(end, assessment.checked_from_time_s + sample * step);
     const auto p = curve.evaluateDeBoorT(t);
-    if (planning_view_ && planning_budget_ && planning_budget_->expired() && from_time_s<=0.0) {
+    if (budget && budget->expired()) {
       assessment.budget_exhausted=true; return assessment;
     }
     auto cell = grid_map_->queryPlanningCell(
@@ -509,7 +511,9 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessTrajectory(
       assessment.failure_snapshot=assessment.physical_epoch->failure_evidence;
     else if (planning_view_ && physical_context==&planning_view_->physical_context)
       assessment.failure_snapshot=planning_view_->snapshot;
-    else {
+    else if(!budget) {
+      // Full diagnostic copying is outside the shared hard deadline. Missing
+      // latest full evidence stays explicit; never substitute a newer epoch.
       const auto snapshot = grid_map_->captureFailureSnapshot(true);
       if (snapshot && snapshot->generation == generation)
         assessment.failure_snapshot = std::make_shared<const GridMapFailureSnapshot>(*snapshot);
@@ -759,11 +763,11 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::assessCheckedStopConn
       stop.velocity_traj_.evaluateDeBoorT(stop.duration_).norm()>1e-5 ||
       stop.acceleration_traj_.evaluateDeBoorT(stop.duration_).norm()>1e-5) return failed;
   auto prefix=assessTrajectory(local_data_.position_traj_,0,view.time_s,true,
-      elapsed,seam,&view.physical,false,&view.motion);
+      elapsed,seam,&view.physical,false,&view.motion,budget);
   prefix.trajectory_id=local_data_.traj_id_;
   if(!prefix.executable()) return prefix;
   auto checked=assessTrajectory(stop.position_traj_,0,view.time_s,true,
-      0,stop.duration_,&view.physical,false,&view.motion);
+      0,stop.duration_,&view.physical,false,&view.motion,budget);
   checked.trajectory_id=stop.traj_id_;
   if(!checked.executable()) return checked;
   // Preserve peer separation for both intervals that will actually execute.
@@ -816,7 +820,10 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::inspectPendingStopPro
 }
 
 EGOPlannerManager::TrajectoryAssessment
-EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_stop, bool include_advisory) {
+EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_stop, bool include_advisory, PlanningBudget::Ptr budget) {
+  const auto unfinished=[&]() {TrajectoryAssessment result;result.trajectory_id=local_data_.traj_id_;
+    result.evaluation_time_s=node_->now().seconds();result.budget_exhausted=true;return result;};
+  if(budget && budget->expired()) return unfinished();
   if (local_data_.start_time_.seconds() <= 0.0)
     return {};
   // The physical/current check runs at the FSM supervision rate. A full
@@ -841,13 +848,18 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
     const double end=std::min(curve.getTimeSum(),until);
     if(end<from) return;
     const auto count=static_cast<size_t>(std::ceil((end-from)/step));
-    for(size_t i=0;i<=count;++i) positions.push_back(curve.evaluateDeBoorT(std::min(end,from+i*step)));
+    for(size_t i=0;i<=count;++i) {
+      if(budget && budget->expired()) return;
+      positions.push_back(curve.evaluateDeBoorT(std::min(end,from+i*step)));
+    }
   };
   const double old_end=std::numeric_limits<double>::infinity();
   collect(local_data_,old_end);
   if(pending_trajectory_) collect(*pending_trajectory_,std::numeric_limits<double>::infinity());
   if(replacement_candidate_) collect(*replacement_candidate_,std::numeric_limits<double>::infinity());
-  const auto view=captureExecutionView(positions,now_s,true);
+  if(budget && budget->expired()) return unfinished();
+  const auto view=captureExecutionView(positions,now_s,true,budget);
+  if(budget && budget->expired()) return unfinished();
   if(!view.physical.epoch) {
     TrajectoryAssessment failed;
     failed.execution_reason=view.physical.motion_reason!=GridExecutionReason::OK
@@ -862,7 +874,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
   const double elapsed = std::max(0.0,now_s - local_data_.start_time_.seconds());
   // Always inspect the complete old tail, including the cancellation branch.
   auto assessment = assessTrajectory(local_data_.position_traj_, version,
-                                     now_s, true, elapsed, old_end,&view.physical,true,&view.motion);
+                                     now_s, true, elapsed, old_end,&view.physical,true,&view.motion,budget);
   assessment.trajectory_id=local_data_.traj_id_;
   const bool executing_tail_executable=assessment.executable();
   if(pending_trajectory_) {
@@ -871,7 +883,7 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
     // Pending start is in the future: it is checked as a curve, not compared
     // with the vehicle's current measured position.
     auto checked=assessTrajectory(pending.position_traj_,version,now_s,true,
-        future_from,std::numeric_limits<double>::infinity(),&view.physical,false,&view.motion);
+        future_from,std::numeric_limits<double>::infinity(),&view.physical,false,&view.motion,budget);
     checked.trajectory_id=pending.traj_id_;
     const double offset=pending.start_time_.seconds()-local_data_.start_time_.seconds();
     const double active_warning=assessment.first_advisory_time_s;
@@ -911,12 +923,12 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
       !executing_tail_executable) {
     // The actual branch owns BOTH success and rejection. A failure of B must
     // not be mislabeled with A's already excluded far-tail refusal.
-    assessment=in_execution_time(assessCheckedStopConnection(*pending_trajectory_,view),*pending_trajectory_);
+    assessment=in_execution_time(assessCheckedStopConnection(*pending_trajectory_,view,budget),*pending_trajectory_);
   }
   // A missing replacement result leaves either B or C executable at the
   // server. Check C even if the complete predecessor happens to remain valid.
   if(replacement_candidate_ && assessment.executable()) {
-    const auto candidate=assessCheckedStopConnection(*replacement_candidate_,view);
+    const auto candidate=assessCheckedStopConnection(*replacement_candidate_,view,budget);
     if(!candidate.executable()) assessment=in_execution_time(candidate,*replacement_candidate_);
   }
   assessment.executing_tail_executable=executing_tail_executable;

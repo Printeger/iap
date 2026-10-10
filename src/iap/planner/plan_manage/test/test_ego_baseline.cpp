@@ -86,6 +86,9 @@ struct GridMapTestAccess {
     map.md_.observed_buffer_[map.toAddress(index)] = 0;
     map.cached_physical_epoch_.reset();
   }
+  static std::unique_lock<std::mutex> holdOccupancyLock(GridMap& map) {
+    return std::unique_lock<std::mutex>(map.occupancy_epoch_mutex_);
+  }
   static void markObserved(GridMap& map) {
     map.cached_physical_epoch_.reset();
     std::fill(map.md_.observed_buffer_.begin(),
@@ -464,6 +467,11 @@ struct EGOPlannerManagerTestAccess {
     EXPECT_EQ(manager.last_candidate_assessment_.execution_reason,GridExecutionReason::OK);
   }
   static void finalEvidence(EGOPlannerManager& manager) { manager.exportLatestFailure(true); manager.drainFailureExports(); }
+  static EGOPlannerManager::TrajectoryAssessment budgetedPointRelease(EGOPlannerManager& manager,
+      const Eigen::Vector3d& point) {
+    manager.planning_budget_=std::make_shared<PlanningBudget>();
+    return manager.assessReleaseCorridor({{point,"actual_curve",0.}},manager.node_->now().seconds());
+  }
   static void setCapture(EGOPlannerManager& manager) {
     manager.capture_failure_map_ = true;
     manager.planning_time_s_ = 10.0;
@@ -1087,6 +1095,49 @@ TEST(EgoBaseline, FailureCaptureKeepsOneCompleteArtifactPerReason) {
   // A non-candidate execution/diagnostic capture cannot inherit the active attempt.
   EXPECT_NE(stage_text.find("\"curve_stages\": []"),std::string::npos);
   EXPECT_NE(stage_text.find("\"final_check_state\": \"not_applicable\""),std::string::npos);
+}
+
+TEST(EgoBaseline, BudgetedReleaseKeepsPhysicalCellsWithoutFullDiagnosticCopy) {
+  auto node=makeNode();
+  ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d point(-1,0,1);const double now=node->now().seconds();
+  GridMapTestAccess::input(*manager.grid_map_,{},now,point);GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,point);
+  const auto checked=ego_planner::EGOPlannerManagerTestAccess::budgetedPointRelease(manager,point);
+  ASSERT_TRUE(checked.executable());ASSERT_TRUE(checked.physical_epoch);
+  EXPECT_TRUE(checked.physical_epoch->cells);
+  EXPECT_FALSE(checked.physical_epoch->failure_evidence)
+      << "Full diagnostic map copying must not occupy the budgeted hard publication path";
+  const auto cell=manager.queryAssessmentCell(checked,point);
+  ASSERT_TRUE(cell);EXPECT_TRUE(cell->executable());EXPECT_EQ(cell->occupancy_generation,checked.evaluated_generation);
+  // Ordinary runtime supervision still retains full forensic evidence.
+  const ego_planner::UniformBspline curve(point.replicate(1,7),3,.3);
+  const auto runtime=manager.assessTrajectory(curve,0,now,false,0,
+      std::numeric_limits<double>::infinity(),nullptr,false);
+  ASSERT_TRUE(runtime.physical_epoch);EXPECT_TRUE(runtime.physical_epoch->failure_evidence);
+}
+
+TEST(EgoBaseline, BudgetedCorridorStopsWaitingForMapAuthorityAtDeadline) {
+  auto node=makeNode();ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d point(-1,0,1);GridMapTestAccess::input(*manager.grid_map_,{},node->now().seconds(),point);
+  auto lock=GridMapTestAccess::holdOccupancyLock(*manager.grid_map_);
+  auto budget=std::make_shared<PlanningBudget>(.01);
+  auto check=std::async(std::launch::async,[&] {return manager.grid_map_->captureFrozenCorridor({point},.6,budget,true);});
+  EXPECT_EQ(check.wait_for(std::chrono::milliseconds(100)),std::future_status::ready)
+      << "A budgeted corridor must not wait for the held authority after its deadline";
+  lock.unlock();EXPECT_FALSE(check.get());EXPECT_TRUE(budget->expired());
+}
+
+TEST(EgoBaseline, ExpiredSharedBudgetCannotStartRemainingBranchCapture) {
+  auto node=makeNode();ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.local_data_.start_time_=node->now();manager.local_data_.traj_id_=7;
+  const auto result=manager.assessRemainingTrajectory(node->now().seconds(),true,false,std::make_shared<PlanningBudget>(0.));
+  EXPECT_TRUE(result.budget_exhausted);EXPECT_FALSE(result.completed);EXPECT_FALSE(result.executable());
+  EXPECT_FALSE(result.physical_epoch);EXPECT_EQ(result.sampled_points,0u);EXPECT_EQ(result.trajectory_id,7);
 }
 
 TEST(EgoBaseline, ReleaseBudgetFailureCannotBorrowPriorCurveCheck) {

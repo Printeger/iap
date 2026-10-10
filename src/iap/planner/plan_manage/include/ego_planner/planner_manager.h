@@ -138,9 +138,9 @@ namespace ego_planner
                                               std::numeric_limits<double>::infinity(),
                                           const GridPlanningContext* physical_context = nullptr,
                                           bool check_connection = true,
-                                          const GridMotionContext* bound_motion = nullptr);
+                                          const GridMotionContext* bound_motion = nullptr, PlanningBudget::Ptr budget = {});
     TrajectoryAssessment assessRemainingTrajectory(double now_s,
-                                                   bool pending_checked_stop = false, bool include_advisory = true);
+                                                   bool pending_checked_stop = false, bool include_advisory = true, PlanningBudget::Ptr budget = {});
     // Forensic scalar query, tied to the assessed epoch/time/motion. Missing
     // proof returns nullopt and never substitutes the current live map.
     std::optional<GridPlanningCell> queryAssessmentCell(

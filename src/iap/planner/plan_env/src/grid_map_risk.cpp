@@ -4,6 +4,7 @@
 #include <cmath>
 #include <chrono>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 GridPlanningRisk classifyCurrentRisk(const GridRiskVoxel& live, const GridPlanningRiskPolicy& policy) {
@@ -705,9 +706,18 @@ std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
   if (!std::isfinite(required) || required < 0) return {};
   const auto expired=[&](){ return budget && budget->expired(); };
   if (expired()) return {};
+  const auto acquire=[&](std::unique_lock<std::mutex>& lock) {
+    if(!budget) {lock.lock();return true;}
+    while(!lock.try_lock()) {
+      if(expired()) return false;
+      std::this_thread::yield();
+    }
+    return !expired();
+  };
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
   {
-    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_,std::defer_lock);
+    if(!acquire(lock)) return {};
     epoch->lattice_origin = mp_.map_origin_; epoch->voxel_dimensions = mp_.map_voxel_num_;
     epoch->resolution_m = mp_.resolution_; epoch->resolution_inv = mp_.resolution_inv_;
     epoch->extent_m = mp_.map_size_; epoch->frame_id = mp_.frame_id_;
@@ -740,7 +750,8 @@ std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
   std::sort(cells->addresses.begin(),cells->addresses.end());
   cells->raw_row_offsets.resize(static_cast<size_t>(dims.x())*dims.y()+1,0);
   {
-  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_,std::defer_lock);
+  if(!acquire(lock)) return {};
   const auto sequence = occupancy_update_sequence_.load();
   if (expired() || !sequence || (sequence&1u) || epoch->lattice_origin!=mp_.map_origin_ ||
       epoch->voxel_dimensions!=mp_.map_voxel_num_ || epoch->extent_m!=mp_.map_size_ || epoch->resolution_m!=mp_.resolution_ || epoch->frame_id!=mp_.frame_id_ ||
@@ -753,7 +764,9 @@ std::shared_ptr<const FrozenOccupancyEpoch> GridMap::captureFrozenCorridor(
     cells->comparison_masks.push_back(masks[address]);
     if (raw) { cells->raw_addresses.push_back(address); ++cells->raw_row_offsets[address/dims.z()+1]; }
   }
-    if (include_failure_evidence) {
+    // Sparse physical cells remain the complete hard corridor proof. The
+    // full-map copy is opt-in forensic output, never execution evidence.
+    if (include_failure_evidence && !budget) {
       const auto evidence=captureFailureSnapshotUnlocked(true);
       if(evidence) epoch->failure_evidence=std::make_shared<const GridMapFailureSnapshot>(std::move(*evidence));
     }

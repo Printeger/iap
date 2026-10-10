@@ -199,3 +199,27 @@ message take转换竞争引发RuntimeError；原记录保持不变。必要11进
 证据 `20261010T130506Z_623/export/analysis/timing_gap_proof.json` 与
 `inline_trigger_fixture_results.json`。新调用链的测试夹具补齐真实广播publisher；此前
 null publisher失败的回溯保留，不在产品代码跳过发布。原完整现场仍须按新SHA复核。
+
+
+## 同预算分支监督与诊断副本
+
+`d80c64bd`现场 `20261010T131525Z_920` 四作业正常收尾，但原300 s内未到达；本Goal
+仍未完成。保存 `20261010T132641Z_063/export/analysis/budget_counterexample.json`：
+两轮实际退回elapsed=1.507／1.595 s，在线上限仍1.5 s，过期不得提交。A25→B26→C27
+在截止前提交并被服务端替换，但重型guard先于已到的权威结果读取，随后剩余窗口关闭；
+结果不确定必须保留B/C身份，不能推断或取消。预算例外不能当成物理地图根因。
+
+现有assessRemainingTrajectory／assessTrajectory接受同一个可选PlanningBudget，
+B确认后的检查、C求解guard、可能执行的A前段／B／C采样和corridor捕获都传递同一对象。
+预算过期返回completed=false／budget_exhausted，不伪称物理拒绝；已确认B保留，没有
+新一轮C预算。现有结果等待先消费可用权威反馈，再做必要检查，不让诊断抢占反馈确认。
+
+预算内corridor保留同generation的全部实际采样、raw比较邻域、observed／净空／motion
+硬事实；地图mutex按该预算尝试取得，截止后不继续等待。全地图failure_evidence只是
+可选诊断副本，在此预算路径不复制；原运行监督仍保存完整冻结诊断。已有原规划全图
+输入保存，最新检查缺少完整诊断副本时保持原map_available=false，不借用新旧地图或
+伪造来源。观测模型、来源及硬检查均不变。定向诊断复制测试先红后绿；18项预算／原保护与6项地图／证据契约通过。原参数ID3
+成功1.091 s（搜索0.924 s、一次），丢失1.408 s与拒绝1.049 s均实际执行B4；B/C撤销
+进入受检保护5/6且不回退A3。结果见 `shared_budget_native_verified.json`；输入变量错误
+造成的五个SKIPPED run由 `skipped_native_env_correction.json` 排除，不计为通过。六包
+Release依赖全链重建完成。原完整现场仍须新SHA复核，不能标DEV_ACCEPTED。

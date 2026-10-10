@@ -544,7 +544,7 @@ namespace ego_planner
 
   bool EGOReplanFSM::waitForServerResult(int id,uint8_t mode,PlanningBudget::Ptr budget) {
     auto next_check=PlanningBudget::Clock::now();
-    while(budget && !budget->workExpired()) {
+    while(budget && !budget->expired()) {
       const auto result=std::atomic_load(&pending_server_result_);
       if(result && result->request_id==id && result->request_mode==mode) {
         planner_manager_->observeServerResult(*result);
@@ -553,6 +553,8 @@ namespace ego_planner
             result->active_id,result->pending_id);
         return result->accepted;
       }
+      // Consume an available authoritative result before another heavy check.
+      if(budget->workExpired()) break;
       if(mode==traj_utils::msg::Bspline::AT_TIME && PlanningBudget::Clock::now()>=next_check) {
         next_check=PlanningBudget::Clock::now()+supervision_period;
         if(!planner_manager_->inspectPendingStopProof(node_->now().seconds(),budget).executable()) {
@@ -1410,7 +1412,11 @@ namespace ego_planner
         planner_manager_->pendingConfirmed() && !budget->expired() && budget->searchRemaining()>0. &&
         planner_manager_->local_data_.traj_id_==predecessor.traj_id_) {
       // B has reached the ONLY execution owner before spending anything on C.
-      const auto checked=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false);
+      const auto checked=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false,budget);
+      if(checked.budget_exhausted) {
+        recordExecutionEvent("backup_replacement_budget_exhausted",bspline.traj_id,info->start_time_.seconds(),NAN,predecessor.traj_id_);
+        return true; // Confirmed B stays in place; no second budget for C.
+      }
       if(!checked.executable()) {
         const std::string event=std::string("backup_replacement_proof_rejected_")+
             gridExecutionReasonName(checked.execution_reason);
@@ -1424,14 +1430,18 @@ namespace ego_planner
         return false;
       }
       auto next_check=PlanningBudget::Clock::now();
-      budget->setExecutionGuard([this,&next_check,predecessor,ts=info->start_time_.seconds()]() {
+      budget->setExecutionGuard([this,&next_check,predecessor,budget,ts=info->start_time_.seconds()]() {
         if(node_->now().seconds()+.1>=ts) return false;
         const auto command=std::atomic_load(&pending_command_);
         if(!command || command->trajectory_id!=static_cast<unsigned>(predecessor.traj_id_)) return false;
         const auto current=PlanningBudget::Clock::now();
         if(current<next_check) return true;
         next_check=current+supervision_period;
-        const auto branch=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false);
+        const auto branch=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false,budget);
+        if(branch.budget_exhausted) {
+          recordExecutionEvent("replacement_check_budget_exhausted",branch.trajectory_id,ts,NAN,predecessor.traj_id_);
+          return false;
+        }
         if(!branch.executable()) {
           recordExecutionEvent("replacement_execution_proof_lost",branch.trajectory_id,ts,NAN,predecessor.traj_id_);
           RCLCPP_ERROR(node_->get_logger(),"Replacement execution proof lost: %s; checked protection required",
