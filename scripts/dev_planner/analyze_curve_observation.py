@@ -6,6 +6,7 @@ outside the map lock. It is diagnostic and cannot authorize execution.
 """
 
 import argparse
+import csv
 import json
 import math
 from pathlib import Path
@@ -169,11 +170,24 @@ def compare_commit_rejection(committed, rejected):
     current = (np.fromfile(current_path,dtype=np.uint8).reshape(tuple(reject['dimensions']))
                if current_path.is_file() else None)
     final = commit.get('final_check')
-    if not final or not final.get('cell_flags_file'):
+    corridor=commit.get('execution_corridor')
+    if not final or not (final.get('cell_flags_file') or corridor):
         raise ValueError('missing authoritative final-check mask')
-    previous_path = cd / final['cell_flags_file']
+    previous_path = cd / final['cell_flags_file'] if final.get('cell_flags_file') else None
     previous = (np.fromfile(previous_path, dtype=np.uint8).reshape(tuple(final['dimensions']))
-                if previous_path.is_file() else None)
+                if previous_path and previous_path.is_file() else None)
+    sparse=None
+    if corridor:
+        if (corridor['authority']!='IMMUTABLE_CHECK_CORRIDOR_NOT_FULL_MAP' or
+                corridor['generation']!=final['generation'] or
+                corridor['evaluation_time_s']!=final['evaluation_time_s']):
+            raise ValueError('sparse final-check identity mismatch')
+        with (cd/corridor['cells_file']).open() as stream:
+            sparse=list(csv.DictReader(stream))
+        addresses=[int(v['address']) for v in sparse]
+        if (len(addresses)!=corridor['cell_count'] or addresses!=sorted(set(addresses)) or
+                any(int(v['flags']) & ~7 or int(v['comparison_mask']) not in (1,7) for v in sparse)):
+            raise ValueError('invalid immutable sparse corridor')
     if commit['actual_curve'] != reject['actual_curve']:
         raise ValueError('different spline payloads')
     t = reject['curve_first_execution_time_s']
@@ -208,12 +222,41 @@ def compare_commit_rejection(committed, rejected):
     source = None
     if current is not None and reject.get('observation_evidence_available') and (rd/reject['observation_sources_file']).is_file():
         source = np.fromfile(rd/reject['observation_sources_file'],dtype=np.uint8).reshape(current.shape)
-    commit_meta = dict(commit,cloud_stamp_s=final['cloud_stamp_s'])
+    commit_meta = dict(commit,cloud_stamp_s=final.get('cloud_stamp_s',corridor['cloud_stamp_s'] if corridor else None))
     before = (evidence(commit_meta,previous,final['origin_m'],final['resolution_m'],
                        final['evaluation_time_s'],final['motion_error_proxy_m'])
               if previous is not None else dict(available=False,reason='final_check_cells_missing',
                   motion_error_proxy_m=final['motion_error_proxy_m'],
-                  map_age_s=final['evaluation_time_s']-final['cloud_stamp_s']))
+                  map_age_s=final['evaluation_time_s']-commit_meta['cloud_stamp_s']))
+    if previous is None and sparse is not None:
+        origin=np.asarray(corridor['origin_m']);resolution=corridor['resolution_m']
+        dimensions=np.asarray(corridor['dimensions'],dtype=int)
+        index=np.floor((p-origin)*(1./resolution)).astype(int)
+        address=int((index[0]*dimensions[1]+index[1])*dimensions[2]+index[2])
+        scoped={int(v['address']):(int(v['flags']),int(v['comparison_mask'])) for v in sparse}
+        flags,mask=scoped.get(address,(0,0))
+        required=(commit['motion_body_radius_m']+commit['motion_tracking_reserve_m']+
+                  corridor['motion_error_proxy_m']+.5*np.sqrt(3)*resolution)
+        radius=int(np.ceil(required/resolution))+1
+        complete=all(int((x*dimensions[1]+y)*dimensions[2]+z) in scoped
+            for x in range(max(0,index[0]-radius),min(dimensions[0],index[0]+radius+1))
+            for y in range(max(0,index[1]-radius),min(dimensions[1],index[1]+radius+1))
+            for z in range(max(0,index[2]-radius),min(dimensions[2],index[2]+radius+1)))
+        raw=np.array([v for v,(f,_) in scoped.items() if f & 1],dtype=int)
+        raw_index=np.column_stack((raw//(dimensions[1]*dimensions[2]),
+            raw//dimensions[2]%dimensions[1],raw%dimensions[2]))
+        centers=origin+(raw_index+.5)*resolution
+        distance=np.linalg.norm(centers-p,axis=1)
+        nearest=int(np.argmin(distance)) if len(distance) else None
+        before=dict(available=bool(mask),index=index.tolist(),flags=flags,
+            comparison_mask=mask,observed=bool(flags&4) if mask&4 else None,
+            inflated=bool(flags&2) if mask&2 else None,raw=bool(flags&1) if mask&1 else None,
+            required_clearance_m=required,motion_error_proxy_m=corridor['motion_error_proxy_m'],
+            raw_neighbourhood_complete=complete,sampled_voxel_at_commit=mask==7,
+            nearest_raw_center_m=centers[nearest].tolist() if nearest is not None else None,
+            raw_center_distance_m=float(distance[nearest]) if nearest is not None else None,
+            map_age_s=corridor['evaluation_time_s']-corridor['cloud_stamp_s'],
+            scope='SCOPED_IMMUTABLE_CHECK_CELLS; no flags inferred for absent cells')
     after = (evidence(reject,current,reject['origin_m'],reject['resolution_m'],
                       reject['curve_evaluation_time_s'],reject['motion_error_proxy_m'],source)
              if current is not None else dict(available=False,reason='rejection_cells_missing',
@@ -222,7 +265,8 @@ def compare_commit_rejection(committed, rejected):
     step = reject['curve_sample_step_s']
     phase = t/step
     return dict(schema='iap_commit_rejection_comparison_v1',committed=str(cd),rejected=str(rd),
-                trajectory_id=commit['candidate_trajectory_id'],same_spline=True,
+                trajectory_id=commit.get('committed_trajectory_id') if commit.get('committed_trajectory_id') is not None
+                    else corridor['trajectory_id'] if corridor else commit['candidate_trajectory_id'],same_spline=True,
                 rejection_curve_time_s=t,rejection_position_m=p.tolist(),
                 commit_same_point=before,rejection_same_point=after,
                 rejection_from_s=reject['curve_checked_from_time_s'],
@@ -230,4 +274,4 @@ def compare_commit_rejection(committed, rejected):
                 commit_check_complete=final['execution_reason']=='OK' and not final['budget_exhausted'],
                 rejection_reason=reject['curve_execution_reason'],
                 commit_generation=final['generation'],rejection_generation=reject['generation'],
-                limitation='Same-point mask comparison, not native check replay. Final-check provenance mask and exact commit sample list were not captured; cannot assert same point was sampled at commit or source transition.')
+                limitation='Same-point immutable mask comparison, not native check replay. Scoped bit mask 7 identifies a checked voxel, not the exact point/sample time. Map changes alone do not identify physical obstacle motion versus registration drift; missing provenance stays missing.')

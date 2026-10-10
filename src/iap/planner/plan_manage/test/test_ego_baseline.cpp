@@ -479,6 +479,9 @@ struct EGOPlannerManagerTestAccess {
     manager.planning_motion_.stamp_s = 10.0;
     manager.planning_motion_.error_proxy_m = 0.02;
   }
+  static void selectExecutionEvidence(EGOPlannerManager& manager,int id) {
+    manager.execution_evidence_ids_.insert(id);
+  }
   static void capture(EGOPlannerManager& manager, const std::string& kind,
                       const GridPlanningCell& cell,
                       const AStar::Result* result = nullptr,
@@ -1117,6 +1120,51 @@ TEST(EgoBaseline, BudgetedReleaseKeepsPhysicalCellsWithoutFullDiagnosticCopy) {
   const auto runtime=manager.assessTrajectory(curve,0,now,false,0,
       std::numeric_limits<double>::infinity(),nullptr,false);
   ASSERT_TRUE(runtime.physical_epoch);EXPECT_TRUE(runtime.physical_epoch->failure_evidence);
+}
+
+TEST(EgoBaseline, SelectedBudgetedReleaseExportsItsImmutableSparseProof) {
+  std::filesystem::path owned;
+  if(!glim::RunLogManager::get_if_initialized()) {
+    if(!std::getenv("IAP_RUN_DIR")) {
+      char name[]="/tmp/iap_sparse_proof_XXXXXX";const auto temporary=mkdtemp(name);
+      ASSERT_NE(temporary,nullptr);owned=temporary;setenv("IAP_RUN_DIR",owned.c_str(),1);
+    }
+    glim::RunLogManager::initialize("sparse_proof_capture_test");
+  }
+  struct Cleanup {std::filesystem::path owned;~Cleanup(){if(!owned.empty())std::filesystem::remove_all(owned);}} cleanup{owned};
+  auto node=makeNode();ego_planner::EGOPlannerManager manager;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d point(-1,0,1);const double now=node->now().seconds();
+  GridMapTestAccess::input(*manager.grid_map_,{},now,point);GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setCapture(manager);
+  ego_planner::EGOPlannerManagerTestAccess::selectExecutionEvidence(manager,10);
+  manager.grid_map_->setFailureEvidenceCapture(true);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,now,1,point);
+  ASSERT_TRUE(manager.beginPlanningView());
+  auto checked=ego_planner::EGOPlannerManagerTestAccess::budgetedPointRelease(manager,point);
+  checked.trajectory_id=10;
+  ASSERT_TRUE(checked.executable());ASSERT_TRUE(checked.physical_epoch);
+  ASSERT_FALSE(checked.physical_epoch->failure_evidence);
+  const auto cell=manager.queryAssessmentCell(checked,point);ASSERT_TRUE(cell);
+  const auto original_generation=checked.evaluated_generation;
+  // Mutate the live producer after checking: the writer must preserve the
+  // check's immutable version, including its original bit comparison scope.
+  GridMapTestAccess::changeEvidence(*manager.grid_map_,point,true,true,true);
+  const ego_planner::UniformBspline curve(point.replicate(1,7),3,.3);
+  ego_planner::EGOPlannerManagerTestAccess::capture(manager,"committed_10",*cell,nullptr,nullptr,&curve,&checked);
+  const auto leaf=glim::RunLogManager::get_if_initialized()->export_path("planner/failure_map/committed_10");
+  boost::property_tree::ptree metadata;boost::property_tree::read_json((leaf/"snapshot.json").string(),metadata);
+  EXPECT_EQ(metadata.get<uint64_t>("execution_corridor.generation"),original_generation);
+  EXPECT_FALSE(metadata.get<bool>("final_check.map_available"));
+  EXPECT_EQ(metadata.get<int>("execution_corridor.trajectory_id"),10);
+  std::ifstream sparse(leaf/"execution_corridor.csv");ASSERT_TRUE(sparse);
+  std::string line;std::getline(sparse,line);EXPECT_EQ(line,"address,flags,comparison_mask");
+  const auto& proof=*checked.physical_epoch->cells;size_t i=0;
+  while(std::getline(sparse,line)) {
+    ASSERT_LT(i,proof.addresses.size());
+    EXPECT_EQ(line,std::to_string(proof.addresses[i])+","+std::to_string(proof.flags[i])+","+std::to_string(proof.comparison_masks[i]));++i;
+  }
+  EXPECT_EQ(i,proof.addresses.size());
 }
 
 TEST(EgoBaseline, BudgetedCorridorStopsWaitingForMapAuthorityAtDeadline) {

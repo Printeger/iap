@@ -418,6 +418,15 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertIn("libplanner_local_map_extension.so",ros["extension_modules"])
             manifest=json.loads((run / "metadata/run_manifest.json").read_text())
             self.assertIn("metadata/config/iap",manifest["config_snapshots"])
+            context.launch_configurations.update(capture_failure_map="true",execution_evidence_ids="10,11,13,24")
+            with mock.patch.dict(os.environ,{"IAP_RUN_DIR":str(run)}),mock.patch.object(runtime,"get_package_share_directory",return_value=str(REPO)):
+                runtime._setup(context)
+            exported=json.loads((run/"metadata/config/planner_parameters.json").read_text())
+            self.assertEqual(exported.pop("planning/execution_evidence_ids"),[10,11,13,24])
+            self.assertEqual(exported,runtime.planner_parameters(catalog["icra_dense_forest_four_fork_v2"],capture_failure_map=True,advisory_guidance=False))
+            context.launch_configurations["execution_evidence_ids"]="10,invalid"
+            with mock.patch.dict(os.environ,{"IAP_RUN_DIR":str(run)}),mock.patch.object(runtime,"get_package_share_directory",return_value=str(REPO)):
+                with self.assertRaises(ValueError):runtime._setup(context)
 
     def test_installed_full_stack_connects_command_feedback_to_the_server(self):
         from ament_index_python.packages import get_package_share_directory

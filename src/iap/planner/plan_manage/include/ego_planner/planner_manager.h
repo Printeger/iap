@@ -249,6 +249,7 @@ namespace ego_planner
     double motion_max_age_s_ = 0.5;
     double environment_max_age_s_ = 0.5;
     bool capture_failure_map_ = false;
+    std::unordered_set<int> execution_evidence_ids_; // Opt-in sparse proof export, no new map/check.
     bool search_performance_diagnostics_ = false;
     PlanningTimings planning_timings_;
     std::unordered_set<std::string> captured_failure_kinds_;

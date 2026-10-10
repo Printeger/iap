@@ -194,6 +194,16 @@ namespace ego_planner
     const auto final_check=has_final_check ? std::optional<TrajectoryAssessment>(*checked) : std::nullopt;
     const auto final_snapshot=final_check && final_check->physical_epoch
         ? final_check->physical_epoch->failure_evidence : std::shared_ptr<const GridMapFailureSnapshot>{};
+    const auto* corridor_check=final_check ? &*final_check : assessment;
+    // committed_N is a planning-attempt label, not an execution owner ID.
+    const int corridor_id=corridor_check && corridor_check->trajectory_id>=0 ?
+        corridor_check->trajectory_id : kind.rfind("committed_",0)==0 ?
+        publicationTrajectory().traj_id_ : executing_id;
+    auto corridor_epoch=execution_evidence_ids_.count(corridor_id) && corridor_check
+        ? corridor_check->physical_epoch : std::shared_ptr<const FrozenOccupancyEpoch>{};
+    // Dense diagnostic epochs already use the existing full-map artifact.
+    if(corridor_epoch && (!corridor_epoch->cells || corridor_epoch->cells->addresses.empty()))
+      corridor_epoch.reset();
     // Capture the same frozen raw cache on the serialized planning thread.
     // The writer receives values, never a mutable query or a live re-query.
     const auto risk_evidence=planning_view_ && planning_view_->advisory_query.captureEvidence
@@ -286,6 +296,18 @@ namespace ego_planner
                   snapshot->cell_flags.size());
       cells.close();
       if (!cells) throw std::runtime_error("cells.bin write failed");
+      if(corridor_epoch && corridor_epoch->cells) {
+        const auto& proof=*corridor_epoch->cells;
+        if(proof.addresses.empty() || proof.addresses.size()!=proof.flags.size() ||
+            proof.comparison_masks.size()!=proof.flags.size())
+          throw std::runtime_error("execution corridor evidence is not a complete sparse proof");
+        std::ofstream sparse(pending/"execution_corridor.csv");
+        sparse << "address,flags,comparison_mask\n";
+        for(size_t i=0;i<proof.addresses.size();++i)
+          sparse << proof.addresses[i] << ',' << unsigned(proof.flags[i]) << ','
+              << unsigned(proof.comparison_masks[i]) << '\n';
+        sparse.close();if(!sparse) throw std::runtime_error("execution corridor write failed");
+      }
       if(final_snapshot && final_snapshot->generation!=snapshot->generation) {
         std::ofstream final_cells(pending/"final_check_cells.bin",std::ios::binary);
         final_cells.write(reinterpret_cast<const char*>(final_snapshot->cell_flags.data()),final_snapshot->cell_flags.size());
@@ -383,6 +405,7 @@ namespace ego_planner
           << "  \"run_manifest\": \"../../../../metadata/run_manifest.json\",\n"
           << "  \"artifact_label\": " << std::quoted(label) << ",\n"
           << "  \"executing_trajectory_id\": " << executing_id << ",\n"
+          << "  \"committed_trajectory_id\": " << (kind.rfind("committed_",0)==0 ? std::to_string(corridor_id) : "null") << ",\n"
           << "  \"server_feedback_id\": " << feedback_id << ",\n"
           << "  \"candidate_trajectory_id\": " << (candidate_id>0 ? std::to_string(candidate_id) : "null") << ",\n"
           << "  \"expected_effective_time_s\": " << number(effective_time) << ",\n"
@@ -676,7 +699,27 @@ namespace ego_planner
         for(size_t i=0;i<evidence.guide.size();++i) metadata << (i ? "," : "") << vector(evidence.guide[i]);
         metadata << "],\"guide_retention\":" << retention(evidence.guide_retention) << '}';
       }
-      metadata << "],\n  \"final_check\": ";
+      metadata << "],\n  \"execution_corridor\": ";
+      if(corridor_epoch && corridor_epoch->cells) {
+        const auto& epoch=*corridor_epoch;
+        const auto* check=final_check ? &*final_check : assessment;
+        metadata << "{\"authority\":\"IMMUTABLE_CHECK_CORRIDOR_NOT_FULL_MAP\","
+          << "\"trajectory_id\":" << corridor_id << ",\"generation\":" << epoch.generation
+          << ",\"frame_id\":" << std::quoted(epoch.frame_id)
+          << ",\"cloud_stamp_s\":" << number(epoch.cloud_stamp_s)
+          << ",\"origin_m\":" << vector(epoch.lattice_origin)
+          << ",\"dimensions\":[" << epoch.voxel_dimensions.x() << ',' << epoch.voxel_dimensions.y() << ',' << epoch.voxel_dimensions.z() << ']'
+          << ",\"resolution_m\":" << number(epoch.resolution_m)
+          << ",\"cells_file\":\"execution_corridor.csv\",\"cell_count\":" << epoch.cells->flags.size()
+          << ",\"evaluation_time_s\":" << number(check->evaluation_time_s)
+          << ",\"checked_from_time_s\":" << number(check->checked_from_time_s)
+          << ",\"checked_to_time_s\":" << number(check->checked_to_time_s)
+          << ",\"sample_step_s\":" << number(check->sample_step_s)
+          << ",\"motion_stamp_s\":" << number(check->evaluated_motion.stamp_s)
+          << ",\"motion_error_proxy_m\":" << number(check->evaluated_motion.error_proxy_m)
+          << ",\"execution_reason\":" << std::quoted(gridExecutionReasonName(check->execution_reason)) << '}';
+      } else metadata << "null";
+      metadata << ",\n  \"final_check\": ";
       if(final_check) {
         metadata << "{\"execution_reason\":" << std::quoted(gridExecutionReasonName(final_check->execution_reason))
           << ",\"guide_retention\":" << retention(final_check->guide_retention)
@@ -753,6 +796,8 @@ namespace ego_planner
                  << std::quoted(relative + "/observation_sources.bin");
       if(final_snapshot && final_snapshot->generation!=snapshot->generation)
         manifest << ",\"final_check_cells\":" << std::quoted(relative+"/final_check_cells.bin");
+      if(corridor_epoch && corridor_epoch->cells)
+        manifest << ",\"execution_corridor\":" << std::quoted(relative+"/execution_corridor.csv");
       manifest << ",\"stage_epoch_cells\":[";
       bool first_stage_epoch=true;
       for(const auto generation : stage_generations) {
@@ -976,6 +1021,13 @@ namespace ego_planner
     initPredictionExport();
     capture_failure_map_ = node->declare_parameter(
         "planning/capture_failure_map", false);
+    const auto evidence_ids=node->declare_parameter<std::vector<int64_t>>(
+        "planning/execution_evidence_ids",std::vector<int64_t>{});
+    if(evidence_ids.size()>32) throw std::invalid_argument("at most 32 execution evidence identities");
+    for(const auto id:evidence_ids) {
+      if(id<0 || id>std::numeric_limits<int>::max()) throw std::invalid_argument("invalid execution evidence identity");
+      execution_evidence_ids_.insert(static_cast<int>(id));
+    }
     grid_map_->setFailureEvidenceCapture(capture_failure_map_);
     search_performance_diagnostics_ = node->declare_parameter(
         "planning/search_performance_diagnostics", false);

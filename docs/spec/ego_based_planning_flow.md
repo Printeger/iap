@@ -44,6 +44,18 @@ Advisory 当前语义为 `pose6_fixed_two_source_envelope_v2`：GNSS 独占星�
 0.005824 m<0.136603 m；保守计入旧准备时间＋本轮准备/搜索仍使用原1.5 s预算。
 `search_prefix_backend_v2/summary.json`为离线实际后端曲线，未发送命令，不能称ON实飞收益。
 
+执行取证增加按真实trajectory ID启用的`execution_evidence_ids`启动参数（空默认关闭，
+逗号分隔，最多32身份，要求`capture_failure_map=true`）。既有异步writer保存既有
+不可变预算内物理epoch的`execution_corridor.csv`及代数/时间/运动元数据，manifest登记；
+不在规划线程复制新地图、重采、放宽检查或增加预算。`committed_N`是attempt标签，
+不是trajectory ID；新`committed_trajectory_id`与corridor的trajectory_id明确真实owner。
+CSV保留producer raw/inflated/observed及comparison_mask：7为实际受检voxel，1为仅raw
+净空邻域；不能把邻域observed位授予执行许可，也不能把voxel受检称精确点/时刻受检。
+同点比较器支持稀疏提交证据，对缺地址和未受检位保留缺失；新采集不能补造历史提交。
+验证：原ID11 final-check缺mask反例保留；预算内原epoch在生产map更新后逐行导出一致，
+原full-map_available仍false。相关4项原生执行/取证检查、22项map工具与48项启动接口
+检查通过。历史ID10/24提交缺失及ID11/13最终地图缺失继续声明，不由新接口追认。
+
 完整新冻结使用 v9，保留原 state/GNSS/cloud/map/reference/receipt；合格正向短区间
 由真实 IMU 传播均值、F、Q 和交叉状态，原后验 envelope `2(FPFᵀ+Q)` 只作对照，
 不作为新的独立观测先验。旧记录不重编码授予时间资格，不刷新 stamp 或扩大配对门槛。

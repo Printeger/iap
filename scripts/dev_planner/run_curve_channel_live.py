@@ -77,6 +77,7 @@ def main():
     parser.add_argument('--stop-after-task',action='store_true',help='stop owned jobs when the original FSM records task_reached')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     parser.add_argument('--gnss-seed', type=int, default=None, help='Independent simulation observation seed; all noise/planner settings retained')
+    parser.add_argument('--execution-evidence-ids', default='', help='Opt-in comma-separated owning IDs; retain existing immutable final/refusal corridor evidence')
     args = parser.parse_args()
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
@@ -153,6 +154,8 @@ def main():
             command.append('capture_advisory_residuals:=true')
         if args.gnss_seed is not None:
             command.append('gnss_observation_seed:=' + str(args.gnss_seed))
+        if args.execution_evidence_ids:
+            command.append('execution_evidence_ids:=' + args.execution_evidence_ids)
         manifest(run, 'forest_runtime_identity', {'schema': 'iap_forest_runtime_identity_v1',
                  **identity, 'command': command, 'preflight': gpu,
                  'runtime_binary': runtime_binary,

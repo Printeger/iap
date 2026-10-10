@@ -221,6 +221,7 @@ def _setup(context):
                 "capture_failure_map": context.launch_configurations.get(
                     "capture_failure_map", "false"
                 ),
+                "execution_evidence_ids": context.launch_configurations.get("execution_evidence_ids", ""),
             }.items(),
         ),
     ]
@@ -259,6 +260,8 @@ def generate_launch_description():
                                  description="Include FGO posterior proxy in Advisory (legacy A/B only)"),
             DeclareLaunchArgument("planner_start_delay_s", default_value="10.0"),
             DeclareLaunchArgument("capture_failure_map", default_value="false"),
+            DeclareLaunchArgument("execution_evidence_ids", default_value="",
+                description="Opt-in comma-separated trajectory IDs for immutable sparse check evidence"),
             DeclareLaunchArgument("capture_advisory_residuals", default_value="false", choices=["true","false"],
                                   description="Opt-in actual GPU postopt quality residuals; same original quality cadence"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),

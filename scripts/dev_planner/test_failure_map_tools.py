@@ -79,6 +79,27 @@ class FailureMapToolsTest(unittest.TestCase):
         result=compare_commit_rejection(commit,reject)
         self.assertTrue(result['commit_same_point']['observed'])
         self.assertFalse(result['rejection_same_point']['observed'])
+        # A budgeted release owns sparse cells rather than a diagnostic full
+        # map. Same-point comparison must preserve the bit comparison scope.
+        base['final_check'].pop('cell_flags_file')
+        base['execution_corridor']=dict(authority='IMMUTABLE_CHECK_CORRIDOR_NOT_FULL_MAP',
+            generation=3,evaluation_time_s=10.1,cloud_stamp_s=10.,trajectory_id=3,
+            dimensions=list(self.flags.shape),origin_m=self.meta['origin_m'],
+            resolution_m=.1,motion_error_proxy_m=0.,cell_count=self.flags.size,
+            cells_file='execution_corridor.csv')
+        target=int(np.ravel_multi_index((10,10,2),self.flags.shape))
+        rows=[f'{i},4,{7 if i==target else 1}\n' for i in range(self.flags.size)]
+        (commit/'execution_corridor.csv').write_text('address,flags,comparison_mask\n'+''.join(rows))
+        (commit/'snapshot.json').write_text(json.dumps(base))
+        result=compare_commit_rejection(commit,reject)
+        self.assertTrue(result['commit_same_point']['observed'])
+        self.assertTrue(result['commit_same_point']['raw_neighbourhood_complete'])
+        self.assertTrue(result['commit_same_point']['sampled_voxel_at_commit'])
+        rows[target]=f'{target},4,1\n'
+        (commit/'execution_corridor.csv').write_text('address,flags,comparison_mask\n'+''.join(rows))
+        result=compare_commit_rejection(commit,reject)
+        self.assertIsNone(result['commit_same_point']['observed'])
+        self.assertFalse(result['commit_same_point']['sampled_voxel_at_commit'])
 
     def test_route_exists_but_online_timed_out(self):
         self.write()

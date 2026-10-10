@@ -234,6 +234,14 @@ def _setup(context):
                        context.launch_configurations.get("advisory_calibration", ""),
                        context.launch_configurations.get("advisory_guidance", "false").lower()=="true",
                        context.launch_configurations.get("advisory_trial", ""))
+    evidence_ids=context.launch_configurations.get("execution_evidence_ids", "")
+    if evidence_ids:
+        tokens=evidence_ids.split(',')
+        if len(tokens)>32 or any(not value.isdecimal() or int(value)>2147483647 for value in tokens):
+            raise ValueError('execution_evidence_ids requires at most 32 nonnegative integer identities')
+        if not frozen_planner_parameters['planning/capture_failure_map']:
+            raise ValueError('execution_evidence_ids requires capture_failure_map=true')
+        frozen_planner_parameters['planning/execution_evidence_ids']=[int(value) for value in tokens]
     parameters_path=run / "metadata/config/planner_parameters.json"
     parameters_path.write_text(json.dumps(frozen_planner_parameters,sort_keys=True,allow_nan=False,indent=2)+"\n")
     register_config_snapshot(run,parameters_path)
