@@ -95,7 +95,9 @@ sensor_msgs::msg::PointCloud2 makeCloud(
   for (const auto& sample : samples) {
     *x = static_cast<float>(sample.center.x());
     *y = static_cast<float>(sample.center.y());
-    *z = static_cast<float>(sample.center.z());
+    // Project only the display geometry. PL and visibility still use the
+    // original slice voxel at flight height (or the configured fixed slice).
+    *z = 0.0f;
     *hpl = static_cast<float>(sample.risk.hpl);
     *vpl = static_cast<float>(sample.risk.vpl);
     *status = static_cast<uint8_t>(sample.risk.status);
@@ -115,7 +117,9 @@ void appendSurfaceTriangle(visualization_msgs::msg::Marker& marker,
                            const SlicePoint& c, const std::string& metric,
                            double minimum, double maximum) {
   for (const SlicePoint* sample : {&a, &b, &c}) {
-    marker.points.push_back(markerPoint(sample->center, -0.025));
+    auto point = markerPoint(sample->center, 0.0);
+    point.z = 0.0;
+    marker.points.push_back(point);
     const double value = metric == "hpl" ? sample->risk.hpl : sample->risk.vpl;
     marker.colors.push_back(markerColor(riskColor(value, minimum, maximum), 0.42f));
   }
@@ -176,7 +180,7 @@ visualization_msgs::msg::MarkerArray makeLegend(
   title.color = markerColor(0xffffffu, 1.0f);
   std::ostringstream text;
   text << (metric == "hpl" ? "HPL" : "VPL")
-       << ": dots predicted, surface interpolated, persists "
+       << ": slice PL projected to z=0, dots predicted, surface interpolated, persists "
        << std::fixed << std::setprecision(0) << retention_s << " s";
   title.text = text.str();
   array.markers.push_back(std::move(title));
@@ -201,7 +205,7 @@ visualization_msgs::msg::MarkerArray drawSurfaces(const RiskDisplayFrame& data,
   if (surface.points.empty()) surface.action=visualization_msgs::msg::Marker::DELETE;
   auto age=markerBase(data.frame_id,stamp,"risk_history_age",data.id,
       visualization_msgs::msg::Marker::TEXT_VIEW_FACING,std::max(.001,remaining));
-  age.pose.position=markerPoint(data.vehicle,.3); age.scale.z=.16;
+  age.pose.position=markerPoint(data.vehicle,0.0); age.pose.position.z=.3; age.scale.z=.16;
   age.color=markerColor(0xffffff,1);
   std::ostringstream label;
   label<<"historical PL ref="<<std::fixed<<std::setprecision(3)<<data.reference_time_s
@@ -457,6 +461,7 @@ class GridMapVisualizer : public rclcpp::Node {
     }
     Eigen::Vector3d corner=Eigen::Vector3d::Zero();
     if(!history_.empty()) corner=history_.back().vehicle+Eigen::Vector3d(-4.5,-4.5,0);
+    corner.z()=0.0;
     legend_->publish(makeLegend(geometry_frame_.empty()?"map":geometry_frame_,stamp,corner,metric_,minimum,maximum,retention_));
     auto label=markerBase(geometry_frame_.empty()?"map":geometry_frame_,stamp,"risk_status",0,visualization_msgs::msg::Marker::TEXT_VIEW_FACING,1.5);
     label.pose.position=markerPoint(corner,.5); label.scale.z=.22; label.color=markerColor(0xffffff,1);

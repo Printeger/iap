@@ -30,6 +30,11 @@ publicationStillTimely → 原 traj_server accepted/pending/active 反馈 → �
 独立地图可视化通过既有 GetGridMapPredictionInput 的 planning_input=true、attempt=0
 读取最近规划轮保留的不可变输入，不额外冻结实时地图，不更新规划／执行状态。
 尚无保留输入时显式显示缺失，不回退实时冻结；PL 时间身份／历史标记及失效判断保留。
+热力图点云及全部历史彩色面投影到地图坐标 z=0；采样高度仍默认跟随飞机、对齐体素中心，
+fixed_z_m 只选择采样切片。投影不修改 PL、观测／障碍筛选、实际轨迹或执行检查。
+图例位于地面，文字保留小幅高度偏移以便阅读。
+显示投影调整已完成 Release 编译及既有 test_ego_pipeline 检查（PL、历史切换、清理）；
+未为显示调整追加原任务现场运行，D4 到达证据仍绑定上表原提交。
 实际 visualizer 进程测试在修改前捕获到 planning_input=false 并失败，修改后要求
 所有显示请求使用保留输入，继续检查 PL、历史切换和清理。原在线预算及全部硬检查不变。
 用户运行只使用 `iap_sim.launch.py`；同一运行根目录／ROS domain 的启动互斥由

@@ -358,6 +358,8 @@ python3 src/iap/scripts/dev_planner/analyze_curve_observation.py \
 
 报告写入 `export/analysis/curve_observation_curve_unobserved.json`，先核对实际曲线、点坐标、体素索引与真实观测 mask，再区分当前射线覆盖缺口、端点去重缺口、当前帧替换/活动窗口移除和 mask 不一致。观测移除来源没有时间戳，不能据此推断证据年龄；只有完整 beam 输入才能讨论无回波覆盖。地图或当前帧证据过期、非注册输入或旧快照缺少曲线/帧来源时明确无法判定，不能用稀疏障碍反推自由空间。A* 的 `search_failure=TIME_BUDGET` 不再被地图推进覆盖；`search_map_changed`、搜索代数和结束时在线代数独立保存。一次失败同时超时且地图变化时，`timeout` 与 `map_changed` 都可保留首份同轮冻结地图。
 
+热力图点云 `/grid_map/risk_slice` 和全部历史彩色面 `/grid_map/risk_surface` 统一显示在地图坐标 z=0，图例位于地面附近。PL 采样仍默认跟随飞机高度并对齐地图体素中心（`risk_viz/z_mode=follow`）；`fixed` 模式和 `fixed_z_m` 控制的是采样高度，不是显示高度。地面颜色代表原高度切片的 PL 投影，不代表地面风险；规划、障碍和轨迹坐标不变。重启既有 launch 即可生效。
+
 运行时切换色彩依据：
 
 ```bash
