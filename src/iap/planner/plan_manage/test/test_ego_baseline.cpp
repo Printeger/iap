@@ -145,6 +145,7 @@ struct EGOReplanFSMTestAccess {
   static void setPublisher(EGOReplanFSM& fsm,
       rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr publisher) {
     fsm.bspline_pub_=std::move(publisher);
+    fsm.broadcast_bspline_pub_=fsm.node_->create_publisher<traj_utils::msg::Bspline>("native_safety_broadcast",10);
   }
   static bool stop(EGOReplanFSM& fsm,const Eigen::Vector3d& position,
                    const Eigen::Vector3d& velocity) {
@@ -1967,8 +1968,10 @@ TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredece
 }
 
 TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
-  for (double unsafe_time : {1.3,4.1}) {
+  for (const auto& scenario : std::vector<std::pair<double,bool>>{{1.3,false},{4.1,false},{4.1,true}}) {
+    const double unsafe_time=scenario.first;const bool blocked_mission=scenario.second;
     SCOPED_TRACE(unsafe_time);
+    SCOPED_TRACE(blocked_mission);
     auto node=makeNode();
     ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
     ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
@@ -1979,9 +1982,11 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
     GridMapTestAccess::input(*manager.grid_map_,{},100.,start);
     GridMapTestAccess::markObserved(*manager.grid_map_);
     ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+    ASSERT_TRUE(manager.planGlobalTraj(start,zero,zero,end,zero,zero));
     ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
     auto predecessor=manager.local_data_;
     GridMapTestAccess::clearObserved(*manager.grid_map_,predecessor.position_traj_.evaluateDeBoorT(unsafe_time));
+    if(blocked_mission) GridMapTestAccess::changeEvidence(*manager.grid_map_,end,true,true,true);
     const auto assessment=manager.assessRemainingTrajectory(100.);
     ASSERT_FALSE(assessment.executable());
     ASSERT_GT(assessment.first_execution_time_s,1.);
@@ -1989,11 +1994,28 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
     if(unsafe_time>1.6) ASSERT_GT(assessment.first_execution_time_s,1.6);
     ego_planner::EGOReplanFSM fsm;
     ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,end);
+    auto odom=std::make_shared<nav_msgs::msg::Odometry>();odom->header.frame_id="map";
+    odom->header.stamp=node->now();odom->pose.pose.position.x=start.x();odom->pose.pose.position.z=start.z();
+    ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,end,odom);
     ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,
         node->create_publisher<traj_utils::msg::Bspline>("unsafe_connection_brake",10));
     // Publication checks the complete old tail, including the cancellation
     // branch after the 1.6 s handover. Any known tail violation rules it out.
-    ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.));
+    // A distant failure still leaves time for the original actual-PVA entry
+    // to publish a fully checked replacement; a near failure needs braking.
+    const bool brake=ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.);
+    EXPECT_EQ(brake,unsafe_time<2.5 || blocked_mission);
+    if(unsafe_time>2.5 && !blocked_mission) {
+      ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
+      EXPECT_GT(manager.local_data_.traj_id_,predecessor.traj_id_);
+      EXPECT_FALSE(manager.hasPendingTrajectory());
+      EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(start,1e-9));
+      EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(zero,1e-9));
+      EXPECT_GT((manager.local_data_.position_traj_.evaluateDeBoorT(manager.local_data_.duration_)-start).norm(),.2);
+      EXPECT_TRUE(manager.assessTrajectory(manager.local_data_.position_traj_,0,100.).executable());
+      EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
+      continue;
+    }
     EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
     EXPECT_FALSE(manager.hasPendingTrajectory());
     ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,start,zero));

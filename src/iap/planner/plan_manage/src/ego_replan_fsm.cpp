@@ -934,9 +934,18 @@ namespace ego_planner
           // Scheduled publication checks the COMPLETE predecessor tail for
           // CANCEL_PENDING, including after handover. Any known hard tail
           // failure rules out that continuation, regardless of its lead time.
-          // Request the existing checked brake while a legal stop is possible.
-          flag_escape_emergency_=true;
-          changeFSMExecState(EMERGENCY_STOP,"unsafe predecessor tail");
+          // A distant failure can still admit a checked actual-PVA replacement.
+          // Reuse the original immediate entry only for this revoked-tail
+          // protection case, with the FULL original 1.5 s planning allowance
+          // plus the existing emergency margin before the known violation.
+          // This is never a fallback for a late normal scheduled candidate.
+          if(lead>1.5+emergency_time_ && planFromGlobalTraj()) {
+            changeFSMExecState(EXEC_TRAJ,"checked revoked-tail replacement");
+            publishSwarmTrajs(false);
+          } else {
+            flag_escape_emergency_=true;
+            changeFSMExecState(EMERGENCY_STOP,"unsafe predecessor tail");
+          }
         } else if (lead > emergency_time_) {
           changeFSMExecState(REPLAN_TRAJ, "SAFETY");
         } else if ((assessment.execution_reason == GridExecutionReason::TRACKING_ERROR
