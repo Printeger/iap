@@ -184,6 +184,19 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
+      Name: UAV current GLIO pose
+      Namespaces:
+        glio_vehicle: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /grid_map/vehicle
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
       Name: Executed B-spline curve
       Namespaces:
         executed_bspline: true

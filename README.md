@@ -360,6 +360,8 @@ python3 src/iap/scripts/dev_planner/analyze_curve_observation.py \
 
 热力图点云 `/grid_map/risk_slice` 和全部历史彩色面 `/grid_map/risk_surface` 统一显示在地图坐标 z=0，图例位于地面附近。PL 采样仍默认跟随飞机高度并对齐地图体素中心（`risk_viz/z_mode=follow`）；`fixed` 模式和 `fixed_z_m` 控制的是采样高度，不是显示高度。地面颜色代表原高度切片的 PL 投影，不代表地面风险；规划、障碍和轨迹坐标不变。重启既有 launch 即可生效。
 
+默认 RViz 的 `UAV current GLIO pose` 显示亮紫色四旋翼图标，按 `/drone_0_visual_slam/odom` 的实测位置和姿态更新，保留实际飞行高度。图标由已有地图显示进程发布到 `/grid_map/vehicle`，复用已有 hummingbird 模型资源；悬停时仍更新，里程计停止更新后 0.5 s 过期。重启既有 launch 即可显示，无额外启动命令。
+
 运行时切换色彩依据：
 
 ```bash

@@ -33,6 +33,11 @@ publicationStillTimely → 原 traj_server accepted/pending/active 反馈 → �
 热力图点云及全部历史彩色面投影到地图坐标 z=0；采样高度仍默认跟随飞机、对齐体素中心，
 fixed_z_m 只选择采样切片。投影不修改 PL、观测／障碍筛选、实际轨迹或执行检查。
 图例位于地面，文字保留小幅高度偏移以便阅读。
+同一显示进程将 GLIO 实测里程计位置／姿态发布为 /grid_map/vehicle 四旋翼模型，
+默认 RViz 开启该图标，保留实际高度；不依赖 PL 可用性或轨迹距离采样。
+复用 odom_visualization 的 hummingbird.mesh 资源，不启动额外节点；无新里程计更新时图标在 0.5 s 后过期。
+已验证独立显示进程在无 PL 输入、相同悬停位置下持续发布正确姿态／高度及有效模型资源，
+既有可视化集成和默认 RViz 配置检查通过；未追加原任务或声称已人工检查 RViz 渲染。
 显示投影调整已完成 Release 编译及既有 test_ego_pipeline 检查（PL、历史切换、清理）；
 未为显示调整追加原任务现场运行，D4 到达证据仍绑定上表原提交。
 实际 visualizer 进程测试在修改前捕获到 planning_input=false 并失败，修改后要求

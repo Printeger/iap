@@ -235,6 +235,7 @@ class GridMapVisualizer : public rclcpp::Node {
     status_=create_publisher<visualization_msgs::msg::Marker>("grid_map/risk_status",1);
     surface_=create_publisher<visualization_msgs::msg::MarkerArray>("grid_map/risk_surface",1);
     legend_=create_publisher<visualization_msgs::msg::MarkerArray>("grid_map/risk_legend",1);
+    vehicle_=create_publisher<visualization_msgs::msg::Marker>("grid_map/vehicle",1);
     path_=create_publisher<nav_msgs::msg::Path>("grid_map/glio_path",1);
     input_=create_client<iap::srv::GetGridMapPredictionInput>("grid_map/prediction_input");
     parameter_callback_=add_on_set_parameters_callback([this](const std::vector<rclcpp::Parameter>& values){
@@ -249,9 +250,25 @@ class GridMapVisualizer : public rclcpp::Node {
       return result;
     });
     odom_=create_subscription<nav_msgs::msg::Odometry>("odom_world",50,[this](nav_msgs::msg::Odometry::ConstSharedPtr msg){
-      if (geometry_frame_.empty() || msg->header.frame_id!=geometry_frame_) return;
       const auto& p=msg->pose.pose.position; const Eigen::Vector3d point(p.x,p.y,p.z);
       if (!point.allFinite()) return;
+      const auto& q=msg->pose.pose.orientation;
+      Eigen::Quaterniond orientation(q.w,q.x,q.y,q.z);
+      // Show the measured pose even before PL input is available or when the
+      // vehicle is stationary; path decimation below must not suppress it.
+      if (!msg->header.frame_id.empty() && orientation.coeffs().allFinite() && orientation.norm()>1e-6) {
+        orientation.normalize();
+        auto vehicle=markerBase(msg->header.frame_id,rclcpp::Time(msg->header.stamp),
+            "glio_vehicle",0,visualization_msgs::msg::Marker::MESH_RESOURCE,.5);
+        vehicle.pose=msg->pose.pose;
+        vehicle.pose.orientation.w=orientation.w(); vehicle.pose.orientation.x=orientation.x();
+        vehicle.pose.orientation.y=orientation.y(); vehicle.pose.orientation.z=orientation.z();
+        vehicle.scale.x=vehicle.scale.y=vehicle.scale.z=2.0;
+        vehicle.color=markerColor(0xff55ff,1.0f);
+        vehicle.mesh_resource="package://odom_visualization/meshes/hummingbird.mesh";
+        vehicle_->publish(vehicle);
+      }
+      if (geometry_frame_.empty() || msg->header.frame_id!=geometry_frame_) return;
       if (!glio_path_.poses.empty()) {
         const auto& previous=glio_path_.poses.back().pose.position;
         if ((point-Eigen::Vector3d(previous.x,previous.y,previous.z)).norm()<.05) return;
@@ -486,7 +503,7 @@ class GridMapVisualizer : public rclcpp::Node {
   rclcpp::Client<iap::srv::GetGridMapPredictionInput>::SharedPtr input_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_service_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_;
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr status_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr status_,vehicle_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr surface_,legend_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_;
