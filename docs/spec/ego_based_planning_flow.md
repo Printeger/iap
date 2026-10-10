@@ -35,6 +35,13 @@ receiver/visibility cache 身份覆盖用于重复一致性判断的字段。
 已采集 seed2101 保留修复前冻结模型身份；修复后独立留出改用未查看的 seed2102，
 追加运行只为此确定的软件反例，不拟合经验参数。
 
+固定路线离线评估器 `failure_map_replay --route-check/--route-cost` 与生产搜索
+共用保存的两套时间：物理检查使用 `planning_time_s`，完整 payload 身份使用
+`risk_reference_time_s`；原 `risk_valid_until_s` 也必须提供且有效。v9 正向传播后
+两时刻不同属于合法输入，不能比较为同一时刻或修改 stamp。真实 committed_4 的
+原工具拒绝为红，修复后同输入可评估；错 reference、缺 reference、错 map 仍拒绝。
+此修复仅涉及离线工具，不授予执行许可，不改变现场规划预算或模型版本。
+
 ## 主线与实际执行范围
 
 保留 D1 route/execute 分离、有限 Advisory 软代价、三个目标身份；D2 原 EGO、真实零末

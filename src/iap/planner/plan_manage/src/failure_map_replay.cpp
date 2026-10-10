@@ -485,12 +485,19 @@ void fixedRouteCheck(const Input& in,const char* payload_path,const char* output
   auto snapshot=in.snapshot;
   if(!(std::cin>>snapshot.virtual_ceiling_height_m>>snapshot.inflation_radius_m))
     throw std::invalid_argument("missing original ceiling/inflation");
+  double risk_reference, risk_until;
+  if(!(std::cin>>risk_reference>>risk_until) || !std::isfinite(risk_reference) ||
+      !std::isfinite(risk_until) || risk_until<risk_reference)
+    throw std::invalid_argument("missing or invalid original prediction reference/validity");
   std::ifstream payload(payload_path,std::ios::binary);
   const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(payload)),{});
   const auto input=ego_planner::decodePredictionInput(bytes);
   auto map=GridMap::fromFailureSnapshot(snapshot);
   const auto epoch=map->captureFrozenOccupancyEpoch();
-  if(!input.occupancy || input.reference_time_s!=in.planning_time_s ||
+  // V9 source propagation retains a GNSS reference epoch distinct from the
+  // physical planning time. Match the saved risk epoch as planningSearch does;
+  // neither original timestamp is rewritten by this offline evaluator.
+  if(!input.occupancy || input.reference_time_s!=risk_reference ||
       input.occupancy->generation!=epoch->generation || input.occupancy->frame_id!=epoch->frame_id ||
       input.occupancy->lattice_origin!=epoch->lattice_origin || input.occupancy->extent_m!=epoch->extent_m ||
       input.occupancy->resolution_m!=epoch->resolution_m || input.occupancy->cloud_stamp_s!=epoch->cloud_stamp_s ||
