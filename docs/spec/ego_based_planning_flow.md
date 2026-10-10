@@ -180,3 +180,22 @@ message take转换竞争引发RuntimeError；原记录保持不变。必要11进
 相同转换错误若context仍运行则继续报错失败。真实入口及ROS context定向测试先红后绿，
 正常SIGINT测试继续通过；不改变规划、执行、传感器或地图证据。下一现场仅补齐权威
 反馈及健康收尾证据，不能凭再次到达代替逐身份连续性审计。当前仍未DEV_ACCEPTED。
+
+
+## 接续触发的同回调事务
+
+补证现场 `20261010T130013Z_120` 在189.994 s到达且四作业正常退出，直接保存57条
+权威反馈；A10→B11→C12、A50→B51→C52实际非零接续。最终审计仍发现ID29、32、41
+有合法moving window，却先转REPLAN、等待下一次exec回调；原物理监督超出其周期的
+回调随后占用剩余窗口，导致没有规划尝试就停车。具体曲线分别绑定committed_39／42／51，
+不能用文件名当执行ID。该现场及审计是修复输入，仍不标记本Goal完成。
+
+现在EXEC_TRAJ达到原触发条件、且当次实际曲线还有moving window时，在同一回调直接
+启动已有planFromCurrentTraj事务。该函数重新读取当前时刻、同future ts取原P/V/A，
+仍通过原完整检查、1.5 s预算与发布。已有pending仍不搜索，失败重试、短停止和停车后
+起步仍走原REPLAN路径；没有减少硬监督或改变其200 ms周期。实际ID29曲线的现有
+测试先红：一次tick只进入REPLAN而没有pending；修复后ID29、32、41三条冻结曲线
+同tick均交付受检pending，接续早于减速、非零P/V/A连续；14项原保护测试通过。
+证据 `20261010T130506Z_623/export/analysis/timing_gap_proof.json` 与
+`inline_trigger_fixture_results.json`。新调用链的测试夹具补齐真实广播publisher；此前
+null publisher失败的回溯保留，不在产品代码跳过发布。原完整现场仍须按新SHA复核。

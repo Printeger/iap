@@ -748,6 +748,14 @@ namespace ego_planner
       {
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
+      // Captured IDs29/32/41 had a moving window at this trigger, then lost it
+      // waiting for the next exec tick behind overdue physical checks. Start
+      // the SAME bounded transaction here; retries and resting starts retain
+      // the existing REPLAN_TRAJ path. No check or publication is skipped.
+      if(exec_state_==REPLAN_TRAJ && continuationTiming(time_now).moving && planFromCurrentTraj()) {
+        changeFSMExecState(EXEC_TRAJ,"FSM");
+        publishSwarmTrajs(false);
+      }
 
       break;
     }

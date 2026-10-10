@@ -209,6 +209,7 @@ struct EGOReplanFSMTestAccess {
     fsm.exec_timer_=fsm.node_->create_wall_timer(std::chrono::hours(1),[]{});
     fsm.data_disp_pub_=fsm.node_->create_publisher<traj_utils::msg::DataDisp>("short_rest_display",10);
     fsm.bspline_pub_=fsm.node_->create_publisher<traj_utils::msg::Bspline>("short_rest_bspline",10);
+    fsm.broadcast_bspline_pub_=fsm.node_->create_publisher<traj_utils::msg::Bspline>("short_rest_broadcast",10);
     fsm.odometryCallback(odom);
   }
   static void tick(EGOReplanFSM& fsm) {fsm.execFSMCallback();}
@@ -1545,9 +1546,6 @@ TEST(EgoBaseline, RollingContinuationTriggersBeforeDecelerationAndRejectsRestHan
     EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::timing(fsm).second);
     prepare(elapsed);
   }
-  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,predecessor.traj_id_,100.+elapsed);
-  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
-  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
   // No future moving window remains. Must retain active, without even a search.
   prepare(duration-.8);
   const auto queries=ego_planner::EGOPlannerManagerTestAccess::attempt(manager);
@@ -1558,9 +1556,12 @@ TEST(EgoBaseline, RollingContinuationTriggersBeforeDecelerationAndRejectsRestHan
   // Fresh motion BEFORE the braking window can still use the original 1.6 s
   // AT_TIME protocol with the exact same-time P/V/A and nonzero velocity.
   prepare(elapsed);
-  const bool connected=ego_planner::EGOReplanFSMTestAccess::fromCurrent(fsm);
-  ASSERT_TRUE(connected);
+  ego_planner::EGOReplanFSMTestAccess::queueCommand(fsm,predecessor.traj_id_,100.+elapsed);
+  // The trigger's callback must START this existing transaction. Returning in
+  // REPLAN_TRAJ would let another overdue safety check consume the window.
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
   ASSERT_TRUE(manager.hasPendingTrajectory());
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
   const auto candidate=manager.publicationTrajectory();const double t=candidate.start_time_.seconds()-100.;
   EXPECT_LT(t,deceleration);
   auto new_p=candidate.position_traj_;auto new_v=candidate.velocity_traj_;auto new_a=candidate.acceleration_traj_;
