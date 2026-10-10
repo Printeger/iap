@@ -31,7 +31,7 @@ def main():
     if primary['entrypoint']!='iap_sim' or primary['scenario']!='icra_dense_forest_four_fork_v2':
         raise ValueError('canonical live run required')
     target=artifact(run,'export/planner/advisory_validation/'+args.label+'_events.jsonl')
-    subscriptions={};counts=Counter();started=time.monotonic()
+    subscriptions={};counts=Counter();started=time.monotonic();shutdown_reason=None
     rclpy.init();node=rclpy.create_node('advisory_live_capture', parameter_overrides=[
         Parameter('use_sim_time', value=canonical_run_uses_sim_time(run))])
     qos=QoSProfile(depth=100,reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -63,6 +63,7 @@ def main():
                                   '/ublox_driver/range_meas','/ublox_driver/ephem','/ublox_driver/glo_ephem',
                                   '/sim/drone_0/lidar_body',
                                   '/drone_0_planning/bspline','/drone_0_planning/pos_cmd',
+                                  '/drone_0_planning/trajectory_feedback',
                                   '/sim/drone_0/imu_iap') or types[0]=='quadrotor_msgs/msg/SO3Command' or
                                   ('planning' in topic and types[0]=='std_msgs/msg/String'))
                         if selected:
@@ -72,10 +73,16 @@ def main():
                 rclpy.spin_once(node,timeout_sec=.1)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass  # Owned driver stop; finalize complete evidence below.
+    except RuntimeError as error:
+        # Owned SIGINT can shut the ROS context down between wait-set take and
+        # Python message conversion. Keep identical errors fatal while live.
+        if rclpy.ok() or not str(error).startswith("Unable to convert call argument '0' to Python object"):
+            raise
+        shutdown_reason="CONTEXT_SHUTDOWN_DURING_MESSAGE_TAKE"
     finally:
         node.destroy_node();rclpy.try_shutdown()
         manifest(run,'advisory_capture_'+args.label,{'identity':'LIVE_MEASUREMENT','source':primary['source'],
-             'counts':dict(counts),'duration_s':time.monotonic()-started,'artifacts_sha256':{str(target.relative_to(run)):sha(target)}})
+             'counts':dict(counts),'duration_s':time.monotonic()-started,'shutdown_reason':shutdown_reason,'artifacts_sha256':{str(target.relative_to(run)):sha(target)}})
     print(json.dumps({'path':str(target),'counts':dict(counts)}))
 
 if __name__=='__main__':main()

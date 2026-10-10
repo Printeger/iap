@@ -644,6 +644,39 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
                     process.kill()
                     process.wait()
 
+    def test_capture_shutdown_conversion_race_preserves_live_errors(self):
+        import subprocess
+        runs = self._load_launch("_includes/run_directory.py")
+        # Exercise the real entrypoint and ROS context. Only the message-take
+        # race is injected; an identical failure with a live context must fail.
+        for shutdown in (False, True):
+            with self.subTest(shutdown=shutdown), tempfile.TemporaryDirectory() as temporary, \
+                    mock.patch.dict(os.environ, {"IAP_RUN_ROOT": temporary}):
+                run = runs.resolve_run_directory(entrypoint="iap_sim", scenario="icra_dense_forest_four_fork_v2")
+                (run / "metadata/manifests/full_stack.json").write_text(json.dumps(
+                    {"clock_contract": "historical_clock_2022-07-06T12:00:00Z"}))
+                code = """import runpy,sys,rclpy
+sys.path.insert(0,sys.argv[1])
+path=sys.argv[2];shutdown=sys.argv[3]=='true'
+def message_take(*args,**kwargs):
+    if shutdown:rclpy.try_shutdown()
+    raise RuntimeError("Unable to convert call argument '0' to Python object (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
+rclpy.spin_once=message_take
+sys.argv=[path,'--duration','30','--label','race']
+runpy.run_path(path,run_name='__main__')
+"""
+                result = subprocess.run([sys.executable, "-c", code,
+                    str(REPO / "scripts/dev_predictor"),
+                    str(REPO / "scripts/dev_predictor/advisory_live_capture.py"),
+                    str(shutdown).lower()], env=dict(os.environ, IAP_RUN_DIR=str(run), ROS_DOMAIN_ID="144"),
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0 if shutdown else 1, result.stdout+result.stderr)
+                metadata = json.loads((run / "metadata/manifests/advisory_capture_race.json").read_text())
+                if shutdown:
+                    self.assertEqual(metadata["shutdown_reason"], "CONTEXT_SHUTDOWN_DURING_MESSAGE_TAKE")
+                else:
+                    self.assertIn("RuntimeError", result.stderr)
+
     def test_each_canonical_entrypoint_has_one_owner_and_propagates_both_run_envs(self):
         for filename in (
             "glio.launch.py",

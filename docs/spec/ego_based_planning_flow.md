@@ -161,3 +161,22 @@ ID4 的完整3.079 s曲线可留下接续窗口，但触发时间只预留0.1 s�
 总1.137 s、搜索0.864 s；B4撤销后受检保护5、C5撤销后受检保护6，均未恢复A3。
 逐run结果见 `20261010T122850Z_790/export/analysis/branch_native_results.json`；14项原
 保护测试通过。新机会、地图证据及物理授权边界均不扩展。
+
+
+## 权威反馈现场证据与采集收尾
+
+原子替换、窗口及身份修复 `3d06e9c0` 的现场 `20261010T125025Z_474` 原任务在
+219.416 s到达，独立原规则审计 `20261010T125429Z_908` 通过。70个实际激活ID、39次
+减速前非零接续，其中 A11→B12→C13、A13→B14→C15、A53→B54→C55 为服务端确认
+的原子替换；接缝P/V/A误差均≤1e-5。仍有22段非终点零速命令55.410 s，离散实测
+低速16.374 s；逐ID审计 `20261010T125624Z_071/export/analysis/continuous_flight_evidence.json`。
+单轮规划最大1.167 s、累计搜索0.792 s、修复最多3；全原planner参数比较无差异。
+
+此run原driver标记failed，因为已授权SIGINT停止辅助capture时，ROS context关闭与
+message take转换竞争引发RuntimeError；原记录保持不变。必要11进程覆盖到达、完整
+采集覆盖到达后0.66 s，该证据不能替代完整健康收尾门禁。现有capture入口纳入
+`/drone_0_planning/trajectory_feedback`，直接保存权威接收、拒绝、active／pending及ts。
+仅在context已经关闭且错误匹配上述转换竞争时正常收尾，并在子manifest记录原因；
+相同转换错误若context仍运行则继续报错失败。真实入口及ROS context定向测试先红后绿，
+正常SIGINT测试继续通过；不改变规划、执行、传感器或地图证据。下一现场仅补齐权威
+反馈及健康收尾证据，不能凭再次到达代替逐身份连续性审计。当前仍未DEV_ACCEPTED。
