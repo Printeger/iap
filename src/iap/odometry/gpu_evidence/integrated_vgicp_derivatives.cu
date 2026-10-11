@@ -20,6 +20,27 @@
 
 namespace gtsam_points {
 
+namespace {
+// Read the actual immutable CUDA source arrays before matching admission.
+// This shares the existing bounded capture slots and stream; no extra sync,
+// lookup, matcher input, or reduction contribution is introduced.
+__global__ void observe_source_geometry(const Eigen::Vector3f* means,
+                                       const Eigen::Matrix3f* covariances,
+                                       iap::GpuMatchResidual* output,
+                                       int stride, int slots) {
+  const int slot=blockIdx.x*blockDim.x+threadIdx.x;
+  if(slot>=slots) return;
+  const int index=slot*stride;
+  auto& record=output[slot];
+  record.source_available=1;record.source_index=index;
+  for(int row=0;row<3;++row) {
+    record.source_mean_m[row]=means[index][row];
+    for(int col=0;col<3;++col)
+      record.source_covariance_m2_row_major[3*row+col]=covariances[index](row,col);
+  }
+}
+}
+
 IapObservedVGICPDerivatives::IapObservedVGICPDerivatives(
   const GaussianVoxelMapGPU::ConstPtr& target,
   const PointCloud::ConstPtr& source,
@@ -154,6 +175,11 @@ void IapObservedVGICPDerivatives::begin_evidence(const Eigen::Isometry3f* linear
   evidence_stride=std::max(1,static_cast<int>((source->size()+evidence_limit-1)/evidence_limit));
   evidence_slots=static_cast<int>((source->size()+evidence_stride-1)/evidence_stride);
   if(!evidence_operation(cudaMemsetAsync(evidence_gpu,0,sizeof(iap::GpuMatchResidual)*evidence_slots,stream),"cudaMemsetAsync")) return;
+  if(evidence_slots>0) {
+    observe_source_geometry<<<(evidence_slots+127)/128,128,0,stream>>>(
+      source->points_gpu,source->covs_gpu,evidence_gpu,evidence_stride,evidence_slots);
+    if(!evidence_operation(cudaGetLastError(),"source geometry kernel")) return;
+  }
   if(!evidence_operation(cudaMemcpyAsync(evidence_cpu->transform_column_major,linearization_point,sizeof(Eigen::Matrix4f),cudaMemcpyDeviceToHost,stream),"transform cudaMemcpyAsync")) return;
   evidence_pending=true;
 }
@@ -183,7 +209,20 @@ void IapObservedVGICPDerivatives::harvest_evidence() {
   last_evidence.sampling_stride=evidence_stride;
   last_evidence.sample_limit=evidence_limit;last_evidence.source_slots=evidence_slots;
   last_evidence.linearization_transform=Eigen::Map<const Eigen::Matrix4f>(evidence_cpu->transform_column_major);
-  for(int i=0;i<evidence_slots;++i) if(evidence_samples_cpu[i].valid) last_evidence.samples.push_back(evidence_samples_cpu[i]);
+  for(int i=0;i<evidence_slots;++i) {
+    const auto& record=evidence_samples_cpu[i];
+    if(!record.source_available || record.source_index!=i*evidence_stride) {
+      last_evidence=iap::GpuMatchCapture{};
+      last_evidence.failure_reason="source geometry capture incomplete";
+      evidence_pending=false;return;
+    }
+    iap::GpuSourceGaussian source_record;source_record.source_index=record.source_index;
+    std::copy_n(record.source_mean_m,3,source_record.mean_m);
+    std::copy_n(record.source_covariance_m2_row_major,9,source_record.covariance_m2_row_major);
+    last_evidence.source_samples.push_back(source_record);
+    if(record.valid) last_evidence.samples.push_back(record);
+  }
+  last_evidence.source_geometry_available=true;
   evidence_pending=false;
 }
 iap::GpuMatchCapture IapObservedVGICPDerivatives::take_evidence() {

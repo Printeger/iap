@@ -22,6 +22,7 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
     packet.capture.samples.resize(128);packet.capture.original_source_count=128;
     packet.capture.original_inlier_count=128;packet.capture.sampling_stride=1;
     packet.capture.sample_limit=128;packet.capture.source_slots=128;
+    packet.capture.source_geometry_available=true;
     packet.owner.target_frame_id=9;packet.owner.level_id=0;
     for(int i=0;i<count;++i) {
       packet.owner.source_frame_id=i;packet.owner.source_stamp=1000.+i*.1;
@@ -33,9 +34,18 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
         packet.capture.samples.resize(128);packet.capture.sample_limit=128;
         packet.capture.original_source_count=packet.capture.original_inlier_count=packet.capture.source_slots=128;
       }
+      packet.capture.source_samples.resize(packet.capture.source_slots);
+      for(int slot=0;slot<packet.capture.source_slots;++slot) {
+        packet.capture.source_samples[slot].source_index=slot;
+        packet.capture.source_samples[slot].mean_m[0]=slot*.1f;
+      }
       writer.submit(packet);
     }
     auto invalid=packet;invalid.capture.samples.resize(129);
+    EXPECT_THROW(writer.submit(invalid),std::invalid_argument);
+    invalid=packet;invalid.capture.source_samples.resize(129);
+    EXPECT_THROW(writer.submit(invalid),std::invalid_argument);
+    invalid=packet;invalid.capture.source_geometry_available=false;
     EXPECT_THROW(writer.submit(invalid),std::invalid_argument);
   }
   using Json=nlohmann::json;
@@ -51,7 +61,7 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
   while(std::getline(ledger,line)) {
     std::vector<std::string> fields;std::stringstream stream(line);std::string value;
     while(std::getline(stream,value,',')) fields.push_back(value);
-    ASSERT_EQ(fields.size(),30u);++rows;
+    ASSERT_EQ(fields.size(),32u);++rows;
     EXPECT_EQ(std::stoull(fields[0]),rows);EXPECT_EQ(std::stoll(fields[1]),rows-1);
     if(fields[8]=="1") accepted.insert(std::stoull(fields[0]));
   }
@@ -61,6 +71,13 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
     const auto packet=Json::parse(line);const auto id=packet["request_id"].get<std::uint64_t>();
     EXPECT_TRUE(exported.insert(id).second);EXPECT_EQ(packet["source_frame_id"],id-1);
     EXPECT_EQ(packet["samples"].size(),id==1 ? iap::kGpuMatchDenseEvidenceLimit : 128u);
+    EXPECT_EQ(packet["schema"],"iap_gpu_match_residual_v2");
+    EXPECT_TRUE(packet["source_geometry_available"].get<bool>());
+    EXPECT_EQ(packet["source_samples"].size(),packet["source_slots"].get<std::size_t>());
+    for(std::size_t slot=0;slot<packet["source_samples"].size();++slot) {
+      EXPECT_EQ(packet["source_samples"][slot]["source_index"],slot);
+      EXPECT_FLOAT_EQ(packet["source_samples"][slot]["mean_m"][0].get<float>(),slot*.1f);
+    }
   }
   EXPECT_EQ(exported,accepted);EXPECT_EQ(exported.size(),manifest["written"].get<std::size_t>());
   EXPECT_THROW(iap::GpuMatchEvidenceWriter duplicate(logs),std::runtime_error);

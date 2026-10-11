@@ -105,6 +105,21 @@ M2仍进行，M3–M5未完成。
 改变模型选择时才补窄采集接口。上述候选未采用，生产V5及所有执行规则保持；
 独立排序、冻结、规划贯通与完整OFF/ON仍未获得资格，Goal active。
 
+均值模型取证的最小接口补齐：实际native kernel原来仅导出原目标的inlier
+几何，旧frame401共有6044个source slots、只存1775个匹配源点；不能将另4269个
+说成新固定地图的关联失败。现有有界capture在同一CUDA stream上先读取原
+source均值／Gaussian covariance，再按原样计算匹配与reduction；共用原pinned
+buffer及128／16384上限，无新增同步。artifact `iap_gpu_match_residual_v2` 分别
+保存原 `samples` 和 `source_samples`，后者含原source index及源坐标；匹配为0
+仍保留原源点。`source_geometry_available`、slot闭合及ledger独立计数明确资格；
+stride>1仍只是有界子集，旧v1不重构未记录源点。源covariance是原VGICP损失
+kernel，qualified_noise/motion仍false，不能直接当作物理噪声或来源位姿covariance。
+源记录缺失／CUDA取证失败不复用旧数据，原匹配残差、cost及Hessian保留；
+原生0匹配反例已红→绿，同步／异步、单／双节点、surface validation、稀疏／
+dense及失败恢复对照通过，writer压力与6项audit（含旧真实协方差反例）通过。
+检查owner `log/20261011T105641Z_447`，红反例原日志绑定前一owner，不移动证据。
+这仅修复模型选择输入，不授予残差均值、原排序、现场预算或执行收益资格。
+
 本轮 pending／来源排序追加 Goal 已交付有限执行修复及独立排序负结论，基线
 `1d1b1a6b`，初始工作树／安装字节一致；现场均绑定干净提交及 Release 安装。
 图文报告、机器验收、复现脚本及提交清单位于

@@ -49,5 +49,6 @@ private:
   std::thread worker_;
   std::uint64_t entries_=0, requests_=0, available_=0, queue_dropped_=0, written_=0, write_failures_=0;
   std::uint64_t samples_written_=0;
+  std::uint64_t source_samples_written_=0;
 };
 }

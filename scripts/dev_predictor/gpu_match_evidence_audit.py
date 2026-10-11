@@ -15,6 +15,50 @@ sys.path.insert(0,str(REPO/"launch/_includes"))
 from run_directory import adopt_run_directory, write_subordinate_manifest
 
 
+def audit_source_geometry(packet):
+    """All bounded native source slots, separate from original target inliers.
+
+    Historical v1 never establishes this availability. These covariances are
+    actual VGICP loss kernels, not sensor noise or map-pose covariances.
+    """
+    if packet["schema"] == "iap_gpu_match_residual_v1":
+        return 0
+    if packet["source_geometry_model"] != "actual_cuda_source_gaussians_v1":
+        raise ValueError("unsupported source geometry model")
+    source_samples = packet["source_samples"]
+    available = packet["source_geometry_available"]
+    if not isinstance(available, bool):
+        raise ValueError("invalid source geometry availability")
+    if not available:
+        if source_samples:
+            raise ValueError("unavailable source geometry borrowed samples")
+        return 0
+    if not packet["available"]:
+        raise ValueError("unavailable capture borrowed source geometry")
+    count, stride = packet["original_source_count"], packet["sampling_stride"]
+    slots, limit = packet["source_slots"], packet["sample_limit"]
+    if count < 0 or stride <= 0 or slots != (count+stride-1)//stride or len(source_samples) != slots or slots > limit:
+        raise ValueError("source geometry slot closure mismatch")
+    for slot, sample in enumerate(source_samples):
+        if sample["source_index"] != slot*stride or not 0 <= sample["source_index"] < count:
+            raise ValueError("source geometry identity mismatch")
+        mean = np.asarray(sample["mean_m"], float)
+        covariance = np.asarray(sample["covariance_m2_row_major"], float)
+        if mean.shape != (3,) or covariance.shape != (9,) or not np.isfinite(mean).all() or not np.isfinite(covariance).all():
+            raise ValueError("nonfinite or malformed source geometry")
+        covariance = covariance.reshape(3, 3)
+        if not np.allclose(covariance, covariance.T, rtol=1e-5, atol=1e-7) or np.linalg.eigvalsh(covariance)[0] < -1e-7:
+            raise ValueError("invalid source kernel covariance")
+    for match in packet["samples"]:
+        index = match["source_index"]
+        if index < 0 or index % stride or index//stride >= slots:
+            raise ValueError("matched source absent from source geometry")
+        source = source_samples[index//stride]
+        if source["mean_m"] != match["source_mean_m"] or source["covariance_m2_row_major"] != match["source_covariance_m2_row_major"]:
+            raise ValueError("matched source differs from original source geometry")
+    return len(source_samples)
+
+
 def quantiles(values):
     values=np.asarray(values,dtype=float)
     return None if not len(values) else {"n":len(values),"min":float(np.min(values)),
@@ -98,14 +142,21 @@ def audit(run):
     residual_errors=[];covariance_errors=[];transform_errors=[];statuses=Counter();owners=Counter()
     source_matches=Counter();voxel_matches=Counter();multi_level=defaultdict(dict)
     frames=set();total_source=0;total_inliers=0;sample_count=0
+    source_sample_count=0;complete_source_captures=0
     arithmetic={}
     with raw.open() as stream:
         for line in stream:
             p=json.loads(line);identity=p["request_id"]
-            if p["schema"]!="iap_gpu_match_residual_v1" or p["model"]!="actual_cuda_postopt_quality_linearization_v1":
+            if p["schema"] not in ("iap_gpu_match_residual_v1", "iap_gpu_match_residual_v2") or p["model"]!="actual_cuda_postopt_quality_linearization_v1":
                 raise ValueError("unsupported actual residual model")
+            source_count = audit_source_geometry(p)
+            source_sample_count += source_count
+            complete_source_captures += bool(source_count > 0 and p.get("source_geometry_available", False) and p["schema"] == "iap_gpu_match_residual_v2" and p["sampling_stride"] == 1)
             if identity not in accepted or identity in raw_ids: raise ValueError("raw request identity mismatch")
             raw_ids.add(identity);row=accepted[identity]
+            if p["schema"] == "iap_gpu_match_residual_v2":
+                if int(row["source_geometry_available"]) != int(p["source_geometry_available"]) or int(row["source_samples"]) != source_count:
+                    raise ValueError("source geometry ledger mismatch")
             if (int(row["source_frame_id"])!=p["source_frame_id"] or int(row["target_frame_id"])!=p["target_frame_id"]
                 or int(row["available"])!=int(p["available"]) or int(row["samples"])!=len(p["samples"])):
                 raise ValueError("request/raw owner/count mismatch")
@@ -171,6 +222,8 @@ def audit(run):
                 raise ValueError("full fixture cost mismatch; no point-count weight allowed")
     if raw_ids!=set(accepted) or summary["written"]!=len(raw_ids) or summary["samples_written"]!=sample_count:
         raise ValueError("raw missing accepted requests/samples")
+    if summary.get("source_samples_written", 0) != source_sample_count:
+        raise ValueError("raw missing accepted source geometry")
     paired=[(value[0],value[1]) for value in multi_level.values() if 0 in value and 1 in value]
     correlation=None
     if len(paired)>2:
@@ -182,6 +235,7 @@ def audit(run):
         "available_exported":statuses["AVAILABLE"],"export_statuses":dict(statuses),
         "request_statuses":dict(Counter("AVAILABLE" if row["available"]=="1" else row["failure_reason"] for row in entries)),
         "source_frames":len(frames),"samples":sample_count,"total_source_count":total_source,"total_inlier_count":total_inliers,
+        "native_source_samples":source_sample_count,"complete_native_source_captures":complete_source_captures,
         "sample_fraction":quantiles(sample_fractions),"actual_residual_norm_m":quantiles(norms),
         "residual_reconstruction_error_m":quantiles(residual_errors),"covariance_reconstruction_error_m2":quantiles(covariance_errors),
         "optimized_transform_error":quantiles(transform_errors),"gnss_owners":dict(owners),"original_state_epoch_gap_s":quantiles(gaps),

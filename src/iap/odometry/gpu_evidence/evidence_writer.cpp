@@ -20,6 +20,10 @@ template<class Matrix> Json row_major(const Matrix& matrix) {
 }
 Json serialize(const GpuMatchEvidencePacket& p) {
   auto samples=Json::array();
+  auto source_samples=Json::array();
+  for(const auto& s:p.capture.source_samples) source_samples.push_back({
+    {"source_index",s.source_index},{"mean_m",s.mean_m},
+    {"covariance_m2_row_major",s.covariance_m2_row_major}});
   for(const auto& s:p.capture.samples) samples.push_back({
     {"source_index",s.source_index},{"target_index",s.target_index},{"target_point_count",s.target_point_count},
     {"residual_m",s.residual_m},{"covariance_m2_row_major",s.covariance_m2_row_major},
@@ -27,7 +31,7 @@ Json serialize(const GpuMatchEvidencePacket& p) {
     {"target_covariance_m2_row_major",s.target_covariance_m2_row_major},
     {"source_mean_m",s.source_mean_m},{"target_mean_m",s.target_mean_m},
     {"mahalanobis_squared",s.mahalanobis_squared}});
-  return {{"schema","iap_gpu_match_residual_v1"},{"model","actual_cuda_postopt_quality_linearization_v1"},
+  return {{"schema","iap_gpu_match_residual_v2"},{"model","actual_cuda_postopt_quality_linearization_v1"},
     {"request_id",p.request_id},{"capture_requested",p.capture_requested},{"source_frame_id",p.owner.source_frame_id},{"target_frame_id",p.owner.target_frame_id},
     {"source_stamp",p.owner.source_stamp},{"target_stamp",p.owner.target_stamp},
     {"target_is_fixed",p.owner.target_is_fixed},{"level_id",p.owner.level_id},{"voxel_resolution_m",p.owner.voxel_resolution_m},
@@ -42,7 +46,9 @@ Json serialize(const GpuMatchEvidencePacket& p) {
     {"gnss",{{"owner_matches",p.gnss_owner_matches},{"frame_id",p.gnss_frame_id},{"update_sequence",p.gnss_update_sequence},
       {"epoch_source_identity",p.gnss_epoch_identity},{"state_stamp",p.gnss_state_stamp},{"epoch_stamp",p.gnss_epoch_stamp},
       {"used_constellations",p.used_constellations},{"propagation","NOT_PROPAGATED"}}},
-    {"samples",samples},{"qualified_noise",false},{"qualified_motion",false}};
+    {"samples",samples},{"source_geometry_available",p.capture.source_geometry_available},
+    {"source_geometry_model","actual_cuda_source_gaussians_v1"},
+    {"source_samples",source_samples},{"qualified_noise",false},{"qualified_motion",false}};
 }
 }
 GpuMatchEvidenceWriter::GpuMatchEvidenceWriter(const glim::RunLogManager& logs)
@@ -59,7 +65,7 @@ GpuMatchEvidenceWriter::GpuMatchEvidenceWriter(const glim::RunLogManager& logs)
     runtime_identity_="metadata/manifests/forest_runtime_identity.json";
   ledger_<<"request_id,source_frame_id,source_stamp,target_frame_id,level_id,capture_requested,available,samples,queue_accepted,failure_reason,"
     "target_stamp,target_is_fixed,voxel_resolution_m,key_count,key0,key1,gnss_frame_id,gnss_update_sequence,gnss_epoch_identity,"
-    "gnss_state_stamp,gnss_epoch_stamp,gnss_owner_matches,used_constellations,sequence,source_count,inlier_count,stride,cost,sample_limit,source_slots\n"<<std::setprecision(17);
+    "gnss_state_stamp,gnss_epoch_stamp,gnss_owner_matches,used_constellations,sequence,source_count,inlier_count,stride,cost,sample_limit,source_slots,source_geometry_available,source_samples\n"<<std::setprecision(17);
   worker_=std::thread(&GpuMatchEvidenceWriter::drain,this);
 }
 GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
@@ -83,6 +89,7 @@ GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
         Json("metadata/manifests/launch_profile_manifest.json") : Json(nullptr)},
       {"entries",entries_},{"requested",requests_},{"available",available_},{"queue_dropped",queue_dropped_},
       {"written",written_},{"samples_written",samples_written_},{"write_failures",write_failures_},
+      {"source_samples_written",source_samples_written_},
       {"queue_limit",kQueueLimit},{"per_factor_sample_limit",kGpuMatchEvidenceLimit},
       {"dense_scan_sample_limit",kGpuMatchDenseEvidenceLimit},
       {"per_factor_max_pinned_bytes",sizeof(GpuMatchTransfer)+sizeof(GpuMatchResidual)*(kGpuMatchDenseEvidenceLimit+kGpuMatchEvidenceLimit)},
@@ -97,7 +104,11 @@ GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
 void GpuMatchEvidenceWriter::submit(GpuMatchEvidencePacket packet) {
   if(packet.key_count>packet.factor_keys.size() || packet.capture.sample_limit<0 ||
      packet.capture.sample_limit>static_cast<int>(kGpuMatchDenseEvidenceLimit) ||
-     packet.capture.samples.size()>static_cast<std::size_t>(packet.capture.sample_limit))
+     packet.capture.samples.size()>static_cast<std::size_t>(packet.capture.sample_limit) ||
+     packet.capture.source_samples.size()>static_cast<std::size_t>(packet.capture.sample_limit) ||
+     (packet.capture.source_geometry_available && (!packet.capture.available ||
+       packet.capture.source_slots<0 || packet.capture.source_samples.size()!=static_cast<std::size_t>(packet.capture.source_slots))) ||
+     (!packet.capture.source_geometry_available && !packet.capture.source_samples.empty()))
     throw std::invalid_argument("GPU evidence packet exceeds bounded contract");
   std::lock_guard<std::mutex> lock(mutex_);
   packet.request_id=++entries_;requests_+=packet.capture_requested;available_+=packet.capture.available;
@@ -112,7 +123,8 @@ void GpuMatchEvidenceWriter::submit(GpuMatchEvidencePacket packet) {
     <<packet.gnss_update_sequence<<','<<packet.gnss_epoch_identity<<','<<packet.gnss_state_stamp<<','
     <<packet.gnss_epoch_stamp<<','<<packet.gnss_owner_matches<<','<<csv_string(packet.used_constellations)<<','
     <<packet.capture.sequence<<','<<packet.capture.original_source_count<<','<<packet.capture.original_inlier_count<<','
-    <<packet.capture.sampling_stride<<','<<packet.capture.original_cost<<','<<packet.capture.sample_limit<<','<<packet.capture.source_slots<<'\n';
+    <<packet.capture.sampling_stride<<','<<packet.capture.original_cost<<','<<packet.capture.sample_limit<<','<<packet.capture.source_slots<<','
+    <<packet.capture.source_geometry_available<<','<<packet.capture.source_samples.size()<<'\n';
   if(!accepted) { ++queue_dropped_;return; }
   queue_.push_back(std::move(packet));
   cv_.notify_one();
@@ -130,6 +142,7 @@ void GpuMatchEvidenceWriter::drain() {
       raw_<<serialize(packet).dump()<<'\n';
       if(!raw_) throw std::runtime_error("raw write failed");
       ++written_;samples_written_+=packet.capture.samples.size();
+      source_samples_written_+=packet.capture.source_samples.size();
     } catch(const std::exception& e) {
       if(write_failures_++==0) spdlog::error("[gpu_evidence] export failed: {}",e.what());
     }

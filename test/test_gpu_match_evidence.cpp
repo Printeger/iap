@@ -59,6 +59,20 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     Eigen::Matrix4d c=Eigen::Matrix4d::Zero();c.diagonal()<<.02,.03,.01,0.;covariances.push_back(c);
   }
   gtsam_points::PointCloudCPU cpu(points);cpu.add_normals(normals);cpu.add_covs(covariances);
+  const auto verify_sources=[&](const iap::GpuMatchCapture& capture) {
+    ASSERT_TRUE(capture.source_geometry_available);
+    ASSERT_EQ(capture.source_samples.size(),static_cast<std::size_t>(capture.source_slots));
+    for(std::size_t slot=0;slot<capture.source_samples.size();++slot) {
+      const auto& record=capture.source_samples[slot];
+      const int index=slot*capture.sampling_stride;
+      ASSERT_EQ(record.source_index,index);ASSERT_LT(index,source_count);
+      for(int row=0;row<3;++row) {
+        EXPECT_FLOAT_EQ(record.mean_m[row],static_cast<float>(points[index][row]));
+        for(int col=0;col<3;++col)
+          EXPECT_FLOAT_EQ(record.covariance_m2_row_major[3*row+col],static_cast<float>(covariances[index](row,col)));
+      }
+    }
+  };
   auto source=gtsam_points::PointCloudGPU::clone(cpu);
   auto target=std::make_shared<gtsam_points::GaussianVoxelMapGPU>(.5);
   target->insert(*source);ASSERT_EQ(cudaDeviceSynchronize(),cudaSuccess);
@@ -85,6 +99,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     EXPECT_TRUE(allocation_failure.samples.empty());EXPECT_NE(allocation_failure.failure_reason.find("cudaMallocHost"),std::string::npos);
     observed->request_evidence();factor_set.linearize(values);
     auto capture=observed->take_evidence();ASSERT_TRUE(capture.available);
+    verify_sources(capture);
     ASSERT_GT(capture.samples.size(),0u);EXPECT_LE(capture.samples.size(),iap::kGpuMatchEvidenceLimit);
     EXPECT_EQ(capture.original_inlier_count,original->num_inliers());
     if(source_count<=128) EXPECT_EQ(capture.samples.size(),static_cast<std::size_t>(capture.original_inlier_count));
@@ -113,6 +128,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     if(capture.sampling_stride==1) EXPECT_NEAR(sample_cost,original_error,1e-5*std::max(1.,std::abs(original_error)));
     observed->request_evidence(iap::kGpuMatchDenseEvidenceLimit);factor_set.linearize(values);
     const auto dense=observed->take_evidence();ASSERT_TRUE(dense.available);
+    verify_sources(dense);
     EXPECT_EQ(dense.sample_limit,iap::kGpuMatchDenseEvidenceLimit);
     EXPECT_EQ(dense.source_slots,source_count);EXPECT_EQ(dense.sampling_stride,1);
     EXPECT_EQ(dense.samples.size(),static_cast<std::size_t>(original->num_inliers()));
@@ -136,6 +152,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     auto missing=values;missing.update(2,fixed*gtsam::Pose3(gtsam::Rot3(),gtsam::Point3(100.,100.,100.)));
     observed->request_evidence();factor_set.linearize(missing);
     const auto empty=observed->take_evidence();EXPECT_TRUE(empty.available);EXPECT_TRUE(empty.samples.empty());
+    verify_sources(empty); // Source geometry survives zero original matches.
     EXPECT_EQ(empty.original_inlier_count,0);EXPECT_EQ(original->num_inliers(),0);
     EXPECT_DOUBLE_EQ(original->error(missing),0.);EXPECT_DOUBLE_EQ(observed->error(missing),0.);
     original->linearize(missing);observed->linearize(missing); // Consume cached results.
@@ -147,6 +164,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     EXPECT_FALSE(fail_evidence_transform_download);
     const auto failed=observed->take_evidence();EXPECT_FALSE(failed.available);
     EXPECT_TRUE(failed.samples.empty());EXPECT_NE(failed.failure_reason.find("transform cudaMemcpyAsync"),std::string::npos);
+    EXPECT_FALSE(failed.source_geometry_available);EXPECT_TRUE(failed.source_samples.empty());
     EXPECT_EQ(observed->num_inliers(),original->num_inliers());
     EXPECT_NEAR(observed->error(values),original->error(values),1e-6*std::max(1.,std::abs(original_error)));
     observed->request_evidence();factor_set.linearize(values);

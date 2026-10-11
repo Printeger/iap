@@ -12,6 +12,34 @@ spec=importlib.util.spec_from_file_location("gpu_audit",path)
 audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
 
 class ActualSampleAudit(unittest.TestCase):
+    def test_unmatched_native_sources_are_separate_from_original_matches(self):
+        match, _ = self.fixture()
+        match["source_index"] = 0
+        packet = {"schema":"iap_gpu_match_residual_v2", "available":True,
+            "source_geometry_model":"actual_cuda_source_gaussians_v1",
+            "source_geometry_available":True, "source_slots":2,
+            "original_source_count":2, "sampling_stride":1, "sample_limit":128,
+            "samples":[match], "source_samples":[
+                {"source_index":0,"mean_m":match["source_mean_m"],
+                 "covariance_m2_row_major":match["source_covariance_m2_row_major"]},
+                {"source_index":1,"mean_m":[10.,20.,30.],
+                 "covariance_m2_row_major":np.eye(3).ravel().tolist()}]}
+        self.assertEqual(audit.audit_source_geometry(packet),2)
+        self.assertEqual(audit.audit_source_geometry({**packet,"samples":[]}),2)
+        self.assertEqual(audit.audit_source_geometry({**packet,"schema":"iap_gpu_match_residual_v1"}),0)
+        for field, value in [("available",False),("source_geometry_available",False),
+                             ("source_slots",1),("source_samples",packet["source_samples"][:1])]:
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                audit.audit_source_geometry({**packet,field:value})
+        for field, value in [("source_index",0),("mean_m",[float('nan'),0.,0.]),
+                             ("covariance_m2_row_major",[-1.]+[0.]*8)]:
+            changed=json.loads(json.dumps(packet));changed["source_samples"][1][field]=value
+            with self.subTest(source_field=field),self.assertRaises(ValueError):
+                audit.audit_source_geometry(changed)
+        changed=json.loads(json.dumps(packet));changed["source_samples"][0]["mean_m"][0]+=.1
+        with self.assertRaisesRegex(ValueError,"differs from original"):
+            audit.audit_source_geometry(changed)
+
     def test_captured_dense_float_covariance_is_not_an_interface_error(self):
         path=os.environ.get('IAP_DENSE_COVARIANCE_COUNTEREXAMPLE')
         if not path:self.skipTest('requires immutable actual dense counterexample')
@@ -107,5 +135,18 @@ class ActualSampleAudit(unittest.TestCase):
             raw.write_text(json.dumps(dense)+'\n');self.assertEqual(audit.audit(run)[0]['samples'],150)
             dense['source_slots']=149;raw.write_text(json.dumps(dense)+'\n')
             with self.assertRaisesRegex(ValueError,'slot ledger'):audit.audit(run)
+            dense.update(schema="iap_gpu_match_residual_v2",source_slots=150,
+                         source_geometry_available=True,source_geometry_model="actual_cuda_source_gaussians_v1",
+                         source_samples=[{"source_index":i,"mean_m":record["source_mean_m"],
+                             "covariance_m2_row_major":record["source_covariance_m2_row_major"]} for i in range(150)])
+            fields += ['source_geometry_available','source_samples']
+            row.update(source_geometry_available=1,source_samples=150)
+            with (run/'export/glio/gpu_match_requests.csv').open('w') as stream:
+                writer=csv.DictWriter(stream,fieldnames=fields);writer.writeheader();writer.writerow(row)
+            summary['source_samples_written']=150
+            (run/'metadata/manifests/gpu_match_evidence.json').write_text(json.dumps(summary))
+            raw.write_text(json.dumps(dense)+'\n')
+            self.assertEqual(audit.audit(run)[0]['native_source_samples'],150)
+            self.assertEqual(audit.audit(run)[0]['complete_native_source_captures'],1)
 
 if __name__=="__main__":unittest.main()
