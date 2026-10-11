@@ -23,9 +23,12 @@ class ForestReportContract(unittest.TestCase):
                     'lever_arm_imu':[0.,0.,0.],'anchor_ecef':[0.,0.,0.]}}
 
     def test_current_fault_model_can_audit_coordinates_without_granting_uncertainty(self):
-        result=audit(self.coordinate_input())
-        self.assertTrue(result['valid']);self.assertEqual(result['directions_checked'],1)
-        self.assertIn('uncertainty is not propagated',result['conditioning'])
+        for version in (8,9,10):
+            with self.subTest(version=version):
+                meta=self.coordinate_input();meta['recording_codec_version']=version
+                result=audit(meta)
+                self.assertTrue(result['valid']);self.assertEqual(result['directions_checked'],1)
+                self.assertIn('uncertainty is not propagated',result['conditioning'])
 
     def test_old_or_unknown_models_cannot_acquire_current_coordinate_qualification(self):
         for key,value in [('recording_codec_version',7),('clock_model','unknown'),('gnss_fault_model','unknown')]:

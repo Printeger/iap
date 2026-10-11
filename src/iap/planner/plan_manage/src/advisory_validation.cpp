@@ -220,6 +220,55 @@ void describe(const Input& in,const std::filesystem::path& path) {
     o<<",\"cloud_stamp\":"; number(o,e.cloud_stamp_s);
     o<<",\"origin\":";array(o,e.lattice_origin);o<<",\"dimensions\":";array(o,e.voxel_dimensions);
     o<<",\"resolution_m\":";number(o,e.resolution_m);
+    // Export the codec's original lineage, never infer map sources from voxels.
+    // Local beam sources do not claim complete raw-obstacle provenance.
+    o<<",\"map_source_evidence\":{\"current_frame_id\":"<<e.current_frame_id
+     <<",\"current_frame_content_hash\":"<<std::quoted(e.current_frame_content_hash)
+     <<",\"frame_contract_id\":"<<std::quoted(e.frame_contract_id)
+     <<",\"active_window_generation\":"<<e.active_window_generation
+     <<",\"raw_obstacle_source_list_available\":"<<(e.active_window_obstacle_sources?"true":"false")
+     <<",\"observation_sources_available\":"<<(e.local_evidence_snapshot?"true":"false")
+     <<",\"observation_sources\":[";
+    if(e.local_evidence_snapshot) {
+      bool first=true;
+      for(const auto& source:e.local_evidence_snapshot->sources()) {
+        if(!first)o<<',';first=false;
+        o<<"{\"frame_id\":"<<source.frame_id<<",\"observation_stamp_s\":";
+        number(o,source.observation_stamp_s);
+        o<<",\"sensor_model_identity\":"<<std::quoted(source.sensor_model_identity)
+         <<",\"content_hash\":"<<std::quoted(source.content_hash)<<'}';
+      }
+    }
+    o<<"],\"current_observation_frame\":";
+    const auto describe_frame=[&](const RegisteredLidarFrameMetadata& frame) {
+      o<<"{\"frame_id\":"<<frame.frame_id<<",\"stamp_s\":";number(o,frame.stamp_s);
+      o<<",\"scan_end_stamp_s\":";number(o,frame.scan_end_stamp_s);
+      o<<",\"content_hash\":"<<std::quoted(frame.content_hash)
+       <<",\"frame_contract_id\":"<<std::quoted(frame.frame_contract_id);
+      o<<",\"T_map_lidar\":";array(o,frame.T_map_lidar.matrix());
+      o<<",\"horizontal_fov_rad\":";number(o,frame.horizontal_fov_rad);
+      o<<",\"vertical_min_rad\":";number(o,frame.vertical_min_rad);
+      o<<",\"vertical_max_rad\":";number(o,frame.vertical_max_rad);
+      o<<",\"min_range_m\":";number(o,frame.min_range_m);
+      o<<",\"max_range_m\":";number(o,frame.max_range_m);
+      o<<",\"source_is_map_reference\":"<<(frame.source_is_map_reference?"true":"false")
+       <<",\"source_health_valid\":"<<(frame.source_health_valid?"true":"false");
+      o<<",\"source_health_stamp_s\":";number(o,frame.source_health_stamp_s);
+      o<<",\"source_icp_degenerate\":"<<(frame.source_icp_degenerate?"true":"false");
+      o<<",\"source_icp_rmse\":";number(o,frame.source_icp_rmse);
+      o<<",\"source_icp_condition\":";number(o,frame.source_icp_condition);
+      o<<",\"source_icp_gamma_lidar\":";number(o,frame.source_icp_gamma_lidar);
+      o<<",\"source_lidar_pl_enu_m\":";array(o,frame.source_lidar_pl_enu_m);o<<'}';
+    };
+    if(e.observation_frame)describe_frame(*e.observation_frame);else o<<"null";
+    o<<",\"raw_obstacle_sources\":";
+    if(e.active_window_obstacle_sources) {
+      o<<'[';bool first=true;
+      for(const auto& source:*e.active_window_obstacle_sources) {
+        if(!first)o<<',';first=false;describe_frame(source.metadata);
+      }o<<']';
+    } else o<<"null";
+    o<<'}';
   }
   o << "}\n";
 }
@@ -593,7 +642,7 @@ int main(int argc,char** argv) {
     if(mode=="diagnostics") {samplingDiagnostics(label,log);return 0;}
     Input in; double budget=120.;
     if(mode=="fixture" || mode=="fixture_ab") in=fixture();
-    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit" || mode=="replay_points") && argc>=4) {
+    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit" || mode=="replay_points" || mode=="replay_metadata") && argc>=4) {
       std::ifstream file(argv[3],std::ios::binary|std::ios::ate);
       if(!file || file.tellg()<=0 || file.tellg()>256*1024*1024) throw std::runtime_error("invalid payload file");
       const size_t size=file.tellg();file.seekg(0);std::vector<uint8_t> data(size);
@@ -601,6 +650,11 @@ int main(int argc,char** argv) {
       if(argc>=5) budget=std::stod(argv[4]);
     } else throw std::invalid_argument("invalid validation mode");
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
+    if(mode=="replay_metadata") {
+      const auto path=log.export_path("advisory/validation/"+label+"/input.json");
+      if(std::filesystem::exists(path))throw std::runtime_error("metadata evidence exists");
+      std::filesystem::create_directories(path.parent_path());describe(in,path);return 0;
+    }
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {
       const auto identity=mode=="fixture_ab"?"SYNTHETIC_MECHANISM":in.recording_codec_version<8?"HISTORICAL_INPUT_DIAGNOSTIC":"REAL_REPLAY";

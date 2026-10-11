@@ -241,6 +241,26 @@ template<class A> void serialize(A& ar, LocalEvidenceSource& value, unsigned) {
   ar & value.sensor_model_identity;
   ar & value.content_hash;
 }
+template<class A> void serialize(A& ar, RegisteredLidarFrameMetadata& value, unsigned) {
+  ar & value.frame_id & value.stamp_s & value.scan_end_stamp_s & value.sensor_receipt_steady_ns;
+  Eigen::Matrix4d pose=value.T_map_lidar.matrix();ar & pose;
+  if constexpr(A::is_loading::value) value.T_map_lidar.matrix()=pose;
+  ar & value.horizontal_fov_rad & value.vertical_min_rad & value.vertical_max_rad;
+  ar & value.min_range_m & value.max_range_m & value.frame_contract_id;
+  ar & value.source_is_map_reference & value.source_health_valid & value.source_health_stamp_s;
+  ar & value.source_icp_degenerate & value.source_icp_rmse & value.source_icp_condition;
+  ar & value.source_icp_gamma_lidar & value.source_lidar_pl_enu_m & value.content_hash;
+}
+template<class A> void serialize(A& ar, RegisteredLidarObstacleSource& value, unsigned) {
+  ar & value.metadata;
+  bool available=bool(value.occupied_voxel_centers);ar & available;
+  std::vector<Eigen::Vector3d> points;
+  if constexpr(A::is_saving::value) if(available)points=*value.occupied_voxel_centers;
+  if(available)ar & points;
+  if constexpr(A::is_loading::value) {
+    if(available)value.occupied_voxel_centers=std::make_shared<const std::vector<Eigen::Vector3d>>(std::move(points));
+  }
+}
 template<class A> void serialize(A& ar, LocalEvidenceIdentity& value, unsigned) {
   ar & value.occupancy_generation;
   ar & value.active_window_generation;
@@ -293,27 +313,27 @@ template<class Archive> void fields(Archive& ar, FrozenOccupancyEpoch& value) {
   ar & value.current_vehicle_clearance_radius_m;
 }
 template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
-  std::string schema="iap_prediction_input_v9";
+  std::string schema="iap_prediction_input_v10";
   ar & schema;
-  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6" && schema!="iap_prediction_input_v7" && schema!="iap_prediction_input_v8" && schema!="iap_prediction_input_v9") throw std::runtime_error("unsupported prediction export schema");
+  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6" && schema!="iap_prediction_input_v7" && schema!="iap_prediction_input_v8" && schema!="iap_prediction_input_v9" && schema!="iap_prediction_input_v10") throw std::runtime_error("unsupported prediction export schema");
   ar & input.reference_time_s & input.validity_s & input.integrity & input.params;
   // v1 reads preserve historical fields; new parameters are an explicit v2 tail.
   if (schema != "iap_prediction_input_v1") ar & input.params.fusion.max_regularization_fraction;
-  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || schema == "iap_prediction_input_v9") ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
+  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
   else input.recording_codec_version = schema == "iap_prediction_input_v1" ? 1 : 2;
-  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || schema == "iap_prediction_input_v9") ar & input.params.gnss.measurement_noise_scale;
-  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || schema == "iap_prediction_input_v9") ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
-  if (schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || schema == "iap_prediction_input_v9") ar & input.clock_model;
+  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.params.gnss.measurement_noise_scale;
+  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
+  if (schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.clock_model;
   else input.clock_model = "legacy_common_clock";
-  if(schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || schema == "iap_prediction_input_v9") ar & input.gnss_fault_model;
+  if(schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.gnss_fault_model;
   else {
     input.gnss_fault_model="legacy_single_satellite_v1";
     // An older wire schema cannot claim a newer recording authority.
     input.recording_codec_version=std::min(input.recording_codec_version,6u);
   }
-  if(schema == "iap_prediction_input_v8" || schema == "iap_prediction_input_v9") {
+  if(schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) {
     ar & input.integrity.postopt_evidence;
-    if(schema == "iap_prediction_input_v9") {
+    if((schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) {
       auto& e=input.integrity.postopt_evidence;
       ar & e.propagated_optimized_means & e.propagated_linearization_means & e.propagated_joint_covariance;
       ar & e.propagation_transition & e.propagation_noise & e.imu_measurements & e.imu_noise & e.imu_bias_hat;
@@ -349,6 +369,33 @@ template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
   }
   ar & flags & raw & environment & has_evidence;
   if (has_evidence) ar & evidence;
+  if(schema=="iap_prediction_input_v10") {
+    // The live epoch already owns these identities and contributions. Preserve
+    // them at the read-only seam; no new map, uncertainty, or freshness is made.
+    bool has_frame=bool(epoch->observation_frame);
+    bool has_current_points=bool(epoch->current_frame_occupied_voxel_centers);
+    bool has_sources=bool(epoch->active_window_obstacle_sources);
+    ar & has_frame & has_current_points & has_sources;
+    RegisteredLidarFrameMetadata frame;
+    std::vector<Eigen::Vector3d> current_points;
+    std::vector<RegisteredLidarObstacleSource> sources;
+    if constexpr(Archive::is_saving::value) {
+      if(has_frame)frame=*epoch->observation_frame;
+      if(has_current_points)current_points=*epoch->current_frame_occupied_voxel_centers;
+      if(has_sources)sources=*epoch->active_window_obstacle_sources;
+    }
+    if(has_frame)ar & frame;
+    if(has_current_points)ar & current_points;
+    if(has_sources)ar & sources;
+    if constexpr(Archive::is_loading::value) {
+      if(sources.size()>10000)throw std::runtime_error("obstacle provenance exceeds source bound");
+      if(has_frame)epoch->observation_frame=std::move(frame);
+      if(has_current_points)epoch->current_frame_occupied_voxel_centers=
+          std::make_shared<const std::vector<Eigen::Vector3d>>(std::move(current_points));
+      if(has_sources)epoch->active_window_obstacle_sources=
+          std::make_shared<const std::vector<RegisteredLidarObstacleSource>>(std::move(sources));
+    }
+  }
   if constexpr (Archive::is_loading::value) {
     if (!(epoch->resolution_m>0) || !std::isfinite(epoch->resolution_m) ||
         !epoch->lattice_origin.allFinite() || (epoch->voxel_dimensions.array()<=0).any() ||

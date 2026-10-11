@@ -2899,6 +2899,40 @@ TEST(EgoBaseline, NativeBoundaryIndexExpressionIsPreservedInEpochAndCorridor) {
   EXPECT_FALSE(map->captureFrozenCorridor({Eigen::Vector3d(-2,0,1)},.3,std::make_shared<PlanningBudget>(0)));
 }
 
+TEST(EgoBaseline, ReadOnlyExportRetainsCompleteObstacleSourceProvenance) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  GridMapTestAccess::input(*map,{Eigen::Vector3d(1,0,1)},10,Eigen::Vector3d(0,0,1));
+  auto epoch=std::make_shared<FrozenOccupancyEpoch>(*map->captureFrozenOccupancyEpoch());
+  auto sources=std::make_shared<std::vector<RegisteredLidarObstacleSource>>();
+  RegisteredLidarObstacleSource source;
+  source.metadata.frame_id=51;source.metadata.stamp_s=9.8;source.metadata.scan_end_stamp_s=9.9;
+  source.metadata.frame_contract_id="original_registered_source";
+  source.metadata.content_hash="immutable-original-51";
+  source.metadata.T_map_lidar.translation()=Eigen::Vector3d(.1,.2,.3);
+  source.metadata.source_is_map_reference=source.metadata.source_health_valid=true;
+  source.metadata.source_health_stamp_s=9.9;source.metadata.source_icp_degenerate=false;
+  source.metadata.source_icp_rmse=.04;source.metadata.source_icp_condition=12.;
+  source.metadata.source_icp_gamma_lidar=2.;source.metadata.source_lidar_pl_enu_m=Eigen::Vector3d(.1,.2,.3);
+  source.occupied_voxel_centers=std::make_shared<const std::vector<Eigen::Vector3d>>(
+      std::vector<Eigen::Vector3d>{Eigen::Vector3d(1,0,1)});
+  sources->push_back(source);epoch->active_window_obstacle_sources=sources;
+  epoch->observation_frame=source.metadata;epoch->current_frame_occupied_voxel_centers=source.occupied_voxel_centers;
+  epoch->current_frame_id=51;epoch->current_frame_content_hash=source.metadata.content_hash;
+  ego_planner::PredictionInput input;input.occupancy=epoch;
+  const auto restored=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(input));
+  ASSERT_TRUE(restored.occupancy->active_window_obstacle_sources);
+  ASSERT_TRUE(restored.occupancy->observation_frame);
+  ASSERT_TRUE(restored.occupancy->current_frame_occupied_voxel_centers);
+  ASSERT_EQ(restored.occupancy->active_window_obstacle_sources->size(),1u);
+  const auto& actual=restored.occupancy->active_window_obstacle_sources->front();
+  EXPECT_EQ(actual.metadata.frame_id,51);EXPECT_EQ(actual.metadata.content_hash,source.metadata.content_hash);
+  EXPECT_TRUE(actual.metadata.T_map_lidar.matrix().isApprox(source.metadata.T_map_lidar.matrix(),0));
+  EXPECT_TRUE(actual.metadata.source_lidar_pl_enu_m.isApprox(source.metadata.source_lidar_pl_enu_m,0));
+  EXPECT_DOUBLE_EQ(actual.metadata.source_icp_rmse,.04);
+  EXPECT_EQ(*actual.occupied_voxel_centers,*source.occupied_voxel_centers);
+  EXPECT_EQ(restored.occupancy->cells->flags,epoch->cells->flags);
+}
+
 TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto node=makeNode(); auto map=std::make_shared<GridMap>(); map->initMap(node);
   std::vector<Eigen::Vector3d> obstacles;
@@ -2944,7 +2978,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto calibrated=input; calibrated.params.gnss.measurement_noise_scale=2.3;
   calibrated.params.lidar.fim_params.fim_support_voxel_m=.4;
   const auto roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(calibrated));
-  EXPECT_EQ(roundtrip.recording_codec_version,9u);
+  EXPECT_EQ(roundtrip.recording_codec_version,10u);
   EXPECT_DOUBLE_EQ(roundtrip.params.gnss.measurement_noise_scale,2.3);
   EXPECT_DOUBLE_EQ(roundtrip.params.lidar.fim_params.fim_support_voxel_m,.4);
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(calibrated));
@@ -2970,7 +3004,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   std::string fault_rejection;
   EXPECT_FALSE(ego_planner::makeRiskPrediction(fault_roundtrip,{},&fault_rejection).predict);
   EXPECT_EQ(fault_rejection,"unsupported_gnss_fault_model");
-  EXPECT_EQ(input.recording_codec_version,9u);
+  EXPECT_EQ(input.recording_codec_version,10u);
   auto state_input=input;
   auto& state=state_input.integrity.postopt_evidence;
   state.update_sequence=51;state.frame_id=17;state.state_stamp=9.95;state.gnss_stamp=10.;

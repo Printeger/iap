@@ -17,8 +17,9 @@ from run_directory import (adopt_run_directory, resolve_run_directory, finalize_
                            write_subordinate_manifest, canonical_run_uses_sim_time)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
-CODEC = "iap_prediction_input_v9/boost_binary/zlib_length_u64le"
-READABLE_CODECS={CODEC,"iap_prediction_input_v8/boost_binary/zlib_length_u64le"}
+CODEC = "iap_prediction_input_v10/boost_binary/zlib_length_u64le"
+READABLE_CODECS={CODEC,"iap_prediction_input_v9/boost_binary/zlib_length_u64le",
+                 "iap_prediction_input_v8/boost_binary/zlib_length_u64le"}
 SOURCES = ["src/iap/planner/plan_manage/include/ego_planner/prediction_input.h",
            "src/iap/planner/plan_manage/src/prediction_input.cpp",
            "src/iap/planner/plan_manage/src/prediction_input_codec.cpp",

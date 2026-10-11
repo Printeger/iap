@@ -1,5 +1,21 @@
 # Advisory 冻结输入验证工具契约
 
+新写入采用 codec v10，在既有完整物理 epoch 后保留当前 registered frame 的原始
+metadata、当前 occupied contribution、活动窗口每个障碍来源的 metadata 与 occupied
+contribution。原帧、时间、SE(3)、content hash、来源健康与既有 LiDAR 误差字段均原样
+保存；这些字段不新增噪声资格或运动许可。v1–v9 读取保持原字节语义，缺少障碍来源
+时保持 unavailable，不从体素或观测来源表推断完整障碍来源。
+`advisory_validation replay_metadata LABEL PAYLOAD` 仅解码并输出原 metadata；原时间
+不更新，原完整 payload hash 仍是身份依据。map_source_evidence 分别报告 current
+frame、完整障碍来源是否存在及观测来源；后者不能替代前者。
+
+`scripts/dev_predictor/heldout_fixed_map.py CONFIG LABEL` 在 resolver-owned run 中用
+原记录 run/request/payload 身份核验固定地图与跨运行真实扫描。保留共同 map frame、
+原 IMU 参考、GNSS 钟差、真实 deskewed source、生产 primitive 原行号及 0.5m 关联缺失。
+所有既有运行只能作为诊断。不同生产 run 证明输入来源分离，不证明不同场景或随机
+LiDAR 噪声独立；同运行对照另列。固定地图不续龄，不回写在线 cache。族均值／族内
+残差分解仅在独立真值评价侧进行，不能作为生产噪声参数或用真值修正地图。
+
 本工具仅录制、离线诊断和生成报告；不创建风险地图，不写 GridMap 风险缓存，不授予运动权限。生产的净空、PL 预警线、执行条件与最终曲线检查不变。
 
 Advisory 后验代理参与由 planner 启动只读参数 `risk/use_posterior_prior` 控制，默认 false；仿真 `advisory_posterior_prior:=true` 仅复现旧 `(3/e)^2 I`。共享 `setAdvisoryPosteriorPrior()` 在捕获 snapshot 时执行，planner 和导出服务使用同一结果，独立可视化无独立判断。OFF 清除 has_lambda_base 与矩阵，保留当前监测质量、误差代理、时间与 GLIO/FGO 内部信息。codec v1 无需换版：已有参与标志/矩阵就是完整输入语义；输入 identity 序列化二者，planner 绑定新 risk version。启动参数不能运行中伪切换。
