@@ -246,7 +246,19 @@ void describe(const Input& in,const std::filesystem::path& path) {
          <<",\"content_hash\":"<<std::quoted(source.content_hash)<<'}';
       }
     }
-    o<<"],\"current_observation_frame\":";
+    o<<"],\"forecast_sensor\":";
+    if(e.local_evidence_snapshot) {
+      const auto& identity=e.local_evidence_snapshot->identity();
+      o<<"{\"sensor_model_identity\":"<<std::quoted(identity.sensor_model_identity)
+       <<",\"horizontal_samples\":"<<identity.horizontal_samples
+       <<",\"vertical_samples\":"<<identity.vertical_samples;
+      o<<",\"horizontal_fov_rad\":";number(o,identity.horizontal_fov_rad);
+      o<<",\"vertical_min_rad\":";number(o,identity.vertical_min_rad);
+      o<<",\"vertical_max_rad\":";number(o,identity.vertical_max_rad);
+      o<<",\"min_range_m\":";number(o,identity.min_range_m);
+      o<<",\"max_range_m\":";number(o,identity.max_range_m);o<<'}';
+    } else o<<"null";
+    o<<",\"current_observation_frame\":";
     const auto describe_frame=[&](const RegisteredLidarFrameMetadata& frame) {
       o<<"{\"frame_id\":"<<frame.frame_id<<",\"stamp_s\":";number(o,frame.stamp_s);
       o<<",\"scan_end_stamp_s\":";number(o,frame.scan_end_stamp_s);

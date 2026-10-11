@@ -36,8 +36,20 @@ are not promoted to free-space evidence: visibility is conditional on the
 frozen known geometry, not a proof of future complete scanning. Beam sampling,
 map error and surface correlations remain unqualified. Rejected support cannot
 re-enter through the legacy point-density fallback.
+When a LocalEvidenceSnapshot is present, the forecast consumes its original
+`spherical_first_hit_v1` horizontal/vertical sample counts. For each primitive
+it tests the nearest beam in that original uniform spherical layout; only a
+beam whose first known raw occupied voxel is the primitive voxel supplies
+information. This is a conservative sampled subset, not complete beam coverage:
+other rays intersecting a voxel corner are not searched. Missing counts reject
+LiDAR as `missing_lidar_sampling_model`, and another layout is explicitly
+unsupported. These rejections cannot enter legacy density fallback. Hit-only
+historical/synthetic inputs without a local evidence snapshot retain continuous
+geometry diagnostics; they cannot qualify sampled future support in M3. The
+exported `forecast_sensor` preserves the recorded layout without inferring it
+from scene defaults. Pose, source time and unknown-cell limitations still apply.
 The cached prediction policy identity is
-`pose6_knn10_raw_first_hit_two_source_envelope_v4`; it includes sensor
+`pose6_knn10_sampled_raw_first_hit_two_source_envelope_v5`; it includes sensor
 availability, recorded metadata/evidence identity and ray lattice geometry.
 This compact numeric cache identity is separate from the full input.bin SHA256
 used to bind original recordings. It never grants original source provenance.

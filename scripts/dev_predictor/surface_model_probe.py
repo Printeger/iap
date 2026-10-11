@@ -76,6 +76,54 @@ def first_hit_support(origin, targets, occupied, lattice_origin, resolution):
     return np.array(result)
 
 
+
+def sampled_first_hit_support(origin, targets, occupied, lattice_origin, resolution,
+                              rotation, sensor):
+    """Independent recorded-grid nearest-beam support, conditional on known raw map."""
+    h, v = sensor['horizontal_samples'], sensor['vertical_samples']
+    assert h > 0 and v > 0 and sensor['sensor_model_identity'] == 'spherical_first_hit_v1'
+    local = (targets-origin) @ rotation
+    azimuth = np.arctan2(local[:, 1], local[:, 0])
+    elevation = np.arctan2(local[:, 2], np.linalg.norm(local[:, :2], axis=1))
+    hfov = sensor['horizontal_fov_rad']
+    if h == 1:
+        yaw = np.zeros(len(targets))
+    elif hfov >= 2*np.pi-1e-9:
+        index = np.floor((azimuth % (2*np.pi))*h/(2*np.pi)+.5).astype('int64') % h
+        yaw = hfov*index/h
+    else:
+        step = hfov/(h-1)
+        index = np.clip(np.floor((azimuth+hfov/2)/step+.5), 0, h-1)
+        yaw = -hfov/2+step*index
+    low, high = sensor['vertical_min_rad'], sensor['vertical_max_rad']
+    if v == 1:
+        pitch = np.full(len(targets), (low+high)/2)
+    else:
+        step = (high-low)/(v-1)
+        index = np.clip(np.floor((elevation-low)/step+.5), 0, v-1)
+        pitch = low+step*index
+    directions = np.column_stack((np.cos(pitch)*np.cos(yaw),
+                                  np.cos(pitch)*np.sin(yaw), np.sin(pitch))) @ rotation.T
+    result = []
+    for target, direction in zip(targets, directions):
+        start = (origin+sensor['min_range_m']*direction-lattice_origin)/resolution
+        end = (origin+sensor['max_range_m']*direction-lattice_origin)/resolution
+        cell, last = np.floor(start).astype('int64'), np.floor(end).astype('int64')
+        target_cell = tuple(np.floor((target-lattice_origin)/resolution).astype('int64'))
+        delta = end-start; step = np.sign(delta).astype('int64')
+        maximum = np.divide(cell+(step > 0)-start, delta,
+                            out=np.full(3, np.inf), where=delta != 0)
+        increment = np.divide(1., abs(delta), out=np.full(3, np.inf), where=delta != 0)
+        supported = False
+        for _ in range(int(np.sum(abs(last-cell)))+3):
+            if tuple(cell) in occupied:
+                supported = tuple(cell) == target_cell; break
+            if np.array_equal(cell, last): break
+            axis = int(np.argmin(maximum)); cell[axis] += step[axis]; maximum[axis] += increment[axis]
+        result.append(supported)
+    return np.array(result)
+
+
 def evaluate(config_path, label):
     cfg = json.loads(config_path.read_text())
     run = adopt_run_directory(cfg['owner'])
@@ -122,7 +170,12 @@ def evaluate(config_path, label):
         ga, gb = np.array(a['admitted_gnss_design']), np.array(a['admitted_gnss_residual_whitened'])
         model = position_metric(np.vstack((np.pad(ma, ((0, 0), (0, ga.shape[1]-6))), ga)), meta['K_H_adv'])
         visible = support.copy()
-        visible[support] = first_hit_support(sensor_T[:3, 3], c[support], occupied, lattice_origin, resolution)
+        layout = meta.get('map_source_evidence', {}).get('forecast_sensor')
+        if layout is None:
+            visible[support] = first_hit_support(sensor_T[:3, 3], c[support], occupied, lattice_origin, resolution)
+        else:
+            visible[support] = sampled_first_hit_support(sensor_T[:3, 3], c[support], occupied,
+                                                        lattice_origin, resolution, sensor_T[:3, :3], layout)
         va, _ = grouped(np.column_stack((n[visible], np.cross(c[visible]-p, n[visible]))), np.zeros(np.sum(visible)), w[visible], keys[visible])
         first_hit_model = position_metric(np.vstack((np.pad(va, ((0, 0), (0, ga.shape[1]-6))), ga)), meta['K_H_adv'])
         points = np.array(a['reference_body_points']) @ T[:3, :3].T + T[:3, 3]

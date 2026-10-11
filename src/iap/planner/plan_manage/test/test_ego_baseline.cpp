@@ -2917,6 +2917,62 @@ TEST(EgoBaseline, FrozenPredictionIdentityIncludesLidarForecastSensorGeometry) {
   EXPECT_NE(baseline,ego_planner::predictionInputIdentity(input));
 }
 
+TEST(EgoBaseline, FrozenLidarInformationDoesNotFillGapsBetweenRecordedBeams) {
+  auto epoch=std::make_shared<FrozenOccupancyEpoch>();
+  epoch->generation=37;epoch->geometry_id="beam-gap-fixture";epoch->frame_id="map";
+  epoch->lattice_origin=Eigen::Vector3d::Constant(-5.);epoch->voxel_dimensions=Eigen::Vector3i::Constant(100);
+  epoch->resolution_m=.1;epoch->cloud_stamp_s=10.;
+  auto points=std::make_shared<std::vector<Eigen::Vector3d>>();
+  auto cells=std::make_shared<FrozenOccupancyCells>();cells->flags.resize(1000000,0);
+  for(int y=-20;y<=20;++y)for(int z=-1;z<=1;++z) {
+    const Eigen::Vector3d p(2.05,.1*y+.05,.1*z+.05);points->push_back(p);
+    const Eigen::Vector3i k=((p-epoch->lattice_origin)/.1).array().floor().cast<int>();
+    cells->flags[(k.x()*100+k.y())*100+k.z()]=1;
+  }
+  epoch->cells=cells;epoch->raw_occupied_voxel_centers=points;
+  epoch->observation_frame=RegisteredLidarFrameMetadata{};
+  LocalEvidenceSnapshot::ReadOnlyData data;
+  data.geometry.origin=epoch->lattice_origin;data.geometry.dimensions=epoch->voxel_dimensions;
+  data.geometry.resolution_m=.1;data.freshness_s=1.;
+  data.sources.push_back({1,10.,"beam-gap","recorded-layout"});
+  data.packed_states.assign(250000,0x55);data.source_indices.assign(1000000,1);
+  data.identity.occupancy_generation=37;data.identity.horizontal_samples=512;
+  data.identity.sensor_model_identity="spherical_first_hit_v1";
+  data.identity.horizontal_fov_rad=2*std::acos(-1.);
+  data.identity.vertical_min_rad=-std::acos(-1.)/4;data.identity.vertical_max_rad=std::acos(-1.)/4;
+  data.identity.min_range_m=.1;data.identity.max_range_m=10.;
+  ego_planner::PredictionInput input;input.occupancy=epoch;input.reference_time_s=10.1;
+  input.params.source_mode=iap::PredictorSourceMode::LidarOnly;
+  input.integrity.valid=input.integrity.has_pose=input.integrity.current.valid=true;
+  input.integrity.stamp=input.integrity.pose_stamp=input.integrity.current.stamp=10.;
+  input.integrity.p_wb=Eigen::Vector3d::Zero();
+  data.identity.vertical_samples=2;
+  epoch->local_evidence_snapshot=LocalEvidenceSnapshot::fromReadOnlyData(data);
+  ASSERT_TRUE(epoch->local_evidence_snapshot);
+  const auto gap=ego_planner::makeFrozenPredictor(input).query(
+      ego_planner::frozenPredictionQuery(input,Eigen::Vector3d::Zero()));
+  EXPECT_EQ(gap.lidar.n_support_groups,0);
+  EXPECT_TRUE(gap.lidar.joint_pose_information.isZero());
+  data.identity.vertical_samples=3;
+  epoch->local_evidence_snapshot=LocalEvidenceSnapshot::fromReadOnlyData(data);
+  const auto hit=ego_planner::makeFrozenPredictor(input).query(
+      ego_planner::frozenPredictionQuery(input,Eigen::Vector3d::Zero()));
+  EXPECT_GT(hit.lidar.n_support_groups,0);
+  input.params.lidar.enable_legacy_observability=true;
+  data.identity.vertical_samples=0;
+  epoch->local_evidence_snapshot=LocalEvidenceSnapshot::fromReadOnlyData(data);
+  const auto missing=ego_planner::makeFrozenPredictor(input).query(
+      ego_planner::frozenPredictionQuery(input,Eigen::Vector3d::Zero()));
+  EXPECT_FALSE(missing.lidar.valid);EXPECT_FALSE(missing.lidar.legacy_valid);
+  EXPECT_EQ(missing.lidar.fallback_reason,"missing_lidar_sampling_model");
+  data.identity.vertical_samples=3;data.identity.sensor_model_identity="unsupported-layout";
+  epoch->local_evidence_snapshot=LocalEvidenceSnapshot::fromReadOnlyData(data);
+  const auto unsupported=ego_planner::makeFrozenPredictor(input).query(
+      ego_planner::frozenPredictionQuery(input,Eigen::Vector3d::Zero()));
+  EXPECT_FALSE(unsupported.lidar.valid);EXPECT_FALSE(unsupported.lidar.legacy_valid);
+  EXPECT_EQ(unsupported.lidar.fallback_reason,"unsupported_lidar_sampling_model");
+}
+
 TEST(EgoBaseline, FrozenLidarInformationExcludesACompletelyOccludedWall) {
   const auto input_for=[](bool hidden) {
     auto epoch=std::make_shared<FrozenOccupancyEpoch>();

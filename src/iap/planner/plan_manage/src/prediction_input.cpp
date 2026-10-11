@@ -1,7 +1,8 @@
 #include <ego_planner/prediction_input.h>
 namespace ego_planner {
 namespace {
-iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInput& input) {
+iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInput& input, std::string& rejection) {
+  rejection="missing_lidar_visibility_model";
   const auto epoch=input.occupancy;
   if(!epoch->cells || !epoch->lattice_origin.allFinite() ||
      !std::isfinite(epoch->resolution_m) || epoch->resolution_m<=0.) return {};
@@ -14,6 +15,15 @@ iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInpu
     sensor->min_range_m=identity.min_range_m;sensor->max_range_m=identity.max_range_m;
   }
   if(!sensor) return {};
+  std::uint32_t horizontal=0,vertical=0;
+  if(epoch->local_evidence_snapshot) {
+    const auto& identity=epoch->local_evidence_snapshot->identity();
+    horizontal=identity.horizontal_samples;vertical=identity.vertical_samples;
+    if(!horizontal || !vertical) {rejection="missing_lidar_sampling_model";return {};}
+    if(identity.sensor_model_identity!="spherical_first_hit_v1") {
+      rejection="unsupported_lidar_sampling_model";return {};
+    }
+  }
   const double pi=std::acos(-1.);
   if(!std::isfinite(sensor->horizontal_fov_rad) || sensor->horizontal_fov_rad<=0. || sensor->horizontal_fov_rad>2*pi+1e-9 ||
      !std::isfinite(sensor->vertical_min_rad) || !std::isfinite(sensor->vertical_max_rad) ||
@@ -28,7 +38,8 @@ iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInpu
     rotation=pose.topLeftCorner<3,3>();offset=pose.topRightCorner<3,1>()-input.integrity.p_wb;
   } else if(input.integrity.require_coordinates || !epoch->observation_frame) return {};
   if(!iap::AdvisoryCoordinateContract::rotation(rotation) || !offset.allFinite())return {};
-  return [epoch,sensor=*sensor,rotation,offset](const Eigen::Vector3d& query,const Eigen::Vector3d& target) {
+  rejection.clear();
+  return [epoch,sensor=*sensor,rotation,offset,horizontal,vertical](const Eigen::Vector3d& query,const Eigen::Vector3d& target) {
     // Local forecast holds the saved reference attitude and extrinsics fixed;
     // attitude remains a nuisance in the information, not an added prior.
     const Eigen::Vector3d origin=query+offset;
@@ -37,8 +48,38 @@ iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInpu
     if(!std::isfinite(range) || range<sensor.min_range_m || range>sensor.max_range_m ||
        elevation<sensor.vertical_min_rad || elevation>sensor.vertical_max_rad ||
        std::abs(std::atan2(local.y(),local.x()))>sensor.horizontal_fov_rad/2) return false;
-    const Eigen::Vector3d start=(origin-epoch->lattice_origin)/epoch->resolution_m;
-    const Eigen::Vector3d end=(target-epoch->lattice_origin)/epoch->resolution_m;
+    const bool sampled=horizontal && vertical;
+    Eigen::Vector3d start=(origin-epoch->lattice_origin)/epoch->resolution_m;
+    Eigen::Vector3d end=(target-epoch->lattice_origin)/epoch->resolution_m;
+    const Eigen::Vector3i target_cell=end.array().floor().cast<int>();
+    if(sampled) {
+      // Same uniform spherical layout as the recorded renderer. A continuous
+      // FOV alone cannot imply that any beam crosses a small occupied voxel.
+      const double pi=std::acos(-1.);double azimuth=std::atan2(local.y(),local.x());
+      double sampled_azimuth=0.;
+      if(horizontal>1) {
+        if(sensor.horizontal_fov_rad>=2*pi-1e-9) {
+          if(azimuth<0.)azimuth+=2*pi;
+          const auto h=static_cast<std::uint32_t>(std::llround(azimuth*horizontal/(2*pi)))%horizontal;
+          sampled_azimuth=sensor.horizontal_fov_rad*h/horizontal;
+        } else {
+          const double step=sensor.horizontal_fov_rad/(horizontal-1);
+          const auto h=std::clamp<std::int64_t>(std::llround((azimuth+sensor.horizontal_fov_rad/2)/step),0,horizontal-1);
+          sampled_azimuth=-sensor.horizontal_fov_rad/2+h*step;
+        }
+      }
+      double sampled_elevation=(sensor.vertical_min_rad+sensor.vertical_max_rad)/2;
+      if(vertical>1) {
+        const double step=(sensor.vertical_max_rad-sensor.vertical_min_rad)/(vertical-1);
+        const auto v=std::clamp<std::int64_t>(std::llround((elevation-sensor.vertical_min_rad)/step),0,vertical-1);
+        sampled_elevation=sensor.vertical_min_rad+v*step;
+      }
+      const Eigen::Vector3d direction=rotation*Eigen::Vector3d(
+          std::cos(sampled_elevation)*std::cos(sampled_azimuth),
+          std::cos(sampled_elevation)*std::sin(sampled_azimuth),std::sin(sampled_elevation));
+      start=(origin+sensor.min_range_m*direction-epoch->lattice_origin)/epoch->resolution_m;
+      end=(origin+sensor.max_range_m*direction-epoch->lattice_origin)/epoch->resolution_m;
+    }
     Eigen::Vector3i cell=start.array().floor().cast<int>();
     const Eigen::Vector3i last=end.array().floor().cast<int>();
     const Eigen::Vector3d delta=end-start;
@@ -50,10 +91,15 @@ iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInpu
     }
     const int limit=(last-cell).cwiseAbs().sum()+3;
     for(int traversed=0;traversed<limit;++traversed) {
-      if(cell==last)return true;
+      if(sampled) {
+        if((cell.array()>=0).all() && (cell.array()<epoch->voxel_dimensions.array()).all()) {
+          const int address=(cell.x()*epoch->voxel_dimensions.y()+cell.y())*epoch->voxel_dimensions.z()+cell.z();
+          if(epoch->cells->at(address)&1)return cell==target_cell;
+        }
+        if(cell==last)return false;
+      } else if(cell==last)return true; // Continuous geometric legacy diagnostic.
       Eigen::Index axis;maximum.minCoeff(&axis);cell[axis]+=step[axis];maximum[axis]+=increment[axis];
-      if(cell==last)continue; // The target's own occupied voxel is the return.
-      if((cell.array()>=0).all() && (cell.array()<epoch->voxel_dimensions.array()).all()) {
+      if(!sampled && cell!=last && (cell.array()>=0).all() && (cell.array()<epoch->voxel_dimensions.array()).all()) {
         const int address=(cell.x()*epoch->voxel_dimensions.y()+cell.y())*epoch->voxel_dimensions.z()+cell.z();
         if(epoch->cells->at(address)&1)return false; // Raw, never inflated/ceiling.
       }
@@ -146,8 +192,9 @@ iap::PredictorModule makeFrozenPredictor(const PredictionInput& input) {
     }
     return support;
   });
-  const auto lidar_support=frozenLidarSupport(input);
-  predictor.set_lidar_support_query(lidar_support, lidar_support ? "" : "missing_lidar_visibility_model");
+  std::string lidar_rejection;
+  const auto lidar_support=frozenLidarSupport(input,lidar_rejection);
+  predictor.set_lidar_support_query(lidar_support,lidar_rejection);
   if (occupancy->raw_occupied_voxel_centers && lidar_support) {
     predictor.set_lidar_map_points(occupancy->raw_occupied_voxel_centers);
     predictor.set_lidar_fim_primitives(iap::make_lidar_fim_primitives(*occupancy->raw_occupied_voxel_centers));
