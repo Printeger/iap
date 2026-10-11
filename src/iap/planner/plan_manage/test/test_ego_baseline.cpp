@@ -2899,6 +2899,24 @@ TEST(EgoBaseline, NativeBoundaryIndexExpressionIsPreservedInEpochAndCorridor) {
   EXPECT_FALSE(map->captureFrozenCorridor({Eigen::Vector3d(-2,0,1)},.3,std::make_shared<PlanningBudget>(0)));
 }
 
+TEST(EgoBaseline, FrozenPredictionIdentityIncludesLidarForecastSensorGeometry) {
+  auto epoch=std::make_shared<FrozenOccupancyEpoch>();epoch->generation=37;epoch->geometry_id="identity-fixture";
+  epoch->observation_frame=RegisteredLidarFrameMetadata{};
+  auto& sensor=*epoch->observation_frame;
+  sensor.horizontal_fov_rad=2*std::acos(-1.);sensor.vertical_min_rad=-.12;sensor.vertical_max_rad=.9;
+  sensor.min_range_m=.1;sensor.max_range_m=10.;
+  ego_planner::PredictionInput input;input.occupancy=epoch;
+  const auto baseline=ego_planner::predictionInputIdentity(input);
+  sensor.vertical_max_rad=.7;
+  EXPECT_NE(baseline,ego_planner::predictionInputIdentity(input));
+  sensor.vertical_max_rad=.9;sensor.max_range_m=8.;
+  EXPECT_NE(baseline,ego_planner::predictionInputIdentity(input));
+  sensor.max_range_m=10.;sensor.T_map_lidar.linear()=Eigen::AngleAxisd(.1,Eigen::Vector3d::UnitY()).toRotationMatrix();
+  EXPECT_NE(baseline,ego_planner::predictionInputIdentity(input));
+  sensor.T_map_lidar.setIdentity();epoch->observation_frame.reset();
+  EXPECT_NE(baseline,ego_planner::predictionInputIdentity(input));
+}
+
 TEST(EgoBaseline, FrozenLidarInformationExcludesACompletelyOccludedWall) {
   const auto input_for=[](bool hidden) {
     auto epoch=std::make_shared<FrozenOccupancyEpoch>();
@@ -2952,6 +2970,15 @@ TEST(EgoBaseline, FrozenLidarInformationExcludesACompletelyOccludedWall) {
       ego_planner::frozenPredictionQuery(outside,Eigen::Vector3d::Zero()));
   EXPECT_FALSE(missing.lidar.valid);EXPECT_FALSE(missing.lidar.legacy_valid);
   EXPECT_EQ(missing.lidar.fallback_reason,"missing_lidar_visibility_model");
+  auto configured=std::make_shared<iap::TrustedLocalMapSupport>();
+  configured->retained_min_map=narrow->lattice_origin;
+  configured->retained_max_map=narrow->lattice_origin+narrow->extent_m;
+  configured->stamp_s=10.;configured->valid_until_s=11.;configured->max_range_m=10.;configured->frame_id="map";
+  narrow->trusted_local_map_support=configured;
+  const auto envelope_only=ego_planner::makeFrozenPredictor(outside).query(
+      ego_planner::frozenPredictionQuery(outside,Eigen::Vector3d::Zero()));
+  EXPECT_FALSE(envelope_only.lidar.valid);
+  EXPECT_EQ(envelope_only.lidar.fallback_reason,"missing_lidar_visibility_model");
 }
 
 TEST(EgoBaseline, ReadOnlyExportRetainsCompleteObstacleSourceProvenance) {

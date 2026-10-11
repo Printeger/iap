@@ -27,14 +27,20 @@ The production frozen binding now admits PCA supports through the recorded
 sensor FOV/range and a first-hit trace of the same GridMap raw occupancy. A
 fully occluded surface cannot supply information. Inflation and the virtual
 ceiling do not occlude this measurement model. Sensor geometry comes from the
-frozen observation/evidence identity (or a configured envelope for hit-only
-inputs); missing geometry rejects LiDAR as `missing_lidar_visibility_model`.
+frozen observation/evidence identity; a configured diagnostic envelope alone
+does not establish the recorded sensor input. Missing geometry rejects LiDAR
+as `missing_lidar_visibility_model`.
 The saved reference attitude and extrinsics are held fixed across spatial
 queries; attitude still enters the joint nuisance state. Unknown ray cells
 are not promoted to free-space evidence: visibility is conditional on the
 frozen known geometry, not a proof of future complete scanning. Beam sampling,
 map error and surface correlations remain unqualified. Rejected support cannot
 re-enter through the legacy point-density fallback.
+The cached prediction policy identity is
+`pose6_known_raw_first_hit_two_source_envelope_v3`; it includes sensor
+availability, recorded metadata/evidence identity and ray lattice geometry.
+This compact numeric cache identity is separate from the full input.bin SHA256
+used to bind original recordings. It never grants original source provenance.
 
 The required result is a frozen spatial prediction of IMU/body position in map
 coordinates, with shared pose nuisance variables handled once. The observed

@@ -466,7 +466,7 @@ uint64_t predictionInputIdentity(const PredictionInput& input) {
   auto params=input.params;
   std::ostringstream stream(std::ios::binary);
   { boost::archive::binary_oarchive ar(stream);
-    const std::string model="pose6_fixed_two_source_envelope_v2";
+    const std::string model="pose6_known_raw_first_hit_two_source_envelope_v3";
     ar << model; // Algorithm policy is part of cached PL identity.
     ar & snapshot & params;
     if(input.recording_codec_version>=5) ar & snapshot.require_coordinates & snapshot.coordinates & snapshot.gnss_epoch.R_query_enu & snapshot.gnss_epoch.antenna_offset_query;
@@ -480,6 +480,20 @@ uint64_t predictionInputIdentity(const PredictionInput& input) {
       ar & e.propagation_transition & e.propagation_noise & e.imu_measurements & e.imu_noise & e.imu_bias_hat;
     }
     ar << input.recording_codec_version << input.validity_s << input.occupancy->generation << input.occupancy->geometry_id;
+    // First-hit support consumes recorded sensor geometry as well as the
+    // physical epoch. Include availability and the immutable evidence identity
+    // without copying the large voxel evidence buffers into every cache key.
+    const auto& epoch=*input.occupancy;
+    ar << bool(epoch.cells) << epoch.lattice_origin << epoch.voxel_dimensions << epoch.resolution_m;
+    ar << bool(epoch.observation_frame) << bool(epoch.local_evidence_snapshot);
+    if(epoch.observation_frame) {
+      auto sensor=*epoch.observation_frame;
+      ar & sensor;
+    }
+    if(epoch.local_evidence_snapshot) {
+      auto sensor=epoch.local_evidence_snapshot->identity();
+      ar & sensor;
+    }
   }
   uint64_t hash=1469598103934665603ULL;
   for (const unsigned char c:stream.str()) { hash^=c; hash*=1099511628211ULL; }

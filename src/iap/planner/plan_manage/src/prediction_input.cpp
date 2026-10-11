@@ -12,16 +12,6 @@ iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInpu
     sensor->horizontal_fov_rad=identity.horizontal_fov_rad;
     sensor->vertical_min_rad=identity.vertical_min_rad;sensor->vertical_max_rad=identity.vertical_max_rad;
     sensor->min_range_m=identity.min_range_m;sensor->max_range_m=identity.max_range_m;
-  } else if(!sensor && epoch->trusted_local_map_support) {
-    // This configured envelope supplies sensor geometry only. It still cannot
-    // prove free space, complete first-hit support, or GNSS LOS admission.
-    const auto& configured=*epoch->trusted_local_map_support;
-    if(configured.valid() && configured.frame_id==epoch->frame_id) {
-      sensor=RegisteredLidarFrameMetadata{};sensor->T_map_lidar=configured.T_map_sensor;
-      sensor->horizontal_fov_rad=configured.horizontal_fov_rad;
-      sensor->vertical_min_rad=configured.vertical_min_rad;sensor->vertical_max_rad=configured.vertical_max_rad;
-      sensor->min_range_m=configured.min_range_m;sensor->max_range_m=configured.max_range_m;
-    }
   }
   if(!sensor) return {};
   const double pi=std::acos(-1.);
@@ -36,8 +26,7 @@ iap::LidarObservabilityFim::SupportQuery frozenLidarSupport(const PredictionInpu
   if(coordinates.valid && coordinates.rejection().empty()) {
     const Eigen::Matrix4d pose=coordinates.T_map_world*coordinates.T_world_imu*coordinates.T_lidar_imu.inverse();
     rotation=pose.topLeftCorner<3,3>();offset=pose.topRightCorner<3,1>()-input.integrity.p_wb;
-  } else if(input.integrity.require_coordinates ||
-            (!epoch->observation_frame && !epoch->trusted_local_map_support)) return {};
+  } else if(input.integrity.require_coordinates || !epoch->observation_frame) return {};
   if(!iap::AdvisoryCoordinateContract::rotation(rotation) || !offset.allFinite())return {};
   return [epoch,sensor=*sensor,rotation,offset](const Eigen::Vector3d& query,const Eigen::Vector3d& target) {
     // Local forecast holds the saved reference attitude and extrinsics fixed;
