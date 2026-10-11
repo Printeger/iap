@@ -224,6 +224,15 @@ Gaussian，它仍不能替代有符号物理均值、固定姿态unary目标的�
 `log/20261011T141528Z_749/export/analysis/minimum_model_feasibility_v1/audit.json`，
 完整来源四分支逐值重放已由`log/20261011T153303Z_160`完成，不重新随机采样。
 
+用户明确的局部相对增量评价已独立预声明为
+[`local_increment_advisory_contract.md`](local_increment_advisory_contract.md) v1：
+固定1.000s、原估计与独立真值各自`T(t)⁻¹T(t+1)`、起始IMU局部XY增量误差，
+共同左SE(3)基准严格抵消，局部形变保留；禁止逐区域／窗口对齐或减均值。
+旧绝对评价和失败保持。下一项先实现该评价与固定语义反例，再仅一次以原24
+已查看请求区分旧绝对对象与局部反序；原V5分数仅作几何baseline，不冒充
+相对增量物理协方差／PL。独立seed7301／7302／7303保留未查看，模型及资格
+冻结前不采集；原数值排序门槛、完整区域与全部原执行规则保持。
+
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，
 原逐请求账本、失败／drop分母与packet字段保持。audit及实际来源重放读取声明
