@@ -25,6 +25,18 @@ def event(e):
 
 
 class NativeIncrementSelection(unittest.TestCase):
+    def test_report_eigen_matrix_layout_matches_recording_codec(self):
+        T = np.eye(4)
+        T[:3, :3] = [[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]]
+        T[:3, 3] = [-18., 2., 1.5]
+        record = event(evidence())
+        record['report']['advisory_t_map_world'] = T.ravel(order='F').tolist()
+        pose, _ = native_endpoint([record], 100.025, T)
+        np.testing.assert_allclose(pose, native_pose_at(evidence(), 100.025, T))
+        record['report']['advisory_t_map_world'] = T.ravel().tolist()
+        with self.assertRaisesRegex(ValueError, 'COORDINATE_OWNER_MISMATCH'):
+            native_endpoint([record], 100.025, T)
+
     def test_capture_retains_past_and_future_owner_without_full_stream(self):
         written = []
         capture = NativeIncrementCapture(written.append)

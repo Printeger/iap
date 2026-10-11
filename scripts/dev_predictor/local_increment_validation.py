@@ -160,7 +160,9 @@ def native_endpoint(reports, stamp, T_map_world):
         if (not report.get('advisory_coordinates_valid') or
                 report['advisory_coordinates_frame_id'] != evidence['frame_id'] or
                 report['advisory_coordinates_epoch_source_identity'] != evidence['epoch_source_identity'] or
-                not np.allclose(np.asarray(report['advisory_t_map_world']).reshape(4, 4), T_map_world, rtol=0, atol=1e-9)):
+                # IntegrityReport uses Eigen::data() (column major), whereas
+                # the recording codec's describe() exports row-major matrices.
+                not np.allclose(np.asarray(report['advisory_t_map_world']).reshape(4, 4, order='F'), T_map_world, rtol=0, atol=1e-9)):
             raise ValueError('NATIVE_COORDINATE_OWNER_MISMATCH')
         key = (evidence['update_sequence'], evidence['frame_id'], start, end, evidence['epoch_source_identity'])
         serialized = json.dumps(evidence, sort_keys=True, allow_nan=False)

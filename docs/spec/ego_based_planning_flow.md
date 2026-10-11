@@ -264,6 +264,10 @@ pair-start前0.5s及后2.3s原报告gzip，payload／失败请求全部保留。
 由recorder唯一保存；compact scope不可作完整任务证据。独立seed仍未采集。
 验证：原生选择／时间输运6项及局部增量11项定向测试通过；原recorder／backend
 10项接口回归通过。仅Python与契约改变，不改变已核验的Release二进制。
+7400原生补录首次读取暴露decoder矩阵布局错误：IntegrityReport的Eigen::data()
+按列主序发布／消费，codec describe按行主序导出；只修正离线报告decoder，
+不变更坐标／评价对象。新增非零平移和旋转的真实布局反例，7项原生测试通过；
+首次坐标拒绝在任何真值误差／排序计算前发生，保留读取失败，不重复采集。
 
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，
