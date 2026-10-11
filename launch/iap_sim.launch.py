@@ -222,6 +222,7 @@ def _setup(context):
                     "capture_failure_map", "false"
                 ),
                 "execution_evidence_ids": context.launch_configurations.get("execution_evidence_ids", ""),
+                "protection_margin_replan": context.launch_configurations.get("protection_margin_replan", "false"),
             }.items(),
         ),
     ]
@@ -262,6 +263,8 @@ def generate_launch_description():
             DeclareLaunchArgument("capture_failure_map", default_value="false"),
             DeclareLaunchArgument("execution_evidence_ids", default_value="",
                 description="Opt-in comma-separated trajectory IDs for immutable sparse check evidence"),
+            DeclareLaunchArgument("protection_margin_replan", default_value="false", choices=["true","false"],
+                description="Experimental early physical-reserve scheduling; original checks and shared planning budget"),
             DeclareLaunchArgument("capture_advisory_residuals", default_value="false", choices=["true","false"],
                                   description="Opt-in actual GPU postopt quality residuals; same original quality cadence"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),

@@ -73,6 +73,10 @@ namespace ego_planner
     double emergency_time_;
     double tracking_error_limit_m_ = 0.30;
     double last_advisory_replan_time_s_ = 0.0;
+    // Experimental scheduling only. The original curve checks own permission.
+    bool protection_margin_replan_enabled_ = false;
+    int reserve_owner_id_ = -1, protection_replan_id_ = -1;
+    double reserve_time_s_ = NAN, reserve_margin_m_ = NAN;
     double last_failed_plan_time_s_ = -std::numeric_limits<double>::infinity();
     uint64_t wait_for_map_generation_ = 0;
     GridExecutionReason wait_for_map_reason_ = GridExecutionReason::OK;
@@ -139,9 +143,9 @@ namespace ego_planner
 
     /* helper functions */
     bool callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj); // front-end and back-end method
-    bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
-    bool planFromGlobalTraj();
-    bool planFromCurrentTraj();
+    bool callEmergencyStop(Eigen::Vector3d stop_pos, PlanningBudget::Ptr budget = {}, bool preemptive = false);
+    bool planFromGlobalTraj(PlanningBudget::Ptr budget = {});
+    bool planFromCurrentTraj(PlanningBudget::Ptr budget = {});
     bool executingTrajectoryRestConfirmed();
     // One timing authority in the existing FSM; refreshed only for a new curve.
     struct ContinuationTiming { double trigger_s, deceleration_s; rclcpp::Time connection; bool moving; };

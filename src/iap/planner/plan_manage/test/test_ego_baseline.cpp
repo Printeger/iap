@@ -233,6 +233,7 @@ struct EGOReplanFSMTestAccess {
   }
   static bool select(EGOReplanFSM& fsm, double distance) { return fsm.getLocalTarget(distance); }
   static bool replanning(const EGOReplanFSM& fsm) { return fsm.exec_state_==EGOReplanFSM::REPLAN_TRAJ; }
+  static void enableProtectionMargin(EGOReplanFSM& fsm) {fsm.protection_margin_replan_enabled_=true;}
   static Eigen::Vector3d taskGoal(const EGOReplanFSM& fsm) { return fsm.end_pt_; }
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
@@ -2211,7 +2212,7 @@ TEST(EgoBaseline, RejectedCheckedBrakeCannotPublishOrReplaceExecutingCurve) {
   EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-9);
 }
 
-TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredecessorCommand) {
+TEST(EgoBaseline, UnsafePredecessorCannotBeWithdrawnByCommandAfterRejectedBrake) {
   auto node=makeNode();
   ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
   ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
@@ -2250,7 +2251,8 @@ TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredece
   ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,999,101.7);
   EXPECT_TRUE(manager.hasPendingTrajectory()); // another trajectory is no proof
   ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,predecessor.traj_id_,101.7);
-  EXPECT_FALSE(manager.hasPendingTrajectory());
+  EXPECT_TRUE(manager.hasPendingTrajectory())
+      << "No withdrawal was authorized while the predecessor was unobserved";
   EXPECT_EQ(manager.local_data_.traj_id_,predecessor.traj_id_);
   EXPECT_TRUE(manager.local_data_.position_traj_.getControlPoint().isApprox(
       predecessor.position_traj_.getControlPoint(),1e-12));
@@ -2259,6 +2261,15 @@ TEST(EgoBaseline, WithdrawnPendingWithRejectedBrakeRetiresOnlyOnPostStartPredece
   GridMapTestAccess::input(*manager.grid_map_,{},101.7,measured);
   GridMapTestAccess::markObserved(*manager.grid_map_);
   ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,101.7,1,measured);
+  // Restore actual FSM odometry as well as the manager's motion input.
+  auto odom=std::make_shared<nav_msgs::msg::Odometry>();
+  odom->header.frame_id="map";odom->header.stamp=node->now();
+  odom->pose.pose.position.x=measured.x();odom->pose.pose.position.y=measured.y();
+  odom->pose.pose.position.z=measured.z();
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,end,odom);
+  ASSERT_TRUE(manager.requestPendingWithdrawal().has_value());
+  ego_planner::EGOReplanFSMTestAccess::predecessorCommand(fsm,predecessor.traj_id_,101.7);
+  ASSERT_FALSE(manager.hasPendingTrajectory());
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,measured,
       predecessor.velocity_traj_.evaluateDeBoorT(1.7)));
   EXPECT_GT(manager.local_data_.traj_id_,withdrawn_id);
@@ -4143,6 +4154,176 @@ TEST(EgoBaseline, GeometricGuideCorrectionDoesNotOvershootOppositeSide) {
   EXPECT_TRUE(q.leftCols(3).isApprox(fixed_start,1e-12));
   EXPECT_TRUE(q.rightCols(3).isApprox(fixed_end,1e-12));
   EXPECT_EQ(budget->used(),2u);
+}
+
+TEST(EgoBaseline, FallingQualifiedClearanceRequestsProtectionBeforeRevocation) {
+  auto node=makeNode(false,1.,false,false,.1);
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),end(2,0,1),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},100.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+  ASSERT_TRUE(manager.reboundReplan(start,zero,zero,end,zero,true,false));
+  const auto original=manager.local_data_;
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,end);
+  // A slowly changing nearby obstacle represents the same condition-loss
+  // pattern as the historical raw-clearance rejections, not an advisory gate.
+  ego_planner::EGOReplanFSMTestAccess::enableProtectionMargin(fsm);
+  GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.85,1.05}},100.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ASSERT_TRUE(manager.assessRemainingTrajectory(100.,false,false).executable());
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.));
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100200000000LL),RCL_RET_OK);
+  GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.65,1.05}},100.2,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.2,1,start);
+  ASSERT_TRUE(manager.assessRemainingTrajectory(100.2,false,false).executable());
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.2));
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm))
+      << "Falling physical reserve must request a qualified replacement before revocation";
+  EXPECT_EQ(manager.local_data_.traj_id_,original.traj_id_);
+  // The old implementation first reacts here, when even the start has lost
+  // its original clearance and an immediate stop cannot restore permission.
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100400000000LL),RCL_RET_OK);
+  GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.45,1.05}},100.4,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.4,1,start);
+  ASSERT_FALSE(manager.assessRemainingTrajectory(100.4,false,false).executable());
+  EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.4));
+  EXPECT_FALSE(manager.planCheckedBrake(start,Eigen::Vector3d(.2,0,0),zero));
+}
+
+TEST(EgoBaseline, StableQualifiedReserveDoesNotRequestProtection) {
+  auto node=makeNode(false,1.,false,false,.1);
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  const Eigen::Vector3d start(-2,0,1);
+  manager.local_data_.position_traj_=ego_planner::UniformBspline(start.replicate(1,7),3,.3);
+  manager.local_data_.velocity_traj_=manager.local_data_.position_traj_.getDerivative();
+  manager.local_data_.acceleration_traj_=manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.start_time_=rclcpp::Time(100000000000LL,RCL_ROS_TIME);
+  manager.local_data_.duration_=manager.local_data_.position_traj_.getTimeSum();
+  manager.local_data_.traj_id_=10;
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,Eigen::Vector3d(2,0,1));
+  ego_planner::EGOReplanFSMTestAccess::enableProtectionMargin(fsm);
+  for(int i=0;i<4;++i) {
+    const double stamp=100.+.2*i;
+    ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),std::llround(stamp*1e9)),RCL_RET_OK);
+    GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.65,1.05}},stamp,start);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,stamp,1,start);
+    EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,stamp));
+    EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
+    EXPECT_EQ(manager.local_data_.traj_id_,10);
+  }
+}
+
+void checkDecliningReserveProtection(bool recovered) {
+  auto node=makeNode(false,1.,false,false,.1);
+  ASSERT_EQ(rcl_enable_ros_time_override(node->get_clock()->get_clock_handle()),RCL_RET_OK);
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100000000000LL),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  manager.deliverTrajToOptimizer();manager.setDroneIdtoOpt();
+  const Eigen::Vector3d start(-2,0,1),velocity(.4,0,0),zero=Eigen::Vector3d::Zero();
+  GridMapTestAccess::input(*manager.grid_map_,{},100.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.,1,start);
+  ASSERT_TRUE(manager.planCheckedBrake(start,velocity,zero));
+  auto original=manager.local_data_;
+  ego_planner::EGOReplanFSM fsm;
+  ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,start,Eigen::Vector3d(2,0,1));
+  auto odom=std::make_shared<nav_msgs::msg::Odometry>();
+  odom->header.stamp=rclcpp::Time(100000000000LL);odom->header.frame_id="map";
+  odom->pose.pose.orientation.w=1.;odom->pose.pose.position.x=start.x();odom->pose.pose.position.z=1.;
+  odom->twist.twist.linear.x=.4;
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,Eigen::Vector3d(2,0,1),odom);
+  ego_planner::EGOReplanFSMTestAccess::enableProtectionMargin(fsm);
+  std::vector<traj_utils::msg::Bspline> wire;
+  auto publisher=node->create_publisher<traj_utils::msg::Bspline>("preemptive_checked_wire",10);
+  auto subscription=node->create_subscription<traj_utils::msg::Bspline>("preemptive_checked_wire",10,
+      [&](traj_utils::msg::Bspline::ConstSharedPtr msg){wire.push_back(*msg);});
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
+  for(int i=0;i<100 && publisher->get_subscription_count()==0;++i) {
+    rclcpp::spin_some(node);std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.85,1.05}},100.,start);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.));
+  ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100200000000LL),RCL_RET_OK);
+  const Eigen::Vector3d current=original.position_traj_.evaluateDeBoorT(.2);
+  const Eigen::Vector3d current_velocity=original.velocity_traj_.evaluateDeBoorT(.2);
+  odom=std::make_shared<nav_msgs::msg::Odometry>(*odom);odom->header.stamp=rclcpp::Time(100200000000LL);
+  odom->pose.pose.position.x=current.x();odom->twist.twist.linear.x=current_velocity.x();
+  ego_planner::EGOReplanFSMTestAccess::shortExecution(fsm,Eigen::Vector3d(2,0,1),odom);
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,publisher);
+  GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.65,1.05}},100.2,current);
+  GridMapTestAccess::markObserved(*manager.grid_map_);
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.2,1,current);
+  ASSERT_TRUE(manager.assessRemainingTrajectory(100.2,false,false).executable());
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.2));
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
+  if(recovered) {
+    GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.85,1.05}},100.2,current);
+    GridMapTestAccess::markObserved(*manager.grid_map_);
+    ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+    rclcpp::spin_some(node);
+    EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
+    EXPECT_EQ(manager.local_data_.traj_id_,original.traj_id_);
+    EXPECT_TRUE(wire.empty()) << "A recovered physical reserve cannot turn ordinary forward failure into a brake";
+    return;
+  }
+  // A short old curve has no legal 1.6 s rolling handover. The ordinary
+  // forward attempt returns false; the SAME transaction checks a fresh brake.
+  ego_planner::EGOReplanFSMTestAccess::tick(fsm);
+  ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::emergency(fsm));
+  ASSERT_GT(manager.local_data_.traj_id_,original.traj_id_);
+  for(int i=0;i<100 && wire.empty();++i) {
+    rclcpp::spin_some(node);std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_EQ(wire.size(),1u);
+  EXPECT_EQ(wire[0].start_mode,traj_utils::msg::Bspline::IMMEDIATE);
+  EXPECT_EQ(wire[0].traj_id,manager.local_data_.traj_id_);
+  EXPECT_TRUE(manager.assessRemainingTrajectory(100.2,false,false).executable());
+  EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(current,1e-8));
+  EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(current_velocity,1e-8));
+  EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-8);
+  // Drive the original server receive and command callback, with no invented
+  // activation from elapsed time or manager bookkeeping.
+  struct ServerCleanup {
+    ~ServerCleanup() {
+      pending_traj.reset();receive_traj_=false;
+      pos_cmd_pub.reset();trajectory_curve_pub.reset();server_node.reset();
+    }
+  } server_cleanup;
+  server_node=node;receive_traj_=false;pending_traj.reset();highest_accepted_trajectory_id=-1;
+  pos_cmd_pub=node->create_publisher<quadrotor_msgs::msg::PositionCommand>("preemptive_actual_command",10);
+  trajectory_curve_pub=node->create_publisher<visualization_msgs::msg::Marker>("preemptive_command_curve",10);
+  bsplineCallback(std::make_shared<traj_utils::msg::Bspline>(wire[0]));
+  ASSERT_TRUE(last_feedback.accepted);
+  ASSERT_EQ(last_feedback.active_id,wire[0].traj_id);
+  command_frame="map";last_yaw_=last_yaw_dot_=0.;time_forward_=.5;
+  cmdCallbackAt(node->now());
+  EXPECT_EQ(cmd.trajectory_id,wire[0].traj_id);
+  EXPECT_NEAR(cmd.position.x,current.x(),1e-8);
+  EXPECT_LT(manager.planningBudget()->elapsed(),1.5);
+}
+
+TEST(EgoBaseline, DecliningReserveActivatesOnlyAnOriginalCheckedProtectionCurve) {
+  checkDecliningReserveProtection(false);
+}
+
+TEST(EgoBaseline, RecoveredPhysicalReserveKeepsOldMotionAfterFailedForwardPlan) {
+  checkDecliningReserveProtection(true);
 }
 
 TEST(EgoBaseline, FailedBrakeRequestRemainsOutstandingForFreshQualifiedInput) {

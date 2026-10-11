@@ -1,5 +1,34 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
+风险引导轻量实证开发进行中，起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
+当前阶段先验证保护触发反例；空间排序同对象实验、独立现场与实际OFF/ON对照尚待完成。
+记录权威为`log/20261011T022904Z_324`；上一轮报告、输入及失效记录保持只读。
+
+实验启动参数`protection_margin_replan:=true`（driver `--protection-margin-replan`）
+仅启用`planning/protection_margin_replan_enabled`，默认关闭，未推广生产默认。
+同一FSM在完整实际尾段受检合格后，对已冻结corridor的当前实际曲线位置作一次原始
+净空标量查询；同身份、新鲜相邻监督记录的余量下降且小于一体素，或按已测下降率
+接近原1.6s接续＋200ms监督窗口时，请求原REPLAN。它只是调度，不是停止空间许可。
+每身份只登记首次请求；原按需异步writer保存`reserve_declining_ID`的同epoch曲线、
+motion/tracking/command时序，reason保留OK，不冒充拒绝。没有新图、距离场或执行器。
+
+原合法前进事务优先；若失败且物理余量未恢复，剩余同一1.5s PlanningBudget内才可
+调用原planCheckedBrake及原发布/反馈权威。预算不重建，pending分支不干预；普通失败、
+恢复余量、Advisory预警/缺失均不独立触发保护。拒绝保护后保留并监督旧运动，不能称
+已停或合格悬停。突然变化及起点已违规仍可能没有许可动作，不授予连续保证。
+定向反例原来在余量下降时不处理，到起点净空违规才尝试并失败；实验实现提前请求，
+原硬检查通过的保护曲线经原server receive/command回调真实激活。稳定/恢复余量不制动。
+验证：14项相关原生检查与48项启动接口检查通过（`runtime/protection_native_v9.log`、
+`runtime/protection_launch_v2.log`）；原反例red保留`runtime/protection_trigger_red.log`。
+扩查发现既有撤回测试与完整旧尾段许可冲突：它在起点未观测时仍期待撤回，恢复段
+未更新FSM实测位置。基线2c8cf4bd源码单独编译同样失败（`protection_pending_baseline.log`）；
+修正测试前提，未放宽生产许可。正式现场触发与无多余制动证据仍待采集。
+
+既有GPU数据的9/17局部固定target增量求解已与独立锚点真值相对位姿及独立白化求解
+交叉核验；原stamp、50ms truth资格及缺失/拒绝保留。GPU子地图不等于Predictor注册图，
+GNSS传播参考也不同，故`local_matched_increment_v1/summary.json`不授予融合空间排序。
+需要同固定图/来源/线性化/时间的实际局部试验；不能用solver covariance当真值。
+
 唯一需求基线：[IAP_Safety_Planner_Requirements_v1.1_20261009.md](IAP_Safety_Planner_Requirements_v1.1_20261009.md)，包含第 0 节连续飞行追加授权与修订后的 §9.1。
 当前追加 Goal **DEV_ACCEPTED**：冻结反例的真实执行分支、身份与原硬检查验证通过，
 `05224791` 原四分叉 ON 任务在266.403 s到达，连续性逐身份审计完成。不继承历史状态，

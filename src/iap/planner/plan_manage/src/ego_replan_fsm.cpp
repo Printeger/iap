@@ -30,6 +30,8 @@ namespace ego_planner
     node_->declare_parameter("fsm/emergency_time", 1.0);
     tracking_error_limit_m_ = node_->declare_parameter(
         "planning/tracking_error_limit_m", 0.30);
+    protection_margin_replan_enabled_ = node_->declare_parameter(
+        "planning/protection_margin_replan_enabled", false);
     node_->declare_parameter("fsm/realworld_experiment", false);
     node_->declare_parameter("fsm/fail_safe", true);
 
@@ -686,14 +688,42 @@ namespace ego_planner
 
     case REPLAN_TRAJ:
     {
-
-      if (planFromCurrentTraj())
+      const bool protecting=protection_margin_replan_enabled_ &&
+          protection_replan_id_==planner_manager_->local_data_.traj_id_;
+      const auto budget=protecting ? std::make_shared<PlanningBudget>(1.5) : PlanningBudget::Ptr{};
+      if (planFromCurrentTraj(budget))
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
         publishSwarmTrajs(false);
       }
       else if(exec_state_!=EMERGENCY_STOP)
       {
+        // This is the same planning transaction: a failed forward candidate
+        // cannot reset its budget to buy a brake. Keep the old qualified curve
+        // unless the original checked-brake path authorizes a replacement.
+        if(protecting && !planner_manager_->hasPendingTrajectory() && !budget->expired()) {
+          const auto checked=planner_manager_->assessRemainingTrajectory(
+              node_->now().seconds(),false,false,budget);
+          const auto input=std::make_pair(checked.evaluated_motion.stamp_s,checked.evaluated_generation);
+          const auto& old=planner_manager_->local_data_;
+          const auto elapsed=std::clamp(checked.evaluation_time_s-old.start_time_.seconds(),0.,old.duration_);
+          auto curve=old.position_traj_;
+          const auto cell=checked.executable() ? planner_manager_->queryAssessmentCell(
+              checked,curve.evaluateDeBoorT(elapsed)) : std::nullopt;
+          const double margin=cell && cell->executable()
+              ? cell->raw_center_clearance_m-cell->required_clearance_m : NAN;
+          const bool still_declining=std::isfinite(margin) && margin>=0. && margin<=reserve_margin_m_;
+          if(checked.executable() && !still_declining) protection_replan_id_=-1;
+          if(checked.executable() && still_declining && (!last_brake_attempt_input_ || *last_brake_attempt_input_!=input)) {
+            last_brake_attempt_input_=input;
+            if(callEmergencyStop(odom_pos_,budget,true)) {
+              flag_escape_emergency_=false;
+              last_brake_attempt_input_.reset();
+              changeFSMExecState(EMERGENCY_STOP,"qualified preemptive protection");
+              break;
+            }
+          }
+        }
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
 
@@ -799,7 +829,7 @@ namespace ego_planner
     }
   }
 
-  bool EGOReplanFSM::planFromGlobalTraj() // zx-todo
+  bool EGOReplanFSM::planFromGlobalTraj(PlanningBudget::Ptr budget) // zx-todo
   {
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
@@ -808,12 +838,12 @@ namespace ego_planner
     if(planner_manager_->hasPendingTrajectory()) return false;
     recordExecutionEvent("planning_started",planner_manager_->local_data_.traj_id_,node_->now().seconds(),
         NAN,planner_manager_->local_data_.traj_id_,-1,&start_pt_,&start_vel_,&start_acc_);
-    if(!planner_manager_->beginPlanningView()) return false;
+    if(!planner_manager_->beginPlanningView(1.5,budget)) return false;
     struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
     return callReboundReplan(true,false);
   }
 
-  bool EGOReplanFSM::planFromCurrentTraj()
+  bool EGOReplanFSM::planFromCurrentTraj(PlanningBudget::Ptr budget)
   {
     applyLatestCommandFeedback();
 
@@ -832,7 +862,7 @@ namespace ego_planner
       // identity and fresh measured rest own the transition to a new start.
       // Until confirmed, supervision retains the checked old tail.
       if(!executingTrajectoryRestConfirmed()) return false;
-      return planFromGlobalTraj(); // Same actual-PVA planning and final publication checks.
+      return planFromGlobalTraj(budget); // Same actual-PVA planning and final publication checks.
     }
     const auto connection=timing.connection;
     const double t=connection.seconds()-info.start_time_.seconds();
@@ -841,7 +871,7 @@ namespace ego_planner
     start_acc_=info.acceleration_traj_.evaluateDeBoorT(t);
     recordExecutionEvent("planning_started",info.traj_id_,connection.seconds(),NAN,info.traj_id_,
         -1,&start_pt_,&start_vel_,&start_acc_);
-    if(!planner_manager_->beginPlanningView(1.5)) return false;
+    if(!planner_manager_->beginPlanningView(1.5,budget)) return false;
     struct EndView { EGOPlannerManager* manager; ~EndView(){manager->endPlanningView();} } end{planner_manager_.get()};
     planner_manager_->setPlanningConnection(connection,info.traj_id_);
     return callReboundReplan(false,false);
@@ -1066,6 +1096,48 @@ namespace ego_planner
           changeFSMExecState(EMERGENCY_STOP, "SAFETY");
         }
         return;
+      }
+      if(protection_margin_replan_enabled_ && exec_state_!=EMERGENCY_STOP &&
+          !planner_manager_->hasPendingTrajectory()) {
+        // One scalar probe in the ALREADY checked immutable corridor. This is
+        // scheduling evidence, never a distance field or an execution proof.
+        const Eigen::Vector3d point=info.position_traj_.evaluateDeBoorT(elapsed);
+        const auto cell=planner_manager_->queryAssessmentCell(assessment,point);
+        const double margin=cell && cell->executable()
+            ? cell->raw_center_clearance_m-cell->required_clearance_m : NAN;
+        const double dt=now-reserve_time_s_;
+        const bool declining=reserve_owner_id_==info.traj_id_ && dt>0. &&
+            dt<=assessment.evaluated_motion.max_environment_age_s &&
+            margin>=0. && std::isfinite(margin) && margin<reserve_margin_m_;
+        const double rate=declining && std::isfinite(reserve_margin_m_)
+            ? (reserve_margin_m_-margin)/dt : 0.;
+        const double lead=continuation_lead_s+std::chrono::duration<double>(supervision_period).count();
+        // A finite obstacle entering the existing scan neighbourhood also
+        // counts as declining. Do not use infinity as a numerical slope.
+        const bool approaching=declining && (margin<planner_manager_->grid_map_->getResolution() ||
+            (rate>0. && margin/rate<lead));
+        reserve_owner_id_=info.traj_id_;reserve_time_s_=now;reserve_margin_m_=margin;
+        if(approaching && protection_replan_id_!=info.traj_id_) {
+          protection_replan_id_=info.traj_id_;
+          RCLCPP_INFO(node_->get_logger(),
+              "Physical reserve declining: trajectory=%d generation=%lu raw=%.9f required=%.9f margin=%.9f decline_mps=%.9f; request checked planning",
+              info.traj_id_,assessment.evaluated_generation,cell->raw_center_clearance_m,
+              cell->required_clearance_m,margin,rate);
+          // Bounded first-trigger-per-owner evidence uses the existing writer.
+          // OK remains OK: this scheduling probe is not a physical refusal.
+          auto probe=assessment;
+          probe.first_execution_time_s=elapsed;
+          probe.first_execution_position=point;
+          probe.first_execution_cell=*cell;
+          const auto command=std::atomic_load(&pending_command_);
+          planner_manager_->captureRemainingFailure("reserve_declining_"+std::to_string(info.traj_id_),
+              expected,odom_pos_,active_tracking_error,info.traj_id_,
+              command ? rclcpp::Time(command->header.stamp).seconds() : -std::numeric_limits<double>::infinity(),
+              now-applied_odom_stamp_s_,now-cell->cloud_stamp_s,GridExecutionReason::OK,&probe);
+          recordExecutionEvent("physical_reserve_declining",info.traj_id_,now,
+              NAN,info.traj_id_,assessment.trajectory_id,&point);
+          changeFSMExecState(REPLAN_TRAJ,"declining physical reserve");
+        }
       }
       // Advisory warnings request an early revision. Missing or brief stale PL
       // does not enter the emergency path.
@@ -1342,7 +1414,7 @@ namespace ego_planner
     broadcast_bspline_pub_->publish(bspline);
   }
 
-  bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)
+  bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos, PlanningBudget::Ptr shared_budget, bool preemptive)
   {
     applyLatestCommandFeedback();
     applyLatestOdometry();
@@ -1358,11 +1430,13 @@ namespace ego_planner
           now.seconds()-stamp<=planner_manager_->currentMotionContext(true).max_motion_age_s)
         connection=timing.connection;
     }
-    const auto budget=planner_manager_->hasPlanningView() ? planner_manager_->planningBudget() :
+    const auto budget=shared_budget ? shared_budget : planner_manager_->hasPlanningView() ? planner_manager_->planningBudget() :
         std::make_shared<PlanningBudget>(1.5);
     if (!planner_manager_->planCheckedBrake(stop_pos, odom_vel_,
                                             Eigen::Vector3d::Zero(),connection,budget)) {
-      RCLCPP_ERROR_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+      if(preemptive) RCLCPP_WARN_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
+          "Preemptive checked braking rejected; no replacement authorized; retained predecessor remains supervised");
+      else RCLCPP_ERROR_THROTTLE(node_->get_logger(),*node_->get_clock(),1000,
           "Checked braking rejected; execution guarantee lost; no replacement authorized; retained command is not a safety proof");
       return false;
     }

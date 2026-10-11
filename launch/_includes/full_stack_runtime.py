@@ -243,6 +243,12 @@ def _setup(context):
             raise ValueError('execution_evidence_ids requires capture_failure_map=true')
         frozen_planner_parameters['planning/execution_evidence_ids']=[int(value) for value in tokens]
     parameters_path=run / "metadata/config/planner_parameters.json"
+    # Explicit development opt-in; absence preserves the previous parameter set.
+    protection=context.launch_configurations.get("protection_margin_replan", "false")
+    if protection not in ("true","false"):
+        raise ValueError('protection_margin_replan must be true or false')
+    if protection=="true":
+        frozen_planner_parameters['planning/protection_margin_replan_enabled']=True
     parameters_path.write_text(json.dumps(frozen_planner_parameters,sort_keys=True,allow_nan=False,indent=2)+"\n")
     register_config_snapshot(run,parameters_path)
     planner = Node(package="ego_planner", executable="ego_planner_node",
