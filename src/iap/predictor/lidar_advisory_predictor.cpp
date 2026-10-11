@@ -41,6 +41,11 @@ void LidarAdvisoryPredictor::set_lidar_map_points(
   map_points_ = std::move(points);
 }
 
+void LidarAdvisoryPredictor::set_support_query(LidarObservabilityFim::SupportQuery query, std::string rejection) {
+  support_query_ = std::move(query);
+  support_rejection_ = std::move(rejection);
+}
+
 void LidarAdvisoryPredictor::rebuild_lidar_fim_index() {
   if (primitives_ == nullptr || primitives_->empty()) {
     primitive_index_.reset();
@@ -60,6 +65,10 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
     const Eigen::Vector3d& query_position,
     const IntegritySnapshot& snapshot) const {
   LidarAdvisoryResult out;
+  if (!support_rejection_.empty()) {
+    out.fallback_reason = support_rejection_;
+    return out;
+  }
   if (!query_position.allFinite()) {
     out.fallback_reason = "invalid_position";
     return out;
@@ -70,9 +79,9 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
       primitive_index_ != nullptr
           ? estimator.evaluate_advisory_fim(query_position,
                                             primitive_index_.get(),
-                                            snapshot.current)
+                                            snapshot.current, support_query_)
           : estimator.evaluate_advisory_fim(query_position, primitives_.get(),
-                                            snapshot.current);
+                                            snapshot.current, support_query_);
   out.fim_valid = fim.valid;
   out.lambda_lidar = fim.lambda;
   out.joint_pose_information = fim.joint_pose_information;
@@ -93,7 +102,7 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
                               : fim.fallback_reason;
   }
 
-  if (params_.enable_legacy_observability && !fim.valid) {
+  if (params_.enable_legacy_observability && !fim.valid && !support_query_) {
     const LidarObservabilityResult legacy =
         estimator.evaluate(query_position, map_points_.get(), snapshot.current);
     out.legacy_valid = legacy.valid;

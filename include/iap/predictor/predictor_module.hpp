@@ -57,6 +57,7 @@ class PredictorModule {
       std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives);
   void set_lidar_map_points(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> points);
+  void set_lidar_support_query(LidarObservabilityFim::SupportQuery query, std::string rejection = {});
 
   PredictorAdmission admission(const PredictorQueryInput& input) const;
   PredictorQueryResult query(const PredictorQueryInput& input) const;

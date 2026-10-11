@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -139,6 +140,9 @@ class LidarFimPrimitiveIndex {
 
 class LidarObservabilityFim {
  public:
+  // Conditional measurement eligibility, bound to the same frozen map and
+  // sensor geometry by the caller. It grants no free-space evidence.
+  using SupportQuery = std::function<bool(const Eigen::Vector3d&, const Eigen::Vector3d&)>;
   struct Params {
     double search_radius_m = 8.0;
     int min_points = 12;
@@ -172,20 +176,20 @@ class LidarObservabilityFim {
   LidarAdvisoryFimResult evaluate_advisory_fim(
       const Eigen::Vector3d& p_w,
       const std::vector<LidarFimPrimitive>* primitives,
-      const CurrentIntegrityState& current) const;
+      const CurrentIntegrityState& current, const SupportQuery& support = {}) const;
 
   LidarAdvisoryFimResult evaluate_advisory_fim(
       const Eigen::Vector3d& p_w,
       const LidarFimPrimitiveIndex* index,
-      const CurrentIntegrityState& current) const;
+      const CurrentIntegrityState& current, const SupportQuery& support = {}) const;
 
   LidarAdvisoryFimResult evaluate_advisory_fim(
       const Eigen::Vector3d& p_w,
       std::nullptr_t,
-      const CurrentIntegrityState& current) const {
+      const CurrentIntegrityState& current, const SupportQuery& support = {}) const {
     return evaluate_advisory_fim(
         p_w, static_cast<const std::vector<LidarFimPrimitive>*>(nullptr),
-        current);
+        current, support);
   }
 
   const Params& params() const { return params_; }

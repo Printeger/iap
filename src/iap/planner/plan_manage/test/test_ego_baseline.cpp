@@ -2899,6 +2899,61 @@ TEST(EgoBaseline, NativeBoundaryIndexExpressionIsPreservedInEpochAndCorridor) {
   EXPECT_FALSE(map->captureFrozenCorridor({Eigen::Vector3d(-2,0,1)},.3,std::make_shared<PlanningBudget>(0)));
 }
 
+TEST(EgoBaseline, FrozenLidarInformationExcludesACompletelyOccludedWall) {
+  const auto input_for=[](bool hidden) {
+    auto epoch=std::make_shared<FrozenOccupancyEpoch>();
+    epoch->lattice_origin=Eigen::Vector3d(-10,-10,-5);
+    epoch->extent_m=Eigen::Vector3d(20,20,10);epoch->voxel_dimensions=Eigen::Vector3i(200,200,100);
+    epoch->resolution_m=.1;epoch->resolution_inv=10.;epoch->frame_id="map";
+    epoch->cloud_stamp_s=10.;epoch->sparse_occupancy_derived_from_raw_centers=true;
+    auto centers=std::make_shared<std::vector<Eigen::Vector3d>>();
+    for(double x:{2.05,4.05}) {
+      if(x>3. && !hidden)continue;
+      for(int y=-20;y<=20;++y)for(int z=-20;z<=20;++z)
+        centers->emplace_back(x,.1*y+.05,.1*z+.05);
+    }
+    epoch->raw_occupied_voxel_centers=centers;
+    auto cells=std::make_shared<FrozenOccupancyCells>();cells->flags.resize(4000000,0);
+    for(const auto& p:*centers) {
+      const Eigen::Vector3i key=((p-epoch->lattice_origin)*10.).array().floor().cast<int>();
+      cells->flags[(key.x()*200+key.y())*100+key.z()]=1;
+    }
+    epoch->cells=cells;
+    RegisteredLidarFrameMetadata sensor;sensor.frame_id=1;sensor.stamp_s=10.;
+    sensor.horizontal_fov_rad=2*std::acos(-1.);sensor.vertical_min_rad=-std::acos(-1.)/2;
+    sensor.vertical_max_rad=std::acos(-1.)/2;sensor.min_range_m=.1;sensor.max_range_m=10.;
+    epoch->observation_frame=sensor;epoch->current_frame_id=1;
+    ego_planner::PredictionInput input;input.occupancy=epoch;input.reference_time_s=10.1;
+    input.params.source_mode=iap::PredictorSourceMode::LidarOnly;
+    input.integrity.valid=input.integrity.has_pose=input.integrity.current.valid=true;
+    input.integrity.stamp=input.integrity.pose_stamp=input.integrity.current.stamp=10.;
+    input.integrity.p_wb=Eigen::Vector3d::Zero();
+    return input;
+  };
+  const auto foreground=input_for(false), with_hidden=input_for(true);
+  const auto a=ego_planner::makeFrozenPredictor(foreground).query(
+      ego_planner::frozenPredictionQuery(foreground,Eigen::Vector3d::Zero()));
+  const auto b=ego_planner::makeFrozenPredictor(with_hidden).query(
+      ego_planner::frozenPredictionQuery(with_hidden,Eigen::Vector3d::Zero()));
+  ASSERT_TRUE(a.lidar.valid)<<a.fallback_reason<<' '<<a.lidar.fallback_reason;
+  ASSERT_TRUE(b.lidar.valid)<<b.fallback_reason<<' '<<b.lidar.fallback_reason;
+  EXPECT_TRUE(a.lidar.joint_pose_information.isApprox(b.lidar.joint_pose_information,1e-10));
+  EXPECT_EQ(a.lidar.n_support_groups,b.lidar.n_support_groups);
+  auto outside=foreground;outside.params.lidar.enable_legacy_observability=true;
+  auto narrow=std::make_shared<FrozenOccupancyEpoch>(*foreground.occupancy);
+  narrow->observation_frame->vertical_min_rad=1.;narrow->observation_frame->vertical_max_rad=1.2;
+  outside.occupancy=narrow;
+  const auto excluded=ego_planner::makeFrozenPredictor(outside).query(
+      ego_planner::frozenPredictionQuery(outside,Eigen::Vector3d::Zero()));
+  EXPECT_FALSE(excluded.lidar.valid);EXPECT_FALSE(excluded.lidar.legacy_valid);
+  EXPECT_TRUE(excluded.lidar.joint_pose_information.isZero());
+  narrow->observation_frame.reset();
+  const auto missing=ego_planner::makeFrozenPredictor(outside).query(
+      ego_planner::frozenPredictionQuery(outside,Eigen::Vector3d::Zero()));
+  EXPECT_FALSE(missing.lidar.valid);EXPECT_FALSE(missing.lidar.legacy_valid);
+  EXPECT_EQ(missing.lidar.fallback_reason,"missing_lidar_visibility_model");
+}
+
 TEST(EgoBaseline, ReadOnlyExportRetainsCompleteObstacleSourceProvenance) {
   auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
   GridMapTestAccess::input(*map,{Eigen::Vector3d(1,0,1)},10,Eigen::Vector3d(0,0,1));
@@ -2943,6 +2998,13 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   GridMapTestAccess::input(*map,obstacles,10,Eigen::Vector3d(0,0,1)); GridMapTestAccess::markObserved(*map);
   ego_planner::PredictionInput input; input.occupancy=map->captureFrozenOccupancyEpoch(); ASSERT_TRUE(input.occupancy);
   input.reference_time_s=10.1; input.params.source_mode=iap::PredictorSourceMode::LidarOnly;
+  // The fixture's cloud callback has no sensor wire metadata. Declare its
+  // synthetic sensor explicitly instead of assuming invisible surfaces exist.
+  auto sensor_epoch=std::make_shared<FrozenOccupancyEpoch>(*input.occupancy);
+  RegisteredLidarFrameMetadata fixture_sensor;fixture_sensor.T_map_lidar.translation()=Eigen::Vector3d(0,0,1);
+  fixture_sensor.horizontal_fov_rad=2*std::acos(-1.);fixture_sensor.vertical_min_rad=-std::acos(-1.)/2;
+  fixture_sensor.vertical_max_rad=std::acos(-1.)/2;fixture_sensor.min_range_m=.1;fixture_sensor.max_range_m=10.;
+  sensor_epoch->observation_frame=fixture_sensor;input.occupancy=sensor_epoch;
   input.params.lidar.enable_legacy_observability=false;
   input.integrity.valid=input.integrity.has_pose=input.integrity.current.valid=true;
   input.integrity.stamp=10.1; input.integrity.pose_stamp=input.integrity.current.stamp=10;

@@ -463,6 +463,10 @@ void PredictorModule::set_lidar_map_points(
   lidar_.set_lidar_map_points(std::move(points));
 }
 
+void PredictorModule::set_lidar_support_query(LidarObservabilityFim::SupportQuery query, std::string rejection) {
+  lidar_.set_support_query(std::move(query), std::move(rejection));
+}
+
 PredictorAdmission PredictorModule::admission(const PredictorQueryInput& input) const {
   PredictorAdmission out;
   const auto& s = input.snapshot;

@@ -23,6 +23,19 @@ row indices; the original payload and certified epoch identity stay intact.
 LiDAR grouping still handles its own support representation copies. Neither
 deduplication proves independence between distinct identities or surfaces.
 
+The production frozen binding now admits PCA supports through the recorded
+sensor FOV/range and a first-hit trace of the same GridMap raw occupancy. A
+fully occluded surface cannot supply information. Inflation and the virtual
+ceiling do not occlude this measurement model. Sensor geometry comes from the
+frozen observation/evidence identity (or a configured envelope for hit-only
+inputs); missing geometry rejects LiDAR as `missing_lidar_visibility_model`.
+The saved reference attitude and extrinsics are held fixed across spatial
+queries; attitude still enters the joint nuisance state. Unknown ray cells
+are not promoted to free-space evidence: visibility is conditional on the
+frozen known geometry, not a proof of future complete scanning. Beam sampling,
+map error and surface correlations remain unqualified. Rejected support cannot
+re-enter through the legacy point-density fallback.
+
 The required result is a frozen spatial prediction of IMU/body position in map
 coordinates, with shared pose nuisance variables handled once. The observed
 ID5 result is HPL/VPL 0.283971/0.275938 m, almost entirely from LiDAR. The first

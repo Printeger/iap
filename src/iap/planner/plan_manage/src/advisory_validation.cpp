@@ -108,6 +108,12 @@ Input fixture() {
       cells->flags.at(address)|=1; points->push_back(p);
     }
   e->cells=cells; e->raw_occupied_voxel_centers=points; e->environment_occupied_voxel_centers=points;
+  // Explicit synthetic omnidirectional sensor for the six-plane mechanism
+  // fixture; real replays retain their original sensor geometry unchanged.
+  RegisteredLidarFrameMetadata sensor;sensor.frame_id=1;sensor.stamp_s=100.;
+  sensor.T_map_lidar.translation()=s.p_wb;sensor.horizontal_fov_rad=2*M_PI;
+  sensor.vertical_min_rad=-M_PI/2;sensor.vertical_max_rad=M_PI/2;
+  sensor.min_range_m=.1;sensor.max_range_m=10.;e->observation_frame=sensor;
   in.occupancy=e;
   return in;
 }
@@ -676,7 +682,8 @@ int main(int argc,char** argv) {
             sources<<"active,"<<source.metadata.frame_id<<',';point_row(sources,point);
           }
       }
-      if(!raw || !environment || !sources)throw std::runtime_error("failed metadata geometry export");return 0;
+      if(!raw || !environment || !sources)throw std::runtime_error("failed metadata geometry export");
+      return 0;
     }
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {

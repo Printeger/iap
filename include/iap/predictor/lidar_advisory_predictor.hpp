@@ -20,6 +20,7 @@ class LidarAdvisoryPredictor {
       std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives);
   void set_lidar_map_points(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> points);
+  void set_support_query(LidarObservabilityFim::SupportQuery query, std::string rejection = {});
 
   LidarAdvisoryResult query(const Eigen::Vector3d& query_position,
                             const IntegritySnapshot& snapshot) const;
@@ -33,6 +34,8 @@ class LidarAdvisoryPredictor {
   std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives_;
   std::shared_ptr<const LidarFimPrimitiveIndex> primitive_index_;
   std::shared_ptr<const std::vector<Eigen::Vector3d>> map_points_;
+  LidarObservabilityFim::SupportQuery support_query_;
+  std::string support_rejection_;
 };
 
 }  // namespace iap

@@ -516,7 +516,8 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     const std::vector<LidarFimPrimitive>* primitives,
     const std::vector<std::size_t>* candidate_indices,
     const LidarObservabilityFim::Params& params,
-    const LidarFimPrimitiveIndex* index=nullptr) {
+    const LidarFimPrimitiveIndex* index=nullptr,
+    const LidarObservabilityFim::SupportQuery& support_query={}) {
   LidarAdvisoryFimResult out;
 
   auto fallback = [&](const char* reason) {
@@ -584,6 +585,7 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
       return;
     }
     ++nearby;
+    if (support_query && !support_query(p_w, primitive.center_w)) return;
     if(prepared) {
       const auto& value=(*prepared)[primitive_id];
       if(!value.valid) return;
@@ -679,20 +681,20 @@ LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
 LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
     const Eigen::Vector3d& p_w,
     const std::vector<LidarFimPrimitive>* primitives,
-    const CurrentIntegrityState& current) const {
+    const CurrentIntegrityState& current, const SupportQuery& support) const {
   (void)current;
   return evaluate_lidar_advisory_fim_candidates(p_w, primitives, nullptr,
-                                               params_);
+                                               params_, nullptr, support);
 }
 
 LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
     const Eigen::Vector3d& p_w,
     const LidarFimPrimitiveIndex* index,
-    const CurrentIntegrityState& current) const {
+    const CurrentIntegrityState& current, const SupportQuery& support) const {
   (void)current;
   if (index == nullptr || index->empty()) {
     return evaluate_lidar_advisory_fim_candidates(p_w, nullptr, nullptr,
-                                                 params_);
+                                                 params_, nullptr, support);
   }
 
   const double radius =
@@ -702,11 +704,11 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
   if(p_w.allFinite() && std::isfinite(radius) && radius>0. &&
       index->advisoryPrimitives(params_.fim_support_voxel_m))
     return evaluate_lidar_advisory_fim_candidates(p_w,index->primitives(),
-        &index->advisoryOrder(),params_,index);
+        &index->advisoryOrder(),params_,index,support);
   std::vector<std::size_t> candidates;
   index->queryRadius(p_w, radius, &candidates);
   return evaluate_lidar_advisory_fim_candidates(p_w, index->primitives(),
-                                               &candidates, params_,index);
+                                               &candidates, params_,index,support);
 }
 
 }  // namespace iap
