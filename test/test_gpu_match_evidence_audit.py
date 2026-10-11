@@ -15,7 +15,10 @@ class ActualSampleAudit(unittest.TestCase):
     def test_captured_dense_float_covariance_is_not_an_interface_error(self):
         path=os.environ.get('IAP_DENSE_COVARIANCE_COUNTEREXAMPLE')
         if not path:self.skipTest('requires immutable actual dense counterexample')
-        for case in json.loads(Path(path).read_text()):
+        cases=json.loads(Path(path).read_text())
+        inherited=Path(path).with_name('input_symmetry_rejections.json')
+        if inherited.exists():cases+=json.loads(inherited.read_text())
+        for case in cases:
             record=case['record'];transform=np.array(case['transform']);before=json.dumps(record,sort_keys=True)
             with self.subTest(run=case['source_run']):
                 audit.audit_sample(record,transform)

@@ -28,7 +28,7 @@ def sha(path):
     return digest.hexdigest()
 
 
-def audit_sample(record, transform):
+def audit_sample(record, transform, diagnostics=None):
     """Independent host algebra from actual exported GPU identities and bytes."""
     e=np.asarray(record["residual_m"],float)
     covariance=np.asarray(record["covariance_m2_row_major"],float).reshape(3,3)
@@ -42,8 +42,6 @@ def audit_sample(record, transform):
     # forward-error bound. A tolerance on the tiny off-diagonal value itself
     # incorrectly rejects cancellation in otherwise symmetric SPD inputs.
     # Retain raw bytes; do not symmetrize, floor eigenvalues or fit a tolerance.
-    if not np.array_equal(ca,ca.T) or not np.array_equal(cb,cb.T):
-        raise ValueError("asymmetric source/target covariance")
     rotation=transform[:3,:3]
     expected=cb+rotation@ca@rotation.T
     unit_roundoff=np.finfo(np.float32).eps/2
@@ -52,10 +50,20 @@ def audit_sample(record, transform):
     roundoff=((1+gamma3)**2-1)*magnitude+unit_roundoff*(np.abs(cb)+(1+gamma3)**2*magnitude)
     host_roundoff=16*np.finfo(np.float64).eps*(np.abs(cb)+magnitude)
     bound=roundoff+host_roundoff
-    if np.any(np.abs(covariance-covariance.T)>bound+bound.T):
+    # Target voxel covariances are also actual rounded matcher inputs. Their
+    # inherited skew is evidence, not a reason to assume bitwise symmetry or
+    # silently repair either input. This validates the tap's construction only;
+    # it does not qualify matcher geometry as a statistical noise covariance.
+    if np.any(np.abs(covariance-covariance.T)>np.abs(expected-expected.T)+bound+bound.T):
         raise ValueError("asymmetric actual covariance")
     if np.any(np.abs(covariance-expected)>bound):
         raise ValueError("actual transform/covariance mismatch beyond float32 roundoff")
+    if diagnostics is not None:
+        for key,value in (("source_input_skew_max_m2",np.max(np.abs(ca-ca.T))),
+                          ("target_input_skew_max_m2",np.max(np.abs(cb-cb.T))),
+                          ("actual_skew_max_m2",np.max(np.abs(covariance-covariance.T))),
+                          ("construction_error_max_m2",np.max(np.abs(covariance-expected)))):
+            diagnostics[key]=max(diagnostics.get(key,0.),float(value))
     chol=np.linalg.cholesky(covariance) # No epsilon/repair.
     whitened=np.linalg.solve(chol,e)
     mahalanobis=float(whitened@whitened)
@@ -90,6 +98,7 @@ def audit(run):
     residual_errors=[];covariance_errors=[];transform_errors=[];statuses=Counter();owners=Counter()
     source_matches=Counter();voxel_matches=Counter();multi_level=defaultdict(dict)
     frames=set();total_source=0;total_inliers=0;sample_count=0
+    arithmetic={}
     with raw.open() as stream:
         for line in stream:
             p=json.loads(line);identity=p["request_id"]
@@ -150,7 +159,7 @@ def audit(run):
                     raise ValueError("source sample identity mismatch")
                 indices.add(s["source_index"])
                 if s["target_index"]<0 or s["target_point_count"]<=0: raise ValueError("invalid target identity")
-                e,w,m,re,ce=audit_sample(s,transform);cost+=m
+                e,w,m,re,ce=audit_sample(s,transform,arithmetic);cost+=m
                 world_e=target[:3,:3]@e
                 residuals.append(world_e);norms.append(float(np.linalg.norm(e)));whitened_all.append(w)
                 residual_errors.append(re);covariance_errors.append(ce)
@@ -180,6 +189,7 @@ def audit(run):
         "paired_multi_level_sources":len(paired),"multi_level_world_component_correlation_diagnostic":correlation,
         "world_component_std_m":np.std(residuals,axis=0).tolist() if residuals else None,
         "whitened_component_std":np.std(whitened_all,axis=0).tolist() if whitened_all else None,
+        "float32_construction_audit":arithmetic,
         "qualified_noise":False,"qualified_joint_model":False,"qualified_space_or_meters":False,
         "note":"Actual 3D VGICP postopt residuals; covariance is matcher geometry. Repeated source/voxel/levels are correlated; no independent-noise or physical-Up qualification."}
     return report,np.asarray(residuals),np.asarray(whitened_all)
