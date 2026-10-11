@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from local_increment_validation import PoseSeries, quaternion_rotation, relative_error
+from local_increment_validation import PoseSeries, quaternion_rotation, relative_error, paired_response_moments
 
 
 def pose(x=0., yaw=0.):
@@ -84,6 +84,27 @@ class LocalIncrementContract(unittest.TestCase):
         data[0]['body'] = 'camera'
         with self.assertRaisesRegex(ValueError, 'EXTRINSIC_UNQUALIFIED'):
             PoseSeries(data, 'glio')
+
+    def test_joint_common_offset_cancels_but_independent_marginals_do_not(self):
+        common = np.array([[.1, 0., 0., 0., 0., 0.], [-.1, 0., 0., 0., 0., 0.]])
+        coupled = np.stack((common, common), axis=1)
+        result = paired_response_moments(pose(), pose(.5), coupled)
+        self.assertLess(result['score_m'], 1e-12)
+        independent = np.stack((common, common[::-1]), axis=1)
+        wrong = paired_response_moments(pose(), pose(.5), independent)
+        self.assertGreater(wrong['score_m'], 1.)
+
+    def test_paired_mean_retains_local_increment_bias(self):
+        pairs = np.zeros((8, 2, 6))
+        pairs[:, 0, :2] = [1., 2.]
+        pairs[:, 1, :2] = [1.03, 1.96]
+        result = paired_response_moments(pose(), pose(.5), pairs)
+        np.testing.assert_allclose(result['mean_increment_response_m'], [.03, -.04, 0.], atol=1e-12)
+        self.assertAlmostEqual(result['score_m'], .25, places=12)
+
+    def test_missing_joint_law_is_not_replaced_with_two_marginals(self):
+        with self.assertRaisesRegex(ValueError, 'JOINT_ENDPOINT'):
+            paired_response_moments(pose(), pose(.5), np.zeros((8, 6)))
 
 
 if __name__ == '__main__':

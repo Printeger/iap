@@ -75,6 +75,45 @@ def relative_error(estimate_start, estimate_end, truth_start, truth_end):
             'estimated_motion_distance_m': float(np.linalg.norm(estimated[:3, 3]))}
 
 
+def corrected_pose(nominal, correction):
+    """Original pose-row convention: translation, then map-left rotation."""
+    T = rigid(nominal).copy()
+    correction = np.asarray(correction, dtype=float)
+    if correction.shape != (6,) or not np.isfinite(correction).all():
+        raise ValueError('POSE_RESPONSE_UNAVAILABLE')
+    v, w = correction[:3], correction[3:]
+    angle = np.linalg.norm(w)
+    K = np.array([[0., -w[2], w[1]], [w[2], 0., -w[0]], [-w[1], w[0], 0.]])
+    R = np.eye(3)+K+.5*K@K if angle < 1e-8 else (
+        np.eye(3)+np.sin(angle)/angle*K+(1-np.cos(angle))/angle**2*K@K)
+    T[:3, 3] += v
+    T[:3, :3] = R @ T[:3, :3]
+    return rigid(T)
+
+
+def paired_response_moments(nominal_start, nominal_end, joint_responses, K_H=5.):
+    """Transport complete paired draws; never assemble independent marginals.
+
+    Inputs describe a declared conditional observation experiment. This algebra
+    does not supply its physical law or qualify its mean/covariance as real noise.
+    Nominal poses are predictor query geometry, not evaluation truth.
+    """
+    joint = np.asarray(joint_responses, dtype=float)
+    if joint.ndim != 3 or joint.shape[1:] != (2, 6) or len(joint) < 2 or not np.isfinite(joint).all():
+        raise ValueError('JOINT_ENDPOINT_RESPONSE_UNAVAILABLE')
+    errors = np.array([relative_error(corrected_pose(nominal_start, pair[0]),
+                                     corrected_pose(nominal_end, pair[1]),
+                                     nominal_start, nominal_end)['translation_error_start_body_m']
+                       for pair in joint])
+    mean = errors.mean(axis=0)
+    covariance = np.cov(errors, rowvar=False, ddof=1)
+    mse = covariance+np.outer(mean, mean)
+    return {'mean_increment_response_m': mean.tolist(),
+            'conditional_sampling_covariance_m2': covariance.tolist(),
+            'score_m': float(K_H*np.sqrt(max(0., np.linalg.eigvalsh(mse[:2, :2])[-1]))),
+            'joint_draw_count': len(joint), 'physical_error_moments_qualified': False}
+
+
 class PoseSeries:
     def __init__(self, rows, source):
         expected = {'glio': ('map', 'imu'), 'truth': ('map', 'drone_0')}

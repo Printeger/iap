@@ -95,6 +95,28 @@ that the existing conditional geometry is a useful local ranking proxy using
 unseen data after freezing its object, identity and applicability; do not add a
 mean model solely to predict the excluded absolute datum.
 
+The first fixed comparison in `log/20261011T160805Z_137` failed: seed
+5101/5102/5103 regional concordance was 2/3, 0/3, 1/3 and Spearman was
+0.393, -0.714, -0.548. One missing estimate bracket and the three original
+unavailable requests remain in the denominator. Merely excluding the common
+absolute datum is therefore insufficient. Do not repeat this baseline.
+
+The next minimum candidate is a **paired signed observation-response proxy**:
+render both endpoint scans from one shared, source-complete conditional scene,
+apply the original sampling/association/weights/free pose and clocks, and form
+the relative transform from both corrected query poses. Transport whole paired
+draws before computing a mean and scatter; do not difference independently
+reported marginals. Common datum must cancel while different local responses
+remain. Independent sampling uses disjoint declared seeds at the two endpoints.
+The physical scene and sampling measure remain one shared hypothesis, not a
+second map or a fitted regional mean. Loss weights stay loss weights. Initial
+candidate moments cover only this declared conditional resampling experiment;
+missing physical source/GNSS error relations are not silently filled with
+posterior covariance, unit white noise or kernel covariances. Such a diagnostic
+candidate cannot enter independent acceptance until its applicability and
+missing physical relationships are resolved. A failure requires updating the
+temporal-response/observation hypothesis rather than repeating geometry sweeps.
+
 ## Gates, independent validation and route benefit
 
 Retain the original numerical ordering gates: regional pair concordance at
