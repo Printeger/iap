@@ -17,8 +17,9 @@ from run_directory import (adopt_run_directory, resolve_run_directory, finalize_
                            write_subordinate_manifest, canonical_run_uses_sim_time)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
-CODEC = "iap_prediction_input_v10/boost_binary/zlib_length_u64le"
-READABLE_CODECS={CODEC,"iap_prediction_input_v9/boost_binary/zlib_length_u64le",
+CODEC = "iap_prediction_input_v11/boost_binary/zlib_length_u64le"
+READABLE_CODECS={CODEC,"iap_prediction_input_v10/boost_binary/zlib_length_u64le",
+                "iap_prediction_input_v9/boost_binary/zlib_length_u64le",
                  "iap_prediction_input_v8/boost_binary/zlib_length_u64le"}
 SOURCES = ["src/iap/planner/plan_manage/include/ego_planner/prediction_input.h",
            "src/iap/planner/plan_manage/src/prediction_input.cpp",
@@ -32,6 +33,8 @@ SOURCES += ["src/iap/gnss/visibility_predictor.cpp", "include/iap/gnss/visibilit
             "src/iap/planner/plan_env/include/plan_env/grid_map.h",
             "src/iap/planner/plan_env/src/local_evidence_snapshot.cpp",
             "src/iap/planner/plan_env/include/plan_env/local_evidence_snapshot.h"]
+SOURCES += ["src/iap/planner/plan_env/src/registered_lidar_window.cpp",
+            "src/iap/planner/plan_env/include/plan_env/registered_lidar_window.h"]
 SOURCES += ["include/iap/gnss/gnss_types.hpp", "include/iap/gnss/gnss_epoch_wire.hpp", "msg/AdvisoryGnssObservation.msg", "include/iap/planner/integrity_snapshot.hpp",
             "include/iap/util/shared_state.hpp", "msg/IntegrityReport.msg",
             "src/iap/gnss/gnss_extension.cpp", "src/iap/integrity/integrity_extension.cpp"]

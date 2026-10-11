@@ -171,6 +171,9 @@ RegisteredLidarWindow::buildContribution(
     const RegisteredLidarFrameData& frame, const bool deduplicate) const {
   FrameContribution contribution;
   contribution.source = frame;
+  // Copy once when the producer source changes, rather than per frozen query.
+  contribution.hits_lidar =
+      std::make_shared<const std::vector<Eigen::Vector3d>>(frame.hits_lidar);
   const std::size_t word_count =
       (active_hit_count_.size() + 63U) / 64U;
   std::vector<std::uint64_t> hit_bits(word_count, 0U);
@@ -437,6 +440,11 @@ RegisteredLidarWindow::currentFrameMetadata() const {
 }
 
 std::shared_ptr<const std::vector<Eigen::Vector3d>>
+RegisteredLidarWindow::currentHitsLidar() const {
+  return has_current_frame_ ? current_frame_.hits_lidar : nullptr;
+}
+
+std::shared_ptr<const std::vector<Eigen::Vector3d>>
 RegisteredLidarWindow::environmentOccupiedVoxelCenters() const {
   return environment_occupied_voxel_centers_;
 }
@@ -492,6 +500,7 @@ RegisteredLidarWindow::activeObstacleSources() const {
     source.metadata.content_hash = contributionContentHash(frame,
                                                            contribution.hits);
     source.occupied_voxel_centers = std::move(centers);
+    source.hits_lidar = contribution.hits_lidar;
     sources->push_back(std::move(source));
   }
   std::sort(sources->begin(), sources->end(),

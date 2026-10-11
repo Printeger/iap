@@ -440,6 +440,10 @@ struct FrozenOccupancyEpoch
       raw_occupied_voxel_keys;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       current_frame_occupied_voxel_centers;
+  // Original producer endpoints paired with observation_frame.T_map_lidar.
+  // Null means unavailable; empty means an available empty source cloud.
+  // No collision, predictor, or execution consumer uses these diagnostics.
+  std::shared_ptr<const std::vector<Eigen::Vector3d>> current_frame_hits_lidar;
   std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
       active_window_obstacle_sources;
   // Environment hits are independent of the flight lattice/geofence. They

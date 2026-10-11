@@ -130,6 +130,17 @@ class AdvisoryValidationTest(unittest.TestCase):
         with self.assertRaises(ValueError): validation.artifact(self.run_dir, "export/../escape")
         with self.assertRaises(ValueError): validation.safe_label("../escape")
 
+    def test_endpoint_export_marks_unavailable_clouds_without_inventing_points(self):
+        source = self.run_dir / "export/advisory/validation/fixture/S0/input.bin"
+        validation.backend(self.run_dir, Path(ARGS.binary),
+                           ["replay_metadata", "endpoint_metadata", str(source)], "endpoint_metadata")
+        directory = self.run_dir / "export/advisory/validation/endpoint_metadata"
+        evidence = json.loads((directory / "input.json").read_text())["map_source_evidence"]
+        self.assertFalse(evidence["current_producer_endpoints_available"])
+        self.assertIsNone(evidence["current_producer_endpoint_count"])
+        self.assertEqual((directory / "source_endpoints.csv").read_text(),
+                         "role,frame_id,point_index,lidar_x,lidar_y,lidar_z,map_x,map_y,map_z\n")
+
     def test_codec_rejects_corruption_at_backend(self):
         path = self.root / "broken.bin"; path.write_bytes(b"invalid")
         with self.assertRaises(subprocess.CalledProcessError):

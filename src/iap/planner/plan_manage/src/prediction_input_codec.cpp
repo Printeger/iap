@@ -313,27 +313,33 @@ template<class Archive> void fields(Archive& ar, FrozenOccupancyEpoch& value) {
   ar & value.current_vehicle_clearance_radius_m;
 }
 template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
-  std::string schema="iap_prediction_input_v10";
+  std::string schema="iap_prediction_input_v11";
   ar & schema;
-  if (schema!="iap_prediction_input_v1" && schema!="iap_prediction_input_v2" && schema!="iap_prediction_input_v3" && schema!="iap_prediction_input_v4" && schema!="iap_prediction_input_v5" && schema!="iap_prediction_input_v6" && schema!="iap_prediction_input_v7" && schema!="iap_prediction_input_v8" && schema!="iap_prediction_input_v9" && schema!="iap_prediction_input_v10") throw std::runtime_error("unsupported prediction export schema");
+  unsigned wire_version=0;
+  for(unsigned version=1;version<=11;++version) {
+    if(schema=="iap_prediction_input_v"+std::to_string(version)) {
+      wire_version=version;break;
+    }
+  }
+  if(!wire_version)throw std::runtime_error("unsupported prediction export schema");
   ar & input.reference_time_s & input.validity_s & input.integrity & input.params;
   // v1 reads preserve historical fields; new parameters are an explicit v2 tail.
-  if (schema != "iap_prediction_input_v1") ar & input.params.fusion.max_regularization_fraction;
-  if (schema == "iap_prediction_input_v3" || schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
-  else input.recording_codec_version = schema == "iap_prediction_input_v1" ? 1 : 2;
-  if(schema == "iap_prediction_input_v4" || schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.params.gnss.measurement_noise_scale;
-  if(schema == "iap_prediction_input_v5" || schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
-  if (schema == "iap_prediction_input_v6" || schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.clock_model;
+  if(wire_version>=2) ar & input.params.fusion.max_regularization_fraction;
+  if(wire_version>=3) ar & input.params.lidar.fim_params.fim_support_voxel_m & input.recording_codec_version;
+  else input.recording_codec_version = wire_version==1 ? 1 : 2;
+  if(wire_version>=4) ar & input.params.gnss.measurement_noise_scale;
+  if(wire_version>=5) ar & input.integrity.require_coordinates & input.integrity.coordinates & input.integrity.gnss_epoch.R_query_enu & input.integrity.gnss_epoch.antenna_offset_query;
+  if(wire_version>=6) ar & input.clock_model;
   else input.clock_model = "legacy_common_clock";
-  if(schema == "iap_prediction_input_v7" || schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) ar & input.gnss_fault_model;
+  if(wire_version>=7) ar & input.gnss_fault_model;
   else {
     input.gnss_fault_model="legacy_single_satellite_v1";
     // An older wire schema cannot claim a newer recording authority.
     input.recording_codec_version=std::min(input.recording_codec_version,6u);
   }
-  if(schema == "iap_prediction_input_v8" || (schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) {
+  if(wire_version>=8) {
     ar & input.integrity.postopt_evidence;
-    if((schema == "iap_prediction_input_v9" || schema == "iap_prediction_input_v10")) {
+    if(wire_version>=9) {
       auto& e=input.integrity.postopt_evidence;
       ar & e.propagated_optimized_means & e.propagated_linearization_means & e.propagated_joint_covariance;
       ar & e.propagation_transition & e.propagation_noise & e.imu_measurements & e.imu_noise & e.imu_bias_hat;
@@ -369,7 +375,7 @@ template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
   }
   ar & flags & raw & environment & has_evidence;
   if (has_evidence) ar & evidence;
-  if(schema=="iap_prediction_input_v10") {
+  if(wire_version>=10) {
     // The live epoch already owns these identities and contributions. Preserve
     // them at the read-only seam; no new map, uncertainty, or freshness is made.
     bool has_frame=bool(epoch->observation_frame);
@@ -387,6 +393,21 @@ template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
     if(has_frame)ar & frame;
     if(has_current_points)ar & current_points;
     if(has_sources)ar & sources;
+    if(wire_version>=11) {
+      // A separate v11 tail keeps the v10 source wire representation readable.
+      const auto endpoints=[&](std::shared_ptr<const std::vector<Eigen::Vector3d>>& value) {
+        bool available=bool(value); ar & available;
+        std::vector<Eigen::Vector3d> points;
+        if constexpr(Archive::is_saving::value) if(available)points=*value;
+        if(available)ar & points;
+        if constexpr(Archive::is_loading::value) {
+          if(points.size()>2000000)throw std::runtime_error("source endpoint count exceeds bound");
+          if(available)value=std::make_shared<const std::vector<Eigen::Vector3d>>(std::move(points));
+        }
+      };
+      endpoints(epoch->current_frame_hits_lidar);
+      for(auto& source:sources)endpoints(source.hits_lidar);
+    }
     if constexpr(Archive::is_loading::value) {
       if(sources.size()>10000)throw std::runtime_error("obstacle provenance exceeds source bound");
       if(has_frame)epoch->observation_frame=std::move(frame);

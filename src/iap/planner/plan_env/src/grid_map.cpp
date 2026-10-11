@@ -2710,6 +2710,7 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     std::vector<int> raw_addresses;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits_lidar;
     std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
         active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_frame;
@@ -2753,6 +2754,7 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
         registered_lidar_window_->environmentOccupiedVoxelCenters();
     state->current_hits =
         registered_lidar_window_->currentOccupiedVoxelCenters();
+    state->current_hits_lidar = registered_lidar_window_->currentHitsLidar();
     state->active_obstacle_sources =
         registered_lidar_window_->activeObstacleSources();
     state->current_frame =
@@ -2903,6 +2905,7 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
   epoch->raw_occupied_voxel_centers = std::move(raw_centers);
   epoch->raw_occupied_voxel_keys = std::move(raw_keys);
   epoch->current_frame_occupied_voxel_centers = state->current_hits;
+  epoch->current_frame_hits_lidar = state->current_hits_lidar;
   epoch->active_window_obstacle_sources = state->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = state->environment_hits;
   epoch->lattice_origin = state->origin;
@@ -3001,6 +3004,7 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::shared_ptr<const std::vector<Eigen::Vector3d>> raw_centers;
     std::shared_ptr<const std::vector<iap::VoxelKey>> raw_keys;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits_lidar;
     std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
         active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_registered_frame;
@@ -3075,6 +3079,7 @@ GridMap::captureFrozenOccupancyEpoch() const
           registered_lidar_window_->environmentOccupiedVoxelCenters();
       buffers->current_hits =
           registered_lidar_window_->currentOccupiedVoxelCenters();
+      buffers->current_hits_lidar = registered_lidar_window_->currentHitsLidar();
       buffers->active_obstacle_sources =
           registered_lidar_window_->activeObstacleSources();
       buffers->current_registered_frame =
@@ -3194,6 +3199,7 @@ GridMap::captureFrozenOccupancyEpoch() const
   epoch->raw_occupied_voxel_keys = buffers->raw_keys;
   epoch->current_frame_occupied_voxel_centers =
       buffers->raw_centers ? buffers->current_hits : std::move(current_centers);
+  epoch->current_frame_hits_lidar = buffers->current_hits_lidar;
   epoch->active_window_obstacle_sources = buffers->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = buffers->environment_hits
       ? buffers->environment_hits : epoch->raw_occupied_voxel_centers;

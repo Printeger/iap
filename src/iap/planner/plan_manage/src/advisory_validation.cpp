@@ -234,6 +234,21 @@ void describe(const Input& in,const std::filesystem::path& path) {
      <<",\"frame_contract_id\":"<<std::quoted(e.frame_contract_id)
      <<",\"active_window_generation\":"<<e.active_window_generation
      <<",\"raw_obstacle_source_list_available\":"<<(e.active_window_obstacle_sources?"true":"false")
+     <<",\"current_producer_endpoints_available\":"<<(e.current_frame_hits_lidar?"true":"false")
+     <<",\"current_producer_endpoint_count\":";
+    if(e.current_frame_hits_lidar)o<<e.current_frame_hits_lidar->size();else o<<"null";
+    o<<",\"active_producer_endpoint_sources\":[";
+    if(e.active_window_obstacle_sources) {
+      bool first=true;
+      for(const auto& source:*e.active_window_obstacle_sources) {
+        if(!first)o<<',';first=false;
+        o<<"{\"frame_id\":"<<source.metadata.frame_id
+         <<",\"available\":"<<(source.hits_lidar?"true":"false")<<",\"count\":";
+        if(source.hits_lidar)o<<source.hits_lidar->size();else o<<"null";
+        o<<'}';
+      }
+    }
+    o<<']'
      <<",\"observation_sources_available\":"<<(e.local_evidence_snapshot?"true":"false")
      <<",\"observation_sources\":[";
     if(e.local_evidence_snapshot) {
@@ -674,11 +689,15 @@ int main(int argc,char** argv) {
       const auto raw_path=path.parent_path()/"raw_centers.csv";
       const auto environment_path=path.parent_path()/"environment_centers.csv";
       const auto source_path=path.parent_path()/"source_centers.csv";
+      const auto endpoint_path=path.parent_path()/"source_endpoints.csv";
       if(std::filesystem::exists(path) || std::filesystem::exists(raw_path) ||
-         std::filesystem::exists(environment_path) || std::filesystem::exists(source_path))
+         std::filesystem::exists(environment_path) || std::filesystem::exists(source_path) ||
+         std::filesystem::exists(endpoint_path))
         throw std::runtime_error("metadata evidence exists");
       std::filesystem::create_directories(path.parent_path());describe(in,path);
       std::ofstream raw(raw_path),environment(environment_path),sources(source_path);
+      std::ofstream endpoints(endpoint_path);
+      endpoints<<"role,frame_id,point_index,lidar_x,lidar_y,lidar_z,map_x,map_y,map_z\n";
       raw<<"x,y,z\n";environment<<"x,y,z\n";sources<<"role,frame_id,x,y,z\n";
       const auto point_row=[&](std::ostream& stream,const Point& point) {
         for(int axis=0;axis<3;++axis){csvNumber(stream,point[axis]);stream<<(axis==2?'\n':',');}
@@ -694,8 +713,23 @@ int main(int argc,char** argv) {
           if(source.occupied_voxel_centers)for(const auto& point:*source.occupied_voxel_centers) {
             sources<<"active,"<<source.metadata.frame_id<<',';point_row(sources,point);
           }
+        const auto endpoint_rows=[&](const char* role,const RegisteredLidarFrameMetadata& frame,
+            const std::shared_ptr<const std::vector<Point>>& points) {
+          if(!points)return;
+          size_t index=0;
+          for(const auto& point:*points) {
+            endpoints<<role<<','<<frame.frame_id<<','<<index++<<',';
+            for(int axis=0;axis<3;++axis){csvNumber(endpoints,point[axis]);endpoints<<',';}
+            point_row(endpoints,frame.T_map_lidar*point);
+          }
+        };
+        if(e.current_frame_hits_lidar && !e.observation_frame)
+          throw std::runtime_error("current producer endpoints have no recorded source transform");
+        if(e.observation_frame)endpoint_rows("current",*e.observation_frame,e.current_frame_hits_lidar);
+        if(e.active_window_obstacle_sources)for(const auto& source:*e.active_window_obstacle_sources)
+          endpoint_rows("active",source.metadata,source.hits_lidar);
       }
-      if(!raw || !environment || !sources)throw std::runtime_error("failed metadata geometry export");
+      if(!raw || !environment || !sources || !endpoints)throw std::runtime_error("failed metadata geometry export");
       return 0;
     }
     // A fixture campaign's labels are reserved. Real replays use caller labels.

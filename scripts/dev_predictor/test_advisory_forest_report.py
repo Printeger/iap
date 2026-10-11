@@ -23,7 +23,7 @@ class ForestReportContract(unittest.TestCase):
                     'lever_arm_imu':[0.,0.,0.],'anchor_ecef':[0.,0.,0.]}}
 
     def test_current_fault_model_can_audit_coordinates_without_granting_uncertainty(self):
-        for version in (8,9,10):
+        for version in (8,9,10,11):
             with self.subTest(version=version):
                 meta=self.coordinate_input();meta['recording_codec_version']=version
                 result=audit(meta)

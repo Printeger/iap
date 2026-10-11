@@ -96,6 +96,10 @@ struct RegisteredLidarFrameMetadata {
 struct RegisteredLidarObstacleSource {
   RegisteredLidarFrameMetadata metadata;
   std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_voxel_centers;
+  // Producer-native registered cloud endpoints, before flight-lattice
+  // quantization, in the source LiDAR frame. Diagnostic geometry only;
+  // occupied_voxel_centers remains the collision/assurance authority.
+  std::shared_ptr<const std::vector<Eigen::Vector3d>> hits_lidar;
 };
 
 struct ActiveLidarWindowDeltaData {
@@ -169,6 +173,7 @@ class RegisteredLidarWindow {
   std::vector<uint8_t> unthinnedObservationMask(
       const RegisteredLidarFrameData& frame) const;
   std::optional<RegisteredLidarFrameMetadata> currentFrameMetadata() const;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>> currentHitsLidar() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
   environmentOccupiedVoxelCenters() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
@@ -193,6 +198,7 @@ class RegisteredLidarWindow {
 
   struct FrameContribution {
     RegisteredLidarFrameData source;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> hits_lidar;
     std::vector<int> hits;
     std::vector<int> observed_free;
     std::vector<EnvironmentVoxelKey> environment_hit_keys;

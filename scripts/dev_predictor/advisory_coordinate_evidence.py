@@ -69,7 +69,7 @@ def audit_postopt(meta):
 
 def audit(meta):
     c=meta['coordinates']
-    if (meta.get('recording_codec_version') not in (8,9,10) or
+    if (meta.get('recording_codec_version') not in (8,9,10,11) or
         meta.get('clock_model')!='per_constellation_pseudorange_bias_v1' or
         meta.get('gnss_fault_model')!='single_satellite_and_constellation_v1') or not c.get('required') or not c.get('valid'):
         raise ValueError('production_coordinate_evidence_unavailable')

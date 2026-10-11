@@ -389,7 +389,7 @@ TEST(RegisteredLidarWindow,
   delta.frame_contract_id = "contract-a";
   auto source_frame = frame(
       12, Eigen::Vector3d(0.5, 0.5, 0.5),
-      {Eigen::Vector3d(2.0, 0.0, 0.0)});
+      {Eigen::Vector3d(2.0, 0.0, 0.0),Eigen::Vector3d(2.04, 0.01, 0.02)});
   source_frame.source_is_map_reference = true;
   source_frame.source_health_valid = true;
   source_frame.source_health_stamp_s = source_frame.stamp_s;
@@ -419,6 +419,16 @@ TEST(RegisteredLidarWindow,
   ASSERT_EQ(sources->front().occupied_voxel_centers->size(), 1u);
   EXPECT_TRUE(sources->front().occupied_voxel_centers->front().isApprox(
       Eigen::Vector3d(2.5, 0.5, 0.5)));
+  ASSERT_TRUE(sources->front().hits_lidar);
+  EXPECT_EQ(*sources->front().hits_lidar,source_frame.hits_lidar);
+  ASSERT_TRUE(window.applyCurrentFrame(source_frame).accepted);
+  const auto current=window.currentHitsLidar();
+  ASSERT_TRUE(current);
+  EXPECT_EQ(*current,source_frame.hits_lidar);
+  ASSERT_TRUE(window.applyCurrentFrame(frame(13,Eigen::Vector3d(.5,.5,.5),{})).accepted);
+  ASSERT_TRUE(window.currentHitsLidar());
+  EXPECT_TRUE(window.currentHitsLidar()->empty());
+  EXPECT_EQ(*current,source_frame.hits_lidar);
 
   ActiveLidarWindowDeltaData remove;
   remove.base_generation = 1;
