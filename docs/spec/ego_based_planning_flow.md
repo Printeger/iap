@@ -268,6 +268,26 @@ pair-start前0.5s及后2.3s原报告gzip，payload／失败请求全部保留。
 按列主序发布／消费，codec describe按行主序导出；只修正离线报告decoder，
 不变更坐标／评价对象。新增非零平移和旋转的真实布局反例，7项原生测试通过；
 首次坐标拒绝在任何真值误差／排序计算前发生，保留读取失败，不重复采集。
+7400开发补录18请求中2个启动期epoch不可用；9个窗口中7个原生endpoint合格，
+另1个原生endpoint覆盖缺失。三个原区域内只有3个合格窗口，不追加同配置采集。
+`native_pair_response_discriminator_scope_v2`保留全部请求与区域：几何score区域
+一致率0、Spearman−1；实际成对源点／原GNSS residual响应区域一致率1、Spearman1，
+但3<6故两者均FAIL。未来端观测只用于诊断。早期v1将区域外窗口混入总体rho，
+保留并明确其排序口径无资格；v2没有扩展区域或更改门槛。原生／发布增量差
+约0.487–2.898mm，不能把发布表示视为充分根因。
+最小模型缺口为有物理依据的短窗口联合误差响应（native时序增益、活动来源相对
+形变与重用观测谱系），不是进一步PCA／FOV／半径修补。IAP内的有界仿射响应
+参考`transport_retained_error_law`只消费完整joint均值／协方差和显式innovation
+交叉块；无物理law即UNAVAILABLE，不代入posterior／loss或独立边缘；保留活动
+source及起点，递推当前状态，不存完整历史。该代数可实现但物理输入尚未取得，
+55维只是此固定开发对象的参考状态上界，未授予在线预算或生产模型资格。
+有界响应5项、原生接口7项及增量11项共23项定向测试通过；共同datum取消、
+相对bias保留、重用观测交叉关系、与完整潜变量递推一致及缺失／预算拒绝均受检。
+实际更新后／消元前观察接口位于只读gtsam_points；5文件候选patch及隔离原生测试
+保存在7400 owner，依赖未改。测试证明旧／新keys共存、原lag与估计保持，以及
+observer异常不触发原fallback；需要用户明确授权此窄范围依赖例外才可应用。
+接口只暴露solver响应结构，不把其Gaussian赋予物理误差资格。M2未通过，
+M3–M5仍未进入，报告／接口证明完成不等于Goal完成。
 
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，

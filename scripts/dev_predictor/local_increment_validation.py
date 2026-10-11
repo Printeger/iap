@@ -114,6 +114,45 @@ def paired_response_moments(nominal_start, nominal_end, joint_responses, K_H=5.)
             'joint_draw_count': len(joint), 'physical_error_moments_qualified': False}
 
 
+def transport_retained_error_law(joint_mean, joint_covariance, retained_dim,
+                                state_transition, innovation_response,
+                                mean_offset, state_dimension_budget=55):
+    """Bounded affine response reference, given a complete physical joint law.
+
+    Input ordering is [retained sources/start endpoint, current state, new
+    innovations]. Output keeps only [retained, next state]. The innovation
+    cross blocks are REQUIRED, including when a measurement is reused. No
+    posterior, loss model or independence assumption supplies missing blocks.
+    Caller must qualify the physical law and native response separately; this
+    algebra grants neither qualification nor a prediction from recorded means.
+    """
+    if joint_mean is None or joint_covariance is None:
+        raise ValueError('PHYSICAL_JOINT_ERROR_LAW_UNAVAILABLE')
+    F, G = np.asarray(state_transition, float), np.asarray(innovation_response, float)
+    if (F.ndim != 2 or F.shape[0] != F.shape[1] or G.ndim != 2 or
+            G.shape[0] != F.shape[0] or not isinstance(retained_dim, int) or retained_dim < 0):
+        raise ValueError('ERROR_RESPONSE_LAYOUT_INVALID')
+    state_dim, noise_dim = F.shape[0], G.shape[1]
+    if retained_dim+state_dim > state_dimension_budget:
+        raise ValueError('BOUNDED_ERROR_STATE_BUDGET_EXCEEDED')
+    dim = retained_dim+state_dim+noise_dim
+    mean, covariance = np.asarray(joint_mean, float), np.asarray(joint_covariance, float)
+    offset = np.asarray(mean_offset, float)
+    if (mean.shape != (dim,) or covariance.shape != (dim, dim) or
+            offset.shape != (state_dim,) or not all(np.isfinite(v).all() for v in (mean, covariance, F, G, offset))):
+        raise ValueError('JOINT_ERROR_BLOCKS_MISSING_OR_NONFINITE')
+    if (not np.allclose(covariance, covariance.T, rtol=0, atol=1e-12) or
+            np.linalg.eigvalsh(covariance).min() < -1e-10):
+        raise ValueError('PHYSICAL_JOINT_ERROR_LAW_NOT_PSD')
+    response = np.zeros((retained_dim+state_dim, dim))
+    response[:retained_dim, :retained_dim] = np.eye(retained_dim)
+    response[retained_dim:, retained_dim:retained_dim+state_dim] = F
+    response[retained_dim:, retained_dim+state_dim:] = G
+    output_mean = response @ mean
+    output_mean[retained_dim:] += offset
+    return output_mean, response @ covariance @ response.T
+
+
 def native_pose_at(evidence, stamp, T_map_world):
     """Original optimized state plus recorded IMU mean transport, no covariance.
 
