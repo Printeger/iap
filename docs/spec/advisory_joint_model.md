@@ -37,7 +37,7 @@ frozen known geometry, not a proof of future complete scanning. Beam sampling,
 map error and surface correlations remain unqualified. Rejected support cannot
 re-enter through the legacy point-density fallback.
 The cached prediction policy identity is
-`pose6_known_raw_first_hit_two_source_envelope_v3`; it includes sensor
+`pose6_knn10_raw_first_hit_two_source_envelope_v4`; it includes sensor
 availability, recorded metadata/evidence identity and ray lattice geometry.
 This compact numeric cache identity is separate from the full input.bin SHA256
 used to bind original recordings. It never grants original source provenance.
@@ -68,7 +68,14 @@ noise calibration. Final admitted nominal rows and sigmas are exported by
 raw/anchored GNSS bounds. FDE exclusion, unknown LOS, inadequate geometry and
 an unbounded whole-constellation hypothesis are separate outcomes.
 
-LiDAR primitives are PCA normals of frozen occupied voxel centers. They are
+LiDAR primitives use the nearest 10 distinct occupied centers within the
+1.5m maximum radius for each PCA normal. Ten matches the original captured
+GLIO preprocessing `k_correspondences`; it is a local geometry policy, not a
+residual/noise fit. Previously the whole radius could include both sides of a
+trunk and erase its local tangent: the known cylinder regression produced zero
+valid normals. Exact repeated input points do not consume the neighbor quota.
+The native exporter records this policy, radius and quota; archived whole-radius
+geometry stays immutable. These primitives are
 not the actual VGICP source/target matches or residuals. Distance taper,
 normal confidence and `fim_range_sigma_base` define the spatial information
 proxy; the latter is not a measured GPU residual standard deviation. Averaging

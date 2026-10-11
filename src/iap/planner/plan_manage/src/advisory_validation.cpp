@@ -181,6 +181,7 @@ void describe(const Input& in,const std::filesystem::path& path) {
   o << ",\"K_V_adv\":";number(o,in.params.fusion.K_V_adv);
   o << ",\"conservative_max_with_gnss\":" << (in.params.fusion.conservative_max_with_gnss?"true":"false");
   o << ",\"parameter_authority\":\"complete serialized PredictorParams in input.bin\",\"primitive_derivation\":\"make_lidar_fim_primitives(default generation params), frozen raw centers\"";
+  o << ",\"primitive_normal_neighborhood_points\":10,\"primitive_normal_radius_limit_m\":1.5,\"primitive_normal_support_policy\":\"nearest_distinct_points_within_radius_v1\"";
   const auto& c=s.coordinates;
   o<<",\"coordinates\":{\"required\":"<<(s.require_coordinates?"true":"false")
    <<",\"valid\":"<<(c.valid?"true":"false")<<",\"reason\":"<<std::quoted(c.rejection())

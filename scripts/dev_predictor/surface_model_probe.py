@@ -19,10 +19,15 @@ sys.path.insert(0, str(REPO / 'launch/_includes'))
 from run_directory import adopt_run_directory, write_subordinate_manifest
 
 
-def fitted_plane_offsets(raw, centers, normals, support_counts, radius=1.5):
+def fitted_plane_offsets(raw, centers, normals, support_counts, radius=1.5, neighborhood_points=None):
     offsets, spread = [], []
     for c, n, count in zip(centers, normals, support_counts):
         patch = raw[np.sum((raw-c)**2, axis=1) <= radius**2]
+        if neighborhood_points is not None:
+            patch = np.unique(patch, axis=0)
+            d2 = np.sum((patch-c)**2, axis=1)
+            order = np.lexsort((patch[:, 2], patch[:, 1], patch[:, 0], d2))
+            patch = patch[order[:neighborhood_points]]
         assert len(patch) == count, 'ORIGINAL_PCA_NEIGHBORHOOD_MISMATCH'
         mean = np.mean(patch, axis=0)
         cov = (patch-mean).T @ (patch-mean) / len(patch)
@@ -91,7 +96,9 @@ def evaluate(config_path, label):
     raw = np.array([[float(v[k]) for k in ('x', 'y', 'z')] for v in csv.DictReader(raw_path.open())])
     lattice_origin = np.array(meta['origin']); resolution = meta['resolution_m']
     occupied = set(map(tuple, np.floor((raw-lattice_origin)/resolution+1e-8).astype('int64')))
-    offsets, variance = fitted_plane_offsets(raw, c, n, counts)
+    offsets, variance = fitted_plane_offsets(
+        raw, c, n, counts, meta.get('primitive_normal_radius_limit_m', 1.5),
+        meta.get('primitive_normal_neighborhood_points'))
     sensor = read(cfg['sensor_metadata'])['map_source_evidence']['current_observation_frame']
     rows = []
     for original in read(cfg['same_map_summary'])['rows']:

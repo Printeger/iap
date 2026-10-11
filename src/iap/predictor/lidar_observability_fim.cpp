@@ -127,7 +127,7 @@ std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
     return finish();
   }
   if (!std::isfinite(params.pca_radius_m) || params.pca_radius_m <= 0.0 ||
-      params.pca_min_support <= 0 || params.pca_max_points < 0 ||
+      params.pca_min_support <= 0 || params.pca_neighborhood_points <= 0 || params.pca_max_points < 0 ||
       params.pca_max_primitives < 0) {
     diag.fallback_reason = "invalid_lidar_fim_pca_params";
     if (diagnostics != nullptr) {
@@ -190,31 +190,43 @@ std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
       break;
     }
     const Eigen::Vector3d& center = points[idx];
-    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
-    int support = 0;
+    // Local surface orientation is a nearest-neighbor quantity. Averaging an
+    // entire radius can enclose both sides of a trunk and erase its tangent.
+    // k=10 is the original GLIO config_preprocess k_correspondences; this is
+    // a geometry policy, not an empirical residual/noise or route fit.
+    std::vector<std::pair<double,std::size_t>> neighbors;
+    neighbors.reserve(finite_indices.size());
     for (const std::size_t q_idx : finite_indices) {
-      const Eigen::Vector3d& q = points[q_idx];
-      const double d2 = (q - center).squaredNorm();
-      if (std::isfinite(d2) && d2 <= radius2) {
-        mean += q;
-        ++support;
-      }
+      const double d2=(points[q_idx]-center).squaredNorm();
+      if(std::isfinite(d2) && d2<=radius2)neighbors.emplace_back(d2,q_idx);
     }
+    std::sort(neighbors.begin(),neighbors.end(),[&](const auto& a,const auto& b) {
+      if(a.first!=b.first)return a.first<b.first;
+      const auto& x=points[a.second];const auto& y=points[b.second];
+      return std::make_tuple(x.x(),x.y(),x.z())<std::make_tuple(y.x(),y.y(),y.z());
+    });
+    // Exact repeated geometry must not consume the local support quota.
+    std::vector<std::size_t> patch;
+    patch.reserve(params.pca_neighborhood_points);
+    for(const auto& neighbor:neighbors) {
+      if(!patch.empty() && points[neighbor.second]==points[patch.back()])continue;
+      patch.push_back(neighbor.second);
+      if(patch.size()==static_cast<std::size_t>(params.pca_neighborhood_points))break;
+    }
+    const int support=static_cast<int>(patch.size());
     if (support < params.pca_min_support) {
       ++diag.lidar_pca_invalid_normals;
       continue;
     }
-    mean /= static_cast<double>(support);
-    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-    for (const std::size_t q_idx : finite_indices) {
-      const Eigen::Vector3d& q = points[q_idx];
-      const double d2 = (q - center).squaredNorm();
-      if (std::isfinite(d2) && d2 <= radius2) {
-        const Eigen::Vector3d centered = q - mean;
-        cov += centered * centered.transpose();
-      }
+    Eigen::Vector3d mean=Eigen::Vector3d::Zero();
+    for(const auto q_idx:patch)mean+=points[q_idx];
+    mean/=static_cast<double>(support);
+    Eigen::Matrix3d cov=Eigen::Matrix3d::Zero();
+    for(const auto q_idx:patch) {
+      const Eigen::Vector3d centered=points[q_idx]-mean;
+      cov+=centered*centered.transpose();
     }
-    cov /= static_cast<double>(support);
+    cov/=static_cast<double>(support);
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
     if (eig.info() != Eigen::Success) {
       ++diag.lidar_pca_invalid_normals;

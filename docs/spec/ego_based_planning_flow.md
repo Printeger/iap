@@ -42,10 +42,21 @@ surface_model_probe 固定关联只改 PCA 截距的对照多数误差增大，�
 来源位姿存在厘米级、约.002–.013rad误差，当前评价帧后验位置σ约2mm，且帧身份
 不同，不能将其当作历史地图来源噪声。缓存身份反例显示改变传感器视场、量程、
 姿态或可用性仍命中同一身份；现纳入记录的传感器／证据和 ray 格子几何，policy
-为 `pose6_known_raw_first_hit_two_source_envelope_v3`。配置 envelope不再替代未记录
+该次为 `pose6_known_raw_first_hit_two_source_envelope_v3`。配置 envelope不再替代未记录
 传感器输入，以保持原输入与只读重放的资格一致。完整payload SHA与数值cache
 identity语义分别保存。原生红→绿，8项缓存／可见支持／只读／pending检查及9项
 工具检查通过；M2偏差模型／评价对象仍在归因，M3–M5未执行。
+
+曲面支持反例 `CurvedTrunkSupportsRetainLocalSurfaceNormals` 已红：半径1.5m覆盖
+整根半径.2m圆柱后生成0个法向。支持生成现改为半径上限内最近10个不同几何点，
+10来自原GLIO预处理 `k_correspondences`，不按路线／误差拟合。几何重复不占名额，
+圆柱径向法向与重复输入原生检查已绿；26项LiDAR、99项模块检查通过。
+模型cache policy推进为 `pose6_knn10_raw_first_hit_two_source_envelope_v4`，诊断metadata
+明确导出邻域策略。相同固定raw地图的迭代配准对照中，仅将全半径邻域改为最近10点
+使23/24个已查看样本水平误差降低，中位数.170→.0367m；20/24在预定10步未收敛，
+全部保留，不据此授予噪声校准／排序资格。8项原生接口／pending、9项工具检查通过。
+同输入新几何原生6维信息与独立NumPy最大差1.27e−11，receiver H=.74847m；
+旧3区域排序仍仅1/3、2/3、1/3，原门槛／负结论不变，M3–M5未执行。
 
 本轮 pending／来源排序追加 Goal 已交付有限执行修复及独立排序负结论，基线
 `1d1b1a6b`，初始工作树／安装字节一致；现场均绑定干净提交及 Release 安装。

@@ -466,7 +466,7 @@ uint64_t predictionInputIdentity(const PredictionInput& input) {
   auto params=input.params;
   std::ostringstream stream(std::ios::binary);
   { boost::archive::binary_oarchive ar(stream);
-    const std::string model="pose6_known_raw_first_hit_two_source_envelope_v3";
+    const std::string model="pose6_knn10_raw_first_hit_two_source_envelope_v4";
     ar << model; // Algorithm policy is part of cached PL identity.
     ar & snapshot & params;
     if(input.recording_codec_version>=5) ar & snapshot.require_coordinates & snapshot.coordinates & snapshot.gnss_epoch.R_query_enu & snapshot.gnss_epoch.antenna_offset_query;

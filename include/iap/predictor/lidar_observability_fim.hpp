@@ -46,6 +46,9 @@ struct LidarFimPrimitiveGenerationParams {
   double pca_radius_m = 1.5;
   int pca_max_points = 2000;
   int pca_min_support = 6;
+  // Match the local covariance support in the recorded GLIO preprocessing.
+  // The radius remains a coverage limit, not permission to mix whole objects.
+  int pca_neighborhood_points = 10;
   double pca_voxel_sample_m = 0.5;
   int pca_max_primitives = 2000;
   bool use_cloud_normals_first = true;

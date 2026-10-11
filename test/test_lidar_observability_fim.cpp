@@ -453,6 +453,37 @@ TEST(LidarObservabilityFimTest, CorridorGeometryWeakensAlongCorridorInformation)
   EXPECT_GT(along_sigma, cross_sigma);
 }
 
+TEST(LidarObservabilityFimTest, CurvedTrunkSupportsRetainLocalSurfaceNormals) {
+  // A known cylinder has radial normals at every seed. A radius enclosing
+  // both sides estimates the shape axis instead of the local surface tangent.
+  std::vector<Eigen::Vector3d> points;
+  const double pi=std::acos(-1.);
+  for(int angle=0;angle<16;++angle) for(int z=-25;z<=25;++z) {
+    const double theta=2*pi*angle/16.;
+    points.emplace_back(.2*std::cos(theta),.2*std::sin(theta),.08*z);
+  }
+  const auto primitives=iap::make_lidar_fim_primitives(points);
+  ASSERT_GE(primitives->size(),10u);
+  std::vector<double> alignment;
+  for(const auto& primitive:*primitives) {
+    if(std::abs(primitive.center_w.z())>1.5)continue;
+    Eigen::Vector3d radial=primitive.center_w;radial.z()=0.;radial.normalize();
+    alignment.push_back(std::abs(radial.dot(primitive.normal_w)));
+  }
+  ASSERT_GE(alignment.size(),6u);
+  std::sort(alignment.begin(),alignment.end());
+  EXPECT_GT(alignment[alignment.size()/2],.95);
+  auto repeated=points;repeated.insert(repeated.end(),points.begin(),points.end());
+  const auto duplicate=iap::make_lidar_fim_primitives(repeated);
+  ASSERT_EQ(duplicate->size(),primitives->size());
+  for(std::size_t i=0;i<primitives->size();++i) {
+    EXPECT_TRUE(duplicate->at(i).center_w.isApprox(primitives->at(i).center_w));
+    EXPECT_TRUE(duplicate->at(i).normal_w.isApprox(primitives->at(i).normal_w));
+    EXPECT_DOUBLE_EQ(duplicate->at(i).normal_confidence,primitives->at(i).normal_confidence);
+    EXPECT_EQ(duplicate->at(i).support_count,primitives->at(i).support_count);
+  }
+}
+
 TEST(LidarObservabilityFimTest, PcaRadiusChangesPrimitiveCount) {
   const auto points = plane_grid(3, 0.4);
   iap::LidarFimPrimitiveGenerationParams small_radius;
