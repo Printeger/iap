@@ -111,6 +111,7 @@ def materialize_profile(
     simulation_scenario: dict[str, Any] | None = None,
     capture_gpu_match_evidence: bool = False,
     capture_dense_lidar: bool = False,
+    capture_source_observations: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Create a run-local config and validate its module contract.
 
@@ -123,6 +124,8 @@ def materialize_profile(
         raise RuntimeError("GPU residual capture requires the canonical simulation full_stack contract")
     if capture_dense_lidar and not capture_gpu_match_evidence:
         raise RuntimeError("dense LiDAR capture requires GPU residual capture")
+    if capture_source_observations and (simulation_scenario is None or contract != "full_stack"):
+        raise RuntimeError("source observation capture requires canonical simulation full_stack")
     run_root = Path(output_dir).expanduser()
     if not run_root.is_absolute():
         raise RuntimeError("output_dir must be an absolute path")
@@ -201,6 +204,7 @@ def materialize_profile(
             "enable_metrics_csv": False,
         }
         glim_ros["planner_local_map"].update({
+            "capture_source_observations": capture_source_observations,
             "frame_contract_id": "ego_grid_map_sim_v1",
             "beam_evidence_topic": "/iap/simulator/lidar_beam_evidence",
             "static_planner_translation_m": initial,
@@ -327,6 +331,7 @@ def materialize_profile(
         "integrity_profile": integrity_profile,
         "capture_gpu_match_evidence": capture_gpu_match_evidence,
         "capture_dense_lidar": capture_dense_lidar,
+        "capture_source_observations": capture_source_observations,
         "imu_topic": glim_ros.get("imu_topic", ""),
         "points_topic": glim_ros.get("points_topic", ""),
         "materialized_secondary_configs": materialized_secondary_configs,

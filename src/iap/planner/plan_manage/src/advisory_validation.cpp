@@ -248,6 +248,31 @@ void describe(const Input& in,const std::filesystem::path& path) {
         o<<'}';
       }
     }
+    o<<']';
+    const auto describe_sampling=[&](const std::shared_ptr<const iap::local_map::SourceSamplingEvidence>& evidence,
+                                      const std::string& reason) {
+      o<<"{\"available\":"<<(evidence?"true":"false");
+      o<<",\"reason\":"<<std::quoted(evidence?"":reason.empty()?
+          (in.recording_codec_version<12?"legacy_codec_no_sampling_evidence":"no_source_sampling_evidence"):reason);
+      if(evidence) {
+        o<<",\"model\":"<<std::quoted(evidence->model)
+         <<",\"preprocessing_identity\":"<<std::quoted(evidence->preprocessing_identity)
+         <<",\"pre_wire_return_count\":"<<evidence->returns_lidar.size()
+         <<",\"native_source_count\":"<<evidence->native_means_imu.size()
+         <<",\"T_lidar_imu\":";array(o,evidence->T_lidar_imu.matrix());
+      }
+      o<<'}';
+    };
+    o<<",\"current_sampling_evidence\":";describe_sampling(e.current_sampling_evidence,e.current_sampling_evidence_reason);
+    o<<",\"active_sampling_evidence\":[";
+    if(e.active_window_obstacle_sources) {
+      bool first=true;
+      for(const auto& source:*e.active_window_obstacle_sources) {
+        if(!first)o<<',';first=false;
+        o<<"{\"frame_id\":"<<source.metadata.frame_id<<",\"evidence\":";
+        describe_sampling(source.sampling_evidence,source.sampling_evidence_reason);o<<'}';
+      }
+    }
     o<<']'
      <<",\"observation_sources_available\":"<<(e.local_evidence_snapshot?"true":"false")
      <<",\"observation_sources\":[";
@@ -690,13 +715,16 @@ int main(int argc,char** argv) {
       const auto environment_path=path.parent_path()/"environment_centers.csv";
       const auto source_path=path.parent_path()/"source_centers.csv";
       const auto endpoint_path=path.parent_path()/"source_endpoints.csv";
+      const auto sampling_path=path.parent_path()/"source_sampling_points.csv";
       if(std::filesystem::exists(path) || std::filesystem::exists(raw_path) ||
          std::filesystem::exists(environment_path) || std::filesystem::exists(source_path) ||
-         std::filesystem::exists(endpoint_path))
+         std::filesystem::exists(endpoint_path) || std::filesystem::exists(sampling_path))
         throw std::runtime_error("metadata evidence exists");
       std::filesystem::create_directories(path.parent_path());describe(in,path);
       std::ofstream raw(raw_path),environment(environment_path),sources(source_path);
       std::ofstream endpoints(endpoint_path);
+      std::ofstream sampling(sampling_path);
+      sampling<<"role,frame_id,representation,source_index,source_x,source_y,source_z,map_x,map_y,map_z\n";
       endpoints<<"role,frame_id,point_index,lidar_x,lidar_y,lidar_z,map_x,map_y,map_z\n";
       raw<<"x,y,z\n";environment<<"x,y,z\n";sources<<"role,frame_id,x,y,z\n";
       const auto point_row=[&](std::ostream& stream,const Point& point) {
@@ -728,8 +756,27 @@ int main(int argc,char** argv) {
         if(e.observation_frame)endpoint_rows("current",*e.observation_frame,e.current_frame_hits_lidar);
         if(e.active_window_obstacle_sources)for(const auto& source:*e.active_window_obstacle_sources)
           endpoint_rows("active",source.metadata,source.hits_lidar);
+        const auto sampling_rows=[&](const char* role,const RegisteredLidarFrameMetadata& frame,
+                                    const std::shared_ptr<const iap::local_map::SourceSamplingEvidence>& evidence) {
+          if(!evidence)return;
+          const auto write=[&](const char* representation,const auto& points,const Eigen::Isometry3d& pose) {
+            for(std::size_t index=0;index<points.size();++index) {
+              const Point point=points[index].template cast<double>();
+              sampling<<role<<','<<frame.frame_id<<','<<representation<<','<<index<<',';
+              for(int axis=0;axis<3;++axis){csvNumber(sampling,point[axis]);sampling<<',';}
+              point_row(sampling,pose*point);
+            }
+          };
+          write("PRE_WIRE_LIDAR",evidence->returns_lidar,frame.T_map_lidar);
+          write("NATIVE_IMU",evidence->native_means_imu,frame.T_map_lidar*evidence->T_lidar_imu);
+        };
+        if(e.current_sampling_evidence && !e.observation_frame)
+          throw std::runtime_error("source sampling evidence has no source transform");
+        if(e.observation_frame)sampling_rows("current",*e.observation_frame,e.current_sampling_evidence);
+        if(e.active_window_obstacle_sources)for(const auto& source:*e.active_window_obstacle_sources)
+          sampling_rows("active",source.metadata,source.sampling_evidence);
       }
-      if(!raw || !environment || !sources || !endpoints)throw std::runtime_error("failed metadata geometry export");
+      if(!raw || !environment || !sources || !endpoints || !sampling)throw std::runtime_error("failed metadata geometry export");
       return 0;
     }
     // A fixture campaign's labels are reserved. Real replays use caller labels.

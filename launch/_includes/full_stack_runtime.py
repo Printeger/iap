@@ -214,7 +214,8 @@ def _setup(context):
         output_dir=str(run), contract="full_stack",
         integrity_profile=scenario["integrity_profile"], simulation_scenario=scenario,
         capture_gpu_match_evidence=context.launch_configurations.get("capture_advisory_residuals","false").lower()=="true",
-        capture_dense_lidar=context.launch_configurations.get("capture_dense_lidar","false").lower()=="true")
+        capture_dense_lidar=context.launch_configurations.get("capture_dense_lidar","false").lower()=="true",
+        capture_source_observations=context.launch_configurations.get("capture_source_observations","false").lower()=="true")
     register_config_snapshot(run, Path(runtime))
     remaps = [("odom_world", "/drone_0_visual_slam/odom"),
               ("grid_map/odom", "/drone_0_visual_slam/odom"),

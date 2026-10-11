@@ -444,6 +444,15 @@ RegisteredLidarWindow::currentHitsLidar() const {
   return has_current_frame_ ? current_frame_.hits_lidar : nullptr;
 }
 
+std::shared_ptr<const iap::local_map::SourceSamplingEvidence>
+RegisteredLidarWindow::currentSamplingEvidence() const {
+  return has_current_frame_ ? current_frame_.source.sampling_evidence : nullptr;
+}
+
+std::string RegisteredLidarWindow::currentSamplingEvidenceReason() const {
+  return has_current_frame_ ? current_frame_.source.sampling_evidence_reason : "no_current_source";
+}
+
 std::shared_ptr<const std::vector<Eigen::Vector3d>>
 RegisteredLidarWindow::environmentOccupiedVoxelCenters() const {
   return environment_occupied_voxel_centers_;
@@ -501,6 +510,8 @@ RegisteredLidarWindow::activeObstacleSources() const {
                                                            contribution.hits);
     source.occupied_voxel_centers = std::move(centers);
     source.hits_lidar = contribution.hits_lidar;
+    source.sampling_evidence = contribution.source.sampling_evidence;
+    source.sampling_evidence_reason = contribution.source.sampling_evidence_reason;
     sources->push_back(std::move(source));
   }
   std::sort(sources->begin(), sources->end(),

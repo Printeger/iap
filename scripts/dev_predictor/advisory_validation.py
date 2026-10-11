@@ -4,6 +4,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -17,8 +18,8 @@ from run_directory import (adopt_run_directory, resolve_run_directory, finalize_
                            write_subordinate_manifest, canonical_run_uses_sim_time)
 
 SCENARIO = "icra_dense_forest_four_fork_v2"
-CODEC = "iap_prediction_input_v11/boost_binary/zlib_length_u64le"
-READABLE_CODECS={CODEC,"iap_prediction_input_v10/boost_binary/zlib_length_u64le",
+CODEC = "iap_prediction_input_v12/boost_binary/zlib_length_u64le"
+READABLE_CODECS={CODEC,"iap_prediction_input_v11/boost_binary/zlib_length_u64le","iap_prediction_input_v10/boost_binary/zlib_length_u64le",
                 "iap_prediction_input_v9/boost_binary/zlib_length_u64le",
                  "iap_prediction_input_v8/boost_binary/zlib_length_u64le"}
 SOURCES = ["src/iap/planner/plan_manage/include/ego_planner/prediction_input.h",
@@ -273,6 +274,9 @@ def record(run, args):
                 odom.flush()
             subscriptions = [node.create_subscription(Odometry, topic, lambda msg, s=source: on_odom(msg, s), 100)
                              for source, topic in (("glio", args.glio_topic), ("truth", args.truth_topic))]
+            delay_end=time.monotonic()+args.initial_delay
+            while time.monotonic()<delay_end:
+                rclpy.spin_once(node,timeout_sec=min(.1,delay_end-time.monotonic()))
             for i in range(args.count):
                 request_id=f"{run.name}:{args.label}:{i}"
                 request_ids.append(request_id)
@@ -308,6 +312,7 @@ def record(run, args):
         node.destroy_node(); rclpy.try_shutdown()
         request_manifest=artifact(run,"export/advisory/validation/recordings/"+args.label+"_requests_manifest.json")
         json_write(request_manifest,{"identity":"LIVE_MEASUREMENT","run_id":run.name,"request_ids":request_ids,
+                   "sampling_plan":{"count":args.count,"interval_s":args.interval,"initial_delay_s":args.initial_delay},
                    "requests_csv":str(requests.relative_to(run)),"requests_csv_sha256":sha(requests)})
         manifest(run, "advisory_record_" + args.label, {**identity, "duration_s": time.monotonic()-start,
                  "artifacts_sha256":{str(p.relative_to(run)):sha(p) for p in (requests,odometry,request_manifest)}})
@@ -564,6 +569,7 @@ def main():
     parser.add_argument("--dataset", help="select one fixture campaign for reporting")
     parser.add_argument("--count", type=int, default=1)
     parser.add_argument("--interval", type=float, default=1.)
+    parser.add_argument("--initial-delay", type=float, default=0., help="Delay first frozen capture; keep odometry and all request outcomes")
     parser.add_argument("--timeout", type=float, default=10.)
     parser.add_argument("--service", default="/grid_map/prediction_input")
     parser.add_argument("--planning-input",action="store_true",help="read retained planning input instead of a new display capture")
@@ -571,7 +577,7 @@ def main():
     parser.add_argument("--glio-topic", default="/drone_0_visual_slam/odom")
     parser.add_argument("--truth-topic", default="/sim/drone_0/truth_odom")
     args = parser.parse_args(); safe_label(args.label)
-    if args.count < 1 or args.interval <= 0 or args.timeout <= 0 or args.planning_attempt_id < 0:
+    if args.count < 1 or args.interval <= 0 or args.timeout <= 0 or args.planning_attempt_id < 0 or not math.isfinite(args.initial_delay) or args.initial_delay < 0:
         parser.error("positive recording count/interval/timeout required")
     inherited = os.environ.get("IAP_RUN_DIR")
     if args.mode == "record" and not inherited:

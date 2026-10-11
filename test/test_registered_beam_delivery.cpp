@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <unistd.h>
 
 extern "C" glim::ExtensionModule* create_extension_module();
@@ -28,13 +29,15 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   std::filesystem::create_directories(root / "run/runtime/ros");
   setenv("IAP_RUN_DIR", (root / "run").c_str(), 1);
   setenv("ROS_LOG_DIR", (root / "run/runtime/ros").c_str(), 1);
-  std::ofstream(root / "config/config.json") << R"({"global":{"config_path":"","config_ros":"config_ros.json"}})";
+  std::ofstream(root / "config/config.json") << R"({"global":{"config_path":"","config_ros":"config_ros.json","config_preprocess":"config_preprocess.json","config_sensors":"config_sensors.json"}})";
+  std::ofstream(root / "config/config_preprocess.json") << R"({"preprocess":{}})";
+  std::ofstream(root / "config/config_sensors.json") << R"({"sensors":{}})";
   std::ofstream(root / "config/config_ros.json") << R"({"glim_ros":{"planner_local_map":{
     "current_topic":"/beam_test/current","delta_topic":"/beam_test/delta",
     "beam_evidence_topic":"/beam_test/evidence","integrity_topic":"/beam_test/integrity",
     "recovery_service":"/beam_test/recovery","frame_contract_id":"beam-test",
     "planning_lattice_resolution_m":0.1,"planning_lattice_origin_m":[0,0,0],
-    "planning_lattice_extent_m":[10,10,10],"window_rate_hz":20}}})";
+    "planning_lattice_extent_m":[10,10,10],"window_rate_hz":20,"capture_source_observations":true}}})";
   glim::GlobalConfig::instance((root / "config").string(), true);
   glim::RunLogManager::initialize("beam_delivery_test", (root / "config").string());
   rclcpp::init(0, nullptr);
@@ -76,8 +79,8 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   const auto scan = [](int id, double stamp) {
     auto points = std::make_shared<glim::RawPoints>();
     points->stamp = stamp;
-    points->points = {Eigen::Vector4d(3, 0, 0, 1)};
-    points->times = {0};
+    points->points = {Eigen::Vector4d(3.01, 0, 0, 1),Eigen::Vector4d(3.02, 0, 0, 1)};
+    points->times = {0,0};
     glim::PreprocessCallbacks::on_raw_points_received(points);
     auto raw = std::make_shared<glim::PreprocessedFrame>();
     raw->stamp = raw->scan_end_time = stamp;
@@ -85,6 +88,9 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
     frame->id = id;
     frame->stamp = stamp;
     frame->raw_frame = raw;
+    frame->frame_id=glim::FrameID::IMU;
+    frame->frame=std::make_shared<gtsam_points::PointCloudCPU>(
+        std::vector<Eigen::Vector4d>{Eigen::Vector4d(3.1234567,0,0,1),Eigen::Vector4d(3.2345678,0,0,1)});
     frame->T_world_lidar = Eigen::Isometry3d::Identity();
     frame->T_lidar_imu = Eigen::Isometry3d::Identity();
     glim::OdometryEstimationCallbacks::on_update_new_frame(frame);
@@ -139,6 +145,14 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   ASSERT_TRUE(until([&] {
     return current.back().beam_evidence_complete && deltas.back().generation == 2U;
   }));
+  ASSERT_TRUE(current.back().sampling_evidence_available);
+  EXPECT_EQ(current.back().sampling_returns_lidar_xyz.size(),6u);
+  EXPECT_DOUBLE_EQ(current.back().sampling_returns_lidar_xyz[0],3.01);
+  EXPECT_DOUBLE_EQ(current.back().sampling_returns_lidar_xyz[3],3.02);
+  EXPECT_EQ(current.back().deskewed_hits_lidar.width,1u); // Both returns share a wire voxel.
+  ASSERT_EQ(current.back().sampling_native_means_imu_xyz.size(),6u);
+  EXPECT_FLOAT_EQ(current.back().sampling_native_means_imu_xyz[0],static_cast<float>(3.1234567));
+  EXPECT_FLOAT_EQ(current.back().sampling_native_means_imu_xyz[3],static_cast<float>(3.2345678));
   EXPECT_EQ(current.back().frame_id, 89);
   EXPECT_EQ(current.back().beam_binding_reason, "matched_exact_scan");
   EXPECT_GE(current.back().beam_received_count, 3u);
@@ -148,11 +162,12 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   EXPECT_EQ(deltas.back().removed_frame_ids, (std::vector<int64_t>{89}));
   ASSERT_EQ(deltas.back().added.size(), 1U);
   EXPECT_TRUE(deltas.back().added.front().beam_evidence_complete);
+  EXPECT_TRUE(deltas.back().added.front().sampling_evidence_available);
   EXPECT_TRUE(deltas.back().added.front().source_health_valid);
   EXPECT_DOUBLE_EQ(deltas.back().added.front().scan_end_stamp_s, captured_scan);
   auto frame90 = scan(90, (captured_scan+.1));
   glim::OdometryEstimationCallbacks::on_update_keyframes(
-      std::vector<glim::EstimationFrame::ConstPtr>{frame89, frame90});
+      std::vector<glim::EstimationFrame::ConstPtr>{frame89->clone_wo_points(), frame90});
   ASSERT_TRUE(until([&] { return current.back().frame_id == 90 && deltas.back().generation == 3U; }));
   scan(91, (captured_scan+.2));
   ASSERT_TRUE(until([&] { return current.back().frame_id == 91; }));
@@ -164,6 +179,7 @@ TEST(RegisteredBeamDelivery, LateEvidenceRefreshesCurrentAndActiveWithoutRollbac
   ASSERT_EQ(deltas.back().added.size(), 1U);
   EXPECT_EQ(deltas.back().added.front().frame_id, 90);
   EXPECT_TRUE(deltas.back().added.front().beam_evidence_complete);
+  EXPECT_TRUE(deltas.back().added.front().sampling_evidence_available);
   executor.remove_node(node);
   extension.reset();
 }

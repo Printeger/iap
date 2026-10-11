@@ -444,6 +444,8 @@ struct FrozenOccupancyEpoch
   // Null means unavailable; empty means an available empty source cloud.
   // No collision, predictor, or execution consumer uses these diagnostics.
   std::shared_ptr<const std::vector<Eigen::Vector3d>> current_frame_hits_lidar;
+  std::shared_ptr<const iap::local_map::SourceSamplingEvidence> current_sampling_evidence;
+  std::string current_sampling_evidence_reason;
   std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
       active_window_obstacle_sources;
   // Environment hits are independent of the flight lattice/geofence. They

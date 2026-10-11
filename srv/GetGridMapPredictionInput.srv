@@ -11,5 +11,5 @@ string geometry_id
 uint64 generation
 uint64 planning_attempt_id
 uint64 risk_version
-# iap_prediction_input_v8: zlib-compressed field-wise binary archive.
+# iap_prediction_input_v12: zlib-compressed field-wise binary archive.
 uint8[] payload

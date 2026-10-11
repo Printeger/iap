@@ -7,6 +7,7 @@
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <gtsam_points/types/point_cloud_gpu.hpp>
 #include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
+#include <iap/local_map/source_sampling_evidence.hpp>
 #include <Eigen/Cholesky>
 #include <set>
 #include <dlfcn.h>
@@ -59,6 +60,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     Eigen::Matrix4d c=Eigen::Matrix4d::Zero();c.diagonal()<<.02,.03,.01,0.;covariances.push_back(c);
   }
   gtsam_points::PointCloudCPU cpu(points);cpu.add_normals(normals);cpu.add_covs(covariances);
+  const auto native_means=iap::local_map::copyNativeMatchingMeans(cpu.points,cpu.size());
   const auto verify_sources=[&](const iap::GpuMatchCapture& capture) {
     ASSERT_TRUE(capture.source_geometry_available);
     ASSERT_EQ(capture.source_samples.size(),static_cast<std::size_t>(capture.source_slots));
@@ -67,7 +69,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
       const int index=slot*capture.sampling_stride;
       ASSERT_EQ(record.source_index,index);ASSERT_LT(index,source_count);
       for(int row=0;row<3;++row) {
-        EXPECT_FLOAT_EQ(record.mean_m[row],static_cast<float>(points[index][row]));
+        EXPECT_FLOAT_EQ(record.mean_m[row],native_means[index][row]);
         for(int col=0;col<3;++col)
           EXPECT_FLOAT_EQ(record.covariance_m2_row_major[3*row+col],static_cast<float>(covariances[index](row,col)));
       }

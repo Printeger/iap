@@ -3053,6 +3053,52 @@ TEST(EgoBaseline, ReadOnlyExportCapturesProducerEndpointsBeforeVoxelQuantization
   EXPECT_EQ(*restored.occupancy->current_frame_hits_lidar,*epoch->current_frame_hits_lidar);
 }
 
+TEST(EgoBaseline, ReadOnlyExportRetainsPreWireMeasureAndNativeMatchingMeans) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  GridMapTestAccess::input(*map,{Eigen::Vector3d(1,0,1)},10,Eigen::Vector3d(0,0,1));
+  auto epoch=std::make_shared<FrozenOccupancyEpoch>(*map->captureFrozenOccupancyEpoch());
+  auto observation=std::make_shared<iap::local_map::SourceSamplingEvidence>();
+  observation->preprocessing_identity="actual-source:random-grid:0.5m:target10000";
+  observation->T_lidar_imu.translation()=Eigen::Vector3d(.01,.02,.03);
+  observation->returns_lidar={Eigen::Vector3d(1.021,.011,.04),Eigen::Vector3d(1.029,.019,.041)};
+  observation->native_means_imu={Eigen::Vector3f(1.01f,.003f,.1f),Eigen::Vector3f(1.08f,.004f,.2f)};
+  epoch->current_sampling_evidence=observation;
+  auto sources=std::make_shared<std::vector<RegisteredLidarObstacleSource>>();
+  RegisteredLidarObstacleSource source;source.metadata.frame_id=7;source.sampling_evidence=observation;
+  sources->push_back(source);epoch->active_window_obstacle_sources=sources;
+  ego_planner::PredictionInput input;input.occupancy=epoch;
+  const auto restored=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(input));
+  ASSERT_TRUE(restored.occupancy->current_sampling_evidence);
+  const auto check=[&](const auto& captured) {
+    ASSERT_TRUE(captured);EXPECT_EQ(captured->model,observation->model);
+    EXPECT_EQ(captured->preprocessing_identity,observation->preprocessing_identity);
+    EXPECT_TRUE(captured->T_lidar_imu.matrix().isApprox(observation->T_lidar_imu.matrix(),0));
+    EXPECT_EQ(captured->returns_lidar,observation->returns_lidar);
+    EXPECT_EQ(captured->native_means_imu,observation->native_means_imu);
+  };
+  check(restored.occupancy->current_sampling_evidence);
+  ASSERT_EQ(restored.occupancy->active_window_obstacle_sources->size(),1u);
+  check(restored.occupancy->active_window_obstacle_sources->front().sampling_evidence);
+  // The additional observation measure cannot change the legacy predictor or
+  // physical occupancy while this diagnostic interface is being qualified.
+  EXPECT_EQ(*restored.occupancy->raw_occupied_voxel_centers,*epoch->raw_occupied_voxel_centers);
+  auto missing=std::make_shared<FrozenOccupancyEpoch>(*epoch);missing->current_sampling_evidence.reset();missing->active_window_obstacle_sources.reset();
+  input.occupancy=missing;
+  auto original_input=input;original_input.occupancy=epoch;
+  EXPECT_EQ(ego_planner::predictionInputIdentity(original_input),ego_planner::predictionInputIdentity(input));
+  EXPECT_FALSE(ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(input)).occupancy->current_sampling_evidence);
+  auto invalid=std::make_shared<iap::local_map::SourceSamplingEvidence>(*observation);
+  invalid->native_means_imu.front().x()=std::numeric_limits<float>::infinity();
+  missing->current_sampling_evidence=invalid;
+  EXPECT_THROW(ego_planner::encodePredictionInput(input),std::runtime_error);
+  invalid->native_means_imu=observation->native_means_imu;
+  invalid->T_lidar_imu.linear()(0,0)=2.;
+  EXPECT_THROW(ego_planner::encodePredictionInput(input),std::runtime_error);
+  invalid->T_lidar_imu=observation->T_lidar_imu;
+  invalid->returns_lidar.resize(65537,Eigen::Vector3d::Zero());
+  EXPECT_THROW(ego_planner::encodePredictionInput(input),std::runtime_error);
+}
+
 TEST(EgoBaseline, ReadOnlyExportRetainsCompleteObstacleSourceProvenance) {
   auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
   GridMapTestAccess::input(*map,{Eigen::Vector3d(1,0,1)},10,Eigen::Vector3d(0,0,1));
@@ -3111,6 +3157,11 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   fixture_sensor.horizontal_fov_rad=2*std::acos(-1.);fixture_sensor.vertical_min_rad=-std::acos(-1.)/2;
   fixture_sensor.vertical_max_rad=std::acos(-1.)/2;fixture_sensor.min_range_m=.1;fixture_sensor.max_range_m=10.;
   sensor_epoch->observation_frame=fixture_sensor;input.occupancy=sensor_epoch;
+  auto sampling=std::make_shared<iap::local_map::SourceSamplingEvidence>();
+  sampling->preprocessing_identity="diagnostic-only";
+  sampling->returns_lidar={Eigen::Vector3d(1,2,3)};
+  sampling->native_means_imu={Eigen::Vector3f(9,8,7)};
+  sensor_epoch->current_sampling_evidence=sampling;
   input.params.lidar.enable_legacy_observability=false;
   input.integrity.valid=input.integrity.has_pose=input.integrity.current.valid=true;
   input.integrity.stamp=10.1; input.integrity.pose_stamp=input.integrity.current.stamp=10;
@@ -3124,6 +3175,11 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   EXPECT_EQ(input.occupancy->cells->flags,restored.occupancy->cells->flags);
   EXPECT_EQ(input.occupancy->geometry_id,restored.occupancy->geometry_id);
   EXPECT_DOUBLE_EQ(input.occupancy->resolution_inv,restored.occupancy->resolution_inv);
+  auto without_sampling=input;
+  auto without_epoch=std::make_shared<FrozenOccupancyEpoch>(*input.occupancy);
+  without_epoch->current_sampling_evidence.reset();without_sampling.occupancy=without_epoch;
+  EXPECT_EQ(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(without_sampling));
+  const auto absent=ego_planner::makeRiskPrediction(without_sampling);ASSERT_TRUE(absent.predict);
   auto calls=std::make_shared<std::atomic<uint64_t>>(0);
   auto original=ego_planner::makeRiskPrediction(input,calls);
   auto replay=ego_planner::makeRiskPrediction(restored);
@@ -3132,6 +3188,8 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   for(int i=0;i<20;++i) {
     const Eigen::Vector3d p(-.4+.04*i,.1,1.1);
     const auto a=original.predict(p), b=replay.predict(p);
+    const auto omitted=absent.predict(p);EXPECT_EQ(a.status,omitted.status);
+    if(a.status==GridRiskStatus::VALID){EXPECT_DOUBLE_EQ(a.hpl,omitted.hpl);EXPECT_DOUBLE_EQ(a.vpl,omitted.vpl);}
     EXPECT_EQ(a.status,b.status);
     if(a.status==GridRiskStatus::VALID) {++valid; EXPECT_DOUBLE_EQ(a.hpl,b.hpl); EXPECT_DOUBLE_EQ(a.vpl,b.vpl);}
   }
@@ -3146,7 +3204,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   auto calibrated=input; calibrated.params.gnss.measurement_noise_scale=2.3;
   calibrated.params.lidar.fim_params.fim_support_voxel_m=.4;
   const auto roundtrip=ego_planner::decodePredictionInput(ego_planner::encodePredictionInput(calibrated));
-  EXPECT_EQ(roundtrip.recording_codec_version,11u);
+  EXPECT_EQ(roundtrip.recording_codec_version,12u);
   EXPECT_DOUBLE_EQ(roundtrip.params.gnss.measurement_noise_scale,2.3);
   EXPECT_DOUBLE_EQ(roundtrip.params.lidar.fim_params.fim_support_voxel_m,.4);
   EXPECT_NE(ego_planner::predictionInputIdentity(input),ego_planner::predictionInputIdentity(calibrated));
@@ -3172,7 +3230,7 @@ TEST(EgoBaseline, ReadOnlyExportUsesSamePredictorWithoutMutatingPlannerCache) {
   std::string fault_rejection;
   EXPECT_FALSE(ego_planner::makeRiskPrediction(fault_roundtrip,{},&fault_rejection).predict);
   EXPECT_EQ(fault_rejection,"unsupported_gnss_fault_model");
-  EXPECT_EQ(input.recording_codec_version,11u);
+  EXPECT_EQ(input.recording_codec_version,12u);
   auto state_input=input;
   auto& state=state_input.integrity.postopt_evidence;
   state.update_sequence=51;state.frame_id=17;state.state_stamp=9.95;state.gnss_stamp=10.;

@@ -313,10 +313,10 @@ template<class Archive> void fields(Archive& ar, FrozenOccupancyEpoch& value) {
   ar & value.current_vehicle_clearance_radius_m;
 }
 template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
-  std::string schema="iap_prediction_input_v11";
+  std::string schema="iap_prediction_input_v12";
   ar & schema;
   unsigned wire_version=0;
-  for(unsigned version=1;version<=11;++version) {
+  for(unsigned version=1;version<=12;++version) {
     if(schema=="iap_prediction_input_v"+std::to_string(version)) {
       wire_version=version;break;
     }
@@ -407,6 +407,35 @@ template<class Archive> void transfer(Archive& ar, PredictionInput& input) {
       };
       endpoints(epoch->current_frame_hits_lidar);
       for(auto& source:sources)endpoints(source.hits_lidar);
+    }
+    if(wire_version>=12) {
+      const auto sampling=[&](std::shared_ptr<const iap::local_map::SourceSamplingEvidence>& value,
+                              std::string& reason) {
+        bool available=bool(value);ar & available & reason;
+        if(!available)return;
+        iap::local_map::SourceSamplingEvidence evidence;
+        if constexpr(Archive::is_saving::value) {
+          if(!iap::local_map::validSourceSamplingEvidence(*value))
+            throw std::runtime_error("invalid source sampling evidence");
+          evidence=*value;
+        }
+        ar & evidence.model & evidence.preprocessing_identity;
+        Eigen::Matrix4d extrinsic=evidence.T_lidar_imu.matrix();ar & extrinsic;
+        if constexpr(Archive::is_loading::value)evidence.T_lidar_imu.matrix()=extrinsic;
+        const auto points=[&](auto& cloud,const std::size_t limit) {
+          std::uint32_t count=cloud.size();ar & count;
+          if(count>limit)throw std::runtime_error("source sampling evidence count exceeds bound");
+          if constexpr(Archive::is_loading::value)cloud.resize(count);
+          for(auto& point:cloud)ar & point;
+        };
+        points(evidence.returns_lidar,65536);points(evidence.native_means_imu,16384);
+        if(!iap::local_map::validSourceSamplingEvidence(evidence))
+          throw std::runtime_error("invalid source sampling evidence");
+        if constexpr(Archive::is_loading::value)
+          value=std::make_shared<const iap::local_map::SourceSamplingEvidence>(std::move(evidence));
+      };
+      sampling(epoch->current_sampling_evidence,epoch->current_sampling_evidence_reason);
+      for(auto& source:sources)sampling(source.sampling_evidence,source.sampling_evidence_reason);
     }
     if constexpr(Archive::is_loading::value) {
       if(sources.size()>10000)throw std::runtime_error("obstacle provenance exceeds source bound");

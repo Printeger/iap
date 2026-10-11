@@ -166,6 +166,7 @@ def _setup(context):
         "advisory_guidance_enabled": context.launch_configurations.get("advisory_guidance", "false").lower()=="true",
         "capture_advisory_residuals": context.launch_configurations.get("capture_advisory_residuals", "false").lower()=="true",
         "capture_dense_lidar": context.launch_configurations.get("capture_dense_lidar", "false").lower()=="true",
+        "capture_source_observations": context.launch_configurations.get("capture_source_observations", "false").lower()=="true",
         "advisory_posterior_prior_enabled": context.launch_configurations.get("advisory_posterior_prior", "false").lower() == "true",
         "test_validator_enabled": False,
         "rviz_profile": (
@@ -209,6 +210,7 @@ def _setup(context):
                 "advisory_guidance": context.launch_configurations.get("advisory_guidance", "false"),
                 "capture_advisory_residuals": context.launch_configurations.get("capture_advisory_residuals", "false"),
                 "capture_dense_lidar": context.launch_configurations.get("capture_dense_lidar", "false"),
+                "capture_source_observations": context.launch_configurations.get("capture_source_observations", "false"),
                 "advisory_posterior_prior": context.launch_configurations.get("advisory_posterior_prior", "false"),
                 "start_rviz": LaunchConfiguration("start_rviz").perform(context),
                 "start_grid_map_visualizer": LaunchConfiguration("start_grid_map_visualizer").perform(context),
@@ -271,6 +273,8 @@ def generate_launch_description():
                                   description="Opt-in actual GPU postopt quality residuals; same original quality cadence"),
             DeclareLaunchArgument("capture_dense_lidar", default_value="false", choices=["true","false"],
                                   description="Opt-in latest fixed target level-0 source slots, max 16384; requires residual capture"),
+            DeclareLaunchArgument("capture_source_observations", default_value="false", choices=["true","false"],
+                                  description="Retain pre-wire returns and native means only in selected frozen inputs"),
             DeclareLaunchArgument("run_duration_s", default_value="0.0"),
             OpaqueFunction(function=_setup),
         ]

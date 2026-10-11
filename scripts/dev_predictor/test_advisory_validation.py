@@ -176,7 +176,7 @@ class AdvisoryValidationTest(unittest.TestCase):
                     source={"git_commit": identity["revision"], "git_worktree_clean": True})
         primary.write_text(json.dumps(info))
         args = SimpleNamespace(label="service_test", service=service_name, producer_binary=Path(ARGS.binary),
-                               count=2, interval=.05, timeout=3., glio_topic="/fixture_glio", truth_topic="/fixture_truth")
+                               count=2, interval=.05, initial_delay=.05, timeout=3., glio_topic="/fixture_glio", truth_topic="/fixture_truth")
         try:
             with patch.object(validation, "source_identity", return_value=identity), patch.dict(os.environ, {"ROS_LOG_DIR": str(self.run_dir / "runtime/ros")}):
                 args.planning_input=False; args.planning_attempt_id=0
@@ -188,6 +188,7 @@ class AdvisoryValidationTest(unittest.TestCase):
             self.assertEqual((self.run_dir / table[1]["payload"]).read_bytes(), payload)
             recording=json.loads((self.run_dir/"export/advisory/validation/recordings/service_test_requests_manifest.json").read_text())
             self.assertEqual(recording["request_ids"],[r["request_id"] for r in table])
+            self.assertEqual(recording["sampling_plan"],{"count":2,"interval_s":.05,"initial_delay_s":.05})
             compared=compare(self.run_dir)
             self.assertEqual(compared["requested"],2)
             failures=validation.rows(self.run_dir/"export/advisory/validation/error_requests.csv")

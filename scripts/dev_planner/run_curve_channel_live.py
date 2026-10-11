@@ -77,6 +77,9 @@ def main():
     parser.add_argument('--stop-after-task',action='store_true',help='stop owned jobs when the original FSM records task_reached')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     parser.add_argument('--capture-dense-lidar',action='store_true',help='Capture latest fixed level-0 target source slots, max 16384')
+    parser.add_argument('--capture-source-observations',action='store_true',help='Retain actual source sampling geometry in selected inputs; no GPU trace required')
+    parser.add_argument('--record-count',type=int,default=None,help='Number of frozen inputs; default retains original 10s cadence')
+    parser.add_argument('--record-initial-delay',type=float,default=0.,help='Predeclared first snapshot delay, seconds')
     parser.add_argument('--gnss-seed', type=int, default=None, help='Independent simulation observation seed; all noise/planner settings retained')
     parser.add_argument('--execution-evidence-ids', default='', help='Opt-in comma-separated owning IDs; retain existing immutable final/refusal corridor evidence')
     parser.add_argument('--protection-margin-replan',action='store_true',help='Experimental early physical-reserve scheduling; keeps original hard checks and total budget')
@@ -86,6 +89,10 @@ def main():
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
+    if args.record_count is not None and args.record_count < 1:
+        raise ValueError('record count must be positive')
+    if not math.isfinite(args.record_initial_delay) or not 0 <= args.record_initial_delay < args.duration-5:
+        raise ValueError('record delay must leave time for the source request')
     safe_label(args.label)
     from full_stack_runtime import gnss_observation_seed
     gnss_observation_seed(args.gnss_seed)
@@ -158,6 +165,8 @@ def main():
             command.append('capture_advisory_residuals:=true')
         if args.capture_dense_lidar:
             command.append('capture_dense_lidar:=true')
+        if args.capture_source_observations:
+            command.append('capture_source_observations:=true')
         if args.gnss_seed is not None:
             command.append('gnss_observation_seed:=' + str(args.gnss_seed))
         if args.execution_evidence_ids:
@@ -181,7 +190,8 @@ def main():
         spawn('launch', command)
         launch_started=time.monotonic()
         spawn('record', [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_validation.py'),
-                         'record', '--label', args.label, '--count', str(math.ceil(args.duration / 10)),
+                         'record', '--label', args.label, '--count', str(args.record_count or math.ceil(args.duration / 10)),
+                         '--initial-delay',str(args.record_initial_delay),
                          '--interval', '10', '--timeout', '5'])
         if args.capture_fork_entries:
             spawn('forks', [sys.executable, str(REPO / 'scripts/dev_predictor/record_fork_inputs.py'),

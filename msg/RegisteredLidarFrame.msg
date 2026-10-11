@@ -6,6 +6,17 @@ geometry_msgs/Pose t_map_lidar
 sensor_msgs/PointCloud2 deskewed_hits_lidar
 string frame_contract_id
 
+# Opt-in immutable observation measure for residual-mean diagnostics. The
+# pre-wire return order and actual float32 native source order are preserved.
+# Neither array supplies collision, source-health, or statistical-noise authority.
+bool sampling_evidence_available
+string sampling_evidence_model
+string sampling_evidence_reason
+string sampling_preprocessing_identity
+geometry_msgs/Pose sampling_t_lidar_imu
+float64[] sampling_returns_lidar_xyz
+float32[] sampling_native_means_imu_xyz
+
 # Explicit beam outcomes associated with this registered scan. The arrays are
 # empty and complete=false when no synchronized simulator evidence exists.
 string sensor_model_id

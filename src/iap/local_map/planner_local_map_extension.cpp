@@ -6,6 +6,7 @@
 #include <iap/local_map/active_window_delta_policy.hpp>
 #include <iap/local_map/beam_evidence_binding.hpp>
 #include <iap/local_map/registered_hit_wire_filter.hpp>
+#include <iap/local_map/source_sampling_evidence.hpp>
 #include <iap/msg/active_lidar_window_delta.hpp>
 #include <iap/msg/integrity_report.hpp>
 #include <iap/msg/lidar_beam_evidence.hpp>
@@ -13,6 +14,7 @@
 #include <iap/odometry/callbacks.hpp>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/preprocess/callbacks.hpp>
+#include <iap/preprocess/cloud_preprocessor.hpp>
 #include <iap/srv/get_active_lidar_window.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/extension_module_ros2.hpp>
@@ -22,6 +24,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <nlohmann/json.hpp>
 
 #include <Eigen/Geometry>
 
@@ -82,6 +85,8 @@ struct FrameSnapshot {
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   Eigen::Isometry3d T_lidar_imu = Eigen::Isometry3d::Identity();
   glim::RawPoints::ConstPtr raw_points;
+  std::shared_ptr<const std::vector<Eigen::Vector3f>> native_means_imu;
+  std::string native_sampling_reason;
   std::shared_ptr<const Eigen::Matrix<double, 8, Eigen::Dynamic>>
       imu_rate_trajectory;
 };
@@ -141,6 +146,30 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
         0.1, 20.0);
     max_active_keyframes_ = std::max<std::size_t>(1, config.param_nested<int>(
         {"glim_ros", "planner_local_map"}, "max_active_keyframes", 15));
+    capture_source_observations_ = config.param_nested<bool>(
+        {"glim_ros", "planner_local_map"}, "capture_source_observations", false);
+    if(capture_source_observations_) {
+      const glim::CloudPreprocessorParams p;
+      nlohmann::json identity={{"model","iap_original_preprocessor_params_v1"},
+        {"distance_near_thresh",p.distance_near_thresh},{"distance_far_thresh",p.distance_far_thresh},
+        {"global_shutter",p.global_shutter},{"use_random_grid_downsampling",p.use_random_grid_downsampling},
+        {"downsample_resolution",p.downsample_resolution},{"downsample_target",p.downsample_target},
+        {"downsample_rate",p.downsample_rate},{"enable_outlier_removal",p.enable_outlier_removal},
+        {"outlier_removal_k",p.outlier_removal_k},{"outlier_std_mul_factor",p.outlier_std_mul_factor},
+        {"enable_cropbox_filter",p.enable_cropbox_filter},{"crop_bbox_frame",p.crop_bbox_frame},
+        {"crop_bbox_min",{p.crop_bbox_min.x(),p.crop_bbox_min.y(),p.crop_bbox_min.z()}},
+        {"crop_bbox_max",{p.crop_bbox_max.x(),p.crop_bbox_max.y(),p.crop_bbox_max.z()}},
+        {"k_correspondences",p.k_correspondences},{"num_threads",p.num_threads},
+        {"native_coordinate_frame","IMU"},{"native_mean_conversion","PointCloudGPU float32"},
+        {"returns_operator","original planner adapter deskew output before wire filter"},
+        {"random_generator_state_recorded",false}};
+      if(p.enable_cropbox_filter) {
+        auto transform=nlohmann::json::array();
+        for(int r=0;r<4;++r)for(int c=0;c<4;++c)transform.push_back(p.T_imu_lidar.matrix()(r,c));
+        identity["crop_T_imu_lidar_row_major"]=transform;
+      }
+      source_preprocessing_identity_=identity.dump();
+    }
     planning_lattice_.resolution_m = config.param_nested<double>(
         {"glim_ros", "planner_local_map"},
         "planning_lattice_resolution_m", -1.0);
@@ -399,6 +428,16 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     snapshot.T_map_lidar = T_planner_glim_ * frame->T_world_lidar;
     snapshot.T_lidar_imu = frame->T_lidar_imu;
     snapshot.raw_points = raw_points;
+    if(capture_source_observations_) {
+      snapshot.native_sampling_reason="native_source_not_in_IMU_frame";
+      if(frame->frame_id==glim::FrameID::IMU && frame->frame) {
+        try {
+          snapshot.native_means_imu=std::make_shared<const std::vector<Eigen::Vector3f>>(
+              iap::local_map::copyNativeMatchingMeans(frame->frame->points,frame->frame->size()));
+          snapshot.native_sampling_reason.clear();
+        } catch(const std::exception& e) { snapshot.native_sampling_reason=e.what(); }
+      }
+    }
     snapshot.imu_rate_trajectory = std::make_shared<
         const Eigen::Matrix<double, 8, Eigen::Dynamic>>(
         frame->imu_rate_trajectory);
@@ -681,6 +720,33 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     }
 
     const auto deskewed = deskew(frame);
+    if(capture_source_observations_) {
+      // A retained same-frame immutable cloud survives clone_wo_points pose
+      // updates. It may never be borrowed from another frame or scan stamp.
+      const bool retained_sampling=retained && retained->sampling_evidence_available &&
+          retained->frame_id==frame.id && retained->header.stamp==message.header.stamp;
+      if(frame.native_means_imu && !deskewed.empty() && deskewed.size()<=65536) {
+        message.sampling_evidence_available=true;
+        message.sampling_evidence_model="registered_pre_wire_returns_and_native_source_v1";
+        message.sampling_evidence_reason.clear();
+        message.sampling_preprocessing_identity=source_preprocessing_identity_;
+        message.sampling_returns_lidar_xyz.clear();
+        message.sampling_returns_lidar_xyz.reserve(3*deskewed.size());
+        for(const auto& point:deskewed)for(int axis=0;axis<3;++axis)
+          message.sampling_returns_lidar_xyz.push_back(point[axis]);
+        message.sampling_native_means_imu_xyz.clear();
+        message.sampling_native_means_imu_xyz.reserve(3*frame.native_means_imu->size());
+        for(const auto& point:*frame.native_means_imu)for(int axis=0;axis<3;++axis)
+          message.sampling_native_means_imu_xyz.push_back(point[axis]);
+      } else if(!retained_sampling) {
+        message.sampling_evidence_available=false;
+        message.sampling_evidence_model.clear();message.sampling_preprocessing_identity.clear();
+        message.sampling_returns_lidar_xyz.clear();message.sampling_native_means_imu_xyz.clear();
+        message.sampling_evidence_reason=frame.native_sampling_reason.empty()
+            ? "pre_wire_return_geometry_missing_or_exceeds_bound" : frame.native_sampling_reason;
+      }
+      message.sampling_t_lidar_imu=toMessagePose(frame.T_lidar_imu);
+    } else { message.sampling_evidence_reason="capture_disabled"; }
     const auto points = filterRegisteredHitsForWire(
         deskewed, frame.T_map_lidar, planning_lattice_);
     if (deskewed_points) {
@@ -1042,6 +1108,8 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   std::string beam_evidence_topic_;
   std::string current_hits_map_topic_;
   bool publish_current_hits_map_ = false;
+  bool capture_source_observations_ = false;
+  std::string source_preprocessing_identity_;
   std::string planner_frame_id_;
   std::string lidar_reference_frame_id_;
   std::string frame_contract_id_;

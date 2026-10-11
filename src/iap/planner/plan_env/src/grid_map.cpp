@@ -202,6 +202,32 @@ bool registeredFrameFromMessage(
   {
     return false;
   }
+  // Extra observation measure is diagnostic only. Invalid/missing extra data
+  // cannot change admission of the original registered physical frame.
+  frame->sampling_evidence.reset();
+  frame->sampling_evidence_reason=message.sampling_evidence_reason;
+  if(message.sampling_evidence_available) {
+    const auto& raw=message.sampling_returns_lidar_xyz;
+    const auto& native=message.sampling_native_means_imu_xyz;
+    frame->sampling_evidence_reason="invalid_source_sampling_evidence";
+    if(raw.size()%3==0 && native.size()%3==0 && raw.size()<=3*65536 && native.size()<=3*16384) {
+      auto evidence=std::make_shared<iap::local_map::SourceSamplingEvidence>();
+      evidence->model=message.sampling_evidence_model;
+      evidence->preprocessing_identity=message.sampling_preprocessing_identity;
+      evidence->T_lidar_imu=poseFromMessage(message.sampling_t_lidar_imu);
+      evidence->returns_lidar.reserve(raw.size()/3);
+      evidence->native_means_imu.reserve(native.size()/3);
+      for(std::size_t i=0;i<raw.size();i+=3)evidence->returns_lidar.emplace_back(raw[i],raw[i+1],raw[i+2]);
+      for(std::size_t i=0;i<native.size();i+=3)evidence->native_means_imu.emplace_back(native[i],native[i+1],native[i+2]);
+      if(iap::local_map::validSourceSamplingEvidence(*evidence)) {
+        frame->sampling_evidence=std::move(evidence);frame->sampling_evidence_reason.clear();
+      }
+    }
+  } else if(!message.sampling_returns_lidar_xyz.empty() || !message.sampling_native_means_imu_xyz.empty()) {
+    frame->sampling_evidence_reason="unavailable_source_sampling_payload";
+  } else if(frame->sampling_evidence_reason.empty()) {
+    frame->sampling_evidence_reason="producer_no_sampling_evidence";
+  }
   return frame->frame_id >= 0 &&
       frame->T_map_lidar.matrix().allFinite();
 }
@@ -2711,6 +2737,8 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits_lidar;
+    std::shared_ptr<const iap::local_map::SourceSamplingEvidence> current_sampling_evidence;
+    std::string current_sampling_evidence_reason;
     std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
         active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_frame;
@@ -2755,6 +2783,8 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     state->current_hits =
         registered_lidar_window_->currentOccupiedVoxelCenters();
     state->current_hits_lidar = registered_lidar_window_->currentHitsLidar();
+    state->current_sampling_evidence = registered_lidar_window_->currentSamplingEvidence();
+    state->current_sampling_evidence_reason = registered_lidar_window_->currentSamplingEvidenceReason();
     state->active_obstacle_sources =
         registered_lidar_window_->activeObstacleSources();
     state->current_frame =
@@ -2906,6 +2936,8 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
   epoch->raw_occupied_voxel_keys = std::move(raw_keys);
   epoch->current_frame_occupied_voxel_centers = state->current_hits;
   epoch->current_frame_hits_lidar = state->current_hits_lidar;
+  epoch->current_sampling_evidence = state->current_sampling_evidence;
+  epoch->current_sampling_evidence_reason = state->current_sampling_evidence_reason;
   epoch->active_window_obstacle_sources = state->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = state->environment_hits;
   epoch->lattice_origin = state->origin;
@@ -3005,6 +3037,8 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::shared_ptr<const std::vector<iap::VoxelKey>> raw_keys;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits_lidar;
+    std::shared_ptr<const iap::local_map::SourceSamplingEvidence> current_sampling_evidence;
+    std::string current_sampling_evidence_reason;
     std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
         active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_registered_frame;
@@ -3080,6 +3114,8 @@ GridMap::captureFrozenOccupancyEpoch() const
       buffers->current_hits =
           registered_lidar_window_->currentOccupiedVoxelCenters();
       buffers->current_hits_lidar = registered_lidar_window_->currentHitsLidar();
+    buffers->current_sampling_evidence = registered_lidar_window_->currentSamplingEvidence();
+    buffers->current_sampling_evidence_reason = registered_lidar_window_->currentSamplingEvidenceReason();
       buffers->active_obstacle_sources =
           registered_lidar_window_->activeObstacleSources();
       buffers->current_registered_frame =
@@ -3200,6 +3236,8 @@ GridMap::captureFrozenOccupancyEpoch() const
   epoch->current_frame_occupied_voxel_centers =
       buffers->raw_centers ? buffers->current_hits : std::move(current_centers);
   epoch->current_frame_hits_lidar = buffers->current_hits_lidar;
+  epoch->current_sampling_evidence = buffers->current_sampling_evidence;
+  epoch->current_sampling_evidence_reason = buffers->current_sampling_evidence_reason;
   epoch->active_window_obstacle_sources = buffers->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = buffers->environment_hits
       ? buffers->environment_hits : epoch->raw_occupied_voxel_centers;

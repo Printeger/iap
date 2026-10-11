@@ -406,6 +406,16 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             odometry = json.loads((run / "metadata/config/iap/config_odometry.json").read_text())
             self.assertEqual(odometry["odometry_estimation"]["initialization_mode"], "NAIVE")
             self.assertFalse(odometry["odometry_estimation"]["enable_gpu_match_evidence"])
+            self.assertFalse(local["capture_source_observations"])
+            context.launch_configurations["capture_source_observations"]="true"
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
+                runtime._setup(context)
+            source_ros=json.loads((run/"metadata/config/iap/config_ros.json").read_text())["glim_ros"]
+            self.assertTrue(source_ros["planner_local_map"].pop("capture_source_observations"))
+            expected_ros=json.loads(json.dumps(ros));expected_ros["planner_local_map"].pop("capture_source_observations")
+            self.assertEqual(source_ros,expected_ros)
+            self.assertEqual(json.loads((run/"metadata/config/iap/config_odometry.json").read_text()),odometry)
+            context.launch_configurations["capture_source_observations"]="false"
             context.launch_configurations["capture_advisory_residuals"]="true"
             with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
                 runtime._setup(context)

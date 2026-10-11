@@ -129,8 +129,26 @@ dense及失败恢复对照通过，writer压力与6项audit（含旧真实协方
 让预期观测生成／原关联的有符号残差矩进入原完整状态响应；v11 wire首点与
 均匀patch池不足以代表实际0.5m random-grid、target10000观测分布。下一项只
 冻结一份地图来源的wire前返回测度、实际native点及原坐标／索引／时刻／预处理
-身份，随必要原输入保存，不再采多seed全帧大日志。接口／模型尚未实施；原V5
+身份，随必要原输入保存，不再采多seed全帧大日志。均值模型尚未资格化；原V5
 只保留条件几何资格，M2继续，M3–M5未进入，失败与未资格假设均保留。
+
+来源采样接口 v12：`capture_source_observations` 默认 false，仅 simulation full_stack
+可显式启用。原 RegisteredLidarFrame／来源窗口／FrozenInput 保存完整 wire 前 adapter
+返回点（LiDAR float64）与同一来源实际 CPU→GPU 匹配均值（IMU float32）、原索引、
+T_lidar_imu 与预处理身份；坐标转换仍使用该来源 T_map_lidar。点数上限分别65536／16384，
+越界或无效只将诊断证据置 unavailable，不改变物理准入。当前／活动来源共享不可变
+观测，位姿更新保留同一帧／时刻，禁止从上一帧借用。codec 保留 v1–v11 读取，历史
+采样证据 unavailable；replay_metadata 导出 source_sampling_points.csv，不由中心或
+wire 端点重构原点。记录真实已抽样 native 点，但不记录随机生成器状态，不能声称
+从 raw 重现原随机抽样。Gaussian kernel 未被命名为物理噪声。
+此接口只补最小模型选择证据，不改生产V5、主要评价或执行授权。定向原生
+codec 丢失反例已红→绿，7项只读／并发冻结、24项来源窗口、26项占用快照、
+48项入口和10项validation检查通过；原 ROS 来源更新与实际 CPU→GPU 均值闭合
+通过，额外观测存在／缺失的原预测值和同版本cache身份相同。旧v11真实输入
+采样证据明确缺失，8项原矩阵逐值差0。六包Release完整重建／安装；检查owner
+`log/20261011T123441Z_520`。接口通过不等于均值模型或排序通过，M2继续。
+诊断 recorder 的 `--initial-delay` 与 driver 的 `--record-count`／`--record-initial-delay`
+允许预先声明只保存一份必要输入，默认保留原10s节奏；所有请求失败账本继续保存。
 
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，

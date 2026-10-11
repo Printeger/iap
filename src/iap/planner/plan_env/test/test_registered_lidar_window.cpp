@@ -79,6 +79,29 @@ TEST(RegisteredLidarWindow, CurrentOverlayReplacementPreservesActiveEvidence) {
             RegisteredVoxelState::UNKNOWN);
 }
 
+TEST(RegisteredLidarWindow, SamplingDescriptorFollowsOwningSourceWithoutChangingOccupancy) {
+  auto window=makeWindow();
+  auto observation=std::make_shared<iap::local_map::SourceSamplingEvidence>();
+  observation->preprocessing_identity="fixture";
+  observation->returns_lidar={Eigen::Vector3d(3,0,0),Eigen::Vector3d(3.01,0,0)};
+  observation->native_means_imu={Eigen::Vector3f(3,0,0)};
+  auto source=frame(10,Eigen::Vector3d(.5,.5,.5),{Eigen::Vector3d(3,0,0)});
+  source.sampling_evidence=observation;
+  ActiveLidarWindowDeltaData active;active.base_generation=0;active.generation=1;
+  active.complete=true;active.frame_contract_id="contract-a";active.added.push_back(source);
+  ASSERT_TRUE(window.applyActiveDelta(active).accepted);
+  ASSERT_TRUE(window.applyCurrentFrame(source).accepted);
+  EXPECT_EQ(window.currentSamplingEvidence(),observation);
+  EXPECT_EQ(window.activeObstacleSources()->front().sampling_evidence,observation);
+  source.T_map_lidar.translation().y()=1.5;
+  ASSERT_TRUE(window.applyCurrentFrame(source).accepted);
+  EXPECT_EQ(window.currentSamplingEvidence(),observation);
+  ASSERT_TRUE(window.applyCurrentFrame(frame(11,Eigen::Vector3d(.5,2.5,.5),{})).accepted);
+  EXPECT_FALSE(window.currentSamplingEvidence());
+  EXPECT_EQ(window.activeObstacleSources()->front().sampling_evidence,observation);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3,0,0)),RegisteredVoxelState::OCCUPIED);
+}
+
 TEST(RegisteredLidarWindow, RepeatedCurrentAdvanceKeepsValidActiveFreeSupport) {
   auto window = makeWindow();
   ActiveLidarWindowDeltaData active;

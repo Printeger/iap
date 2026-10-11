@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <plan_env/local_evidence_snapshot.h>
+#include <iap/local_map/source_sampling_evidence.hpp>
 
 #include <cstdint>
 #include <array>
@@ -40,6 +41,8 @@ struct RegisteredLidarFrameData {
   std::uint64_t sensor_receipt_steady_ns = 0;
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   std::vector<Eigen::Vector3d> hits_lidar;
+  std::shared_ptr<const iap::local_map::SourceSamplingEvidence> sampling_evidence;
+  std::string sampling_evidence_reason;
   std::string sensor_model_id;
   std::uint32_t horizontal_samples = 0;
   std::uint32_t vertical_samples = 0;
@@ -100,6 +103,8 @@ struct RegisteredLidarObstacleSource {
   // quantization, in the source LiDAR frame. Diagnostic geometry only;
   // occupied_voxel_centers remains the collision/assurance authority.
   std::shared_ptr<const std::vector<Eigen::Vector3d>> hits_lidar;
+  std::shared_ptr<const iap::local_map::SourceSamplingEvidence> sampling_evidence;
+  std::string sampling_evidence_reason;
 };
 
 struct ActiveLidarWindowDeltaData {
@@ -174,6 +179,8 @@ class RegisteredLidarWindow {
       const RegisteredLidarFrameData& frame) const;
   std::optional<RegisteredLidarFrameMetadata> currentFrameMetadata() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>> currentHitsLidar() const;
+  std::shared_ptr<const iap::local_map::SourceSamplingEvidence> currentSamplingEvidence() const;
+  std::string currentSamplingEvidenceReason() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
   environmentOccupiedVoxelCenters() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
