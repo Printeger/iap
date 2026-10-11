@@ -1,8 +1,9 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
-风险引导轻量实证开发进行中，起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
-当前阶段先验证保护触发反例；空间排序同对象实验、独立现场与实际OFF/ON对照尚待完成。
+风险引导轻量实证闭环已完成，包含不通过结论；起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
+规划实验提交`040c5ed7`与离线资格修复`fb4980c4`分别验证，未修改生产融合模型或风险权重。
 记录权威为`log/20261011T022904Z_324`；上一轮报告、输入及失效记录保持只读。
+图文报告：[`empirical_report_v1/REPORT.md`](../../log/20261011T022904Z_324/export/analysis/empirical_report_v1/REPORT.md)。
 
 实验启动参数`protection_margin_replan:=true`（driver `--protection-margin-replan`）
 仅启用`planning/protection_margin_replan_enabled`，默认关闭，未推广生产默认。
@@ -22,7 +23,14 @@ motion/tracking/command时序，reason保留OK，不冒充拒绝。没有新图�
 `runtime/protection_launch_v2.log`）；原反例red保留`runtime/protection_trigger_red.log`。
 扩查发现既有撤回测试与完整旧尾段许可冲突：它在起点未观测时仍期待撤回，恢复段
 未更新FSM实测位置。基线2c8cf4bd源码单独编译同样失败（`protection_pending_baseline.log`）；
-修正测试前提，未放宽生产许可。正式现场触发与无多余制动证据仍待采集。
+修正测试前提，未放宽生产许可。实际配对OFF/ON均绑定干净040c5ed7、相同seed4101、
+prior OFF、原预算/物理政策/任务目标。ON真实owner23在余量仍约.295m时请求保护，
+原受检.5s制动24由server激活并于44ms后发送实际命令，该窗口无保证失效。
+后续active33/pending34在新地图下撤销旧尾段资格，原制动两次动力学不合格；
+直到新受检35命令激活仍有.195s保证缺口。34未先激活；保留33命令不等于受检悬停，
+不由此推断碰撞。此实验不提供pending期间持续合法备份或突然变化下的连续保证，
+不再追加ON收益运行，不推广默认。OFF本窗口11次余量请求通过前进处理、无提前制动；
+仅支持所观察窗口及稳定/恢复余量原生反例，不承诺所有正常条件均无制动。
 
 既有GPU数据的9/17局部固定target增量求解已与独立锚点真值相对位姿及独立白化求解
 交叉核验；原stamp、50ms truth资格及缺失/拒绝保留。GPU子地图不等于Predictor注册图，
@@ -35,6 +43,20 @@ GNSS传播参考也不同，故`local_matched_increment_v1/summary.json`不授�
 这是诊断器资格修复，未改变生产模型、噪声/K/风险权重，未用已查看留出拟合。
 稀疏扫描关联与完整Predictor支持集仍不相同，共享地图/源内相关及IMU传播不确定性
 未经经验校准；不能用solver covariance当真值或授予绝对误差/95%覆盖。
+同对象实际求解的H代理/局部误差排序：诊断seed3101为12/17合格、Spearman .678；
+冻结后独立OFF4101为8/9请求合格、.857；同一冻结估计器的配对ON为8/9、.190。
+弱方向平均对齐.490/.603/.617，尚无方向一致性资格。稀疏支持、共享地图及后验GNSS
+残差限制保留；不因部分正相关宣布普适排序，不拟合噪声/K，不授予米数覆盖。
+同一真实入口committed_5的675非插值空间查询中，GNSS-only无合格有限值，
+LiDAR/Fusion各477，198物理过滤；按共同边缘弱方向消元投影，GNSS信息份额至多
+2.34e-5，LiDAR主导是条件模型结论。全局部目标两侧均END_UNOBSERVED；仅原guide
+受检前缀同端点OFF/ON/充足离线参考取得同一路径与离散最优性，统一成本33.842192m。
+实际首分岔x[-15.5,-9]全段在共享冻结图中均不可完整评估；共同受检x[-15.5,-13.8]
+的实际终点y/z不同，不能由较低部分成本宣布ON胜出。ON首分岔实际12.168m/34.630s，
+OFF9.547m/25.929s；下沉已在guide，owner7后端偏离至多.0381m、3.7s时长不变，
+wire与实际命令身份一致。未证实后端丢失路线，也未取得整体ON任务收益或全支路排序。
+同owner7原epoch统一stage成本：guide33.010839m→优化32.926291m，长度/风险附加
+略降，原dynamics及release保持同成本，未通过新离线曲线冒充现场执行。
 
 唯一需求基线：[IAP_Safety_Planner_Requirements_v1.1_20261009.md](IAP_Safety_Planner_Requirements_v1.1_20261009.md)，包含第 0 节连续飞行追加授权与修订后的 §9.1。
 当前追加 Goal **DEV_ACCEPTED**：冻结反例的真实执行分支、身份与原硬检查验证通过，
