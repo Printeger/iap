@@ -73,8 +73,13 @@ class LocalIncrementContract(unittest.TestCase):
     def test_conflicting_stamp_and_unknown_extrinsic_fail(self):
         data = rows([0., 0., .1])
         data[1]['x'] = 1.
+        series = PoseSeries(data, 'glio')
         with self.assertRaisesRegex(ValueError, 'CONFLICTING_DUPLICATE'):
-            PoseSeries(data, 'glio')
+            series.at(0.)
+        with self.assertRaisesRegex(ValueError, 'CONFLICTING_DUPLICATE'):
+            series.at(.05)
+        # An unrelated exact pose does not use either ambiguous value.
+        self.assertEqual(series.at(.1)[0][0, 3], .1)
         data = rows([0., .1])
         data[0]['body'] = 'camera'
         with self.assertRaisesRegex(ValueError, 'EXTRINSIC_UNQUALIFIED'):

@@ -1,4 +1,4 @@
-# Local increment advisory evaluation v1
+# Local increment advisory evaluation v1.1
 
 Status: active M2 development contract; no independent acceptance or production
 model qualification. This version implements the user's explicit exclusion of
@@ -45,7 +45,12 @@ the original bracketing samples. No extrapolation. The truth bracket's maximum
 distance from the endpoint is 0.050 s, preserving the original truth gate.
 GLIO's maximum bracket interval is 0.150 s: its ordinary cadence is 0.100 s;
 missing two-frame intervals are unavailable. Exact recorded timestamps use the
-recorded pose. Duplicate stamps with different poses, nonmonotonic samples,
+recorded pose. Duplicate stamps with different poses invalidate every endpoint
+that uses that stamp or interpolation bracket; preserve the ambiguous stamp in
+the source audit and never choose either pose. Unrelated endpoints do not use
+the ambiguous value. This v1.1 clarification follows a read-time rejection in
+`log/20261011T160620Z_524`, before any error or ordering result was computed;
+all window lengths and gates are unchanged. Nonmonotonic samples,
 nonfinite values, unknown frame/body identity or nonrigid transforms fail.
 Never widen these gates after seeing an error.
 

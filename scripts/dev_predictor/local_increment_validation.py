@@ -81,6 +81,7 @@ class PoseSeries:
         if source not in expected:
             raise ValueError('UNKNOWN_POSE_SOURCE')
         values = []
+        self.ambiguous_stamps = set()
         for row in rows:
             if row['source'] != source:
                 continue
@@ -96,7 +97,7 @@ class PoseSeries:
                 raise ValueError('NONMONOTONIC_POSE_TIME')
             if values and stamp == values[-1][0]:
                 if not np.allclose(p, values[-1][1], rtol=0, atol=1e-12) or not np.allclose(R, quaternion_rotation(values[-1][2]), rtol=0, atol=1e-12):
-                    raise ValueError('CONFLICTING_DUPLICATE_POSE_STAMP')
+                    self.ambiguous_stamps.add(stamp)
                 continue
             values.append((stamp, p, q))
         if len(values) < 2:
@@ -109,12 +110,16 @@ class PoseSeries:
     def at(self, stamp):
         i = int(np.searchsorted(self.stamps, stamp))
         if i < len(self.stamps) and self.stamps[i] == stamp:
+            if stamp in self.ambiguous_stamps:
+                raise ValueError('CONFLICTING_DUPLICATE_POSE_STAMP')
             p, q = self.positions[i], self.quaternions[i]
             evidence = {'stamp_s': stamp, 'exact_sample': True, 'bracket_s': [stamp, stamp]}
         else:
             if i == 0 or i == len(self.stamps):
                 raise ValueError('POSE_WINDOW_NOT_BRACKETED')
             lo, hi = self.stamps[i-1:i+1]
+            if lo in self.ambiguous_stamps or hi in self.ambiguous_stamps:
+                raise ValueError('CONFLICTING_DUPLICATE_POSE_STAMP')
             if self.source == 'truth':
                 if max(stamp-lo, hi-stamp) > TRUTH_ENDPOINT_GATE_S+1e-6:
                     raise ValueError('TRUTH_BRACKET_EXCEEDS_50MS')
@@ -183,6 +188,7 @@ def evaluate(run, label, control_path):
     contract = REPO / 'docs/spec/local_increment_advisory_contract.md'
     inputs[str(contract)] = sha(contract)
     rows = []
+    source_ambiguities = []
     for seed in (5101, 5102, 5103):
         config = read(REPO / f'log/20261011T044535Z_421/metadata/config/dense_{seed}_increment_v1.json')
         poses_path = Path(config['truth'])
@@ -190,6 +196,9 @@ def evaluate(run, label, control_path):
         with poses_path.open() as stream:
             original_poses = list(csv.DictReader(stream))
         estimated, truth = PoseSeries(original_poses, 'glio'), PoseSeries(original_poses, 'truth')
+        source_ambiguities.append({'seed': seed,
+                                  'estimate_stamps_s': sorted(estimated.ambiguous_stamps),
+                                  'truth_stamps_s': sorted(truth.ambiguous_stamps)})
         source_run = Path(config['gpu']).parents[2]
         source_manifest = read(source_run / 'metadata/run_manifest.json')
         if not source_manifest['source']['git_worktree_clean']:
@@ -232,6 +241,7 @@ def evaluate(run, label, control_path):
                'prediction': 'unchanged V5 conditional geometric H baseline; not relative covariance or PL',
                'primary': 'one-second actual GLIO relative translation error, initial physical IMU XY, independent truth',
                'rows': rows, 'regional': regional_results(rows), 'gates': GATES,
+               'source_ambiguities': source_ambiguities,
                'all_predeclared_regions_preserved': True, 'truth_in_prediction': False,
                'alignment_fitted': False, 'sample_means_subtracted': False,
                'production_changed': False, 'independent_validation': False,
