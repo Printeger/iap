@@ -1,6 +1,9 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
-本轮 pending／来源排序追加 Goal 正在实现，基线 `1d1b1a6b`，工作树与安装字节一致。
+本轮 pending／来源排序追加 Goal 已交付有限执行修复及独立排序负结论，基线
+`1d1b1a6b`，初始工作树／安装字节一致；现场均绑定干净提交及 Release 安装。
+图文报告、机器验收、复现脚本及提交清单位于
+[`goal_report_v1/REPORT.md`](../../log/20261011T044535Z_421/export/analysis/goal_report_v1/REPORT.md)。
 原 active33／pending34 在 gen637 的定向反例：A 完整尾段拒绝，但 A 至 ts 和完整 B 合格，
 原普通 pending 监督却拒绝并进入急停（`log/20261011T044535Z_421/runtime/pending_red.log`）。
 `assessRemainingTrajectory(now, include_advisory, budget)` 统一以 server 确认身份选择分支，
@@ -10,7 +13,7 @@
 命令权威、原预算与许可阈值保持；超过 ts 缺少实际激活反馈不推定已执行。
 等待 B 确认因分支失效退出时，原发布动作不能清除保护请求；同预算复用
 inspectPendingStopProof 确认失效并返回 false，保留队列身份，走原受检保护入口。
-当前状态 IMPLEMENTED，现场待验证。真实 A33/B34 反例红→绿、11项直接执行回归、2项
+当前状态 IMPLEMENTED_LIMITED_VERIFIED。真实 A33/B34 反例红→绿、11项直接执行回归、2项
 server 回归通过；原冻结 A3 的 success／rejected／lost／feedback_lost／backup_feedback_lost／
 backup_revoked 六分支通过，失败替换实际执行 B4，撤销资格后实际激活受检保护5。
 `log/20261011T044535Z_421/runtime/pending_atomic_*` 保留首轮等待失效 red 及修复 green。
@@ -25,7 +28,9 @@ backup_revoked 六分支通过，失败替换实际执行 B4，撤销资格后�
 epoch；FSM 通过原 captureRemainingFailure 保存 excluded_tail_ID 和原事件时刻／首拒绝点。
 不重查或隐藏拒绝，不改变许可或预算；原 writer 最多保存32个 excluded_tail_ID。
 原生 A33/B34 回归验证原 gen637／INSUFFICIENT_CLEARANCE／首拒绝时刻保留，实际 B34
-命令与 manager 激活身份闭合（`runtime/pending_refusal_green.log`）；现场身份审计正在完成。
+命令与 manager 激活身份闭合（`runtime/pending_refusal_green.log`）；两个现场身份审计共15,560条实际命令与自身wire spline数值闭合；OFF5101的
+A9/B10独立拒绝gen195及stop11实际命令／反馈保留。初次原制动动力学不可行，
+约.112s尚无合格完整接续分支仍是能力边界，不宣称已消除。
 
 LiDAR 排序追加验证使用已冻结的 dense_lidar_ranking_protocol_v1，独立 OFF seeds
 5101／5102／5103，每次90s，规则与区域在查看新结果前固定。诊断接口
@@ -42,7 +47,7 @@ fixed_map_increment 诊断按原 source 身份逐项映射生产 primitive CSV �
 自相关仍是条件限制。CUDA 原代价与 Hessian 一致性、取证异常、16384点队列压力、4项 host audit
 与48项启动接口检查通过（`log/20261011T044535Z_421/runtime/dense_*_v2.log`）；
 历史8个样本359条关联修正原行号并重建模型矩阵闭合，原排序 rho=.857 未改变。
-独立数据尚未采集，C 的排序前置未通过。
+3个独立 seed 的数据已采集，C 的排序前置未通过。
 
 稠密 CUDA 取证新增原始审计反例：三个独立运行的输入 Ca／Cb 严格对称正定，
 实际 float32 `Cb+R Ca Rᵀ` 因抵消留下约1.0–1.3e-7 m² 非对称，原按近零交叉项设
@@ -52,10 +57,13 @@ fixed_map_increment 诊断按原 source 身份逐项映射生产 primitive CSV �
 样本及超过算术界的注入错误回归通过；进一步核对发现原 target 输入也保留
 7e-9–1.5e-8 m² 舍入偏差，host 不再错误要求逐位对称。按原输入的实际偏差加
 构造算术界检查 tap，输出 source／target／tap skew 最大值，不修复原值或授予
-统计噪声资格；6个真实拒绝样本及注入错误回归通过，原始全量取证重新核验中。独立24个局部
+统计噪声资格；6个真实拒绝样本及注入错误回归通过，三个原始全量取证共7,938,121条记录核验通过，queue drop为0／20／55均在
+账本中，预定评价因子完整性闭合。独立24个局部
 解、27次请求（3次启动缺失）均保留；3个 seed 是3个运行单位，时序点不是独立
 实验。全路线 rho=.643／.786／.857，但冻结区域排序一致率1/3／2/3／2/3，不满足
 预定≥.7的要求；形成区域排序尚未支持的负结论，C 未执行，不宣布 ON 收益。
+
+以下为上一轮保留的历史实证记录，不替代本轮验收。
 
 风险引导轻量实证闭环已完成，包含不通过结论；起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
 规划实验提交`040c5ed7`与离线资格修复`fb4980c4`分别验证，未修改生产融合模型或风险权重。
