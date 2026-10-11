@@ -78,6 +78,7 @@ def main():
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     parser.add_argument('--capture-dense-lidar',action='store_true',help='Capture latest fixed level-0 target source slots, max 16384')
     parser.add_argument('--capture-source-observations',action='store_true',help='Retain actual source sampling geometry in selected inputs; no GPU trace required')
+    parser.add_argument('--omit-planner-map-dumps',action='store_true',help='M2 source-observation diagnostics only: omit repetitive planner maps and internal input dumps, retain failure ledgers')
     parser.add_argument('--record-count',type=int,default=None,help='Number of frozen inputs; default retains original 10s cadence')
     parser.add_argument('--record-initial-delay',type=float,default=0.,help='Predeclared first snapshot delay, seconds')
     parser.add_argument('--gnss-seed', type=int, default=None, help='Independent simulation observation seed; all noise/planner settings retained')
@@ -86,6 +87,8 @@ def main():
     args = parser.parse_args()
     if args.capture_dense_lidar and not args.capture_advisory_residuals:
         raise ValueError('--capture-dense-lidar requires --capture-advisory-residuals')
+    if args.omit_planner_map_dumps and (not args.capture_source_observations or args.guidance != 'false'):
+        raise ValueError('--omit-planner-map-dumps requires OFF source-observation diagnostics')
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
@@ -157,7 +160,7 @@ def main():
                    'run_lifecycle_owner:=driver',
                    'scenario:=icra_dense_forest_four_fork_v2', 'start_rviz:='+str(args.visualization=='full').lower(),
                    'start_grid_map_visualizer:='+str(args.visualization!='none').lower(), 'advisory_posterior_prior:=false',
-                   'advisory_guidance:='+args.guidance, 'capture_failure_map:=true',
+                   'advisory_guidance:='+args.guidance, 'capture_failure_map:='+str(not args.omit_planner_map_dumps).lower(),
                    f'run_duration_s:={args.duration}']
         if args.rinex_nav_file:
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))

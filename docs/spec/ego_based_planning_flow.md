@@ -149,6 +149,18 @@ codec 丢失反例已红→绿，7项只读／并发冻结、24项来源窗口�
 `log/20261011T123441Z_520`。接口通过不等于均值模型或排序通过，M2继续。
 诊断 recorder 的 `--initial-delay` 与 driver 的 `--record-count`／`--record-initial-delay`
 允许预先声明只保存一份必要输入，默认保留原10s节奏；所有请求失败账本继续保存。
+来源测度的单次现场 `log/20261011T131912Z_451` 已完成，GPU READY／原NAV／干净
+`dc1d1a4f`／安装身份与必要健康闭合。current347、active0／254／293均保存完整
+wire前与native源点，原索引／float32／变换闭合，坐标差0；唯一原payload 2.89MB，
+逐字节相同重放input.bin与其共享inode。全部24原请求在同一新固定地图上，wire
+矩候选区域1/3、1/3、1/3；仅换native测度后2/3、2/3、1/3，仍未达到原.7门槛；
+全局Spearman的改善不能替代区域规则，不进入M3。sampling测度有影响但非充分
+修复，下一处缺口为未来观测／实际关联算子的有符号残差响应及来源偏差，禁止
+继续按区域修补patch、调参数或增加同目的采集。
+旧driver仍逐规划保存map／内部输入，本次整run约1.05GB，已有证据不删。后续
+`--omit-planner-map-dumps` 仅允许OFF来源观测诊断，传递原capture_failure_map=false，
+省去重复mask与内部规划输入；标量失败／请求分母、原物理检查和指定单份service
+输入保持。M4／完整OFF/ON不得用此取证简化替代原完整证据要求。
 
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，
