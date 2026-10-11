@@ -37,8 +37,25 @@ def audit_sample(record, transform):
     a=np.asarray(record["source_mean_m"],float);b=np.asarray(record["target_mean_m"],float)
     if not all(np.isfinite(x).all() for x in (e,covariance,ca,cb,a,b,transform)):
         raise ValueError("nonfinite actual matching sample")
-    if not np.allclose(covariance,covariance.T,rtol=1e-6,atol=1e-7):
+    # The tap exports the actual float32 Cb + R Ca R^T, including roundoff.
+    # Two length-3 dot products followed by one addition give a componentwise
+    # forward-error bound. A tolerance on the tiny off-diagonal value itself
+    # incorrectly rejects cancellation in otherwise symmetric SPD inputs.
+    # Retain raw bytes; do not symmetrize, floor eigenvalues or fit a tolerance.
+    if not np.array_equal(ca,ca.T) or not np.array_equal(cb,cb.T):
+        raise ValueError("asymmetric source/target covariance")
+    rotation=transform[:3,:3]
+    expected=cb+rotation@ca@rotation.T
+    unit_roundoff=np.finfo(np.float32).eps/2
+    gamma3=3*unit_roundoff/(1-3*unit_roundoff)
+    magnitude=np.abs(rotation)@np.abs(ca)@np.abs(rotation.T)
+    roundoff=((1+gamma3)**2-1)*magnitude+unit_roundoff*(np.abs(cb)+(1+gamma3)**2*magnitude)
+    host_roundoff=16*np.finfo(np.float64).eps*(np.abs(cb)+magnitude)
+    bound=roundoff+host_roundoff
+    if np.any(np.abs(covariance-covariance.T)>bound+bound.T):
         raise ValueError("asymmetric actual covariance")
+    if np.any(np.abs(covariance-expected)>bound):
+        raise ValueError("actual transform/covariance mismatch beyond float32 roundoff")
     chol=np.linalg.cholesky(covariance) # No epsilon/repair.
     whitened=np.linalg.solve(chol,e)
     mahalanobis=float(whitened@whitened)
@@ -48,7 +65,7 @@ def audit_sample(record, transform):
     if not np.isclose(mahalanobis,gpu,rtol=1e-3,atol=1e-5):
         raise ValueError("actual GPU Mahalanobis mismatch")
     residual_error=float(np.max(np.abs(e-(b-transform[:3,:3]@a-transform[:3,3]))))
-    covariance_error=float(np.max(np.abs(covariance-(cb+transform[:3,:3]@ca@transform[:3,:3].T))))
+    covariance_error=float(np.max(np.abs(covariance-expected)))
     if residual_error>1e-5 or covariance_error>1e-5:
         raise ValueError("actual transform/residual/covariance mismatch")
     return e,whitened,mahalanobis,residual_error,covariance_error

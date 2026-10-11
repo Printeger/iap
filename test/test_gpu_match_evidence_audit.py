@@ -5,12 +5,25 @@ import numpy as np
 import csv
 import json
 import tempfile
+import os
 
 path=Path(__file__).resolve().parents[1]/"scripts/dev_predictor/gpu_match_evidence_audit.py"
 spec=importlib.util.spec_from_file_location("gpu_audit",path)
 audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
 
 class ActualSampleAudit(unittest.TestCase):
+    def test_captured_dense_float_covariance_is_not_an_interface_error(self):
+        path=os.environ.get('IAP_DENSE_COVARIANCE_COUNTEREXAMPLE')
+        if not path:self.skipTest('requires immutable actual dense counterexample')
+        for case in json.loads(Path(path).read_text()):
+            record=case['record'];transform=np.array(case['transform']);before=json.dumps(record,sort_keys=True)
+            with self.subTest(run=case['source_run']):
+                audit.audit_sample(record,transform)
+                self.assertEqual(json.dumps(record,sort_keys=True),before)
+                changed={**record,'covariance_m2_row_major':list(record['covariance_m2_row_major'])}
+                changed['covariance_m2_row_major'][1]+=1e-3
+                with self.assertRaisesRegex(ValueError,'covariance'):audit.audit_sample(changed,transform)
+
     def fixture(self):
         transform=np.eye(4);transform[:3,:3]=[[0,-1,0],[1,0,0],[0,0,1]];transform[:3,3]=[.2,-.1,.3]
         a=np.array([1.,2.,3.]);e=np.array([.1,-.2,.3]);b=transform[:3,:3]@a+transform[:3,3]+e
@@ -33,6 +46,8 @@ class ActualSampleAudit(unittest.TestCase):
 
     def test_singular_nonfinite_and_invalid_cost_rejected(self):
         record,transform=self.fixture();record["covariance_m2_row_major"]=[0.]*9
+        record["source_covariance_m2_row_major"]=[0.]*9
+        record["target_covariance_m2_row_major"]=[0.]*9
         with self.assertRaises(np.linalg.LinAlgError):audit.audit_sample(record,transform)
         record,transform=self.fixture();record["residual_m"][0]=float('nan')
         with self.assertRaisesRegex(ValueError,"nonfinite"):audit.audit_sample(record,transform)
