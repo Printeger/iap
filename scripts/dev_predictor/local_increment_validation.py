@@ -114,6 +114,74 @@ def paired_response_moments(nominal_start, nominal_end, joint_responses, K_H=5.)
             'joint_draw_count': len(joint), 'physical_error_moments_qualified': False}
 
 
+def native_pose_at(evidence, stamp, T_map_world):
+    """Original optimized state plus recorded IMU mean transport, no covariance.
+
+    This is an evaluation state representation. It neither supplies a noise law
+    nor fits or corrects a production prediction using truth.
+    """
+    if (evidence.get('model') != 'postopt_X_V_B_R_E_active_clocks_joint_v1' or
+            not evidence.get('optimized_valid') or not evidence.get('update_sequence')):
+        raise ValueError('NATIVE_STATE_UNAVAILABLE')
+    start, end = evidence['state_stamp'], evidence['gnss_stamp']
+    if stamp < start-1e-6 or stamp > end+1e-6 or stamp-start > .100001:
+        raise ValueError('TARGET_OUTSIDE_NATIVE_IMU_INTERVAL')
+    means = np.asarray(evidence['optimized_means'], dtype=float)
+    if (evidence['mean_dimensions'][:5] != [16, 3, 6, 9, 3] or
+            len(means) != sum(evidence['mean_dimensions']) or len(means) < 37 or not np.isfinite(means).all()):
+        raise ValueError('NATIVE_STATE_LAYOUT_UNAVAILABLE')
+    frame = evidence['frame_id']
+    expected = [(ord(symbol) << 56) | index for symbol, index in
+                [('x', frame), ('v', frame), ('b', frame), ('r', 0), ('e', 0)]]
+    if evidence['keys'][:5] != expected:
+        raise ValueError('NATIVE_STATE_OWNER_MISMATCH')
+    if abs(stamp-start) <= 1e-6:
+        propagated = means
+    else:
+        from epoch_motion_reference import intervals, propagate
+        rows = intervals(evidence['imu_measurements'], start, stamp)
+        propagated = propagate(means, rows, stamp-start)
+    return rigid(rigid(T_map_world) @ rigid(propagated[:16].reshape(4, 4)))
+
+
+def native_endpoint(reports, stamp, T_map_world):
+    """Earliest covering GNSS epoch, latest preceding state; never select by error."""
+    candidates = {}
+    for event in reports:
+        report = event['report']
+        evidence = report.get('advisory_postopt', {})
+        start, end = evidence.get('state_stamp', 0.), evidence.get('gnss_stamp', 0.)
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or not np.isfinite([start, end]).all():
+            continue
+        if not start-1e-6 <= stamp <= end+1e-6 or stamp-start > .100001:
+            continue
+        if report.get('estimation_frame_id') != evidence.get('frame_id'):
+            continue  # A later frame reusing an old bundle does not own its quality.
+        if (not report.get('advisory_coordinates_valid') or
+                report['advisory_coordinates_frame_id'] != evidence['frame_id'] or
+                report['advisory_coordinates_epoch_source_identity'] != evidence['epoch_source_identity'] or
+                not np.allclose(np.asarray(report['advisory_t_map_world']).reshape(4, 4), T_map_world, rtol=0, atol=1e-9)):
+            raise ValueError('NATIVE_COORDINATE_OWNER_MISMATCH')
+        key = (evidence['update_sequence'], evidence['frame_id'], start, end, evidence['epoch_source_identity'])
+        serialized = json.dumps(evidence, sort_keys=True, allow_nan=False)
+        if key in candidates and candidates[key][0] != serialized:
+            raise ValueError('CONFLICTING_NATIVE_STATE_IDENTITY')
+        if key not in candidates:
+            candidates[key] = (serialized, report, evidence)
+        elif candidates[key][1].get('current_motion_quality') != report.get('current_motion_quality'):
+            raise ValueError('CONFLICTING_NATIVE_STATE_QUALIFICATION')
+    if not candidates:
+        raise ValueError('NATIVE_ENDPOINT_NOT_RECORDED')
+    _, report, evidence = min(candidates.values(), key=lambda item: (item[2]['gnss_stamp'], -item[2]['state_stamp']))
+    if report.get('current_motion_quality') != 1:
+        raise ValueError('ORIGINAL_NATIVE_MOTION_QUALITY_UNQUALIFIED')
+    T = native_pose_at(evidence, stamp, T_map_world)
+    return T, {'frame_id': evidence['frame_id'], 'update_sequence': evidence['update_sequence'],
+               'epoch_source_identity': evidence['epoch_source_identity'],
+               'state_stamp_s': evidence['state_stamp'], 'gnss_stamp_s': evidence['gnss_stamp'],
+               'evaluation_stamp_s': stamp, 'covariance_used': False}
+
+
 class PoseSeries:
     def __init__(self, rows, source):
         expected = {'glio': ('map', 'imu'), 'truth': ('map', 'drone_0')}

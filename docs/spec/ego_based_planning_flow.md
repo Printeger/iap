@@ -247,6 +247,23 @@ service缺失继续保留。排除“仅改评价对象即足够”假设，不�
 交叉关系，公共偏差抵消、差异偏差保留；不同端独立抽样使用不同seed。该
 响应代数不填补物理来源或GNSS噪声关系，也不授予相对PL资格；物理关系未
 解决前不进入独立验收。无需为此恢复旧source的绝对历史漂移。
+两端已登记场景的有符号LiDAR响应component在`20261011T161653Z_300`仍为
+2/3、1/3、1/3，Spearman 0／−.452／−.119，拒绝作为充分修复；它未将缺失
+GNSS或来源噪声补为协方差，zero-GNSS-residual只是明确的反事实component。
+旧同epoch发布插值与原生参考均值位置差中位2.086mm／最大5.588mm、姿态差
+中位5.141mrad，与新局部误差信号同量级；旧future原生状态未存，不能恢复。
+v1.2预声明一次seed7400／105s开发取证，18input／9个1s pair、首延迟10s、
+pair-start间隔10s；原场景／NAV／任务／OFF及全部物理质量／预算／权重保持。
+`--capture-native-increments`复用既有IntegrityReport原postopt／IMU，只保存
+pair-start前0.5s及后2.3s原报告gzip，payload／失败请求全部保留。原recorder
+默认不变；paired模式按首次issue绝对节拍，非等待服务完成后累计漂移。
+`native_pose_at`／`native_endpoint`只重放原生均值至固定endpoint，不用covariance
+补物理误差；原100ms／IMU20ms覆盖门禁保持，冲突身份、缺失或原质量不合格
+明确失败，无发布插值fallback。`--omit-planner-map-dumps`配合此OFF诊断时仅
+保留clock／来源／运动质量／标量执行事件，完整pose CSV及selected原生报告
+由recorder唯一保存；compact scope不可作完整任务证据。独立seed仍未采集。
+验证：原生选择／时间输运6项及局部增量11项定向测试通过；原recorder／backend
+10项接口回归通过。仅Python与契约改变，不改变已核验的Release二进制。
 
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，

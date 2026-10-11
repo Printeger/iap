@@ -1,4 +1,4 @@
-# Local increment advisory evaluation v1.1
+# Local increment advisory evaluation v1.2
 
 Status: active M2 development contract; no independent acceptance or production
 model qualification. This version implements the user's explicit exclusion of
@@ -53,6 +53,30 @@ the ambiguous value. This v1.1 clarification follows a read-time rejection in
 all window lengths and gates are unchanged. Nonmonotonic samples,
 nonfinite values, unknown frame/body identity or nonrigid transforms fail.
 Never widen these gates after seeing an error.
+
+The old interpolated-publication evaluation remains v1.1, including its failures.
+For new data, v1.2 uses the original native optimized reference state plus its
+recorded IMU mean transport to the **same exact endpoint epochs**. This changes
+the pose representation, not the one-second increment object, body axes,
+truth gate, ordering rules or online motion policy. No truth-based pose correction
+or covariance propagation into the risk model is involved. The original mean
+transport is limited to 0.100001 s and requires bracketing raw IMU samples with
+no interval over 0.020001 s; unavailable input fails the window with no linear
+interpolation fallback. This is necessary because the 24 old queries show a
+2.086 mm median, 5.588 mm maximum position difference and 5.141 mrad median
+orientation difference between the published interpolation and native reference
+state at the same epoch, comparable to the relative-error signal. That discrepancy
+is not a truth error estimate and does not invalidate or erase the old results.
+
+Endpoint reports must bind the original postopt sequence, frame, GNSS source
+identity and unchanged map/world transform. Select the earliest recorded GNSS
+epoch covering the requested endpoint and the latest preceding state in that
+epoch. Conflicting values for the same native identity fail; selection never
+uses truth or error. Native motion quality stays at the original qualifying
+value. Record both endpoint inputs and selected reports (0.5 s pre-roll, 2.3 s
+after each pair-start request), retaining all request failures. Request-pair issue
+times have a one-second offset; actual evaluation still uses the exact native
+reference stamp of the first input plus 1.000 s, not the second request time.
 
 The predictor query retains its recorded source/map/GNSS identities and original
 motion-quality admission. An unavailable or originally unqualified query stays
@@ -116,6 +140,24 @@ posterior covariance, unit white noise or kernel covariances. Such a diagnostic
 candidate cannot enter independent acceptance until its applicability and
 missing physical relationships are resolved. A failure requires updating the
 temporal-response/observation hypothesis rather than repeating geometry sweeps.
+
+That conditional LiDAR component also failed in `log/20261011T161653Z_300`:
+regional concordance 2/3, 1/3, 1/3; Spearman 0, -0.452, -0.119. Preserve the
+counterfactual zero-GNSS-residual component label: it never asserted that missing
+physical GNSS error is zero and cannot substitute for a complete error law.
+No further resampling, patch, radius or source-pose variants of it are scheduled.
+
+The next minimum data discriminator is one development run, seed **7400**,
+duration **105 s**, 18 requested inputs in nine one-second pairs, first request
+delay 10 s and pair-start cadence 10 s. Keep the original NAV, scene, task,
+OFF guidance, physical checks, motion quality, weights and budgets. Compare
+the exact native increment with the publication-based increment and with
+actual paired source responses before choosing the missing temporal model.
+Use the existing source-complete OFF6104 map for the fixed-map controls; a
+future endpoint input is evaluation evidence, not a new forecast map. This
+pilot is development data, never an independent acceptance run. Stop after
+the declared run; failure requires an evidence-supported change. No dense GPU
+trace, repeated planner masks or duplicate full pose/IMU event dumps are needed.
 
 ## Gates, independent validation and route benefit
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Record full read-only inputs, replay the production Predictor, report evidence."""
 import argparse
+from collections import deque
+from contextlib import nullcontext
+import gzip
 import csv
 import hashlib
 import json
@@ -238,6 +241,38 @@ def save_record(run, label, payload, identity, service_identity):
     return path
 
 
+class NativeIncrementCapture:
+    """Bounded read-only report selection around declared recorder requests."""
+    def __init__(self, write):
+        self.write = write
+        self.recent = deque(maxlen=20)
+        self.request_id = None
+        self.until = -float('inf')
+
+    def emit(self, report, stamp):
+        self.write({'request_id': self.request_id, 'receive_steady_s': stamp,
+                    'report': report})
+
+    def observe(self, report, stamp):
+        # Unavailable/nonfinite diagnostics stay explicit null, never zero.
+        def plain(value):
+            if isinstance(value, dict): return {k: plain(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)): return [plain(v) for v in value]
+            if hasattr(value, 'tolist'): return plain(value.tolist())
+            if isinstance(value, float) and not math.isfinite(value): return None
+            return value
+        report = plain(report)
+        self.recent.append((stamp, report))
+        if self.request_id is not None and stamp <= self.until:
+            self.emit(report, stamp)
+
+    def begin(self, request_id, stamp, duration_s):
+        self.request_id, self.until = request_id, stamp+duration_s
+        for received, report in self.recent:
+            if stamp-.5 <= received <= stamp:
+                self.emit(report, received)
+
+
 def record(run, args):
     # A recorder adopts the canonical launch; it never launches sensors or a map.
     primary = json.loads((run / "metadata/run_manifest.json").read_text())
@@ -261,10 +296,14 @@ def record(run, args):
     client = node.create_client(GetGridMapPredictionInput, args.service)
     requests = artifact(run, "export/advisory/validation/recordings/" + args.label + "_requests.csv")
     odometry = artifact(run, "export/advisory/validation/recordings/" + args.label + "_odometry.csv")
+    native_enabled = bool(getattr(args, 'capture_native_increments', False))
+    pair_window = float(getattr(args, 'pair_window', 0.))
+    native_path = artifact(run, "export/advisory/validation/recordings/" + args.label + "_native_reports.jsonl.gz") if native_enabled else None
     start = time.monotonic()
     request_ids=[]
     try:
-        with requests.open("x") as req, odometry.open("x") as odom:
+        with requests.open("x") as req, odometry.open("x") as odom, \
+                (gzip.open(native_path, "xt", compresslevel=1) if native_path else nullcontext()) as native:
             w = csv.writer(req); w.writerow(["request", "request_id", "run_id", "available", "reason", "elapsed_s", "payload"])
             ow = csv.writer(odom); ow.writerow(["source", "stamp", "frame", "body", "x", "y", "z", "qx", "qy", "qz", "qw"])
             def on_odom(msg, source):
@@ -274,6 +313,13 @@ def record(run, args):
                 odom.flush()
             subscriptions = [node.create_subscription(Odometry, topic, lambda msg, s=source: on_odom(msg, s), 100)
                              for source, topic in (("glio", args.glio_topic), ("truth", args.truth_topic))]
+            native_capture = None
+            if native_enabled:
+                from iap.msg import IntegrityReport
+                from rosidl_runtime_py.convert import message_to_ordereddict
+                native_capture = NativeIncrementCapture(lambda event: native.write(json.dumps(event, allow_nan=False)+'\n'))
+                subscriptions.append(node.create_subscription(IntegrityReport, '/iap/integrity',
+                    lambda msg: native_capture.observe(message_to_ordereddict(msg), time.monotonic()), 20))
             delay_end=time.monotonic()+args.initial_delay
             while time.monotonic()<delay_end:
                 rclpy.spin_once(node,timeout_sec=min(.1,delay_end-time.monotonic()))
@@ -281,6 +327,10 @@ def record(run, args):
                 request_id=f"{run.name}:{args.label}:{i}"
                 request_ids.append(request_id)
                 stamp = time.monotonic()
+                if not pair_window or i % 2 == 0:
+                    pair_start = stamp
+                    if native_capture:
+                        native_capture.begin(request_id, stamp, (pair_window or 1.)+1.3)
                 payload_path = ""
                 if not client.wait_for_service(timeout_sec=args.timeout):
                     available, reason = False, "input_service_unavailable"
@@ -302,7 +352,7 @@ def record(run, args):
                                             "risk_version":response.risk_version})
                         payload_path = str(path.relative_to(run))
                 w.writerow([i, request_id, run.name, available, reason, time.monotonic() - stamp, payload_path]); req.flush()
-                end = time.monotonic() + args.interval
+                end = (pair_start + (pair_window if i % 2 == 0 else args.interval)) if pair_window else time.monotonic() + args.interval
                 while time.monotonic() < end:
                     rclpy.spin_once(node, timeout_sec=min(.1, end - time.monotonic()))
             del subscriptions
@@ -311,11 +361,17 @@ def record(run, args):
     finally:
         node.destroy_node(); rclpy.try_shutdown()
         request_manifest=artifact(run,"export/advisory/validation/recordings/"+args.label+"_requests_manifest.json")
+        sampling_plan = {"count":args.count,"interval_s":args.interval,"initial_delay_s":args.initial_delay}
+        if native_enabled:
+            sampling_plan.update(native_report_capture=True, pair_window_s=pair_window,
+                                 native_pre_roll_s=.5, native_post_window_s=(pair_window or 1.)+1.3)
         json_write(request_manifest,{"identity":"LIVE_MEASUREMENT","run_id":run.name,"request_ids":request_ids,
-                   "sampling_plan":{"count":args.count,"interval_s":args.interval,"initial_delay_s":args.initial_delay},
+                   "sampling_plan":sampling_plan,
                    "requests_csv":str(requests.relative_to(run)),"requests_csv_sha256":sha(requests)})
+        evidence_paths = [requests, odometry, request_manifest]
+        if native_path and native_path.is_file(): evidence_paths.append(native_path)
         manifest(run, "advisory_record_" + args.label, {**identity, "duration_s": time.monotonic()-start,
-                 "artifacts_sha256":{str(p.relative_to(run)):sha(p) for p in (requests,odometry,request_manifest)}})
+                 "artifacts_sha256":{str(p.relative_to(run)):sha(p) for p in evidence_paths}})
 
 
 def rows(path):
@@ -570,6 +626,8 @@ def main():
     parser.add_argument("--count", type=int, default=1)
     parser.add_argument("--interval", type=float, default=1.)
     parser.add_argument("--initial-delay", type=float, default=0., help="Delay first frozen capture; keep odometry and all request outcomes")
+    parser.add_argument("--capture-native-increments", action="store_true", help="Selected original postopt/IMU reports for exact one-second increment evaluation")
+    parser.add_argument("--pair-window", type=float, default=0., choices=(0., 1.), help="Optional one-second request pairs; interval is pair-start cadence")
     parser.add_argument("--timeout", type=float, default=10.)
     parser.add_argument("--service", default="/grid_map/prediction_input")
     parser.add_argument("--planning-input",action="store_true",help="read retained planning input instead of a new display capture")
@@ -579,6 +637,8 @@ def main():
     args = parser.parse_args(); safe_label(args.label)
     if args.count < 1 or args.interval <= 0 or args.timeout <= 0 or args.planning_attempt_id < 0 or not math.isfinite(args.initial_delay) or args.initial_delay < 0:
         parser.error("positive recording count/interval/timeout required")
+    if args.pair_window and (not args.capture_native_increments or args.count % 2 or args.interval <= args.pair_window):
+        parser.error("one-second pairs require native reports, even input count and interval >1s")
     inherited = os.environ.get("IAP_RUN_DIR")
     if args.mode == "record" and not inherited:
         parser.error("record must adopt IAP_RUN_DIR from canonical iap_sim")

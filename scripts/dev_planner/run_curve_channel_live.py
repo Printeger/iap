@@ -78,6 +78,7 @@ def main():
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     parser.add_argument('--capture-dense-lidar',action='store_true',help='Capture latest fixed level-0 target source slots, max 16384')
     parser.add_argument('--capture-source-observations',action='store_true',help='Retain actual source sampling geometry in selected inputs; no GPU trace required')
+    parser.add_argument('--capture-native-increments',action='store_true',help='M2 OFF: one-second input pairs and selected native postopt/IMU reports; no dense GPU trace')
     parser.add_argument('--omit-planner-map-dumps',action='store_true',help='M2 source-observation diagnostics only: omit repetitive planner maps and internal input dumps, retain failure ledgers')
     parser.add_argument('--record-count',type=int,default=None,help='Number of frozen inputs; default retains original 10s cadence')
     parser.add_argument('--record-initial-delay',type=float,default=0.,help='Predeclared first snapshot delay, seconds')
@@ -89,6 +90,9 @@ def main():
         raise ValueError('--capture-dense-lidar requires --capture-advisory-residuals')
     if args.omit_planner_map_dumps and (not args.capture_source_observations or args.guidance != 'false'):
         raise ValueError('--omit-planner-map-dumps requires OFF source-observation diagnostics')
+    if args.capture_native_increments and (not args.capture_source_observations or args.guidance != 'false' or
+            (args.record_count is not None and args.record_count % 2)):
+        raise ValueError('native increment diagnostics require OFF source observations and even total input count')
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
@@ -188,14 +192,20 @@ def main():
             outputs.append(log)
             jobs[name] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True)
-        spawn('capture', [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_live_capture.py'),
-                          '--duration', str(args.duration + 15), '--label', args.label])
+        capture_command = [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_live_capture.py'),
+                          '--duration', str(args.duration + 15), '--label', args.label]
+        if args.capture_native_increments and args.omit_planner_map_dumps:
+            capture_command += ['--compact-source-diagnostics']
+        spawn('capture', capture_command)
         spawn('launch', command)
         launch_started=time.monotonic()
-        spawn('record', [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_validation.py'),
-                         'record', '--label', args.label, '--count', str(args.record_count or math.ceil(args.duration / 10)),
+        record_command = [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_validation.py'),
+                         'record', '--label', args.label, '--count', str(args.record_count or (2 if args.capture_native_increments else 1)*math.ceil(args.duration / 10)),
                          '--initial-delay',str(args.record_initial_delay),
-                         '--interval', '10', '--timeout', '5'])
+                         '--interval', '10', '--timeout', '5']
+        if args.capture_native_increments:
+            record_command += ['--capture-native-increments', '--pair-window', '1']
+        spawn('record', record_command)
         if args.capture_fork_entries:
             spawn('forks', [sys.executable, str(REPO / 'scripts/dev_predictor/record_fork_inputs.py'),
                             '--duration', str(args.duration+15)])

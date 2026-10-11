@@ -26,6 +26,7 @@ def plain(value):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--duration',type=float,default=170);p.add_argument('--label',default='survey')
+    p.add_argument('--compact-source-diagnostics',action='store_true',help='M2 only: source/health/scalar execution events; pose CSV and selected native reports belong to recorder')
     args=p.parse_args();safe_label(args.label)
     run=adopt_run_directory(os.environ['IAP_RUN_DIR']);primary=json.loads((run/'metadata/run_manifest.json').read_text())
     if primary['entrypoint']!='iap_sim' or primary['scenario']!='icra_dense_forest_four_fork_v2':
@@ -48,6 +49,10 @@ def main():
                              'data_bytes':len(msg.data)}
                 else:
                     payload=plain(message_to_ordereddict(msg))
+                if args.compact_source_diagnostics and msg.__class__.__name__=='IntegrityReport':
+                    payload={k:v for k,v in payload.items() if k in ('header','estimation_frame_id','gnss_epoch_stamp') or k.startswith('current_motion_')}
+                    post=msg.advisory_postopt
+                    payload['postopt_identity']={k:getattr(post,k) for k in ('model','update_sequence','frame_id','state_stamp','gnss_stamp','epoch_source_identity','optimized_valid','covariance_valid','failure_reason')}
                 if msg.__class__.__name__=='String':
                     try:payload=json.loads(msg.data)
                     except json.JSONDecodeError:pass
@@ -66,6 +71,9 @@ def main():
                                   '/drone_0_planning/trajectory_feedback',
                                   '/sim/drone_0/imu_iap') or types[0]=='quadrotor_msgs/msg/SO3Command' or
                                   ('planning' in topic and types[0]=='std_msgs/msg/String'))
+                        if args.compact_source_diagnostics and topic in ('/drone_0_visual_slam/odom','/sim/drone_0/truth_odom',
+                                '/ublox_driver/range_meas','/ublox_driver/ephem','/ublox_driver/glo_ephem','/sim/drone_0/imu_iap'):
+                            selected=False
                         if selected:
                             subscriptions[topic]=node.create_subscription(get_message(types[0]),topic,
                                  lambda msg,t=topic:receive(t,msg),qos)
@@ -82,6 +90,8 @@ def main():
     finally:
         node.destroy_node();rclpy.try_shutdown()
         manifest(run,'advisory_capture_'+args.label,{'identity':'LIVE_MEASUREMENT','source':primary['source'],
+             'capture_scope':'M2_SOURCE_DIAGNOSTIC' if args.compact_source_diagnostics else 'FULL_REFERENCE_EVENTS',
+             'full_task_evidence':not args.compact_source_diagnostics,
              'counts':dict(counts),'duration_s':time.monotonic()-started,'shutdown_reason':shutdown_reason,'artifacts_sha256':{str(target.relative_to(run)):sha(target)}})
     print(json.dumps({'path':str(target),'counts':dict(counts)}))
 
