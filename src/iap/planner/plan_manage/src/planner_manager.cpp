@@ -1135,7 +1135,7 @@ namespace ego_planner
         result.request_mode==traj_utils::msg::Bspline::CANCEL_PENDING && result.accepted &&
         result.pending_id==-1 && receipt>=*pending_withdrawal_requested_s_) {
       pending_trajectory_.reset();pending_withdrawal_requested_s_.reset();
-      confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
+      confirmed_pending_id_=replacement_pending_id_=-1;
     } else if(pending_trajectory_ && result.request_id==pending_trajectory_->traj_id_ &&
         result.request_mode==traj_utils::msg::Bspline::AT_TIME && result.accepted &&
         result.pending_id==pending_trajectory_->traj_id_ &&
@@ -1148,7 +1148,7 @@ namespace ego_planner
     if(!pendingConfirmed() || replacement_candidate_ || pending_withdrawal_requested_s_ ||
         !planning_budget_ || planning_budget_->expired() ||
         pending_trajectory_->start_time_.seconds()-node_->now().seconds()<.1) return false;
-    replacement_pending_id_=pending_trajectory_->traj_id_;pending_branch_proof_=true;
+    replacement_pending_id_=pending_trajectory_->traj_id_;
     setPlanningConnection(pending_trajectory_->start_time_,local_data_.traj_id_);
     return true;
   }
@@ -1167,12 +1167,12 @@ namespace ego_planner
     server_feedback_id_ = trajectory_id;
     if(replacement_candidate_ && replacement_candidate_->traj_id_==trajectory_id) {
       local_data_=*replacement_candidate_;replacement_candidate_.reset();pending_trajectory_.reset();
-      confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
+      confirmed_pending_id_=replacement_pending_id_=-1;
       pending_withdrawal_requested_s_.reset();return;
     }
     if(pending_trajectory_ && pending_trajectory_->traj_id_==trajectory_id) {
       local_data_=*pending_trajectory_; pending_trajectory_.reset();
-      replacement_candidate_.reset();confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
+      replacement_candidate_.reset();confirmed_pending_id_=replacement_pending_id_=-1;
       pending_withdrawal_requested_s_.reset();
       RCLCPP_INFO(node_->get_logger(),"Trajectory %d executing at its scheduled connection",trajectory_id);
     } else if(pending_trajectory_ && pending_withdrawal_requested_s_ &&
@@ -1197,7 +1197,7 @@ namespace ego_planner
 
   void EGOPlannerManager::discardUnpublishedTrajectory(const LocalTrajData& predecessor) {
     if(replacement_candidate_) { replacement_candidate_.reset();replacement_pending_id_=-1; }
-    else if(pending_trajectory_) {pending_trajectory_.reset();confirmed_pending_id_=-1;pending_branch_proof_=false;}
+    else if(pending_trajectory_) {pending_trajectory_.reset();confirmed_pending_id_=-1;}
     else local_data_=predecessor;
     pending_withdrawal_requested_s_.reset();
     last_plan_failure_=planning_budget_ && planning_budget_->expired() ? PlanFailure::Budget : PlanFailure::Connection;
@@ -1876,7 +1876,7 @@ namespace ego_planner
           next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
           candidate.traj_id_=next_trajectory_id_;
           if(replacing) replacement_candidate_=candidate;
-          else {pending_trajectory_=candidate;confirmed_pending_id_=-1;pending_branch_proof_=false;}
+          else {pending_trajectory_=candidate;confirmed_pending_id_=-1;}
           pending_withdrawal_requested_s_.reset();
         } else updateTrajInfo(curve,node_->now());
         return true;
@@ -2082,7 +2082,7 @@ namespace ego_planner
           auto latest=view;latest.time_s=commit_time;
           if(!assessCheckedStopConnection(stop,latest,budget).executable()) return false;
           next_trajectory_id_=stop.traj_id_;pending_trajectory_=stop;pending_withdrawal_requested_s_.reset();
-          confirmed_pending_id_=-1;pending_branch_proof_=true;
+          confirmed_pending_id_=-1;
           return true;
         },budget);
         if(gate==GridMap::CorridorCommit::Committed) {
@@ -2301,7 +2301,7 @@ namespace ego_planner
   void EGOPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now)
   {
     pending_trajectory_.reset();replacement_candidate_.reset();
-    confirmed_pending_id_=replacement_pending_id_=-1;pending_branch_proof_=false;
+    confirmed_pending_id_=replacement_pending_id_=-1;
     pending_withdrawal_requested_s_.reset();
     next_trajectory_id_=std::max(next_trajectory_id_,local_data_.traj_id_)+1;
     local_data_.start_time_ = time_now;

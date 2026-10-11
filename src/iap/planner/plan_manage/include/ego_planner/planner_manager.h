@@ -140,7 +140,7 @@ namespace ego_planner
                                           bool check_connection = true,
                                           const GridMotionContext* bound_motion = nullptr, PlanningBudget::Ptr budget = {});
     TrajectoryAssessment assessRemainingTrajectory(double now_s,
-                                                   bool pending_checked_stop = false, bool include_advisory = true, PlanningBudget::Ptr budget = {});
+                                                   bool include_advisory = true, PlanningBudget::Ptr budget = {});
     // Forensic scalar query, tied to the assessed epoch/time/motion. Missing
     // proof returns nullopt and never substitutes the current live map.
     std::optional<GridPlanningCell> queryAssessmentCell(
@@ -355,7 +355,6 @@ namespace ego_planner
     // branches remain checked until a matching result/command resolves identity.
     std::optional<LocalTrajData> replacement_candidate_;
     int confirmed_pending_id_=-1, replacement_pending_id_=-1;
-    bool pending_branch_proof_=false;
     std::optional<double> pending_withdrawal_requested_s_;
     std::optional<rclcpp::Time> connection_time_;
     int connection_predecessor_ = -1;

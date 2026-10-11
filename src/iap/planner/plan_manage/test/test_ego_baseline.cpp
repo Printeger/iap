@@ -238,6 +238,10 @@ struct EGOReplanFSMTestAccess {
   static Eigen::Vector3d target(const EGOReplanFSM& fsm) { return fsm.local_target_pt_; }
 };
 struct EGOPlannerManagerTestAccess {
+  static void capturedPending(EGOPlannerManager& manager,const LocalTrajData& data) {
+    manager.pending_trajectory_=data;
+    manager.confirmed_pending_id_=-1;
+  }
   static void measuredOdometry(EGOPlannerManager& manager,nav_msgs::msg::Odometry::ConstSharedPtr odom) {
     std::atomic_store(&manager.risk_odom_,std::move(odom));
   }
@@ -1184,7 +1188,7 @@ TEST(EgoBaseline, ExpiredSharedBudgetCannotStartRemainingBranchCapture) {
   auto node=makeNode();ego_planner::EGOPlannerManager manager;
   manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
   manager.local_data_.start_time_=node->now();manager.local_data_.traj_id_=7;
-  const auto result=manager.assessRemainingTrajectory(node->now().seconds(),true,false,std::make_shared<PlanningBudget>(0.));
+  const auto result=manager.assessRemainingTrajectory(node->now().seconds(),false,std::make_shared<PlanningBudget>(0.));
   EXPECT_TRUE(result.budget_exhausted);EXPECT_FALSE(result.completed);EXPECT_FALSE(result.executable());
   EXPECT_FALSE(result.physical_epoch);EXPECT_EQ(result.sampled_points,0u);EXPECT_EQ(result.trajectory_id,7);
 }
@@ -2332,7 +2336,7 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
       EXPECT_FALSE(manager.assessRemainingTrajectory(100.).executing_tail_executable);
       EXPECT_FALSE(manager.requestPendingWithdrawal());
       GridMapTestAccess::clearObserved(*manager.grid_map_,stop.position_traj_.evaluateDeBoorT(stop.duration_));
-      const auto revoked=manager.assessRemainingTrajectory(100.,true,false);
+      const auto revoked=manager.assessRemainingTrajectory(100.,false);
       EXPECT_FALSE(revoked.executable());
       EXPECT_EQ(revoked.trajectory_id,stop.traj_id_)
           << "Report the actual B branch failure, rather than the old unreachable A far tail";
@@ -2340,6 +2344,102 @@ TEST(EgoBaseline, KnownUnsafeTailCannotAuthorizeScheduledConnection) {
     }
     EXPECT_LT(stop.velocity_traj_.evaluateDeBoorT(stop.duration_).norm(),1e-9);
   }
+}
+
+TEST(EgoBaseline, CapturedConfirmedPendingExcludesUnexecutedFarTail) {
+  const char* path=std::getenv("IAP_PENDING_COUNTEREXAMPLE");
+  if(!path) GTEST_SKIP() << "requires frozen active33/pending34 epoch and original wire/feedback";
+  boost::property_tree::ptree input,saved,state;
+  boost::property_tree::read_json(path,input);
+  const std::filesystem::path snapshot_path=input.get<std::string>("snapshot");
+  boost::property_tree::read_json(snapshot_path.string(),saved);
+  boost::property_tree::read_json(input.get<std::string>("state"),state);
+  const auto point=[](const auto& values) {Eigen::Vector3d p;int i=0;
+    for(const auto& item:values) p[i++]=item.second.template get_value<double>();return p;};
+  const auto stamp=[](const auto& value) {return rclcpp::Time(value.template get<int64_t>("sec")*1000000000LL+
+      value.template get<int64_t>("nanosec"),RCL_ROS_TIME);};
+  const auto wire=[&](const auto& value) {
+    auto msg=std::make_shared<traj_utils::msg::Bspline>();
+    msg->order=value.template get<int>("order");msg->traj_id=value.template get<int>("traj_id");
+    msg->start_mode=value.template get<int>("start_mode");msg->predecessor_id=value.template get<int>("predecessor_id");
+    msg->start_time=stamp(value.get_child("start_time"));
+    for(const auto& item:value.get_child("knots")) msg->knots.push_back(item.second.template get_value<double>());
+    for(const auto& item:value.get_child("pos_pts")) {geometry_msgs::msg::Point p;
+      p.x=item.second.template get<double>("x");p.y=item.second.template get<double>("y");p.z=item.second.template get<double>("z");msg->pos_pts.push_back(p);}
+    return msg;
+  };
+  const auto data=[&](const auto& msg) {
+    ego_planner::LocalTrajData d;Eigen::MatrixXd q(3,msg->pos_pts.size());
+    for(size_t i=0;i<msg->pos_pts.size();++i) q.col(i)=Eigen::Vector3d(msg->pos_pts[i].x,msg->pos_pts[i].y,msg->pos_pts[i].z);
+    d.position_traj_=ego_planner::UniformBspline(q,3,msg->knots[4]-msg->knots[3]);
+    d.position_traj_.setKnot(Eigen::Map<const Eigen::VectorXd>(msg->knots.data(),msg->knots.size()));
+    d.velocity_traj_=d.position_traj_.getDerivative();d.acceleration_traj_=d.velocity_traj_.getDerivative();
+    d.start_time_=stamp(input.get_child("wires."+std::to_string(msg->traj_id)+".start_time"));
+    d.duration_=d.position_traj_.getTimeSum();d.traj_id_=msg->traj_id;return d;
+  };
+  auto node=makeNode(false,1.,false,false,.1,.5);
+  auto* clock=node->get_clock()->get_clock_handle();
+  ASSERT_EQ(rcl_enable_ros_time_override(clock),RCL_RET_OK);
+  const double now=saved.get<double>("curve_evaluation_time_s");
+  ASSERT_EQ(rcl_set_ros_time_override(clock,std::llround(now*1e9)),RCL_RET_OK);
+  auto owner=std::make_unique<ego_planner::EGOPlannerManager>();auto& manager=*owner;
+  manager.initPlanModules(node,std::make_shared<ego_planner::PlanningVisualization>(node));
+  GridMapFailureSnapshot snapshot;snapshot.origin=point(saved.get_child("origin_m"));
+  snapshot.max_boundary=point(saved.get_child("max_boundary_m"));snapshot.dimensions=point(saved.get_child("dimensions")).cast<int>();
+  snapshot.resolution_m=saved.get<double>("resolution_m");snapshot.generation=saved.get<uint64_t>("generation");
+  snapshot.cloud_stamp_s=saved.get<double>("cloud_stamp_s");snapshot.frame_id=saved.get<std::string>("frame_id");
+  snapshot.virtual_ceiling_height_m=saved.get<double>("virtual_ceiling_height_m");snapshot.inflation_radius_m=saved.get<double>("inflation_radius_m");
+  std::ifstream cells(snapshot_path.parent_path()/saved.get<std::string>("cell_flags_file"),std::ios::binary);
+  snapshot.cell_flags.assign(std::istreambuf_iterator<char>(cells),{});
+  ego_planner::EGOPlannerManagerTestAccess::replayMap(manager,GridMap::fromFailureSnapshot(snapshot));
+  const auto actual=point(state.get_child("glio_position_m"));
+  ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,saved.get<double>("motion_stamp_s"),saved.get<int>("motion_quality"),actual);
+  ego_planner::EGOPlannerManagerTestAccess::setMotionError(manager,saved.get<double>("motion_error_proxy_m"));
+  auto a=wire(input.get_child("wires.33")),b=wire(input.get_child("wires.34"));
+  manager.local_data_=data(a);ego_planner::EGOPlannerManagerTestAccess::capturedPending(manager,data(b));
+  server_node=node;command_frame="map";receive_traj_=false;pending_traj.reset();highest_accepted_trajectory_id=-1;
+  pos_cmd_pub=node->create_publisher<quadrotor_msgs::msg::PositionCommand>("captured_pending_command",10);
+  trajectory_curve_pub=node->create_publisher<visualization_msgs::msg::Marker>("captured_pending_curve",10);
+  bsplineCallback(a);bsplineCallback(b);
+  ASSERT_TRUE(last_feedback.accepted);ASSERT_EQ(last_feedback.pending_id,34);
+  const auto unconfirmed=manager.assessRemainingTrajectory(now,false);
+  EXPECT_FALSE(unconfirmed.executable());
+  auto wrong=last_feedback;wrong.pending_id=35;manager.observeServerResult(wrong);
+  EXPECT_FALSE(manager.pendingConfirmed());
+  wrong=last_feedback;wrong.active_id=32;manager.observeServerResult(wrong);
+  EXPECT_FALSE(manager.pendingConfirmed());
+  wrong=last_feedback;wrong.effective_time=rclcpp::Time(std::llround((now+.1)*1e9));manager.observeServerResult(wrong);
+  EXPECT_FALSE(manager.pendingConfirmed());
+  manager.observeServerResult(last_feedback);ASSERT_TRUE(manager.pendingConfirmed());
+  auto pending_curve=data(b).position_traj_;
+  pending_curve.setPhysicalLimits(manager.pp_.max_vel_,manager.pp_.max_acc_,manager.pp_.feasibility_tolerance_);
+  double ratio=1.;ASSERT_TRUE(pending_curve.checkFeasibility(ratio,false));
+  const auto branch=manager.inspectPendingStopProof(now,nullptr);
+  const auto checked=manager.assessRemainingTrajectory(now,false);
+  std::cout<<"CAPTURED_PENDING active=33 pending=34 generation="<<snapshot.generation
+      <<" full_tail="<<checked.executing_tail_executable<<" branch="<<branch.executable()
+      <<" branch_reason="<<gridExecutionReasonName(branch.execution_reason)<<" branch_owner="<<branch.trajectory_id
+      <<" supervision="<<checked.executable()<<" first="<<checked.first_execution_time_s<<std::endl;
+  ASSERT_TRUE(branch.executable());EXPECT_FALSE(checked.executing_tail_executable);
+  EXPECT_TRUE(checked.executable()) << "confirmed checked A-to-seam and B must not inherit A far-tail rejection";
+  EXPECT_FALSE(manager.requestPendingWithdrawal());
+  ego_planner::EGOReplanFSM fsm;ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,actual,{18,0,1.5});
+  ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,node->create_publisher<traj_utils::msg::Bspline>("captured_pending_request",10));
+  EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,saved.get<double>("motion_stamp_s")));
+  GridMapTestAccess::clearObserved(*manager.grid_map_,data(b).position_traj_.evaluateDeBoorT(data(b).duration_));
+  const auto pending_rejected=manager.assessRemainingTrajectory(now,false);
+  EXPECT_FALSE(pending_rejected.executable());EXPECT_EQ(pending_rejected.trajectory_id,34);
+  ego_planner::EGOPlannerManagerTestAccess::replayMap(manager,GridMap::fromFailureSnapshot(snapshot));
+  GridMapTestAccess::clearObserved(*manager.grid_map_,data(a).position_traj_.evaluateDeBoorT(now-data(a).start_time_.seconds()));
+  const auto connection_rejected=manager.assessRemainingTrajectory(now,false);
+  EXPECT_FALSE(connection_rejected.executable());EXPECT_EQ(connection_rejected.trajectory_id,33);
+  ego_planner::EGOPlannerManagerTestAccess::replayMap(manager,GridMap::fromFailureSnapshot(snapshot));
+  ASSERT_EQ(rcl_set_ros_time_override(clock,stamp(input.get_child("wires.34.start_time")).nanoseconds()),RCL_RET_OK);
+  cmdCallbackAt(node->now());EXPECT_EQ(cmd.trajectory_id,34);
+  EXPECT_EQ(manager.local_data_.traj_id_,33); // Receiving B never meant active.
+  manager.observeExecutingTrajectory(cmd.trajectory_id,rclcpp::Time(cmd.header.stamp).seconds());
+  EXPECT_EQ(manager.local_data_.traj_id_,34);EXPECT_FALSE(manager.hasPendingTrajectory());
+  pending_traj.reset();pos_cmd_pub.reset();trajectory_curve_pub.reset();server_node.reset();
 }
 
 TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof) {
@@ -2480,7 +2580,7 @@ TEST(EgoBaseline, CapturedDistantRevocationNeedsPhysicalBridgeAndFutureStopProof
       ASSERT_FALSE(stopped);ASSERT_EQ(accepted_ids.size(),1u);
       const int backup=accepted_ids.front();
       EXPECT_EQ(manager.planningBudget()->searches.calls,0u);
-      EXPECT_FALSE(manager.assessRemainingTrajectory(now,true,false).executable());
+      EXPECT_FALSE(manager.assessRemainingTrajectory(now,false).executable());
       EXPECT_FALSE(manager.requestPendingWithdrawal());
       ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::stop(fsm,actual,actual_velocity));
       for(int i=0;i<100 && accepted_ids.size()<2;++i) {rclcpp::spin_some(node);std::this_thread::sleep_for(std::chrono::milliseconds(1));}
@@ -4176,14 +4276,14 @@ TEST(EgoBaseline, FallingQualifiedClearanceRequestsProtectionBeforeRevocation) {
   ego_planner::EGOReplanFSMTestAccess::enableProtectionMargin(fsm);
   GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.85,1.05}},100.,start);
   GridMapTestAccess::markObserved(*manager.grid_map_);
-  ASSERT_TRUE(manager.assessRemainingTrajectory(100.,false,false).executable());
+  ASSERT_TRUE(manager.assessRemainingTrajectory(100.,false).executable());
   EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.));
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::executing(fsm));
   ASSERT_EQ(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),100200000000LL),RCL_RET_OK);
   GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.65,1.05}},100.2,start);
   GridMapTestAccess::markObserved(*manager.grid_map_);
   ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.2,1,start);
-  ASSERT_TRUE(manager.assessRemainingTrajectory(100.2,false,false).executable());
+  ASSERT_TRUE(manager.assessRemainingTrajectory(100.2,false).executable());
   EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.2));
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm))
       << "Falling physical reserve must request a qualified replacement before revocation";
@@ -4194,7 +4294,7 @@ TEST(EgoBaseline, FallingQualifiedClearanceRequestsProtectionBeforeRevocation) {
   GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.45,1.05}},100.4,start);
   GridMapTestAccess::markObserved(*manager.grid_map_);
   ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.4,1,start);
-  ASSERT_FALSE(manager.assessRemainingTrajectory(100.4,false,false).executable());
+  ASSERT_FALSE(manager.assessRemainingTrajectory(100.4,false).executable());
   EXPECT_TRUE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.4));
   EXPECT_FALSE(manager.planCheckedBrake(start,Eigen::Vector3d(.2,0,0),zero));
 }
@@ -4269,7 +4369,7 @@ void checkDecliningReserveProtection(bool recovered) {
   GridMapTestAccess::input(*manager.grid_map_,{{-1.95,.65,1.05}},100.2,current);
   GridMapTestAccess::markObserved(*manager.grid_map_);
   ego_planner::EGOPlannerManagerTestAccess::setMotion(manager,100.2,1,current);
-  ASSERT_TRUE(manager.assessRemainingTrajectory(100.2,false,false).executable());
+  ASSERT_TRUE(manager.assessRemainingTrajectory(100.2,false).executable());
   EXPECT_FALSE(ego_planner::EGOReplanFSMTestAccess::supervise(fsm,100.2));
   ASSERT_TRUE(ego_planner::EGOReplanFSMTestAccess::replanning(fsm));
   if(recovered) {
@@ -4293,7 +4393,7 @@ void checkDecliningReserveProtection(bool recovered) {
   ASSERT_EQ(wire.size(),1u);
   EXPECT_EQ(wire[0].start_mode,traj_utils::msg::Bspline::IMMEDIATE);
   EXPECT_EQ(wire[0].traj_id,manager.local_data_.traj_id_);
-  EXPECT_TRUE(manager.assessRemainingTrajectory(100.2,false,false).executable());
+  EXPECT_TRUE(manager.assessRemainingTrajectory(100.2,false).executable());
   EXPECT_TRUE(manager.local_data_.position_traj_.evaluateDeBoorT(0).isApprox(current,1e-8));
   EXPECT_TRUE(manager.local_data_.velocity_traj_.evaluateDeBoorT(0).isApprox(current_velocity,1e-8));
   EXPECT_LT(manager.local_data_.velocity_traj_.evaluateDeBoorT(manager.local_data_.duration_).norm(),1e-8);

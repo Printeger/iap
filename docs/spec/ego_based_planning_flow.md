@@ -1,5 +1,23 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
+本轮 pending／来源排序追加 Goal 正在实现，基线 `1d1b1a6b`，工作树与安装字节一致。
+原 active33／pending34 在 gen637 的定向反例：A 完整尾段拒绝，但 A 至 ts 和完整 B 合格，
+原普通 pending 监督却拒绝并进入急停（`log/20261011T044535Z_421/runtime/pending_red.log`）。
+`assessRemainingTrajectory(now, include_advisory, budget)` 统一以 server 确认身份选择分支，
+删除 caller 的 pending_checked_stop 参数与构造标签 pending_branch_proof；已确认且未撤销的
+普通／保护 pending 同用原 assessCheckedStopConnection。完整 A 尾段仍单独检查并决定取消
+资格；未确认、接缝／连接／pending／motion／tracking／peer 失败仍拒绝。原确认和实际
+命令权威、原预算与许可阈值保持；超过 ts 缺少实际激活反馈不推定已执行。
+等待 B 确认因分支失效退出时，原发布动作不能清除保护请求；同预算复用
+inspectPendingStopProof 确认失效并返回 false，保留队列身份，走原受检保护入口。
+当前状态 IMPLEMENTED，现场待验证。真实 A33/B34 反例红→绿、11项直接执行回归、2项
+server 回归通过；原冻结 A3 的 success／rejected／lost／feedback_lost／backup_feedback_lost／
+backup_revoked 六分支通过，失败替换实际执行 B4，撤销资格后实际激活受检保护5。
+`log/20261011T044535Z_421/runtime/pending_atomic_*` 保留首轮等待失效 red 及修复 green。
+这些是固定 epoch 原生调用链证据，不追认历史区间，也不授予未来地图持续保证。B 排序尚未取得
+独立支持，C 前置未通过、未启动新收益对照。固定地图局部退化代理不含历史绝对漂移、
+全故障或认证 PL。
+
 风险引导轻量实证闭环已完成，包含不通过结论；起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
 规划实验提交`040c5ed7`与离线资格修复`fb4980c4`分别验证，未修改生产融合模型或风险权重。
 记录权威为`log/20261011T022904Z_324`；上一轮报告、输入及失效记录保持只读。

@@ -703,7 +703,7 @@ namespace ego_planner
         // unless the original checked-brake path authorizes a replacement.
         if(protecting && !planner_manager_->hasPendingTrajectory() && !budget->expired()) {
           const auto checked=planner_manager_->assessRemainingTrajectory(
-              node_->now().seconds(),false,false,budget);
+              node_->now().seconds(),false,budget);
           const auto input=std::make_pair(checked.evaluated_motion.stamp_s,checked.evaluated_generation);
           const auto& old=planner_manager_->local_data_;
           const auto elapsed=std::clamp(checked.evaluation_time_s-old.start_time_.seconds(),0.,old.duration_);
@@ -964,8 +964,7 @@ namespace ego_planner
       if (elapsed >= info.duration_) return;
       const auto scheduled=planner_manager_->publicationTrajectory();
       recordExecutionEvent("physical_check_begin",scheduled.traj_id_,scheduled.start_time_.seconds(),NAN,checked_active_id);
-      auto assessment = planner_manager_->assessRemainingTrajectory(now,
-          exec_state_==EMERGENCY_STOP && !flag_escape_emergency_);
+      auto assessment = planner_manager_->assessRemainingTrajectory(now);
       recordExecutionEvent("physical_check_end",scheduled.traj_id_,scheduled.start_time_.seconds(),NAN,checked_active_id,assessment.trajectory_id);
       applyLatestCommandFeedback();
       if(identity_changed()) continue;
@@ -1481,12 +1480,27 @@ namespace ego_planner
     recordExecutionEvent("brake_publication_sent",info->traj_id_,info->start_time_.seconds(),
         NAN,planner_manager_->local_data_.traj_id_,-1,&p,&v,&a);
     bspline_pub_->publish(bspline);
-    if(bspline.start_mode==traj_utils::msg::Bspline::AT_TIME &&
-        waitForServerResult(bspline.traj_id,bspline.start_mode,budget) &&
+    const bool confirmed=bspline.start_mode==traj_utils::msg::Bspline::AT_TIME &&
+        waitForServerResult(bspline.traj_id,bspline.start_mode,budget);
+    if(bspline.start_mode==traj_utils::msg::Bspline::AT_TIME && !confirmed &&
+        planner_manager_->hasPendingTrajectory() && !budget->expired()) {
+      // Waiting can end because the physical branch was revoked before the
+      // acknowledgment arrived. Publishing B is then no protection success.
+      // Reuse the same inspection and budget; uncertainty cannot cancel B or
+      // restore A's far tail, and the checked-protection request stays active.
+      const auto branch=planner_manager_->inspectPendingStopProof(node_->now().seconds(),budget);
+      if(!branch.executable() && !branch.budget_exhausted) {
+        flag_escape_emergency_=true;
+        recordExecutionEvent("pending_protection_proof_lost",branch.trajectory_id,
+            bspline.start_time.sec+bspline.start_time.nanosec*1e-9,NAN,predecessor.traj_id_,bspline.traj_id);
+        return false;
+      }
+    }
+    if(confirmed &&
         planner_manager_->pendingConfirmed() && !budget->expired() && budget->searchRemaining()>0. &&
         planner_manager_->local_data_.traj_id_==predecessor.traj_id_) {
       // B has reached the ONLY execution owner before spending anything on C.
-      const auto checked=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false,budget);
+      const auto checked=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),false,budget);
       if(checked.budget_exhausted) {
         recordExecutionEvent("backup_replacement_budget_exhausted",bspline.traj_id,info->start_time_.seconds(),NAN,predecessor.traj_id_);
         return true; // Confirmed B stays in place; no second budget for C.
@@ -1511,7 +1525,7 @@ namespace ego_planner
         const auto current=PlanningBudget::Clock::now();
         if(current<next_check) return true;
         next_check=current+supervision_period;
-        const auto branch=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),true,false,budget);
+        const auto branch=planner_manager_->assessRemainingTrajectory(node_->now().seconds(),false,budget);
         if(branch.budget_exhausted) {
           recordExecutionEvent("replacement_check_budget_exhausted",branch.trajectory_id,ts,NAN,predecessor.traj_id_);
           return false;

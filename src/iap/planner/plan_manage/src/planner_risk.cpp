@@ -820,7 +820,7 @@ EGOPlannerManager::TrajectoryAssessment EGOPlannerManager::inspectPendingStopPro
 }
 
 EGOPlannerManager::TrajectoryAssessment
-EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_stop, bool include_advisory, PlanningBudget::Ptr budget) {
+EGOPlannerManager::assessRemainingTrajectory(double now_s, bool include_advisory, PlanningBudget::Ptr budget) {
   const auto unfinished=[&]() {TrajectoryAssessment result;result.trajectory_id=local_data_.traj_id_;
     result.evaluation_time_s=node_->now().seconds();result.budget_exhausted=true;return result;};
   if(budget && budget->expired()) return unfinished();
@@ -918,9 +918,14 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool pending_checked_
     }
     return branch;
   };
-  if((pending_checked_stop || pending_branch_proof_) && pending_trajectory_ &&
+  if(pending_trajectory_ &&
       pendingConfirmed() && !pending_withdrawal_requested_s_ &&
       !executing_tail_executable) {
+    // Every published local curve ends at rest. Once the server confirms its
+    // queue identity, the checked A-to-seam -> pending branch is the actual
+    // stopping branch, including ordinary AT_TIME continuations. A planner's
+    // construction label must not restore A's excluded far tail. Cancellation
+    // still requires executing_tail_executable at its own authority seam.
     // The actual branch owns BOTH success and rejection. A failure of B must
     // not be mislabeled with A's already excluded far-tail refusal.
     assessment=in_execution_time(assessCheckedStopConnection(*pending_trajectory_,view,budget),*pending_trajectory_);
