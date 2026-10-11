@@ -27,7 +27,14 @@ motion/tracking/command时序，reason保留OK，不冒充拒绝。没有新图�
 既有GPU数据的9/17局部固定target增量求解已与独立锚点真值相对位姿及独立白化求解
 交叉核验；原stamp、50ms truth资格及缺失/拒绝保留。GPU子地图不等于Predictor注册图，
 GNSS传播参考也不同，故`local_matched_increment_v1/summary.json`不授予融合空间排序。
-需要同固定图/来源/线性化/时间的实际局部试验；不能用solver covariance当真值。
+同生产GridMap、真实采样与原IMU传播参考的局部增量诊断现已完成，冻结后新OFF4101
+保留9请求/8完整输入/8求解。工具`scripts/dev_predictor/fixed_map_increment.py CONFIG LABEL`
+只在已有run内登记离线结果；星座钟差＋位置的实际设计矩阵先核验列秩，秩不足保留
+`GNSS_POSITION_UNOBSERVABLE_AFTER_CLOCK_NUISANCE`，不输出普通有限单源协方差。
+本轮实测3行/5列反例红→绿；20个融合/LiDAR求解与H/V及排序结果逐项不变。
+这是诊断器资格修复，未改变生产模型、噪声/K/风险权重，未用已查看留出拟合。
+稀疏扫描关联与完整Predictor支持集仍不相同，共享地图/源内相关及IMU传播不确定性
+未经经验校准；不能用solver covariance当真值或授予绝对误差/95%覆盖。
 
 唯一需求基线：[IAP_Safety_Planner_Requirements_v1.1_20261009.md](IAP_Safety_Planner_Requirements_v1.1_20261009.md)，包含第 0 节连续飞行追加授权与修订后的 §9.1。
 当前追加 Goal **DEV_ACCEPTED**：冻结反例的真实执行分支、身份与原硬检查验证通过，
