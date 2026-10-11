@@ -21,9 +21,18 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
     iap::GpuMatchEvidencePacket packet;packet.capture_requested=true;packet.capture.available=true;
     packet.capture.samples.resize(128);packet.capture.original_source_count=128;
     packet.capture.original_inlier_count=128;packet.capture.sampling_stride=1;
+    packet.capture.sample_limit=128;packet.capture.source_slots=128;
     packet.owner.target_frame_id=9;packet.owner.level_id=0;
     for(int i=0;i<count;++i) {
       packet.owner.source_frame_id=i;packet.owner.source_stamp=1000.+i*.1;
+      if(i==0) {
+        packet.capture.samples.resize(iap::kGpuMatchDenseEvidenceLimit);
+        packet.capture.sample_limit=iap::kGpuMatchDenseEvidenceLimit;
+        packet.capture.original_source_count=packet.capture.original_inlier_count=packet.capture.source_slots=iap::kGpuMatchDenseEvidenceLimit;
+      } else {
+        packet.capture.samples.resize(128);packet.capture.sample_limit=128;
+        packet.capture.original_source_count=packet.capture.original_inlier_count=packet.capture.source_slots=128;
+      }
       writer.submit(packet);
     }
     auto invalid=packet;invalid.capture.samples.resize(129);
@@ -42,7 +51,7 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
   while(std::getline(ledger,line)) {
     std::vector<std::string> fields;std::stringstream stream(line);std::string value;
     while(std::getline(stream,value,',')) fields.push_back(value);
-    ASSERT_EQ(fields.size(),28u);++rows;
+    ASSERT_EQ(fields.size(),30u);++rows;
     EXPECT_EQ(std::stoull(fields[0]),rows);EXPECT_EQ(std::stoll(fields[1]),rows-1);
     if(fields[8]=="1") accepted.insert(std::stoull(fields[0]));
   }
@@ -51,7 +60,7 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
   while(std::getline(raw,line)) {
     const auto packet=Json::parse(line);const auto id=packet["request_id"].get<std::uint64_t>();
     EXPECT_TRUE(exported.insert(id).second);EXPECT_EQ(packet["source_frame_id"],id-1);
-    EXPECT_EQ(packet["samples"].size(),128u);
+    EXPECT_EQ(packet["samples"].size(),id==1 ? iap::kGpuMatchDenseEvidenceLimit : 128u);
   }
   EXPECT_EQ(exported,accepted);EXPECT_EQ(exported.size(),manifest["written"].get<std::size_t>());
   EXPECT_THROW(iap::GpuMatchEvidenceWriter duplicate(logs),std::runtime_error);

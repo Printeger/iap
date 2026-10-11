@@ -99,6 +99,7 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   icp_quality_stride = std::max(1, config.param<int>("odometry_estimation", "icp_quality_stride", 1));
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
   enable_gpu_match_evidence = config.param<bool>("odometry_estimation", "enable_gpu_match_evidence", false);
+  enable_gpu_match_dense_scan = config.param<bool>("odometry_estimation", "enable_gpu_match_dense_scan", false);
   icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
                                                   "iap_icp.csv");
   if (const auto* run_logs = RunLogManager::get_if_initialized()) {
@@ -287,8 +288,19 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
       gpu_evidence_writer_->submit(std::move(packet));
     }
   };
-  if(gpu_evidence_writer_) for(const auto& f:vgicp_factors)
-    static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get())->request_evidence();
+  if(gpu_evidence_writer_) {
+    gtsam_points::IapObservedVGICPFactorGPU* dense_factor=nullptr;
+    if(params->enable_gpu_match_dense_scan) for(const auto& f:vgicp_factors) {
+      auto* gpu=static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get());
+      const auto owner=gpu->get_evidence_owner();
+      if(owner.target_is_fixed && owner.level_id==0 &&
+         (!dense_factor || owner.target_frame_id>dense_factor->get_evidence_owner().target_frame_id)) dense_factor=gpu;
+    }
+    for(const auto& f:vgicp_factors) {
+      auto* gpu=static_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get());
+      gpu->request_evidence(gpu==dense_factor ? iap::kGpuMatchDenseEvidenceLimit : iap::kGpuMatchEvidenceLimit);
+    }
+  }
   try {
     factor_set.linearize(values);
   } catch(const std::exception& e) {

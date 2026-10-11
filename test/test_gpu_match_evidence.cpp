@@ -111,6 +111,19 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     }
     EXPECT_TRUE(multi_point_voxel);
     if(capture.sampling_stride==1) EXPECT_NEAR(sample_cost,original_error,1e-5*std::max(1.,std::abs(original_error)));
+    observed->request_evidence(iap::kGpuMatchDenseEvidenceLimit);factor_set.linearize(values);
+    const auto dense=observed->take_evidence();ASSERT_TRUE(dense.available);
+    EXPECT_EQ(dense.sample_limit,iap::kGpuMatchDenseEvidenceLimit);
+    EXPECT_EQ(dense.source_slots,source_count);EXPECT_EQ(dense.sampling_stride,1);
+    EXPECT_EQ(dense.samples.size(),static_cast<std::size_t>(original->num_inliers()));
+    double dense_cost=0.;std::set<int> dense_sources;
+    for(const auto& record:dense.samples) {
+      EXPECT_TRUE(dense_sources.insert(record.source_index).second);
+      dense_cost+=record.mahalanobis_squared;
+    }
+    EXPECT_NEAR(dense_cost,original_error,1e-5*std::max(1.,std::abs(original_error)));
+    const gtsam::HessianFactor dense_h(*observed->linearize(values));
+    EXPECT_TRUE(old_h.augmentedInformation().isApprox(dense_h.augmentedInformation(),1e-6));
     EXPECT_FALSE(observed->take_evidence().available);
     // Evidence is opt-in and consumed once; a new optimization cannot reuse it.
     factor_set.linearize(values);EXPECT_FALSE(observed->take_evidence().available);

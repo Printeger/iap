@@ -35,6 +35,7 @@ Json serialize(const GpuMatchEvidencePacket& p) {
     {"available",p.capture.available},{"failure_reason",p.capture.failure_reason},{"sequence",p.capture.sequence},
     {"original_source_count",p.capture.original_source_count},{"original_inlier_count",p.capture.original_inlier_count},
     {"original_cost",p.capture.original_cost},{"sampling_stride",p.capture.sampling_stride},
+    {"sample_limit",p.capture.sample_limit},{"source_slots",p.capture.source_slots},
     {"linearization_transform_row_major",row_major(p.capture.linearization_transform)},
     {"T_world_source_row_major",row_major(p.T_world_source)},{"T_world_target_row_major",row_major(p.T_world_target)},
     {"T_lidar_imu_row_major",row_major(p.T_lidar_imu)},
@@ -58,7 +59,7 @@ GpuMatchEvidenceWriter::GpuMatchEvidenceWriter(const glim::RunLogManager& logs)
     runtime_identity_="metadata/manifests/forest_runtime_identity.json";
   ledger_<<"request_id,source_frame_id,source_stamp,target_frame_id,level_id,capture_requested,available,samples,queue_accepted,failure_reason,"
     "target_stamp,target_is_fixed,voxel_resolution_m,key_count,key0,key1,gnss_frame_id,gnss_update_sequence,gnss_epoch_identity,"
-    "gnss_state_stamp,gnss_epoch_stamp,gnss_owner_matches,used_constellations,sequence,source_count,inlier_count,stride,cost\n"<<std::setprecision(17);
+    "gnss_state_stamp,gnss_epoch_stamp,gnss_owner_matches,used_constellations,sequence,source_count,inlier_count,stride,cost,sample_limit,source_slots\n"<<std::setprecision(17);
   worker_=std::thread(&GpuMatchEvidenceWriter::drain,this);
 }
 GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
@@ -83,8 +84,9 @@ GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
       {"entries",entries_},{"requested",requests_},{"available",available_},{"queue_dropped",queue_dropped_},
       {"written",written_},{"samples_written",samples_written_},{"write_failures",write_failures_},
       {"queue_limit",kQueueLimit},{"per_factor_sample_limit",kGpuMatchEvidenceLimit},
-      {"per_factor_pinned_bytes",sizeof(GpuMatchTransfer)},
-      {"per_factor_device_evidence_bytes",sizeof(GpuMatchResidual)*kGpuMatchEvidenceLimit},
+      {"dense_scan_sample_limit",kGpuMatchDenseEvidenceLimit},
+      {"per_factor_max_pinned_bytes",sizeof(GpuMatchTransfer)+sizeof(GpuMatchResidual)*(kGpuMatchDenseEvidenceLimit+kGpuMatchEvidenceLimit)},
+      {"per_factor_max_device_evidence_bytes",sizeof(GpuMatchResidual)*kGpuMatchDenseEvidenceLimit},
       {"sampling","deterministic_source_index_stride"},{"qualified_noise",false},{"qualified_motion",false}};
     std::ofstream manifest(manifest_path_);manifest<<summary.dump(2)<<'\n';manifest.flush();
     if(!manifest) throw std::runtime_error("summary write failed");
@@ -93,7 +95,9 @@ GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
   }
 }
 void GpuMatchEvidenceWriter::submit(GpuMatchEvidencePacket packet) {
-  if(packet.key_count>packet.factor_keys.size() || packet.capture.samples.size()>kGpuMatchEvidenceLimit)
+  if(packet.key_count>packet.factor_keys.size() || packet.capture.sample_limit<0 ||
+     packet.capture.sample_limit>static_cast<int>(kGpuMatchDenseEvidenceLimit) ||
+     packet.capture.samples.size()>static_cast<std::size_t>(packet.capture.sample_limit))
     throw std::invalid_argument("GPU evidence packet exceeds bounded contract");
   std::lock_guard<std::mutex> lock(mutex_);
   packet.request_id=++entries_;requests_+=packet.capture_requested;available_+=packet.capture.available;
@@ -108,7 +112,7 @@ void GpuMatchEvidenceWriter::submit(GpuMatchEvidencePacket packet) {
     <<packet.gnss_update_sequence<<','<<packet.gnss_epoch_identity<<','<<packet.gnss_state_stamp<<','
     <<packet.gnss_epoch_stamp<<','<<packet.gnss_owner_matches<<','<<csv_string(packet.used_constellations)<<','
     <<packet.capture.sequence<<','<<packet.capture.original_source_count<<','<<packet.capture.original_inlier_count<<','
-    <<packet.capture.sampling_stride<<','<<packet.capture.original_cost<<'\n';
+    <<packet.capture.sampling_stride<<','<<packet.capture.original_cost<<','<<packet.capture.sample_limit<<','<<packet.capture.source_slots<<'\n';
   if(!accepted) { ++queue_dropped_;return; }
   queue_.push_back(std::move(packet));
   cv_.notify_one();

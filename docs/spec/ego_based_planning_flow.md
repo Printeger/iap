@@ -27,6 +27,23 @@ epoch；FSM 通过原 captureRemainingFailure 保存 excluded_tail_ID 和原事�
 原生 A33/B34 回归验证原 gen637／INSUFFICIENT_CLEARANCE／首拒绝时刻保留，实际 B34
 命令与 manager 激活身份闭合（`runtime/pending_refusal_green.log`）；现场身份审计正在完成。
 
+LiDAR 排序追加验证使用已冻结的 dense_lidar_ranking_protocol_v1，独立 OFF seeds
+5101／5102／5103，每次90s，规则与区域在查看新结果前固定。诊断接口
+`capture_dense_lidar:=true`／driver `--capture-dense-lidar` 要求原 residual capture，
+仅 simulation full_stack 可用，默认关闭。原 postopt quality batch 中最新 fixed target
+level-0 因子最多16384个 source slots，其他因子保持128；不加 matching、重试、
+quality pass 或同步，不改 cost／Hessian／GNSS／规划预算。只有 stride=1 且采样数与
+原 inliers 闭合才称完整原匹配；逐请求保留 source slots、有效数、唯一 source／target
+与 queue drop，超限依然稀疏并显式标记。临时 pinned buffer 在原析构同步后释放。
+fixed_map_increment 诊断按原 source 身份逐项映射生产 primitive CSV 的原始行号，
+同时保留半径子集行号、GPU target 身份、同表面族和缺失原因；以相同冻结地图、
+原 IMU 参考、0.5m 关联及真实扫描均值解局部增量，真值仅评价。修正原子集索引
+冒充 primitive 原行号的取证错误；模型矩阵与参数未改。跨帧／共享地图／当前扫描
+自相关仍是条件限制。CUDA 原代价与 Hessian 一致性、取证异常、16384点队列压力、4项 host audit
+与48项启动接口检查通过（`log/20261011T044535Z_421/runtime/dense_*_v2.log`）；
+历史8个样本408条关联修正原行号并重建模型矩阵闭合，原排序 rho=.857 未改变。
+独立数据尚未采集，C 的排序前置未通过。
+
 风险引导轻量实证闭环已完成，包含不通过结论；起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
 规划实验提交`040c5ed7`与离线资格修复`fb4980c4`分别验证，未修改生产融合模型或风险权重。
 记录权威为`log/20261011T022904Z_324`；上一轮报告、输入及失效记录保持只读。

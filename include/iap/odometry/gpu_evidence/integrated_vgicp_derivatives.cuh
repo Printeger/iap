@@ -44,7 +44,7 @@ public:
 
   void touch_points();
 
-  void request_evidence();
+  void request_evidence(std::size_t sample_limit=iap::kGpuMatchEvidenceLimit);
   void cancel_evidence();
   iap::GpuMatchCapture take_evidence();
   void harvest_evidence();
@@ -68,9 +68,12 @@ private:
   bool evidence_requested=false, evidence_pending=false;
   bool evidence_sync_ok=false;
   int evidence_slots=0, evidence_stride=0;
+  std::size_t evidence_limit=iap::kGpuMatchEvidenceLimit, evidence_capacity=0;
   std::uint64_t evidence_sequence=0;
   iap::GpuMatchResidual* evidence_gpu=nullptr;
   iap::GpuMatchTransfer* evidence_cpu=nullptr;
+  iap::GpuMatchResidual* evidence_samples_cpu=nullptr;
+  std::vector<iap::GpuMatchResidual*> retired_evidence_samples_cpu;
   iap::GpuMatchCapture last_evidence;
   bool enable_offloading;
 

@@ -413,6 +413,18 @@ class CanonicalLaunchContractsTest(unittest.TestCase):
             self.assertTrue(captured["odometry_estimation"].pop("enable_gpu_match_evidence"))
             odometry["odometry_estimation"].pop("enable_gpu_match_evidence")
             self.assertEqual(captured,odometry) # Capture changes no quality cadence or dynamics.
+            context.launch_configurations["capture_dense_lidar"]="true"
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)):
+                runtime._setup(context)
+            dense=json.loads((run/"metadata/config/iap/config_odometry.json").read_text())
+            self.assertTrue(dense["odometry_estimation"].pop("enable_gpu_match_evidence"))
+            self.assertTrue(dense["odometry_estimation"].pop("enable_gpu_match_dense_scan"))
+            expected=json.loads(json.dumps(odometry));expected["odometry_estimation"].pop("enable_gpu_match_dense_scan")
+            self.assertEqual(dense,expected)
+            context.launch_configurations["capture_advisory_residuals"]="false"
+            with mock.patch.dict(os.environ, {"IAP_RUN_DIR": str(run)}), mock.patch.object(runtime, "get_package_share_directory", return_value=str(REPO)), self.assertRaisesRegex(RuntimeError,"dense LiDAR"):
+                runtime._setup(context)
+            context.launch_configurations.update(capture_advisory_residuals="true",capture_dense_lidar="false")
             self.assertFalse(ros["sim"]["align_planner_odom_to_truth"])
             self.assertEqual(ros["sim"]["static_planner_translation_m"],local["static_planner_translation_m"])
             self.assertIn("libplanner_local_map_extension.so",ros["extension_modules"])

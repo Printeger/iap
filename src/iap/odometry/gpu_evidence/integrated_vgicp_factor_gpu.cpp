@@ -83,7 +83,7 @@ IapObservedVGICPFactorGPU::IapObservedVGICPFactorGPU(
 
 IapObservedVGICPFactorGPU::~IapObservedVGICPFactorGPU() {}
 
-void IapObservedVGICPFactorGPU::request_evidence() { derivatives->request_evidence(); }
+void IapObservedVGICPFactorGPU::request_evidence(std::size_t sample_limit) { derivatives->request_evidence(sample_limit); }
 void IapObservedVGICPFactorGPU::cancel_evidence() { derivatives->cancel_evidence(); }
 iap::GpuMatchCapture IapObservedVGICPFactorGPU::take_evidence() { return derivatives->take_evidence(); }
 

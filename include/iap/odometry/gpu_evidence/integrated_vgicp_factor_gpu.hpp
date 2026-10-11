@@ -78,7 +78,7 @@ public:
 
   virtual ~IapObservedVGICPFactorGPU() override;
 
-  void request_evidence();
+  void request_evidence(std::size_t sample_limit=iap::kGpuMatchEvidenceLimit);
   void cancel_evidence();
   iap::GpuMatchCapture take_evidence();
   void set_evidence_owner(const iap::GpuMatchOwner& owner) { evidence_owner=owner; }

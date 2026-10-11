@@ -53,6 +53,8 @@ IapObservedVGICPDerivatives::IapObservedVGICPDerivatives(
 IapObservedVGICPDerivatives::~IapObservedVGICPDerivatives() {
   // Pending downloads own pinned memory until this stream has completed.
   if(evidence_cpu) { cudaStreamSynchronize(stream); cudaFreeHost(evidence_cpu); }
+  if(evidence_samples_cpu) cudaFreeHost(evidence_samples_cpu);
+  for(auto* retired:retired_evidence_samples_cpu) cudaFreeHost(retired);
   if(evidence_gpu) check_error << cudaFreeAsync(evidence_gpu,stream);
   check_error << cudaFreeAsync(source_inliers, stream);
   check_error << cudaFreeAsync(num_inliers_gpu, stream);
@@ -119,8 +121,10 @@ double IapObservedVGICPDerivatives::compute_error(const Eigen::Isometry3f& d_xl,
   return error;
 }
 
-void IapObservedVGICPDerivatives::request_evidence() {
+void IapObservedVGICPDerivatives::request_evidence(std::size_t sample_limit) {
   last_evidence=iap::GpuMatchCapture{}; // New requests cannot read a prior pass.
+  // Only two bounded capture modes. This changes observation, never matching.
+  evidence_limit=sample_limit>iap::kGpuMatchEvidenceLimit ? iap::kGpuMatchDenseEvidenceLimit : iap::kGpuMatchEvidenceLimit;
   evidence_requested=true;
 }
 void IapObservedVGICPDerivatives::cancel_evidence() {
@@ -133,11 +137,21 @@ void IapObservedVGICPDerivatives::begin_evidence(const Eigen::Isometry3f* linear
   evidence_sync_ok=false;
   if(!evidence_requested) return;
   evidence_requested=false;
-  if(!evidence_gpu) {
-    if(!evidence_operation(cudaMallocAsync(&evidence_gpu,sizeof(iap::GpuMatchResidual)*iap::kGpuMatchEvidenceLimit,stream),"cudaMallocAsync")) return;
-  }
   if(!evidence_cpu && !evidence_operation(cudaMallocHost(&evidence_cpu,sizeof(iap::GpuMatchTransfer)),"cudaMallocHost")) return;
-  evidence_stride=std::max(1,static_cast<int>((source->size()+iap::kGpuMatchEvidenceLimit-1)/iap::kGpuMatchEvidenceLimit));
+  if(evidence_capacity<evidence_limit) {
+    iap::GpuMatchResidual* new_cpu=nullptr;
+    if(!evidence_operation(cudaMallocHost(&new_cpu,sizeof(iap::GpuMatchResidual)*evidence_limit),"sample cudaMallocHost")) return;
+    iap::GpuMatchResidual* new_gpu=nullptr;
+    if(!evidence_operation(cudaMallocAsync(&new_gpu,sizeof(iap::GpuMatchResidual)*evidence_limit,stream),"cudaMallocAsync")) {
+      cudaFreeHost(new_cpu);return;
+    }
+    // Retain the old pinned buffer until the existing destructor sync, including
+    // a failed prior sync. No additional per-factor synchronization is allowed.
+    if(evidence_samples_cpu) retired_evidence_samples_cpu.push_back(evidence_samples_cpu);
+    if(evidence_gpu) cudaFreeAsync(evidence_gpu,stream);
+    evidence_samples_cpu=new_cpu;evidence_gpu=new_gpu;evidence_capacity=evidence_limit;
+  }
+  evidence_stride=std::max(1,static_cast<int>((source->size()+evidence_limit-1)/evidence_limit));
   evidence_slots=static_cast<int>((source->size()+evidence_stride-1)/evidence_stride);
   if(!evidence_operation(cudaMemsetAsync(evidence_gpu,0,sizeof(iap::GpuMatchResidual)*evidence_slots,stream),"cudaMemsetAsync")) return;
   if(!evidence_operation(cudaMemcpyAsync(evidence_cpu->transform_column_major,linearization_point,sizeof(Eigen::Matrix4f),cudaMemcpyDeviceToHost,stream),"transform cudaMemcpyAsync")) return;
@@ -154,7 +168,7 @@ bool IapObservedVGICPDerivatives::evidence_operation(int result, const char* ope
 }
 void IapObservedVGICPDerivatives::finish_evidence(const LinearizedSystem6* output) {
   if(!evidence_pending) return;
-  if(!evidence_operation(cudaMemcpyAsync(evidence_cpu->samples,evidence_gpu,
+  if(!evidence_operation(cudaMemcpyAsync(evidence_samples_cpu,evidence_gpu,
       sizeof(iap::GpuMatchResidual)*evidence_slots,cudaMemcpyDeviceToHost,stream),"residual cudaMemcpyAsync")) return;
   if(!evidence_operation(cudaMemcpyAsync(&evidence_cpu->inliers,&output->num_inliers,sizeof(int),cudaMemcpyDeviceToHost,stream),"inlier cudaMemcpyAsync")) return;
   evidence_operation(cudaMemcpyAsync(&evidence_cpu->cost,&output->error,sizeof(float),cudaMemcpyDeviceToHost,stream),"cost cudaMemcpyAsync");
@@ -167,8 +181,9 @@ void IapObservedVGICPDerivatives::harvest_evidence() {
   last_evidence.original_source_count=source->size();last_evidence.original_inlier_count=evidence_cpu->inliers;
   last_evidence.original_cost=evidence_cpu->cost;
   last_evidence.sampling_stride=evidence_stride;
+  last_evidence.sample_limit=evidence_limit;last_evidence.source_slots=evidence_slots;
   last_evidence.linearization_transform=Eigen::Map<const Eigen::Matrix4f>(evidence_cpu->transform_column_major);
-  for(int i=0;i<evidence_slots;++i) if(evidence_cpu->samples[i].valid) last_evidence.samples.push_back(evidence_cpu->samples[i]);
+  for(int i=0;i<evidence_slots;++i) if(evidence_samples_cpu[i].valid) last_evidence.samples.push_back(evidence_samples_cpu[i]);
   evidence_pending=false;
 }
 iap::GpuMatchCapture IapObservedVGICPDerivatives::take_evidence() {

@@ -51,6 +51,7 @@ public:
   int         icp_quality_stride = 1;             ///< Compute ICP quality every N frames; skipped frames reuse latest quality
   bool        enable_icp_csv  = false;           ///< Write per-frame ICP quality CSV
   bool        enable_gpu_match_evidence = false; ///< Opt-in actual CUDA residuals; no extra quality passes
+  bool        enable_gpu_match_dense_scan = false; ///< Latest fixed level-0 target only; bounded full source slots
   std::string icp_csv_path    = "iap_icp.csv";
   // -----------------------------------------------------------------------
 };

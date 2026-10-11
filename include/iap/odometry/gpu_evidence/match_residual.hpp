@@ -19,10 +19,10 @@ struct GpuMatchResidual {
   float mahalanobis_squared=0.f;
 };
 inline constexpr std::size_t kGpuMatchEvidenceLimit=128;
+inline constexpr std::size_t kGpuMatchDenseEvidenceLimit=16384;
 // All downloads share pinned storage; even small pageable destinations can
 // introduce an implicit per-factor synchronization in cudaMemcpyAsync.
 struct GpuMatchTransfer {
-  GpuMatchResidual samples[kGpuMatchEvidenceLimit];
   float transform_column_major[16];
   int inliers;
   float cost;
@@ -38,6 +38,7 @@ struct GpuMatchCapture {
   std::string failure_reason;
   std::uint64_t sequence=0;
   int original_source_count=0, original_inlier_count=0, sampling_stride=0;
+  int sample_limit=0, source_slots=0;
   float original_cost=0.f;
   Eigen::Matrix4f linearization_transform=Eigen::Matrix4f::Identity();
   std::vector<GpuMatchResidual> samples;

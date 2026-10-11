@@ -76,5 +76,18 @@ class ActualSampleAudit(unittest.TestCase):
                 ('epoch_stamp',1000.),('owner_matches',True),('used_constellations','CG')]:
                 changed=dict(original);changed['gnss']={**original['gnss'],field:value};raw.write_text(json.dumps(changed)+'\n')
                 with self.subTest(gnss_field=field),self.assertRaises(ValueError):audit.audit(run)
+            # Full source capture may exceed the old 128 sample cap. Its declared
+            # slots and actual reduction still have to close exactly.
+            dense={**original,"original_source_count":150,"original_inlier_count":150,
+                "sample_limit":16384,"source_slots":150,"original_cost":150*record["mahalanobis_squared"],
+                "samples":[{**record,"source_index":i} for i in range(150)]}
+            fields+=['sample_limit','source_slots']
+            row.update(source_count=150,inlier_count=150,samples=150,cost=dense['original_cost'],sample_limit=16384,source_slots=150)
+            with (run/'export/glio/gpu_match_requests.csv').open('w') as stream:
+                writer=csv.DictWriter(stream,fieldnames=fields);writer.writeheader();writer.writerow(row)
+            summary['samples_written']=150;(run/'metadata/manifests/gpu_match_evidence.json').write_text(json.dumps(summary))
+            raw.write_text(json.dumps(dense)+'\n');self.assertEqual(audit.audit(run)[0]['samples'],150)
+            dense['source_slots']=149;raw.write_text(json.dumps(dense)+'\n')
+            with self.assertRaisesRegex(ValueError,'slot ledger'):audit.audit(run)
 
 if __name__=="__main__":unittest.main()

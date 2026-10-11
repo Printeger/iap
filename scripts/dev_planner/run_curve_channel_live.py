@@ -76,10 +76,13 @@ def main():
     parser.add_argument('--capture-fork-entries',action='store_true',help='freeze physical fork entrance inputs with a read-only helper')
     parser.add_argument('--stop-after-task',action='store_true',help='stop owned jobs when the original FSM records task_reached')
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
+    parser.add_argument('--capture-dense-lidar',action='store_true',help='Capture latest fixed level-0 target source slots, max 16384')
     parser.add_argument('--gnss-seed', type=int, default=None, help='Independent simulation observation seed; all noise/planner settings retained')
     parser.add_argument('--execution-evidence-ids', default='', help='Opt-in comma-separated owning IDs; retain existing immutable final/refusal corridor evidence')
     parser.add_argument('--protection-margin-replan',action='store_true',help='Experimental early physical-reserve scheduling; keeps original hard checks and total budget')
     args = parser.parse_args()
+    if args.capture_dense_lidar and not args.capture_advisory_residuals:
+        raise ValueError('--capture-dense-lidar requires --capture-advisory-residuals')
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
@@ -153,6 +156,8 @@ def main():
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
         if args.capture_advisory_residuals:
             command.append('capture_advisory_residuals:=true')
+        if args.capture_dense_lidar:
+            command.append('capture_dense_lidar:=true')
         if args.gnss_seed is not None:
             command.append('gnss_observation_seed:=' + str(args.gnss_seed))
         if args.execution_evidence_ids:

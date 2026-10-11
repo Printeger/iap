@@ -108,8 +108,12 @@ def audit(run):
                 continue
             frames.add(p["source_frame_id"]);total_source+=p["original_source_count"];total_inliers+=p["original_inlier_count"]
             samples=p["samples"];sample_count+=len(samples)
-            if len(samples)>128 or len(samples)>p["original_inlier_count"]: raise ValueError("invalid sample bound")
-            stride=max(1,(p["original_source_count"]+127)//128)
+            if len(samples)>p.get("sample_limit",128) or len(samples)>p["original_inlier_count"]: raise ValueError("invalid sample bound")
+            limit=p.get("sample_limit",128)
+            if limit not in (128,16384): raise ValueError("invalid declared capture limit")
+            stride=max(1,(p["original_source_count"]+limit-1)//limit)
+            if "sample_limit" in p:
+                if int(row["sample_limit"])!=limit or int(row["source_slots"])!=p["source_slots"] or p["source_slots"]!=(p["original_source_count"]+stride-1)//stride: raise ValueError("capture slot ledger mismatch")
             if p["sampling_stride"]!=stride: raise ValueError("density/stride mismatch")
             sample_fractions.append(len(samples)/max(1,p["original_inlier_count"]))
             transform=np.asarray(p["linearization_transform_row_major"],float).reshape(4,4)
