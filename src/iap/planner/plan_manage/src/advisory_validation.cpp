@@ -652,8 +652,31 @@ int main(int argc,char** argv) {
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
     if(mode=="replay_metadata") {
       const auto path=log.export_path("advisory/validation/"+label+"/input.json");
-      if(std::filesystem::exists(path))throw std::runtime_error("metadata evidence exists");
-      std::filesystem::create_directories(path.parent_path());describe(in,path);return 0;
+      const auto raw_path=path.parent_path()/"raw_centers.csv";
+      const auto environment_path=path.parent_path()/"environment_centers.csv";
+      const auto source_path=path.parent_path()/"source_centers.csv";
+      if(std::filesystem::exists(path) || std::filesystem::exists(raw_path) ||
+         std::filesystem::exists(environment_path) || std::filesystem::exists(source_path))
+        throw std::runtime_error("metadata evidence exists");
+      std::filesystem::create_directories(path.parent_path());describe(in,path);
+      std::ofstream raw(raw_path),environment(environment_path),sources(source_path);
+      raw<<"x,y,z\n";environment<<"x,y,z\n";sources<<"role,frame_id,x,y,z\n";
+      const auto point_row=[&](std::ostream& stream,const Point& point) {
+        for(int axis=0;axis<3;++axis){csvNumber(stream,point[axis]);stream<<(axis==2?'\n':',');}
+      };
+      if(in.occupancy) {
+        const auto& e=*in.occupancy;
+        if(e.raw_occupied_voxel_centers)for(const auto& point:*e.raw_occupied_voxel_centers)point_row(raw,point);
+        if(e.environment_occupied_voxel_centers)for(const auto& point:*e.environment_occupied_voxel_centers)point_row(environment,point);
+        if(e.current_frame_occupied_voxel_centers)for(const auto& point:*e.current_frame_occupied_voxel_centers) {
+          sources<<"current,"<<e.current_frame_id<<',';point_row(sources,point);
+        }
+        if(e.active_window_obstacle_sources)for(const auto& source:*e.active_window_obstacle_sources)
+          if(source.occupied_voxel_centers)for(const auto& point:*source.occupied_voxel_centers) {
+            sources<<"active,"<<source.metadata.frame_id<<',';point_row(sources,point);
+          }
+      }
+      if(!raw || !environment || !sources)throw std::runtime_error("failed metadata geometry export");return 0;
     }
     // A fixture campaign's labels are reserved. Real replays use caller labels.
     if(mode=="fixture_ab" || mode=="replay_ab") {

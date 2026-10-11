@@ -5,7 +5,9 @@ metadata、当前 occupied contribution、活动窗口每个障碍来源的 meta
 contribution。原帧、时间、SE(3)、content hash、来源健康与既有 LiDAR 误差字段均原样
 保存；这些字段不新增噪声资格或运动许可。v1–v9 读取保持原字节语义，缺少障碍来源
 时保持 unavailable，不从体素或观测来源表推断完整障碍来源。
-`advisory_validation replay_metadata LABEL PAYLOAD` 仅解码并输出原 metadata；原时间
+`advisory_validation replay_metadata LABEL PAYLOAD` 仅解码并输出原 metadata、raw
+centers、原 environment centers 及分 current／active 的 source centers CSV；旧记录 source centers 留空并
+保留 unavailable。所有已有输出拒绝覆盖。原时间
 不更新，原完整 payload hash 仍是身份依据。map_source_evidence 分别报告 current
 frame、完整障碍来源是否存在及观测来源；后者不能替代前者。
 
