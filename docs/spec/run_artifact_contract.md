@@ -28,6 +28,18 @@ not count as explicit user intent.
 
 ## 2. Public configuration and allocation
 
+For sustained diagnostic campaigns, retain the unique frozen input bytes and
+their source/configuration/hash binding, every requested sample's availability
+and failure ledger, selected physical observations needed by the declared
+experiment, and baseline/candidate/final results including failures. Metadata
+alone does not replace `input.bin`. Repeated derived exports and full-frame raw
+traces are not routine deliverables; large raw capture requires a specific
+declared question and remains opt-in. Stream lossless compression for such
+traces rather than keeping expanded and compressed copies. Sample compaction
+must record selection and missing data, preserve the original denominator and
+all acceptance gates, and must not claim full-trace reproducibility. This policy
+does not authorize ordinary retention to delete protected or active runs.
+
 `IAP_RUN_ROOT` is the only user-facing persistent run-location setting. In a
 source or symlink-install workspace it defaults to `<iap source>/log`; in an
 installed package it defaults to `${XDG_STATE_HOME:-~/.local/state}/iap/log`.

@@ -9,6 +9,7 @@
 
   <depend>fmt</depend>
   <depend>spdlog</depend>
+  <depend>zlib</depend>
 
   <!-- Message generation (ROS2) -->
   <buildtool_depend condition="$ROS_VERSION == 2">rosidl_default_generators</buildtool_depend>

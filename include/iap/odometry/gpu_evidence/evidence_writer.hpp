@@ -8,6 +8,8 @@
 #include <mutex>
 #include <thread>
 
+struct gzFile_s;
+
 namespace glim { class RunLogManager; }
 namespace iap {
 struct GpuMatchEvidencePacket {
@@ -41,7 +43,8 @@ private:
   static constexpr std::size_t kQueueLimit=16;
   std::filesystem::path raw_path_, ledger_path_, manifest_path_;
   std::string runtime_identity_;
-  std::ofstream raw_, ledger_;
+  gzFile_s* raw_=nullptr;
+  std::ofstream ledger_;
   std::deque<GpuMatchEvidencePacket> queue_;
   std::mutex mutex_;
   std::condition_variable cv_;

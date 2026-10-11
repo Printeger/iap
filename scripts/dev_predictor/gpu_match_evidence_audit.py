@@ -4,6 +4,7 @@ import argparse
 import csv
 import hashlib
 import json
+import gzip
 from collections import Counter, defaultdict
 from pathlib import Path
 import sys
@@ -123,8 +124,24 @@ def audit_sample(record, transform, diagnostics=None):
     return e,whitened,mahalanobis,residual_error,covariance_error
 
 
+def gpu_raw_path(run):
+    """The producer manifest declares encoding; missing evidence stays missing."""
+    summary=json.loads((run/"metadata/manifests/gpu_match_evidence.json").read_text())
+    name=summary.get("raw", "export/glio/gpu_match_residuals.jsonl")
+    compression=summary.get("raw_compression", "none")
+    allowed={"none":"export/glio/gpu_match_residuals.jsonl",
+             "gzip":"export/glio/gpu_match_residuals.jsonl.gz"}
+    if compression not in allowed or allowed[compression]!=name:
+        raise ValueError("unsupported GPU evidence encoding or path")
+    return run/name
+
+
+def open_gpu_raw(path):
+    return gzip.open(path,"rt",encoding="utf-8") if path.suffix==".gz" else path.open()
+
+
 def audit(run):
-    raw=run/"export/glio/gpu_match_residuals.jsonl"
+    raw=gpu_raw_path(run)
     ledger=run/"export/glio/gpu_match_requests.csv"
     manifest=run/"metadata/manifests/gpu_match_evidence.json"
     summary=json.loads(manifest.read_text())
@@ -144,7 +161,7 @@ def audit(run):
     frames=set();total_source=0;total_inliers=0;sample_count=0
     source_sample_count=0;complete_source_captures=0
     arithmetic={}
-    with raw.open() as stream:
+    with open_gpu_raw(raw) as stream:
         for line in stream:
             p=json.loads(line);identity=p["request_id"]
             if p["schema"] not in ("iap_gpu_match_residual_v1", "iap_gpu_match_residual_v2") or p["model"]!="actual_cuda_postopt_quality_linearization_v1":
@@ -269,7 +286,7 @@ def main():
     axes[1].set_xlabel("Matcher covariance whitened residual (dimensionless)")
     fig.suptitle("Actual CUDA postopt diagnostic; repeated samples, noise unqualified")
     fig.tight_layout();plot=output/"actual_residuals.png";fig.savefig(plot,dpi=160);plt.close(fig)
-    files=[run/"export/glio/gpu_match_residuals.jsonl",run/"export/glio/gpu_match_requests.csv",
+    files=[gpu_raw_path(run),run/"export/glio/gpu_match_requests.csv",
            run/"metadata/manifests/gpu_match_evidence.json",result,plot,Path(__file__)]
     write_subordinate_manifest(run,"gpu_match_evidence_audit",{"command":sys.argv,"result":report,
         "sha256":{str(p):sha(p) for p in files}})

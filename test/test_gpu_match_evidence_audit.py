@@ -6,6 +6,7 @@ import csv
 import json
 import tempfile
 import os
+import gzip
 
 path=Path(__file__).resolve().parents[1]/"scripts/dev_predictor/gpu_match_evidence_audit.py"
 spec=importlib.util.spec_from_file_location("gpu_audit",path)
@@ -114,6 +115,19 @@ class ActualSampleAudit(unittest.TestCase):
                 writer=csv.DictWriter(stream,fieldnames=fields);writer.writeheader();writer.writerow(row)
             raw=run/'export/glio/gpu_match_residuals.jsonl';raw.write_text(json.dumps(original)+'\n')
             self.assertEqual(audit.audit(run)[0]['samples'],1)
+            baseline=audit.audit(run)[0]
+            compressed=raw.with_suffix('.jsonl.gz')
+            summary.update(raw='export/glio/gpu_match_residuals.jsonl.gz',raw_compression='gzip')
+            (run/'metadata/manifests/gpu_match_evidence.json').write_text(json.dumps(summary))
+            # An old expanded file must not conceal a missing declared archive.
+            with self.assertRaises(FileNotFoundError):audit.audit(run)
+            encoded=gzip.compress(raw.read_bytes(),compresslevel=1)
+            compressed.write_bytes(encoded)
+            self.assertEqual(audit.audit(run)[0],baseline)
+            compressed.write_bytes(encoded[:-8])
+            with self.assertRaises((EOFError,OSError)):audit.audit(run)
+            summary.pop('raw');summary.pop('raw_compression')
+            (run/'metadata/manifests/gpu_match_evidence.json').write_text(json.dumps(summary))
             for field,value in [('source_stamp',1002.),('target_stamp',1001.),('level_id',1),('capture_requested',False),
                 ('failure_reason','borrowed'),('target_is_fixed',True),('voxel_resolution_m',1.),('factor_keys',[0,1]),('sequence',2)]:
                 changed=dict(original);changed[field]=value;raw.write_text(json.dumps(changed)+'\n')

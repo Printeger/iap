@@ -7,6 +7,7 @@
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <zlib.h>
 
 TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw) {
   std::string pattern=(std::filesystem::temp_directory_path()/"iap_gpu_writer_XXXXXX").string();
@@ -66,8 +67,16 @@ TEST(GpuMatchEvidenceWriter, BoundedPressureRetainsEveryRequestAndDrainsOwnedRaw
     if(fields[8]=="1") accepted.insert(std::stoull(fields[0]));
   }
   EXPECT_EQ(rows,count);
-  std::ifstream raw(logs.export_path("glio/gpu_match_residuals.jsonl"));
-  while(std::getline(raw,line)) {
+  EXPECT_EQ(manifest["raw"],"export/glio/gpu_match_residuals.jsonl.gz");
+  EXPECT_EQ(manifest["raw_compression"],"gzip");
+  EXPECT_FALSE(std::filesystem::exists(logs.export_path("glio/gpu_match_residuals.jsonl")));
+  gzFile raw=gzopen(logs.export_path("glio/gpu_match_residuals.jsonl.gz").c_str(),"rb");
+  ASSERT_NE(raw,nullptr);
+  std::string decoded;char block[65536];int bytes;
+  while((bytes=gzread(raw,block,sizeof(block)))>0) decoded.append(block,bytes);
+  EXPECT_EQ(bytes,0);EXPECT_EQ(gzclose(raw),Z_OK);
+  std::istringstream raw_lines(decoded);
+  while(std::getline(raw_lines,line)) {
     const auto packet=Json::parse(line);const auto id=packet["request_id"].get<std::uint64_t>();
     EXPECT_TRUE(exported.insert(id).second);EXPECT_EQ(packet["source_frame_id"],id-1);
     EXPECT_EQ(packet["samples"].size(),id==1 ? iap::kGpuMatchDenseEvidenceLimit : 128u);

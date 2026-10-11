@@ -47,7 +47,8 @@ create_factors绑定actual source/target frame、原stamp、fixed/unary、level/
 GNSS finish先于该pass；仅实际frame/stamp相符标owner_matches，其他保留unmatched。
 所有state/epoch原时刻及NOT_PROPAGATED保持；无GNSS不借旧包授予资格。
 
-共享RunLogManager导出export/glio/gpu_match_residuals.jsonl（大样本仅后台写）和
+共享RunLogManager导出export/glio/gpu_match_residuals.jsonl.gz（大样本仅后台写、
+gzip level 1无损流式压缩，不生成展开副本）和
 小型buffered gpu_match_requests.csv身份账本。单odometry producer、后台worker
 最多16包×每factor128样本；queue满只丢raw并逐请求记录queue_accepted=false，
 保留失败原因、source/target原时刻、fixed/voxel、factor keys、GNSS epoch/update身份及样本分母。
@@ -55,6 +56,10 @@ GNSS finish先于该pass；仅实际frame/stamp相符标owner_matches，其他�
 不增加匹配／重试，失败批次不删失，也不让未消费请求进入下一轮。worker异常/IO失败单列，不算有效证据。
 析构drain、flush后写metadata/manifests/gpu_match_evidence.json；只有run owner登记
 primary manifest。原始产物已有时拒绝覆盖，opt-in无shared resolver则启动拒绝。
+manifest的raw及raw_compression决定实际文件与编码；历史未压缩文件仍按原
+声明读取。原packet字段、逐请求账本、失败／drop分母不变，压缩不是样本筛选。
+读取到缺失或损坏的声明文件必须失败，不能回退另一副本掩盖缺失；审计hash绑定
+实际存储文件。后台队列仍为16，压缩耗时不授予现场无drop或实时预算资格。
 canonical driver核验native安装Release/hash；直接canonical启动若无driver runtime identity，
 子manifest明确null/unavailable并指向共享run identity，不能制造悬空引用；配置／输入／原时钟身份在既有run manifests。
 

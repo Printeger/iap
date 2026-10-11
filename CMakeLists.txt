@@ -38,6 +38,7 @@ find_package(GTSAM 4.2 REQUIRED)
 find_package(gtsam_points 1.2.0 REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(ZLIB REQUIRED)
 
 if(BUILD_WITH_VIEWER)
   find_package(Iridescence REQUIRED)
@@ -226,7 +227,7 @@ target_include_directories(iap PUBLIC
   $<INSTALL_INTERFACE:include/iap>
   ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(iap
+target_link_libraries(iap PUBLIC
   Boost::boost
   Boost::serialization
   Eigen3::Eigen
@@ -238,6 +239,7 @@ target_link_libraries(iap
   ${OpenCV_LIBRARIES}
   $<TARGET_NAME_IF_EXISTS:iap_gpu_match_evidence>
 )
+target_link_libraries(iap PRIVATE ZLIB::ZLIB)
 if(BUILD_WITH_OPENCV)
   target_compile_definitions(iap PUBLIC GLIM_USE_OPENCV)
 endif()
@@ -425,7 +427,7 @@ if(DEFINED ENV{ROS_VERSION})
     )
     # gnss_comm headers needed by pseudorange_factor.cpp / doppler_factor.cpp
     # which are compiled into the iap library target
-    ament_target_dependencies(iap gnss_comm)
+    ament_target_dependencies(iap PUBLIC gnss_comm)
     target_link_libraries(gnss_extension iap)
     ament_target_dependencies(gnss_extension rclcpp sensor_msgs gnss_comm)
     list(APPEND iap_LIBRARIES gnss_extension)
@@ -653,7 +655,7 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(ament_cmake_gtest REQUIRED)
       # Step 10: tests declare narrow deps via interface targets (impl still in iap)
       ament_add_gtest(test_gpu_match_evidence_writer test/test_gpu_match_evidence_writer.cpp)
-      target_link_libraries(test_gpu_match_evidence_writer iap)
+      target_link_libraries(test_gpu_match_evidence_writer iap ZLIB::ZLIB)
       if(BUILD_WITH_CUDA)
         ament_add_gtest(test_gpu_match_evidence test/test_gpu_match_evidence.cpp)
         target_link_libraries(test_gpu_match_evidence iap_gpu_match_evidence CUDA::cudart ${CMAKE_DL_LIBS})

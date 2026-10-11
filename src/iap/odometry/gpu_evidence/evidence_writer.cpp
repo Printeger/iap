@@ -3,7 +3,9 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <iomanip>
+#include <limits>
 #include <stdexcept>
+#include <zlib.h>
 
 namespace iap {
 namespace {
@@ -52,36 +54,44 @@ Json serialize(const GpuMatchEvidencePacket& p) {
 }
 }
 GpuMatchEvidenceWriter::GpuMatchEvidenceWriter(const glim::RunLogManager& logs)
-: raw_path_(logs.export_path("glio/gpu_match_residuals.jsonl")),
+: raw_path_(logs.export_path("glio/gpu_match_residuals.jsonl.gz")),
   ledger_path_(logs.export_path("glio/gpu_match_requests.csv")),
   manifest_path_(logs.metadata_path("manifests/gpu_match_evidence.json")) {
   for(const auto& path:{raw_path_,ledger_path_,manifest_path_}) {
     if(std::filesystem::exists(path)) throw std::runtime_error("GPU evidence refuses existing artifact: "+path.string());
     std::filesystem::create_directories(path.parent_path());
   }
-  raw_.open(raw_path_);ledger_.open(ledger_path_);
-  if(!raw_ || !ledger_) throw std::runtime_error("GPU evidence cannot open run-scoped artifacts");
+  // Refuse both encodings of the same logical evidence. Fast lossless gzip is
+  // streamed by the existing worker; no expanded copy or sensor-side encoding.
+  if(std::filesystem::exists(logs.export_path("glio/gpu_match_residuals.jsonl")))
+    throw std::runtime_error("GPU evidence refuses existing uncompressed artifact");
+  ledger_.open(ledger_path_);
+  if(!ledger_) throw std::runtime_error("GPU evidence cannot open request ledger");
+  raw_=gzopen(raw_path_.c_str(),"wb1");
+  if(!raw_) throw std::runtime_error("GPU evidence cannot open compressed raw artifact");
   if(std::filesystem::exists(logs.metadata_path("manifests/forest_runtime_identity.json")))
     runtime_identity_="metadata/manifests/forest_runtime_identity.json";
   ledger_<<"request_id,source_frame_id,source_stamp,target_frame_id,level_id,capture_requested,available,samples,queue_accepted,failure_reason,"
     "target_stamp,target_is_fixed,voxel_resolution_m,key_count,key0,key1,gnss_frame_id,gnss_update_sequence,gnss_epoch_identity,"
     "gnss_state_stamp,gnss_epoch_stamp,gnss_owner_matches,used_constellations,sequence,source_count,inlier_count,stride,cost,sample_limit,source_slots,source_geometry_available,source_samples\n"<<std::setprecision(17);
-  worker_=std::thread(&GpuMatchEvidenceWriter::drain,this);
+  try { worker_=std::thread(&GpuMatchEvidenceWriter::drain,this); }
+  catch(...) { gzclose(raw_);raw_=nullptr;throw; }
 }
 GpuMatchEvidenceWriter::~GpuMatchEvidenceWriter() {
   {
     std::lock_guard<std::mutex> lock(mutex_);stopping_=true;
   }
   cv_.notify_one();worker_.join();
-  raw_.flush();ledger_.flush();
-  if(!raw_) ++write_failures_;
+  if(gzclose(raw_)!=Z_OK) ++write_failures_;
+  raw_=nullptr;ledger_.flush();
   if(!ledger_) ++write_failures_;
   try {
     Json summary={{"schema","iap_gpu_match_evidence_manifest_v1"},
       {"upstream_revision","85d0f4c43098b1f071bbb07710692e3829347c6c"},
       {"model","actual_cuda_postopt_quality_linearization_v1"},
       {"version",IAP_VERSION},{"build_type",IAP_BUILD_TYPE},
-      {"raw","export/glio/gpu_match_residuals.jsonl"},{"requests","export/glio/gpu_match_requests.csv"},
+      {"raw","export/glio/gpu_match_residuals.jsonl.gz"},{"raw_compression","gzip"},
+      {"requests","export/glio/gpu_match_requests.csv"},
       {"runtime_identity",runtime_identity_.empty() ? Json(nullptr) : Json(runtime_identity_)},
       {"runtime_identity_available",!runtime_identity_.empty()},
       {"run_identity","metadata/run_manifest.json"},
@@ -139,8 +149,10 @@ void GpuMatchEvidenceWriter::drain() {
       packet=std::move(queue_.front());queue_.pop_front();
     }
     try {
-      raw_<<serialize(packet).dump()<<'\n';
-      if(!raw_) throw std::runtime_error("raw write failed");
+      const std::string bytes=serialize(packet).dump()+'\n';
+      if(bytes.size()>static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+         gzwrite(raw_,bytes.data(),static_cast<unsigned>(bytes.size()))!=static_cast<int>(bytes.size()))
+        throw std::runtime_error("compressed raw write failed");
       ++written_;samples_written_+=packet.capture.samples.size();
       source_samples_written_+=packet.capture.source_samples.size();
     } catch(const std::exception& e) {

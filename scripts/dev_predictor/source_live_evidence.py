@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 from advisory_validation import sha, source_identity
-from gpu_match_evidence_audit import audit_sample
+from gpu_match_evidence_audit import audit_sample, gpu_raw_path, open_gpu_raw
 from run_directory import adopt_run_directory, write_subordinate_manifest
 
 
@@ -34,7 +34,7 @@ def main():
     source = args.source_run.resolve()
     noise_path = source/'export/simulation/gnss_injected_noise.csv'
     factor_path = source/'export/glio/iap_gnss_factor_debug.csv'
-    gpu_path = source/'export/glio/gpu_match_residuals.jsonl'
+    gpu_path = gpu_raw_path(source)
     noise = read_csv(noise_path)
     emitted = [r for r in noise if r['observation_emitted'] == '1']
     noise_index = {(round(float(r['stamp']), 6), int(r['sat_id'])): r for r in emitted}
@@ -121,7 +121,7 @@ def main():
     rejects = Counter(); first_reject = {}; total = good = requests = available = 0
     source_matches = Counter(); target_matches = Counter(); levels = defaultdict(dict)
     max_skew = 0.; frames = set()
-    with gpu_path.open() as stream:
+    with open_gpu_raw(gpu_path) as stream:
         for line in stream:
             p = json.loads(line); requests += 1
             if not p['available']:

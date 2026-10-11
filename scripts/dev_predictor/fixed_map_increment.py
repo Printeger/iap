@@ -10,16 +10,17 @@ sys.path[:0]=[str(REPO/'scripts/dev_predictor'),str(REPO/'launch/_includes')]
 from compare_advisory_error import rotation_matrix,quaternion
 from epoch_motion_reference import log as so3log
 from run_directory import adopt_run_directory,write_subordinate_manifest
+from gpu_match_evidence_audit import gpu_raw_path,open_gpu_raw
 from advisory_validation import sha,safe_label,artifact
 cfgpath=Path(sys.argv[1]);cfg=json.loads(cfgpath.read_text());run=adopt_run_directory(cfg['owner']);label=safe_label(sys.argv[2]);out=artifact(run,'export/analysis/'+label+'/summary.json').parent
 assert not (out/'summary.json').exists(),'diagnostic evidence already exists'
-root=Path(cfg['decoded_root']);raw=Path(cfg['gpu']);truthpath=Path(cfg['truth']);qualified=set(cfg['qualified_frames'])
+root=Path(cfg['decoded_root']);raw=gpu_raw_path(Path(cfg['gpu']).parents[2]);truthpath=Path(cfg['truth']);qualified=set(cfg['qualified_frames'])
 meta={}
 for p in sorted(root.glob(cfg['decoded_glob'])):
  m=json.loads(p.read_text());k=m['estimation_frame_id']
  if k in qualified:meta[k]=(p,m)
 packets={};considered=0
-for line in raw.open():
+for line in open_gpu_raw(raw):
  p=json.loads(line);k=p['source_frame_id']
  if k not in meta:continue
  considered+=1
