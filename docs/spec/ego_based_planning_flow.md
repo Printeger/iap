@@ -232,6 +232,11 @@ Gaussian，它仍不能替代有符号物理均值、固定姿态unary目标的�
 已查看请求区分旧绝对对象与局部反序；原V5分数仅作几何baseline，不冒充
 相对增量物理协方差／PL。独立seed7301／7302／7303保留未查看，模型及资格
 冻结前不采集；原数值排序门槛、完整区域与全部原执行规则保持。
+相对增量评价实现位于`scripts/dev_predictor/local_increment_validation.py`，仅使用
+原密集估计／truth pose和固定query身份；truth仅在评价端，既不拟合对齐也不
+改变预测。GLIO两帧缺口及truth原50ms门禁明确失败，全部缺失请求保留分母。
+共同旋转／平移消除、局部形变保留、起始姿态影响和静止窗口的定向检查通过
+后，才执行一次已查看数据的baseline区分实验；其结果不授予相对物理协方差。
 
 持续诊断存储收紧：GPU大样本仍显式启用，现由原后台worker直接写gzip level 1
 无损流，声明`gpu_match_residuals.jsonl.gz`及raw_compression；不保留展开副本，
