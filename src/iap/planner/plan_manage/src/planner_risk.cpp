@@ -928,13 +928,17 @@ EGOPlannerManager::assessRemainingTrajectory(double now_s, bool include_advisory
     // still requires executing_tail_executable at its own authority seam.
     // The actual branch owns BOTH success and rejection. A failure of B must
     // not be mislabeled with A's already excluded far-tail refusal.
+    const auto tail=std::make_shared<const TrajectoryAssessment>(std::move(assessment));
     assessment=in_execution_time(assessCheckedStopConnection(*pending_trajectory_,view,budget),*pending_trajectory_);
+    assessment.executing_tail_refusal=tail;
   }
   // A missing replacement result leaves either B or C executable at the
   // server. Check C even if the complete predecessor happens to remain valid.
   if(replacement_candidate_ && assessment.executable()) {
+    const auto tail=assessment.executing_tail_refusal;
     const auto candidate=assessCheckedStopConnection(*replacement_candidate_,view,budget);
     if(!candidate.executable()) assessment=in_execution_time(candidate,*replacement_candidate_);
+    assessment.executing_tail_refusal=tail;
   }
   assessment.executing_tail_executable=executing_tail_executable;
   return assessment;

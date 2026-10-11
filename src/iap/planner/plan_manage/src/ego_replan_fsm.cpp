@@ -997,7 +997,8 @@ namespace ego_planner
         }
       }
       const auto capture_remaining = [&](const std::string& kind,
-                                         const GridExecutionReason reason) {
+                                         const GridExecutionReason reason,
+                                         const EGOPlannerManager::TrajectoryAssessment* checked=nullptr) {
         const double odom_age = std::isfinite(applied_odom_stamp_s_)
             ? now - applied_odom_stamp_s_ : -1.0;
         const auto map_cell = planner_manager_->queryLocalTargetCell(
@@ -1008,8 +1009,17 @@ namespace ego_planner
         planner_manager_->captureRemainingFailure(kind, expected, odom_pos_,
             (expected - odom_pos_).norm(), info.traj_id_,
             command ? rclcpp::Time(command->header.stamp).seconds() : -std::numeric_limits<double>::infinity(),
-            odom_age, map_age, reason, &assessment);
+            odom_age, map_age, reason, checked ? checked : &assessment);
       };
+
+      if(assessment.executing_tail_refusal) {
+        const auto& tail=*assessment.executing_tail_refusal;
+        capture_remaining("excluded_tail_"+std::to_string(tail.trajectory_id),tail.execution_reason,&tail);
+        const std::string event=std::string("predecessor_tail_excluded_")+gridExecutionReasonName(tail.execution_reason);
+        recordExecutionEvent(event.c_str(),tail.trajectory_id,
+            info.start_time_.seconds()+tail.first_execution_time_s,NAN,info.traj_id_,
+            assessment.trajectory_id,&tail.first_execution_position);
+      }
 
       // Swarm separation retains its physical execution meaning.
       const double swarm_clearance = planner_manager_->getSwarmClearance();

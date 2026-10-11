@@ -2422,6 +2422,11 @@ TEST(EgoBaseline, CapturedConfirmedPendingExcludesUnexecutedFarTail) {
       <<" supervision="<<checked.executable()<<" first="<<checked.first_execution_time_s<<std::endl;
   ASSERT_TRUE(branch.executable());EXPECT_FALSE(checked.executing_tail_executable);
   EXPECT_TRUE(checked.executable()) << "confirmed checked A-to-seam and B must not inherit A far-tail rejection";
+  ASSERT_TRUE(checked.executing_tail_refusal);
+  EXPECT_EQ(checked.executing_tail_refusal->trajectory_id,33);
+  EXPECT_EQ(checked.executing_tail_refusal->execution_reason,GridExecutionReason::INSUFFICIENT_CLEARANCE);
+  EXPECT_EQ(checked.executing_tail_refusal->evaluated_generation,637u);
+  EXPECT_NEAR(checked.executing_tail_refusal->first_execution_time_s,saved.get<double>("curve_first_execution_time_s"),1e-9);
   EXPECT_FALSE(manager.requestPendingWithdrawal());
   ego_planner::EGOReplanFSM fsm;ego_planner::EGOReplanFSMTestAccess::configure(fsm,std::move(owner),node,actual,{18,0,1.5});
   ego_planner::EGOReplanFSMTestAccess::setPublisher(fsm,node->create_publisher<traj_utils::msg::Bspline>("captured_pending_request",10));

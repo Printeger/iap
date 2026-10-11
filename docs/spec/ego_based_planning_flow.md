@@ -18,6 +18,15 @@ backup_revoked 六分支通过，失败替换实际执行 B4，撤销资格后�
 独立支持，C 前置未通过、未启动新收益对照。固定地图局部退化代理不含历史绝对漂移、
 全故障或认证 PL。
 
+短程 ON4101 `log/20261011T045538Z_253` 绑定干净 `65745197`，GPU READY、11个安装产物
+与 Release 构建一致，进程正常收尾。新链身份／路线不同于历史反例，不按相同 seed 追认
+历史 A33/B34；4条近期／年龄能力边界保护失败仍保留，不宣称整段连续保证。追加取证
+`TrajectoryAssessment.executing_tail_refusal` 保存被分支替代的完整 A 原拒绝及其 immutable
+epoch；FSM 通过原 captureRemainingFailure 保存 excluded_tail_ID 和原事件时刻／首拒绝点。
+不重查或隐藏拒绝，不改变许可或预算；原 writer 最多保存32个 excluded_tail_ID。
+原生 A33/B34 回归验证原 gen637／INSUFFICIENT_CLEARANCE／首拒绝时刻保留，实际 B34
+命令与 manager 激活身份闭合（`runtime/pending_refusal_green.log`）；现场身份审计正在完成。
+
 风险引导轻量实证闭环已完成，包含不通过结论；起始HEAD `2c8cf4bd`，工作树与安装身份已核对。
 规划实验提交`040c5ed7`与离线资格修复`fb4980c4`分别验证，未修改生产融合模型或风险权重。
 记录权威为`log/20261011T022904Z_324`；上一轮报告、输入及失效记录保持只读。

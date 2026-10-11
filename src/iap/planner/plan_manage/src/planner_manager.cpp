@@ -111,6 +111,9 @@ namespace ego_planner
       const TrajectoryAssessment* assessment)
   {
     if (!capture_failure_map_) return;
+    if(kind.rfind("excluded_tail_",0)==0 && !captured_failure_kinds_.count(kind) &&
+        std::count_if(captured_failure_kinds_.begin(),captured_failure_kinds_.end(),
+          [](const std::string& value){return value.rfind("excluded_tail_",0)==0;})>=32) return;
     auto* artifacts = glim::RunLogManager::get_if_initialized();
     if (!artifacts) {
       RCLCPP_ERROR(node_->get_logger(),
