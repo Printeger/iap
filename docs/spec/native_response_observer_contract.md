@@ -33,7 +33,15 @@ opt-in mode newly constructed IAP VGICP factors retain one fixed 13x13 response
 block and its linearization transform from the reduction already consumed by
 `linearize`. This retains target/source blocks otherwise discarded by unary
 fixed-target construction. The native Hessian upper-triangle convention is
-preserved. Factor lifetime remains owned by the original smoother.
+preserved. Each returned Gaussian factor owns an immutable response, including
+its linearization transform. Postopt quality can relinearize the nonlinear GPU
+factor without changing that cached Gaussian, so its latest nonlinear reduction
+is not an authoritative response for the solver cache. The observer reads the
+Gaussian's bound response; cloning preserves it. The worker checks the cached
+source/full block against that response at relative tolerance 1e-12 and makes
+any mismatch unavailable. The returned Gaussian inherits the original Hessian
+implementation; coefficients, solve and elimination behavior are unchanged.
+Factor lifetime remains owned by the original smoother.
 
 Each snapshot permits at most 512 state keys, 4096 active factors, 32768 indexed
 variable-factor relationships, 1536 tangent dimensions/rows per factor and

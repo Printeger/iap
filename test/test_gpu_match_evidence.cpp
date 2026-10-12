@@ -93,7 +93,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
       observed=gtsam::make_shared<gtsam_points::IapObservedVGICPFactorGPU>(1,2,target,source);
     }
     original->set_enable_surface_validation(validate);observed->set_enable_surface_validation(validate);
-    EXPECT_FALSE(observed->native_response().has_value());observed->retain_native_response();
+    observed->retain_native_response();
     gtsam::NonlinearFactorGraph graph;graph.add(original);graph.add(observed);
     gtsam_points::NonlinearFactorSetGPU factor_set;factor_set.add(graph);
     observed->request_evidence();fail_evidence_host_allocation=true;factor_set.linearize(values);
@@ -107,10 +107,12 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     EXPECT_EQ(capture.original_inlier_count,original->num_inliers());
     if(source_count<=128) EXPECT_EQ(capture.samples.size(),static_cast<std::size_t>(capture.original_inlier_count));
     EXPECT_EQ(capture.sampling_stride,(source_count+127)/128);EXPECT_EQ(capture.original_source_count,source_count);
-    const gtsam::HessianFactor old_h(*original->linearize(values)),new_h(*observed->linearize(values));
+    const auto cached=observed->linearize(values);
+    const auto* response=dynamic_cast<const gtsam_points::IapCachedVGICPResponse*>(cached.get());
+    const gtsam::HessianFactor old_h(*original->linearize(values)),new_h(*cached);
     EXPECT_TRUE(old_h.augmentedInformation().isApprox(new_h.augmentedInformation(),1e-6));
-    ASSERT_TRUE(observed->native_response().has_value());
-    const auto& retained=observed->native_response()->augmented_information;
+    ASSERT_NE(response,nullptr);
+    const auto& retained=response->native_response().augmented_information;
     if(unary) {
       Eigen::Matrix<double,7,7> unary_block;
       unary_block.topLeftCorner<6,6>()=retained.block<6,6>(6,6);
@@ -135,6 +137,18 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
       const auto expected=-cross.col(3);
       EXPECT_LT((derivative-expected).norm()/std::max(1.,expected.norm()),.003);
     } else EXPECT_TRUE(new_h.augmentedInformation().isApprox(retained,1e-12));
+    // Native cache A survives a later quality linearization B. The target
+    // response and matrix must still belong to A, including after clone.
+    auto quality_values=values;
+    quality_values.update(2,values.at<gtsam::Pose3>(2)*gtsam::Pose3(gtsam::Rot3(),gtsam::Point3(.02,.01,0.)));
+    const auto old_response=retained;
+    observed->linearize(quality_values);
+    EXPECT_TRUE(response->native_response().augmented_information.isApprox(old_response,1e-12));
+    auto clone=cached->clone();
+    const auto* copied=dynamic_cast<const gtsam_points::IapCachedVGICPResponse*>(clone.get());
+    ASSERT_NE(copied,nullptr);
+    EXPECT_TRUE(copied->native_response().augmented_information.isApprox(old_response,1e-12));
+    factor_set.linearize(values);
     const double original_error=original->error(values),observed_error=observed->error(values);
     EXPECT_NEAR(original_error,observed_error,1e-6*std::max(1.,std::abs(original_error)));
     EXPECT_NEAR(capture.original_cost,original_error,1e-6*std::max(1.,std::abs(original_error)));

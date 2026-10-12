@@ -159,6 +159,9 @@ std::unique_ptr<NativeResponsePacket> NativeResponseObserver::capture(
         stored_bytes=jac->rows()*f.rows*sizeof(double);
       } else if(dynamic_cast<const gtsam::HessianFactor*>(factor.get())) stored_bytes=f.rows*f.rows*sizeof(double);
       else throw std::runtime_error("UNSUPPORTED_NATIVE_GAUSSIAN_TYPE");
+#ifdef IAP_NATIVE_GPU_MATCH
+      if(dynamic_cast<const gtsam_points::IapCachedVGICPResponse*>(factor.get())) stored_bytes+=(13*13+4*4)*sizeof(double);
+#endif
       if(stored_bytes>kMaxCachedBytes-p->cached_bytes) throw std::runtime_error("NATIVE_CACHED_FACTOR_CAP_EXCEEDED");
       p->cached_bytes+=stored_bytes;
       // Deep-copy the already-cached CPU factor; worker computes A^T A. No
@@ -173,12 +176,14 @@ std::unique_ptr<NativeResponsePacket> NativeResponseObserver::capture(
       }
 #ifdef IAP_NATIVE_GPU_MATCH
       if(const auto* gpu=dynamic_cast<const gtsam_points::IapObservedVGICPFactorGPU*>(nf)) {
-        f.vgicp=true;f.owner=gpu->get_evidence_owner();const auto& response=gpu->native_response();
-        f.target_response_available=response.has_value();
-        if(response) {
+        f.vgicp=true;f.owner=gpu->get_evidence_owner();
+        const auto* bound=dynamic_cast<const gtsam_points::IapCachedVGICPResponse*>(factor.get());
+        f.target_response_available=bound!=nullptr;
+        if(bound) {
+          const auto& response=bound->native_response();
           charge((13*14/2+4*4)*sizeof(double));
-          f.target_upper=packed_upper(response->augmented_information);
-          f.linearization_transform=row_major(response->linearization_transform);
+          f.target_upper=packed_upper(response.augmented_information);
+          f.linearization_transform=row_major(response.linearization_transform);
         }
         if(f.owner.target_is_fixed) {charge(16*sizeof(double));f.fixed_target_pose=row_major(gpu->get_fixed_target_pose().matrix());}
       }
@@ -204,8 +209,21 @@ Json NativeResponseObserver::serialize(const NativeResponsePacket& p) {
   for(const auto& s:p.states) out["states"].push_back({{"key",s.key},{"type",std::string(1,gtsam::Symbol(s.key).chr())},
     {"dim",s.dim},{"linearization_point",s.point},{"representation",s.representation},{"delta",s.delta}});
   for(const auto& f:p.factors) {
+    const auto native_matrix=f.cached->augmentedInformation();
+    double target_block_difference=0.;
+#ifdef IAP_NATIVE_GPU_MATCH
+    if(f.vgicp && f.target_response_available) {
+      const auto* bound=dynamic_cast<const gtsam_points::IapCachedVGICPResponse*>(f.cached.get());
+      if(!bound) throw std::runtime_error("NATIVE_TARGET_RESPONSE_OWNER_MISSING");
+      const auto& full=bound->native_response().augmented_information;
+      Eigen::MatrixXd expected=f.owner.target_is_fixed ? Eigen::MatrixXd(full.bottomRightCorner<7,7>()) : Eigen::MatrixXd(full);
+      if(native_matrix.rows()!=expected.rows()) throw std::runtime_error("NATIVE_TARGET_RESPONSE_DIMENSION_MISMATCH");
+      target_block_difference=(native_matrix-expected).cwiseAbs().maxCoeff();
+      if(!native_matrix.isApprox(expected,1e-12)) throw std::runtime_error("NATIVE_TARGET_RESPONSE_COEFFICIENT_MISMATCH");
+    }
+#endif
     Json row={{"index",f.index},{"keys",f.keys},{"dims",f.dims},{"rows",f.rows},
-      {"augmented_information_upper",packed_upper(f.cached->augmentedInformation())},
+      {"augmented_information_upper",packed_upper(native_matrix)},
       {"new_this_update",f.new_this_update},{"native_type",f.native_type}};
     if(f.pseudorange) row["pseudorange"]={{"sat_id",f.sat_id},{"constellation",std::string(1,f.constellation)},
       {"pr_meas_m",f.pr_meas},{"elevation_rad",f.elevation}};
@@ -215,6 +233,8 @@ Json NativeResponseObserver::serialize(const NativeResponsePacket& p) {
         {"source_stamp",o.source_stamp},{"target_stamp",o.target_stamp},{"level_id",o.level_id},
         {"target_is_fixed",o.target_is_fixed},{"voxel_resolution_m",o.voxel_resolution_m},
         {"target_response_available",f.target_response_available}};
+      row["vgicp"]["target_response_from_cached_gaussian"]=f.target_response_available;
+      row["vgicp"]["target_block_absolute_difference"]=target_block_difference;
       if(f.target_response_available) {
         row["vgicp"]["full_augmented_information_upper"]=f.target_upper;
         row["vgicp"]["linearization_transform_row_major"]=f.linearization_transform;

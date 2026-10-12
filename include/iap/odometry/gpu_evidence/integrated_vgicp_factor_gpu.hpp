@@ -19,6 +19,7 @@ namespace gtsam_points { using IapObservedVGICPFactorGPU=IntegratedVGICPFactorGP
 #include <gtsam_points/types/point_cloud.hpp>
 #include <gtsam_points/types/gaussian_voxelmap_gpu.hpp>
 #include <gtsam_points/factors/nonlinear_factor_gpu.hpp>
+#include <gtsam/linear/HessianFactor.h>
 
 struct CUstream_st;
 
@@ -88,7 +89,6 @@ public:
     Eigen::Matrix4d linearization_transform;
   };
   void retain_native_response() { retain_native_response_=true; }
-  const std::optional<NativeResponse>& native_response() const { return native_response_; }
 
   /// @brief Print the factor information.
   virtual void print(const std::string& s = "", const gtsam::KeyFormatter& keyFormatter = gtsam::DefaultKeyFormatter) const override;
@@ -161,7 +161,6 @@ public:
 private:
   iap::GpuMatchOwner evidence_owner;
   bool retain_native_response_=false;
-  mutable std::optional<NativeResponse> native_response_;
   Eigen::Isometry3f calc_delta(const gtsam::Values& values) const;
 
 private:
@@ -178,6 +177,22 @@ private:
 
   mutable std::optional<float> evaluation_result;
   mutable std::unique_ptr<LinearizedSystem6> linearization_result;
+};
+
+// The exact returned Gaussian factor owns its response. Postopt quality can
+// relinearize the nonlinear GPU factor without replacing the solver's cached
+// Gaussian; reading the nonlinear factor's last response would mix updates.
+class IapCachedVGICPResponse final : public gtsam::HessianFactor {
+ public:
+  IapCachedVGICPResponse(const gtsam::HessianFactor& factor,
+                        IapObservedVGICPFactorGPU::NativeResponse response)
+  : gtsam::HessianFactor(factor), response_(std::move(response)) {}
+  gtsam::GaussianFactor::shared_ptr clone() const override {
+    return gtsam::make_shared<IapCachedVGICPResponse>(*this);
+  }
+  const IapObservedVGICPFactorGPU::NativeResponse& native_response() const { return response_; }
+ private:
+  IapObservedVGICPFactorGPU::NativeResponse response_;
 };
 
 }  // namespace gtsam_points

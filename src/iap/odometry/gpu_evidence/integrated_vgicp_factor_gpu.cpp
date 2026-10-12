@@ -208,6 +208,7 @@ gtsam::GaussianFactor::shared_ptr IapObservedVGICPFactorGPU::linearize(const gts
   // Preserve the actual already-computed two-body reduction before the unary
   // path discards target blocks. These are native loss/response coefficients,
   // not a physical source covariance; no extra CUDA computation or sync.
+  std::optional<NativeResponse> native_response;
   if(retain_native_response_) {
     NativeResponse response;response.augmented_information.setZero();
     auto& h=response.augmented_information;
@@ -221,7 +222,7 @@ gtsam::GaussianFactor::shared_ptr IapObservedVGICPFactorGPU::linearize(const gts
     // HessianFactor uses the reduction's upper triangle as its symmetric block.
     h=Eigen::Matrix<double,13,13>(h.selfadjointView<Eigen::Upper>());
     response.linearization_transform=linearization_point.matrix().cast<double>();
-    native_response_=std::move(response);
+    native_response=std::move(response);
   }
 
   if (is_binary) {
@@ -238,6 +239,7 @@ gtsam::GaussianFactor::shared_ptr IapObservedVGICPFactorGPU::linearize(const gts
     factor.reset(new gtsam::HessianFactor(keys_[0], l.H_source.cast<double>(), -l.b_source.cast<double>(), l.error));
   }
 
+  if(native_response) return gtsam::make_shared<IapCachedVGICPResponse>(*factor,std::move(*native_response));
   return factor;
 }
 
