@@ -46,6 +46,9 @@ slot may hold one pending writer packet if the two-packet queue is full. The
 worker drains it; this never allocates a second rolling/deferred slot or enlarges
 the queue. The ledger records `writer_storage` and rejects a further overflow.
 Post-retirement callbacks do not read the slot as previous solver state.
+The original odometry makes two native calls per frame. Rolling capture uses
+only ordinal 1, the final solve; selected boundaries retain their required call.
+Ordinal 0 cannot be the previous frame's final solve and is not redundantly cloned.
 It also reuses the existing simulator injected-noise CSV, without GPU residual
 traces or new random draws. This provides physical PR/Doppler white samples and
 persistent bias identities for later qualification, not a map-source joint law.

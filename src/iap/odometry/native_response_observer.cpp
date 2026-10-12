@@ -300,7 +300,9 @@ void NativeResponseObserver::observe(const gtsam_points::IncrementalFixedLagSmoo
   std::vector<std::string> roles;
   if(frames_.count(frame) && !seen_.count(frame)) roles.push_back("explicit");
   if(initial) roles.push_back("initial_x0_elimination");
-  bool rolling=source_freeze_enabled_ && !source_selection_done_ && source_id_>=0 && source_freeze_frame_<0;
+  // Original odometry runs one additional update. Only its final call can be
+  // the previous frame's solve; cloning the first call is redundant.
+  bool rolling=source_freeze_enabled_ && !source_selection_done_ && source_id_>=0 && source_freeze_frame_<0 && update_in_frame_==1;
   if(source_freeze_enabled_ && !source_selection_done_ && source_id_>=0) {
     if(frame-source_birth_frame_>100 || update_in_frame_>=2) {
       source_selection_failure_="SOURCE_BOUNDARY_NOT_OBSERVED_WITHIN_TRACKING_CAP";
