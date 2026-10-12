@@ -31,6 +31,7 @@
 #include <iap/gnss/clock_between_factor.hpp>
 #include <iap/util/extension_module_ros2.hpp>
 #include <iap/common/imu_integration.hpp>
+#include <iap/odometry/native_response_observer.hpp>
 
 namespace iap {
 
@@ -106,6 +107,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::shared_ptr<spdlog::logger> logger_;
 
   std::unique_ptr<GnssHandler> gnss_handler_;
+  std::shared_ptr<NativeResponseObserver> native_response_observer_;
   glim::IMUIntegration epoch_imu_;
   std::mutex epoch_imu_mutex_;
   std::shared_ptr<const gtsam::PreintegratedImuMeasurements> last_epoch_motion_;

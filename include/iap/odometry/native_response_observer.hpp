@@ -1,0 +1,42 @@
+#pragma once
+
+#include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
+#include <iap/util/run_log_manager.hpp>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <set>
+#include <nlohmann/json.hpp>
+
+namespace iap {
+// Diagnostic native response coefficients, NOT a physical joint error law.
+// No nonlinear evaluation, GPU synchronization, marginal covariance or solve.
+class NativeResponseObserver : public std::enable_shared_from_this<NativeResponseObserver> {
+ public:
+  static constexpr std::size_t kMaxFrames=31, kMaxKeys=512, kMaxFactors=2048;
+  static constexpr std::size_t kMaxFactorDim=128, kMaxBytes=8*1024*1024, kQueueLimit=2;
+  static constexpr double kCopyBudgetMs=5.;
+  NativeResponseObserver(const glim::RunLogManager& logs, const std::vector<long>& frames);
+  ~NativeResponseObserver();
+  void prepare(gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother,
+               const gtsam::NonlinearFactorGraph& new_factors, long frame, double stamp);
+  // Also used by focused native-solver contract tests.
+  static nlohmann::json snapshot(const gtsam_points::IncrementalFixedLagSmootherExt& native,
+                                 const gtsam::KeyVector& discarded, long frame, double stamp);
+ private:
+  void observe(const gtsam_points::IncrementalFixedLagSmootherExt& native,
+               const gtsam::KeyVector& discarded, long frame, double stamp);
+  void drain();
+  std::set<long> frames_, seen_;
+  bool initial_seen_=false, stopping_=false;
+  std::filesystem::path raw_path_, manifest_path_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::deque<nlohmann::json> queue_;
+  std::vector<nlohmann::json> ledger_;
+  std::thread worker_;
+  void* raw_=nullptr;
+  std::size_t written_=0, write_failures_=0;
+};
+}

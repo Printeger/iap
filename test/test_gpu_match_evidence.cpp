@@ -93,6 +93,7 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
       observed=gtsam::make_shared<gtsam_points::IapObservedVGICPFactorGPU>(1,2,target,source);
     }
     original->set_enable_surface_validation(validate);observed->set_enable_surface_validation(validate);
+    EXPECT_FALSE(observed->native_response().has_value());observed->retain_native_response();
     gtsam::NonlinearFactorGraph graph;graph.add(original);graph.add(observed);
     gtsam_points::NonlinearFactorSetGPU factor_set;factor_set.add(graph);
     observed->request_evidence();fail_evidence_host_allocation=true;factor_set.linearize(values);
@@ -108,6 +109,32 @@ TEST(GpuMatchEvidence, ActualKernelSamplesPreserveOriginalCostAndHessian) {
     EXPECT_EQ(capture.sampling_stride,(source_count+127)/128);EXPECT_EQ(capture.original_source_count,source_count);
     const gtsam::HessianFactor old_h(*original->linearize(values)),new_h(*observed->linearize(values));
     EXPECT_TRUE(old_h.augmentedInformation().isApprox(new_h.augmentedInformation(),1e-6));
+    ASSERT_TRUE(observed->native_response().has_value());
+    const auto& retained=observed->native_response()->augmented_information;
+    if(unary) {
+      Eigen::Matrix<double,7,7> unary_block;
+      unary_block.topLeftCorner<6,6>()=retained.block<6,6>(6,6);
+      unary_block.topRightCorner<6,1>()=retained.block<6,1>(6,12);
+      unary_block.bottomLeftCorner<1,6>()=retained.block<1,6>(12,6);
+      unary_block(6,6)=retained(12,12);
+      EXPECT_TRUE(new_h.augmentedInformation().isApprox(unary_block,1e-12));
+      // A real target block exists even though the solver's unary graph drops it.
+      EXPECT_GT((retained.block<6,6>(0,0).norm()),0.);
+      const Eigen::Matrix<double,6,6> cross=retained.block<6,6>(6,0);
+      // Explicit one-component physical displacement, not posterior noise:
+      // move the original fixed target by +/-1 mm in its local x chart. The
+      // native GPU residual/normal RHS must match the retained target response.
+      constexpr double step=.001;
+      gtsam::Vector6 direction=gtsam::Vector6::Zero();direction(3)=step;
+      gtsam_points::IapObservedVGICPFactorGPU plus(fixed.retract(direction),2,target,source);
+      gtsam_points::IapObservedVGICPFactorGPU minus(fixed.retract(-direction),2,target,source);
+      plus.set_enable_surface_validation(validate);minus.set_enable_surface_validation(validate);
+      const auto hp=plus.linearize(values)->augmentedInformation();
+      const auto hm=minus.linearize(values)->augmentedInformation();
+      const auto derivative=(hp.block<6,1>(0,6)-hm.block<6,1>(0,6))/(2.*step);
+      const auto expected=-cross.col(3);
+      EXPECT_LT((derivative-expected).norm()/std::max(1.,expected.norm()),.003);
+    } else EXPECT_TRUE(new_h.augmentedInformation().isApprox(retained,1e-12));
     const double original_error=original->error(values),observed_error=observed->error(values);
     EXPECT_NEAR(original_error,observed_error,1e-6*std::max(1.,std::abs(original_error)));
     EXPECT_NEAR(capture.original_cost,original_error,1e-6*std::max(1.,std::abs(original_error)));

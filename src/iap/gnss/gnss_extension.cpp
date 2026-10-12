@@ -197,6 +197,15 @@ GnssExtensionModule::GnssExtensionModule()
     last_frame_stamp_.store(f->stamp);
   });
 
+  const auto response_frames=config.param<std::vector<int>>("gnss","native_response_frames",{});
+  if(!response_frames.empty()) {
+    const auto* logs=glim::RunLogManager::get_if_initialized();
+    if(!logs) throw std::runtime_error("native response requires initialized run artifact authority");
+    native_response_observer_=std::make_shared<NativeResponseObserver>(*logs,
+        std::vector<long>(response_frames.begin(),response_frames.end()));
+    logger_->info("[native_response] enabled for {} selected frames plus initial x0 elimination",response_frames.size());
+  }
+
   // Register on_smoother_update to inject GNSS factors
   Callbacks::on_smoother_update.add([this](
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother,
@@ -607,6 +616,7 @@ void GnssExtensionModule::on_smoother_update_(
     std::lock_guard<std::mutex> lock(frame_mutex_);
     frame_id=last_frame_id_.load(); frame_stamp=last_frame_stamp_.load();
   }
+  if(native_response_observer_) native_response_observer_->prepare(smoother,new_factors,frame_id,frame_stamp);
   if (frame_id < 0) return;
 
   // Retrieve current ECEF anchor for get_factors()

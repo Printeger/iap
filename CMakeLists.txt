@@ -142,6 +142,7 @@ add_library(iap SHARED
   src/iap/util/run_log_manager.cpp
   src/iap/util/export_factors.cpp
   src/iap/odometry/gpu_evidence/evidence_writer.cpp
+  src/iap/odometry/native_response_observer.cpp
   src/iap/util/time_keeper.cpp
   src/iap/util/trajectory_manager.cpp
   src/iap/util/extension_module.cpp
@@ -656,6 +657,8 @@ if(DEFINED ENV{ROS_VERSION})
       # Step 10: tests declare narrow deps via interface targets (impl still in iap)
       ament_add_gtest(test_gpu_match_evidence_writer test/test_gpu_match_evidence_writer.cpp)
       target_link_libraries(test_gpu_match_evidence_writer iap ZLIB::ZLIB)
+      ament_add_gtest(test_native_response_observer test/test_native_response_observer.cpp)
+      target_link_libraries(test_native_response_observer iap ZLIB::ZLIB)
       if(BUILD_WITH_CUDA)
         ament_add_gtest(test_gpu_match_evidence test/test_gpu_match_evidence.cpp)
         target_link_libraries(test_gpu_match_evidence iap_gpu_match_evidence CUDA::cudart ${CMAKE_DL_LIBS})

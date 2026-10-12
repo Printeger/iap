@@ -78,6 +78,7 @@ def main():
     parser.add_argument('--capture-advisory-residuals',action='store_true',help='Opt-in bounded native GPU residual evidence')
     parser.add_argument('--capture-dense-lidar',action='store_true',help='Capture latest fixed level-0 target source slots, max 16384')
     parser.add_argument('--capture-source-observations',action='store_true',help='Retain actual source sampling geometry in selected inputs; no GPU trace required')
+    parser.add_argument('--capture-native-response-frames', default='', help='M2 OFF: 1..31 predeclared native frame IDs, plus initial x0 elimination')
     parser.add_argument('--capture-native-increments',action='store_true',help='M2 OFF: one-second input pairs and selected native postopt/IMU reports; no dense GPU trace')
     parser.add_argument('--omit-planner-map-dumps',action='store_true',help='M2 source-observation diagnostics only: omit repetitive planner maps and internal input dumps, retain failure ledgers')
     parser.add_argument('--record-count',type=int,default=None,help='Number of frozen inputs; default retains original 10s cadence')
@@ -93,6 +94,8 @@ def main():
     if args.capture_native_increments and (not args.capture_source_observations or args.guidance != 'false' or
             (args.record_count is not None and args.record_count % 2)):
         raise ValueError('native increment diagnostics require OFF source observations and even total input count')
+    if args.capture_native_response_frames and (not args.capture_native_increments or args.guidance != "false"):
+        raise ValueError("native response capture requires OFF native increment diagnostics")
     if args.stop_after_planning_input: args.duration=30.
     if not math.isfinite(args.duration) or args.duration < 30:
         raise ValueError('duration must be at least 30 seconds')
@@ -172,6 +175,8 @@ def main():
             command.append('capture_advisory_residuals:=true')
         if args.capture_dense_lidar:
             command.append('capture_dense_lidar:=true')
+        if args.capture_native_response_frames:
+            command.append('capture_native_response_frames:=' + args.capture_native_response_frames)
         if args.capture_source_observations:
             command.append('capture_source_observations:=true')
         if args.gnss_seed is not None:

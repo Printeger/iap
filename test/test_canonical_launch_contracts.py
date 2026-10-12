@@ -809,6 +809,7 @@ runpy.run_path(path,run_name='__main__')
             root = json.loads((Path(runtime) / "config.json").read_text())
             ros = json.loads((Path(runtime) / "config_ros.json").read_text())
             gnss = json.loads((Path(runtime) / "config_gnss.json").read_text())
+            self.assertEqual(gnss["gnss"]["native_response_frames"], [])
             self.assertTrue(
                 Path(root["global"]["timing_csv_path"]).is_relative_to(output)
             )
@@ -847,6 +848,27 @@ runpy.run_path(path,run_name='__main__')
                             assert_contained(child)
 
                 assert_contained(secondary)
+
+    def test_native_response_selection_is_bounded_and_simulation_only(self):
+        helper = self._load_launch("_includes/profile_runtime.py")
+        scenario = json.loads((REPO / "config/scenarios/catalog.json").read_text())["icra_dense_forest_four_fork_v2"]
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime, manifest = helper.materialize_profile(
+                source_config_dir=str(REPO / "config/profiles/full_stack_flight"),
+                output_dir=str(Path(temporary) / "run"), contract="full_stack",
+                simulation_scenario=scenario, capture_native_response_frames="50,150,160")
+            gnss = json.loads((Path(runtime) / "config_gnss.json").read_text())
+            self.assertEqual(gnss["gnss"]["native_response_frames"], [50,150,160])
+            self.assertEqual(manifest["native_response_frames"], [50,150,160])
+            for value in ("1,1", "-1", "x", "2147483648", ",".join(str(i) for i in range(32))):
+                with self.assertRaises(RuntimeError):
+                    helper.materialize_profile(source_config_dir=str(REPO / "config/profiles/full_stack_flight"),
+                        output_dir=str(Path(temporary) / "invalid"),contract="full_stack",
+                        simulation_scenario=scenario,capture_native_response_frames=value)
+            with self.assertRaises(RuntimeError):
+                helper.materialize_profile(source_config_dir=str(REPO / "config/profiles/full_stack_flight"),
+                    output_dir=str(Path(temporary) / "flight"),contract="full_stack",
+                    forbid_sim_extensions=True,capture_native_response_frames="1")
 
     def test_legacy_artifact_paths_use_only_basename_and_warn(self):
         helper = self._load_launch("_includes/profile_runtime.py")

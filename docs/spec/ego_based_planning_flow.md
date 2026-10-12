@@ -1,5 +1,20 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
+当前 Goal 已按用户的窄范围依赖授权恢复 active，仍在 M2。gtsam_points 原工作区
+干净，批准补丁的五个文件基线 hash 全部一致；独立依赖提交
+`0a3c1b16a7e256721525f1fcb09588e033f85e63` 增加更新后、消元前的可选只读回调。
+IAP GNSS 在原 smoother update 前接入，默认关闭；预声明最多31帧另加首次 x0
+消元，限时／限量复制原 CPU 响应结构，worker gzip 保存。IAP VGICP 仅在 opt-in
+时保留原生 reduction 的目标／来源块，修复 unary 路径丢弃目标响应的取证缺口，
+不改变原匹配、求解、5秒 lag、物理检查、预算、PL门槛或风险权重。
+接口、边界和未取得的物理关系见
+[native_response_observer_contract.md](native_response_observer_contract.md)。
+`log/20261012T024925Z_202` 保留补丁、版本、构建和接口核验：原5秒窗口85步
+关闭回调与原基线逐字节一致，开启及异常每步估计一致，异常不进入 fallback。
+接口通过不等于联合误差模型通过；来源／短窗口起止状态／创新的物理联合律及
+原生扰动一致性仍待新记录验证。旧失败、v1.2评价对象和原通过标准保持；
+独立排序、模型冻结、实际选路和完整OFF/ON收益尚未完成。
+
 当前持续开发目标为“可信局部风险指标＋实际风险选路收益”，基线 `f90d42c9`。
 工作入口及预定完成／数据划分规则见
 [credible_local_risk_goal.md](../dev_predictor/credible_local_risk_goal.md)。
