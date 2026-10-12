@@ -1,0 +1,107 @@
+--- a/include/gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp
++++ b/include/gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp
+@@ -20,6 +20,8 @@
+ // \callgraph
+ #pragma once
+ 
++#include <functional>
++#include <string>
+ #include <gtsam/config.h>
+ 
+ #if GTSAM_VERSION_NUMERIC >= 40300
+@@ -73,6 +75,16 @@
+     const KeyTimestampMap& timestamps = KeyTimestampMap(),
+     const FactorIndices& factorsToRemove = FactorIndices()) override;
+ 
++  // Opt-in const observer after the actual update and before leaf removal.
++  // It exposes solver response structure, never a physical error covariance.
++  using PreMarginalizationObserver = std::function<void(const IncrementalFixedLagSmootherExt&, const KeyVector&)>;
++  virtual void setPreMarginalizationObserver(PreMarginalizationObserver observer) {
++    pre_marginalization_observer_ = std::move(observer);
++  }
++  virtual const std::string& preMarginalizationObserverFailure() const {
++    return pre_marginalization_observer_failure_;
++  }
++
+   /** Compute an estimate from the incomplete linear delta computed during the last update.
+    * This delta is incomplete because it was not updated below wildfire_threshold.  If only
+    * a single variable is needed, it is faster to call calculateEstimate(const KEY&).
+@@ -117,6 +129,9 @@
+   const ISAM2Ext& getISAM2() const { return isam_; }
+ 
+ protected:
++  PreMarginalizationObserver pre_marginalization_observer_;
++  std::string pre_marginalization_observer_failure_;
++
+   /** Create default parameters */
+   static ISAM2Params DefaultISAM2Params() {
+     ISAM2Params params;
+--- a/include/gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp
++++ b/include/gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp
+@@ -13,6 +13,14 @@
+   ~IncrementalFixedLagSmootherExtWithFallback() override;
+ 
+   void set_fix_variable_types(const std::vector<std::pair<char, int>>& var_types) { fix_variable_types = var_types; }
++
++  void setPreMarginalizationObserver(PreMarginalizationObserver observer) override {
++    IncrementalFixedLagSmootherExt::setPreMarginalizationObserver(std::move(observer));
++    smoother->setPreMarginalizationObserver(pre_marginalization_observer_);
++  }
++  const std::string& preMarginalizationObserverFailure() const override {
++    return smoother->preMarginalizationObserverFailure();
++  }
+ 
+   Result update(
+     const gtsam::NonlinearFactorGraph& newFactors = gtsam::NonlinearFactorGraph(),
+--- a/src/gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.cpp
++++ b/src/gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.cpp
+@@ -99,6 +99,18 @@
+     std::cout << "END" << std::endl;
+   }
+ 
++  // Observer failure must not enter the optimizer fallback/recovery path.
++  pre_marginalization_observer_failure_.clear();
++  if (pre_marginalization_observer_) {
++    try {
++      pre_marginalization_observer_(*this, marginalizableKeys);
++    } catch (const std::exception& error) {
++      pre_marginalization_observer_failure_ = error.what();
++    } catch (...) {
++      pre_marginalization_observer_failure_ = "UNKNOWN_OBSERVER_EXCEPTION";
++    }
++  }
++
+   // Marginalize out any needed variables
+   if (marginalizableKeys.size() > 0) {
+     FastList<Key> leafKeys(marginalizableKeys.begin(), marginalizableKeys.end());
+--- a/src/gtsam_points/optimizers/gtsam4.2/incremental_fixed_lag_smoother_ext.cpp
++++ b/src/gtsam_points/optimizers/gtsam4.2/incremental_fixed_lag_smoother_ext.cpp
+@@ -120,6 +120,18 @@
+     std::cout << "END" << std::endl;
+   }
+ 
++  // Observer failure must not enter the optimizer fallback/recovery path.
++  pre_marginalization_observer_failure_.clear();
++  if (pre_marginalization_observer_) {
++    try {
++      pre_marginalization_observer_(*this, marginalizableKeys);
++    } catch (const std::exception& error) {
++      pre_marginalization_observer_failure_ = error.what();
++    } catch (...) {
++      pre_marginalization_observer_failure_ = "UNKNOWN_OBSERVER_EXCEPTION";
++    }
++  }
++
+   // Marginalize out any needed variables
+   if (marginalizableKeys.size() > 0) {
+     FastList<Key> leafKeys(marginalizableKeys.begin(), marginalizableKeys.end());
+--- a/src/gtsam_points/optimizers/incremental_fixed_lag_smoother_ext_with_fallback.cpp
++++ b/src/gtsam_points/optimizers/incremental_fixed_lag_smoother_ext_with_fallback.cpp
+@@ -329,6 +329,7 @@
+   }
+ 
+   smoother.reset(new IncrementalFixedLagSmootherExt(smoother->smootherLag(), smoother->params()));
++  smoother->setPreMarginalizationObserver(pre_marginalization_observer_);
+   smoother->update(new_factors, values, new_stamps);
+ }
+ 

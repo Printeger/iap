@@ -1,5 +1,11 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
+源码快照保留必需的 `patches/gtsam_points/pre_elimination_observer_v1.patch`，
+其基线、补丁SHA与依赖重建要求见 native_response_observer_contract。
+`.gitignore` 排除运行记录／重放输入／中间导出、构建缓存与传感器录制；
+必要源码、测试fixture、契约和依赖补丁保留。仅改变版本管理，生产流程、
+模型资格和M2–M5未通过状态不变。
+
 最小模型推进：已有代码／记录支持原仿真的严格静止启动与理想IMU／初始fix；
 4766个启动真值样本不变，仅验证适用条件，不进入预测。
 `stationary_simulator_bootstrap_inputs` 实现24维初始物理输入：只接受初始化阶段

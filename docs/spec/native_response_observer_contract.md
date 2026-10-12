@@ -4,7 +4,7 @@ Status: M2 diagnostic interface. Interface verification does not qualify a
 physical joint error model, regional ordering, route choice or benefit.
 
 The task-specific dependency exception covers only the five files in approved
-`pre_elimination_observer_v1.patch`, SHA256
+[`patches/gtsam_points/pre_elimination_observer_v1.patch`](../../patches/gtsam_points/pre_elimination_observer_v1.patch), SHA256
 `fb0744580325adb3c88825669a0ef76edf77f1163b11078cb49bc74073d01377`.
 gtsam_points base is `85d0f4c43098b1f071bbb07710692e3829347c6c`; observer commit is
 `0a3c1b16a7e256721525f1fcb09588e033f85e63`. The original update, 5 s native lag,
@@ -15,6 +15,13 @@ forwards the observer to its native smoother and preserves it across recovery.
 This ABI change requires rebuilding the complete actual IAP dependency chain.
 Both upstream implementations carry the hook; only installed GTSAM 4.3a0 is
 tested here. No 4.2 qualification is claimed.
+
+The versioned patch is required source, not a runtime artifact. On a clean
+gtsam_points checkout at the stated base, use `git apply --check` followed by
+`git apply` with this patch, then rebuild/install gtsam_points and the actual IAP
+dependency chain. Do not apply it again to the stated observer commit. Runtime
+records, replay inputs and intermediate exports remain local under ignored
+`log/`; this source snapshot does not claim model or Goal acceptance.
 
 ## Selection and bounds
 

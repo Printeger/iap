@@ -49,6 +49,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.venv/
+venv/
+.coverage
+.coverage.*
+htmlcov/
 qtcreator-*
 *.user
 
@@ -64,18 +69,32 @@ qtcreator-*
 # Catkin custom files
 CATKIN_IGNORE
 
-# Local runtime / colcon logs
+# Run records, replay inputs and intermediate exports stay local.
+# Keep only the colcon sentinel; necessary source patches live under patches/.
 /log/*
-!/log/
 !/log/COLCON_IGNORE
-/log/latest
-/log/latest/
-/log/**/*.log
-/log/**/analysis/
 /tools/log/
 /tools/build/
 /tools/install/
 /symlink_install_manifest.txt
+
+# Generated CMake build trees and caches
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+/Testing/
+
+# Misplaced runtime artifact roots and raw sensor recordings
+/runtime/
+/profiling/
+/export/
+/metadata/
+rosbag2_*/
+*.bag
+*.db3
+*.db3-shm
+*.db3-wal
+*.mcap
 
 # Repository-root planner test outputs
 /*.csv.execution_events.csv
