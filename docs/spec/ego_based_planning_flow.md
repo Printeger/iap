@@ -10,6 +10,12 @@
 37项既有定向回归通过；可靠GNSS改善传入H/V，但V主导且倍率饱和为3。
 G1总体验收 BLOCKED/MODEL_GAP：低维LiDAR有符号物理律与共享来源关系尚无
 可实例化候选依据；不授予排序、PL或收益资格，不自动进入G2–G4。
+用户随后授权且已完成仅已有证据的低维物理律审查，见
+`log/20261012T190421Z_878/export/analysis/g1_physical_law_review`。
+固定段双端联合矩的低维投影可行；signed创新均值／共享来源交叉矩及未来响应
+仍不可由现有输入实例化。G1继续BLOCKED/MODEL_GAP，原支持族候选0/24和
+相对成分失败保留；无新实验、拟合、采集、生产接口或执行流程改动。
+唯一待决项为共享来源联合创新的独立物理校准预登记协议设计，不构成采集或G2授权。
 
 源码快照保留必需的 `patches/gtsam_points/pre_elimination_observer_v1.patch`，
 其基线、补丁SHA与依赖重建要求见 native_response_observer_contract。
