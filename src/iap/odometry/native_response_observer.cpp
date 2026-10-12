@@ -1,38 +1,54 @@
 #include <iap/odometry/native_response_observer.hpp>
 #include <iap/gnss/pseudorange_factor.hpp>
 #include <iap/odometry/gpu_evidence/integrated_vgicp_factor_gpu.hpp>
+#include <iap/odometry/gpu_evidence/match_residual.hpp>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/ImuBias.h>
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/linear/JacobianFactor.h>
+#include <gtsam/linear/HessianFactor.h>
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <fstream>
-#include <cstring>
 #include <zlib.h>
 
 namespace iap {
 namespace {
 using Json=nlohmann::json;
-template<class Matrix> Json row_major(const Matrix& m) {
+template<class Matrix> std::vector<double> row_major(const Matrix& m) {
   if(!m.allFinite()) throw std::runtime_error("NONFINITE_NATIVE_STATE");
-  Json out=Json::array();
+  std::vector<double> out;out.reserve(m.size());
   for(int r=0;r<m.rows();++r) for(int c=0;c<m.cols();++c) out.push_back(m(r,c));
   return out;
 }
-// Copy large coefficient blocks on the solver thread; expand only on writer.
-template<class Matrix> Json coefficient_bytes(const Matrix& m) {
-  if(!m.allFinite()) throw std::runtime_error("NONFINITE_NATIVE_COEFFICIENTS");
-  Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor> copy=m;
-  const auto* first=reinterpret_cast<const std::uint8_t*>(copy.data());
-  return Json::binary(std::vector<std::uint8_t>(first,first+copy.size()*sizeof(double)));
+std::vector<double> packed_upper(const Eigen::MatrixXd& m) {
+  if(!m.allFinite() || m.rows()!=m.cols()) throw std::runtime_error("NONFINITE_NATIVE_COEFFICIENTS");
+  std::vector<double> out;out.reserve(m.rows()*(m.rows()+1)/2);
+  for(int r=0;r<m.rows();++r) for(int c=r;c<m.cols();++c) out.push_back(m(r,c));
+  return out;
 }
-void expand_coefficients(Json& value) {
-  if(value.is_binary()) {
-    const auto& bytes=value.get_binary();std::vector<double> numbers(bytes.size()/sizeof(double));
-    std::memcpy(numbers.data(),bytes.data(),bytes.size());value=numbers;
-  } else if(value.is_array()||value.is_object()) for(auto& child:value) expand_coefficients(child);
+struct ResponseState {
+  std::uint64_t key;std::size_t dim;const char* representation;
+  std::vector<double> point,delta;
+};
+struct ResponseFactor {
+  std::size_t index,rows;gtsam::KeyVector keys;std::vector<std::size_t> dims;
+  const char* native_type="missing";bool new_this_update=false;
+  gtsam::GaussianFactor::shared_ptr cached;
+  bool pseudorange=false;int sat_id=0;char constellation='?';double pr_meas=0.,elevation=0.;
+  bool vgicp=false,target_response_available=false;
+  GpuMatchOwner owner;
+  std::vector<double> target_upper,linearization_transform,fixed_target_pose;
+};
 }
-}
+struct NativeResponsePacket {
+  long frame;double stamp,lag,copy_ms=0.;bool complete=false,initial=false;
+  std::string failure;
+  std::size_t bytes=0,cached_bytes=0,request_id=0,keys=0,slots=0,entries=0,active=0,max_factor_dim=0;
+  gtsam::KeyVector discarded;
+  std::vector<ResponseState> states;
+  std::vector<ResponseFactor> factors;
+};
 NativeResponseObserver::NativeResponseObserver(const glim::RunLogManager& logs,const std::vector<long>& frames)
 : frames_(frames.begin(),frames.end()), raw_path_(logs.export_path("glio/native_response.jsonl.gz")),
   manifest_path_(logs.metadata_path("manifests/native_response.json")) {
@@ -53,14 +69,15 @@ NativeResponseObserver::~NativeResponseObserver() {
   if(gzclose(static_cast<gzFile>(raw_))!=Z_OK) ++write_failures_;
   try {
     Json missing=Json::array();for(auto frame:frames_) if(!seen_.count(frame)) missing.push_back(frame);
-    Json manifest={{"schema","iap_native_response_manifest_v1"},{"version",IAP_VERSION},
+    Json manifest={{"schema","iap_native_response_manifest_v2"},{"version",IAP_VERSION},
       {"build_type",IAP_BUILD_TYPE},{"run_identity","metadata/run_manifest.json"},
       {"raw","export/glio/native_response.jsonl.gz"},{"selection_frames",frames_},
       {"missing_frames",missing},{"initial_x0_elimination_seen",initial_seen_},{"requests",ledger_},
       {"written",written_},{"write_failures",write_failures_},{"queue_limit",kQueueLimit},
       {"max_snapshots",kMaxFrames+1},{"max_keys",kMaxKeys},{"max_factors",kMaxFactors},
       {"max_index_entries",kMaxIndexEntries},{"max_retained_gpu_factors",kMaxRetainedGpuFactors},
-      {"max_factor_tangent_dim",kMaxFactorDim},{"matrix_byte_limit",kMaxBytes},
+      {"cached_factor_byte_limit",kMaxCachedBytes},
+      {"max_factor_tangent_dim",kMaxFactorDim},{"matrix_encoding","symmetric_upper_triangle_row_major"},{"matrix_byte_limit",kMaxBytes},
       {"copy_budget_ms",kCopyBudgetMs},{"physical_joint_error_law_available",false}};
     std::ofstream file(manifest_path_);file<<manifest.dump(2)<<'\n';file.flush();
     if(!file) throw std::runtime_error("manifest write failed");
@@ -85,118 +102,167 @@ void NativeResponseObserver::prepare(gtsam_points::IncrementalFixedLagSmootherEx
     if(auto self=weak.lock()) self->observe(native,discarded,frame,stamp);
   });
 }
-Json NativeResponseObserver::snapshot(const gtsam_points::IncrementalFixedLagSmootherExt& native,
+std::unique_ptr<NativeResponsePacket> NativeResponseObserver::capture(
+    const gtsam_points::IncrementalFixedLagSmootherExt& native,
     const gtsam::KeyVector& discarded,long frame,double stamp) {
   const auto start=std::chrono::steady_clock::now();
-  Json out={{"schema","iap_native_response_v1"},{"frame_id",frame},{"stamp",stamp},
-    {"lag_s",native.smootherLag()},{"discarded_keys",discarded},{"complete",false},
-    {"coefficient_semantics","cached_native_loss_normal_equations_not_physical_noise"},
-    {"physical_joint_error_law_available",false},{"states",Json::array()},{"factors",Json::array()}};
-  std::size_t bytes=0;
+  auto p=std::make_unique<NativeResponsePacket>();
+  p->frame=frame;p->stamp=stamp;p->lag=native.smootherLag();p->discarded=discarded;
   const auto& theta=native.getLinearizationPoint();
   const auto& factors=native.getLinearFactors();
   const auto& index=native.getISAM2().getVariableIndex();
-  out["native_key_count"]=theta.size();out["native_factor_slot_count"]=factors.size();
-  out["native_index_entries"]=index.nEntries();
+  p->keys=theta.size();p->slots=factors.size();p->entries=index.nEntries();
   auto elapsed=[&]{return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();};
+  auto check_time=[&]{if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");};
+  auto charge=[&](std::size_t bytes) {
+    if(bytes>kMaxBytes-p->bytes) throw std::runtime_error("NATIVE_MATRIX_CAP_EXCEEDED");
+    p->bytes+=bytes;
+  };
   try {
     if(theta.size()>kMaxKeys || index.nEntries()>kMaxIndexEntries) throw std::runtime_error("NATIVE_GRAPH_CAP_EXCEEDED");
-    // The solver's VariableIndex contains only active relationships. Iterating
-    // it avoids an unbounded scan of old null factor slots without changing the
-    // estimator's slot reuse policy.
-    std::set<std::size_t> active;
+    // Native VariableIndex contains active relationships, including marginals;
+    // no scan of historical null slots and no estimator slot-policy change.
+    std::vector<std::size_t> active;active.reserve(index.nEntries());
     for(const auto& entry:index) {
-      if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");
-      active.insert(entry.second.begin(),entry.second.end());
-      if(active.size()>kMaxFactors) throw std::runtime_error("NATIVE_ACTIVE_FACTOR_CAP_EXCEEDED");
+      check_time();active.insert(active.end(),entry.second.begin(),entry.second.end());
     }
-    out["native_active_factor_count"]=active.size();
-    const auto& delta=native.getDelta();
+    std::sort(active.begin(),active.end());active.erase(std::unique(active.begin(),active.end()),active.end());
+    p->active=active.size();
+    if(active.size()>kMaxFactors) throw std::runtime_error("NATIVE_ACTIVE_FACTOR_CAP_EXCEEDED");
+    const auto& delta=native.getDelta();p->states.reserve(theta.size());
     for(const auto& kv:theta) {
-      if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");
-      const auto key=kv.key;const char type=gtsam::Symbol(key).chr();
-      Json point;std::string representation;
-      if(type=='x') {point=row_major(theta.at<gtsam::Pose3>(key).matrix());representation="Pose3_matrix_row_major";}
-      else if(type=='r') {point=row_major(theta.at<gtsam::Rot3>(key).matrix());representation="Rot3_matrix_row_major";}
-      else if(type=='b') {point=row_major(theta.at<gtsam::imuBias::ConstantBias>(key).vector());representation="ConstantBias_acc_gyro";}
-      else if(type=='v'||type=='e') {point=row_major(theta.at<gtsam::Vector3>(key));representation="Vector3";}
-      else if(type=='c'||type=='d'||type=='h'||type=='j') {point=row_major(theta.at<gtsam::Vector2>(key));representation="Vector2";}
+      check_time();const auto key=kv.key;const char type=gtsam::Symbol(key).chr();
+      ResponseState s;s.key=key;s.dim=kv.value.dim();
+      if(type=='x') {s.point=row_major(theta.at<gtsam::Pose3>(key).matrix());s.representation="Pose3_matrix_row_major";}
+      else if(type=='r') {s.point=row_major(theta.at<gtsam::Rot3>(key).matrix());s.representation="Rot3_matrix_row_major";}
+      else if(type=='b') {s.point=row_major(theta.at<gtsam::imuBias::ConstantBias>(key).vector());s.representation="ConstantBias_acc_gyro";}
+      else if(type=='v'||type=='e') {s.point=row_major(theta.at<gtsam::Vector3>(key));s.representation="Vector3";}
+      else if(type=='c'||type=='d'||type=='h'||type=='j') {s.point=row_major(theta.at<gtsam::Vector2>(key));s.representation="Vector2";}
       else throw std::runtime_error("UNSUPPORTED_NATIVE_VALUE_TYPE");
-      bytes+=(point.size()+kv.value.dim())*sizeof(double);
-      if(bytes>kMaxBytes) throw std::runtime_error("NATIVE_MATRIX_CAP_EXCEEDED");
-      out["states"].push_back({{"key",key},{"type",std::string(1,type)},{"dim",kv.value.dim()},
-        {"linearization_point",point},{"representation",representation},{"delta",row_major(delta.at(key))}});
+      s.delta=row_major(delta.at(key));charge((s.point.size()+s.delta.size())*sizeof(double));
+      p->states.push_back(std::move(s));
     }
     const auto& nonlinear=native.getFactors();
-    const auto& new_indices=native.getISAM2Result().newFactorsIndices;
+    auto new_indices=native.getISAM2Result().newFactorsIndices;std::sort(new_indices.begin(),new_indices.end());
+    p->factors.reserve(active.size());
     for(const auto i:active) {
-      if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");
-      if(i>=factors.size() || !factors[i]) throw std::runtime_error("NATIVE_LINEAR_CACHE_MISSING");
-      const auto& factor=factors[i];
-      std::size_t dim=0;std::vector<std::size_t> dims;
-      for(auto it=factor->begin();it!=factor->end();++it) {auto d=factor->getDim(it);dims.push_back(d);dim+=d;}
-      if(dim>kMaxFactorDim || (bytes+=(dim+1)*(dim+1)*sizeof(double))>kMaxBytes)
-        throw std::runtime_error("NATIVE_MATRIX_CAP_EXCEEDED");
-      const auto matrix=factor->augmentedInformation();
-      if(!matrix.allFinite()) throw std::runtime_error("NONFINITE_NATIVE_COEFFICIENTS");
-      Json row={{"index",i},{"keys",factor->keys()},{"dims",dims},{"rows",matrix.rows()},
-        {"augmented_information_row_major",coefficient_bytes(matrix)},
-        {"new_this_update",std::find(new_indices.begin(),new_indices.end(),i)!=new_indices.end()}};
+      check_time();if(i>=factors.size() || !factors[i]) throw std::runtime_error("NATIVE_LINEAR_CACHE_MISSING");
+      const auto& factor=factors[i];ResponseFactor f;f.index=i;f.keys=factor->keys();
+      std::size_t dim=0;f.dims.reserve(factor->size());
+      for(auto it=factor->begin();it!=factor->end();++it) {auto d=factor->getDim(it);f.dims.push_back(d);dim+=d;}
+      p->max_factor_dim=std::max(p->max_factor_dim,dim);
+      if(dim>kMaxFactorDim) throw std::runtime_error("NATIVE_FACTOR_DIM_CAP_EXCEEDED");
+      f.rows=dim+1;charge(f.rows*(f.rows+1)/2*sizeof(double));
+      std::size_t stored_bytes=0;
+      if(const auto* jac=dynamic_cast<const gtsam::JacobianFactor*>(factor.get())) {
+        if(jac->rows()>kMaxFactorDim) throw std::runtime_error("NATIVE_FACTOR_ROW_CAP_EXCEEDED");
+        stored_bytes=jac->rows()*f.rows*sizeof(double);
+      } else if(dynamic_cast<const gtsam::HessianFactor*>(factor.get())) stored_bytes=f.rows*f.rows*sizeof(double);
+      else throw std::runtime_error("UNSUPPORTED_NATIVE_GAUSSIAN_TYPE");
+      if(stored_bytes>kMaxCachedBytes-p->cached_bytes) throw std::runtime_error("NATIVE_CACHED_FACTOR_CAP_EXCEEDED");
+      p->cached_bytes+=stored_bytes;
+      // Deep-copy the already-cached CPU factor; worker computes A^T A. No
+      // references to subsequently updated solver state or GPU objects escape.
+      f.cached=factor->clone();
+      f.new_this_update=std::binary_search(new_indices.begin(),new_indices.end(),i);
       const auto* nf=i<nonlinear.size() ? nonlinear[i].get() : nullptr;
-      row["native_type"]=nf ? typeid(*nf).name() : "missing";
+      f.native_type=nf ? typeid(*nf).name() : "missing";
       if(const auto* pr=dynamic_cast<const PseudorangeFactor*>(nf)) {
-        row["pseudorange"]={{"sat_id",pr->sat_id()},{"constellation",std::string(1,pr->constellation())},
-          {"pr_meas_m",pr->pr_meas()},{"elevation_rad",pr->elevation()}};
+        f.pseudorange=true;f.sat_id=pr->sat_id();f.constellation=pr->constellation();
+        f.pr_meas=pr->pr_meas();f.elevation=pr->elevation();
       }
 #ifdef IAP_NATIVE_GPU_MATCH
       if(const auto* gpu=dynamic_cast<const gtsam_points::IapObservedVGICPFactorGPU*>(nf)) {
-        const auto& owner=gpu->get_evidence_owner();
-        row["vgicp"]={{"source_frame_id",owner.source_frame_id},{"target_frame_id",owner.target_frame_id},
-          {"source_stamp",owner.source_stamp},{"target_stamp",owner.target_stamp},{"level_id",owner.level_id},
-          {"target_is_fixed",owner.target_is_fixed},{"voxel_resolution_m",owner.voxel_resolution_m}};
-        const auto& response=gpu->native_response();
-        row["vgicp"]["target_response_available"]=response.has_value();
+        f.vgicp=true;f.owner=gpu->get_evidence_owner();const auto& response=gpu->native_response();
+        f.target_response_available=response.has_value();
         if(response) {
-          bytes+=(13*13+4*4)*sizeof(double);
-          if(bytes>kMaxBytes) throw std::runtime_error("NATIVE_MATRIX_CAP_EXCEEDED");
-          row["vgicp"]["full_augmented_information_row_major"]=coefficient_bytes(response->augmented_information);
-          row["vgicp"]["linearization_transform_row_major"]=row_major(response->linearization_transform);
+          charge((13*14/2+4*4)*sizeof(double));
+          f.target_upper=packed_upper(response->augmented_information);
+          f.linearization_transform=row_major(response->linearization_transform);
         }
-        if(owner.target_is_fixed) row["vgicp"]["fixed_target_pose_row_major"]=row_major(gpu->get_fixed_target_pose().matrix());
+        if(f.owner.target_is_fixed) {charge(16*sizeof(double));f.fixed_target_pose=row_major(gpu->get_fixed_target_pose().matrix());}
       }
 #endif
-      out["factors"].push_back(std::move(row));
+      p->factors.push_back(std::move(f));
     }
-    out["complete"]=true;
-  } catch(const std::exception& e) {
-    // Never export a partial graph as a complete native response.
-    out["states"]=Json::array();out["factors"]=Json::array();out["failure_reason"]=e.what();
+    check_time();p->complete=true;
+  } catch(const std::exception& e) {p->failure=e.what();}
+  // Partial packet disposal and all formatting occur on the writer, not here.
+  p->copy_ms=elapsed();return p;
+}
+Json NativeResponseObserver::serialize(const NativeResponsePacket& p) {
+  Json out={{"schema","iap_native_response_v2"},{"frame_id",p.frame},{"stamp",p.stamp},{"lag_s",p.lag},
+    {"discarded_keys",p.discarded},{"complete",p.complete},{"failure_reason",p.failure},
+    {"initial_x0_elimination",p.initial},{"copy_ms",p.copy_ms},{"copied_matrix_bytes",p.bytes},
+    {"cached_factor_bytes",p.cached_bytes},
+    {"native_key_count",p.keys},{"native_factor_slot_count",p.slots},{"native_index_entries",p.entries},
+    {"native_active_factor_count",p.active},{"max_observed_factor_tangent_dim",p.max_factor_dim},
+    {"coefficient_semantics","cached_native_loss_normal_equations_not_physical_noise"},
+    {"matrix_encoding","symmetric_upper_triangle_row_major"},{"physical_joint_error_law_available",false},
+    {"states",Json::array()},{"factors",Json::array()}};
+  if(!p.complete) return out;
+  for(const auto& s:p.states) out["states"].push_back({{"key",s.key},{"type",std::string(1,gtsam::Symbol(s.key).chr())},
+    {"dim",s.dim},{"linearization_point",s.point},{"representation",s.representation},{"delta",s.delta}});
+  for(const auto& f:p.factors) {
+    Json row={{"index",f.index},{"keys",f.keys},{"dims",f.dims},{"rows",f.rows},
+      {"augmented_information_upper",packed_upper(f.cached->augmentedInformation())},
+      {"new_this_update",f.new_this_update},{"native_type",f.native_type}};
+    if(f.pseudorange) row["pseudorange"]={{"sat_id",f.sat_id},{"constellation",std::string(1,f.constellation)},
+      {"pr_meas_m",f.pr_meas},{"elevation_rad",f.elevation}};
+    if(f.vgicp) {
+      const auto& o=f.owner;
+      row["vgicp"]={{"source_frame_id",o.source_frame_id},{"target_frame_id",o.target_frame_id},
+        {"source_stamp",o.source_stamp},{"target_stamp",o.target_stamp},{"level_id",o.level_id},
+        {"target_is_fixed",o.target_is_fixed},{"voxel_resolution_m",o.voxel_resolution_m},
+        {"target_response_available",f.target_response_available}};
+      if(f.target_response_available) {
+        row["vgicp"]["full_augmented_information_upper"]=f.target_upper;
+        row["vgicp"]["linearization_transform_row_major"]=f.linearization_transform;
+      }
+      if(o.target_is_fixed) row["vgicp"]["fixed_target_pose_row_major"]=f.fixed_target_pose;
+    }
+    out["factors"].push_back(std::move(row));
   }
-  out["copied_matrix_bytes"]=bytes;out["copy_ms"]=elapsed();return out;
+  return out;
+}
+Json NativeResponseObserver::snapshot(const gtsam_points::IncrementalFixedLagSmootherExt& native,
+    const gtsam::KeyVector& discarded,long frame,double stamp) {
+  return serialize(*capture(native,discarded,frame,stamp));
 }
 void NativeResponseObserver::observe(const gtsam_points::IncrementalFixedLagSmootherExt& native,
     const gtsam::KeyVector& discarded,long frame,double stamp) {
   const bool initial=!initial_seen_ && std::find(discarded.begin(),discarded.end(),gtsam::Symbol('x',0))!=discarded.end();
   if((!frames_.count(frame)||seen_.count(frame)) && !initial) return;
-  if(frames_.count(frame)) seen_.insert(frame);
-  if(initial) initial_seen_=true;
-  auto packet=snapshot(native,discarded,frame,stamp);packet["initial_x0_elimination"]=initial;
-  std::lock_guard<std::mutex> lock(mutex_);
-  const bool accepted=queue_.size()<kQueueLimit;
+  if(frames_.count(frame)) seen_.insert(frame);if(initial) initial_seen_=true;
+  auto packet=capture(native,discarded,frame,stamp);packet->initial=initial;
+  std::lock_guard<std::mutex> lock(mutex_);const bool accepted=queue_.size()<kQueueLimit;
+  packet->request_id=ledger_.size();
   ledger_.push_back({{"frame_id",frame},{"stamp",stamp},{"initial_x0_elimination",initial},
-    {"complete",packet["complete"]},{"failure_reason",packet.value("failure_reason","")},
-    {"copy_ms",packet["copy_ms"]},{"queue_accepted",accepted}});
-  if(!accepted) return;
-  queue_.push_back(std::move(packet));cv_.notify_one();
+    {"complete",packet->complete},{"failure_reason",packet->failure},{"copy_ms",packet->copy_ms},
+    {"native_active_factor_count",packet->active},{"native_factor_slot_count",packet->slots},
+    {"max_observed_factor_tangent_dim",packet->max_factor_dim},{"queue_accepted",accepted}});
+  if(!accepted) return;queue_.push_back(std::move(packet));cv_.notify_one();
 }
 void NativeResponseObserver::drain() {
   for(;;) {
-    Json packet;
-    { std::unique_lock<std::mutex> lock(mutex_);cv_.wait(lock,[this]{return stopping_||!queue_.empty();});
-      if(queue_.empty()) return;packet=std::move(queue_.front());queue_.pop_front(); }
-    expand_coefficients(packet);const auto line=packet.dump()+"\n";
-    if(gzwrite(static_cast<gzFile>(raw_),line.data(),line.size())!=static_cast<int>(line.size())) ++write_failures_;
-    else ++written_;
+    std::unique_ptr<NativeResponsePacket> packet;
+    {std::unique_lock<std::mutex> lock(mutex_);cv_.wait(lock,[this]{return stopping_||!queue_.empty();});
+      if(queue_.empty()) return;packet=std::move(queue_.front());queue_.pop_front();}
+    try {
+      Json encoded;
+      try {encoded=serialize(*packet);}
+      catch(const std::exception& error) {
+        packet->complete=false;packet->failure=error.what();encoded=serialize(*packet);
+        std::lock_guard<std::mutex> lock(mutex_);
+        ledger_[packet->request_id]["complete"]=false;
+        ledger_[packet->request_id]["failure_reason"]=packet->failure;
+      }
+      const auto line=encoded.dump()+"\n";
+      if(gzwrite(static_cast<gzFile>(raw_),line.data(),line.size())!=static_cast<int>(line.size())) ++write_failures_;
+      else ++written_;
+    } catch(const std::exception& error) {
+      ++write_failures_;spdlog::error("[native_response] serialize failed: {}",error.what());
+    }
   }
 }
 }

@@ -4,6 +4,8 @@
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/linear/JacobianFactor.h>
+#include <gtsam/nonlinear/LinearContainerFactor.h>
 #include <fstream>
 #include <cstdlib>
 #include <numeric>
@@ -74,6 +76,36 @@ TEST(NativeResponseObserver, DeadFactorSlotsDoNotBecomeActiveGraphBudget) {
   EXPECT_LT(packet["native_active_factor_count"].get<int>(),600);
   EXPECT_TRUE(packet["complete"].get<bool>())<<packet.dump();
 }
+TEST(NativeResponseObserver, RepresentativeNativeSizeAndLargeMarginalFitOriginalCopyBudget) {
+  // Native response/storage fixture only; the identity loss is NOT noise law.
+  gtsam::ISAM2Params parameters;
+  gtsam_points::IncrementalFixedLagSmootherExt smoother(5.,parameters);
+  gtsam::Values values;gtsam::FixedLagSmoother::KeyTimestampMap stamps;
+  for(int i=0;i<50;++i) {const auto key=gtsam::Symbol('x',i);values.insert(key,gtsam::Pose3());stamps[key]=0.;}
+  gtsam::NonlinearFactorGraph factors;
+  const gtsam::Matrix I=gtsam::Matrix::Identity(6,6),Z=gtsam::Matrix::Zero(6,6);
+  const gtsam::Vector zero=gtsam::Vector::Zero(6);
+  for(int i=0;i<3300;++i) {
+    gtsam::KeyVector keys{gtsam::Symbol('x',i%48),gtsam::Symbol('x',i%48+1),gtsam::Symbol('x',i%48+2)};
+    const gtsam::HessianFactor h(keys,std::vector<gtsam::Matrix>{I,Z,Z,I,Z,I},
+        std::vector<gtsam::Vector>{zero,zero,zero},0.);
+    factors.emplace_shared<gtsam::LinearContainerFactor>(h,values);
+  }
+  std::vector<std::pair<gtsam::Key,gtsam::Matrix>> terms;
+  for(int i=0;i<50;++i) {gtsam::Matrix A=gtsam::Matrix::Zero(300,6);A.block<6,6>(6*i,0)=I;terms.emplace_back(gtsam::Symbol('x',i),A);}
+  gtsam::JacobianFactor marginal(terms,gtsam::Vector::Zero(300),gtsam::noiseModel::Unit::Create(300));
+  factors.emplace_shared<gtsam::LinearContainerFactor>(marginal,values);
+  nlohmann::json packet;
+  smoother.setPreMarginalizationObserver([&](const auto& native,const auto& discarded) {
+    packet=iap::NativeResponseObserver::snapshot(native,discarded,49,0.);
+  });
+  smoother.update(factors,values,stamps);
+  EXPECT_TRUE(packet["complete"].get<bool>())<<packet.dump();
+  EXPECT_EQ(packet["native_active_factor_count"],3301);
+  EXPECT_EQ(packet["max_observed_factor_tangent_dim"],300);
+  EXPECT_GT(packet["copied_matrix_bytes"].get<int>(),4*1024*1024);
+  EXPECT_LE(packet["copy_ms"].get<double>(),iap::NativeResponseObserver::kCopyBudgetMs);
+}
 TEST(NativeResponseObserver, OwnedWriterHasFiniteSelectionAndRetainsMissingRequests) {
   std::string pattern=(std::filesystem::temp_directory_path()/"iap_response_test_XXXXXX").string();
   auto* allocated=::mkdtemp(pattern.data());ASSERT_NE(allocated,nullptr);
@@ -103,7 +135,7 @@ TEST(NativeResponseObserver, OwnedWriterHasFiniteSelectionAndRetainsMissingReque
   while(std::getline(lines,line)) {
     const auto packet=nlohmann::json::parse(line);++rows;
     EXPECT_TRUE(packet["complete"].get<bool>());
-    for(const auto& factor:packet["factors"]) EXPECT_TRUE(factor["augmented_information_row_major"].is_array());
+    for(const auto& factor:packet["factors"]) EXPECT_TRUE(factor["augmented_information_upper"].is_array());
     EXPECT_LE(packet["copied_matrix_bytes"].get<int>(),iap::NativeResponseObserver::kMaxBytes);
   }
   EXPECT_EQ(rows,manifest["written"]);

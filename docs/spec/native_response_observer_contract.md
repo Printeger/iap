@@ -1,4 +1,4 @@
-# Native pre-elimination response observer v1
+# Native pre-elimination response observer v2
 
 Status: M2 diagnostic interface. Interface verification does not qualify a
 physical joint error model, regional ordering, route choice or benefit.
@@ -36,15 +36,21 @@ fixed-target construction. The native Hessian upper-triangle convention is
 preserved. Factor lifetime remains owned by the original smoother.
 
 Each snapshot permits at most 512 state keys, 4096 active factors, 32768 indexed
-variable-factor relationships, 128 tangent
-dimensions per factor and 8 MiB of numerical payload. Copying checks a 5 ms
+variable-factor relationships, 1536 tangent dimensions/rows per factor and
+8 MiB of numerical payload in symmetric upper-triangle representation. Cached
+Gaussian factor clones have a separate 16 MiB storage cap. The producer deep
+copies cached CPU factors and native metadata; the worker computes augmented
+normal coefficients and encodes the triangle. No matrix product or JSON graph
+formatting runs on the estimator thread. Clones have independent numerical
+storage, so future solver updates cannot change a queued snapshot. Copying checks a 5 ms
 deadline between bounded state/factor operations; one bounded operation can
 finish beyond that check. Report actual copy time rather than claiming a hard
 real-time guarantee. Exceeding a cap or encountering missing cached factors,
 unsupported state types or nonfinite coefficients exports an unavailable
 snapshot with no partial graph. Bounds never justify deleting a requested frame
 or treating truncation as valid. A two-packet queue feeds lossless gzip off the
-estimator thread; large coefficient arrays are expanded only on that worker.
+estimator thread. Nonfinite worker-side coefficients invalidate the complete
+snapshot and update its ledger; observer failure cannot reach estimator recovery.
 At most 32 snapshots and 32 small ledger entries are produced, with no rolling
 full-history archive. Queue rejection and absent requested frames remain in the
 manifest. At most 2048 live VGICP factors have retention enabled; a bounded
@@ -56,7 +62,10 @@ beyond the retention cap remain unavailable, never filled from another factor.
 
 RunLogManager owns `export/glio/native_response.jsonl.gz` and the subordinate
 `metadata/manifests/native_response.json`. No expanded duplicate is written.
-The manifest binds run/build identity, selection, availability, caps and timing.
+The v2 manifest binds run/build identity, selection, availability, caps and timing.
+v1 failed snapshots remain unchanged. `augmented_information_upper` and VGICP's
+`full_augmented_information_upper` enumerate `(r,c)` with `r=0..n-1` and
+`c=r..n-1`; mirror the upper triangle to reconstruct the symmetric matrix.
 
 ## Meaning and remaining information
 
