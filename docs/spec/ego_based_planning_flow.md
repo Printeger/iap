@@ -1,5 +1,16 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
+当前执行入口仍为 [credible_local_risk_goal.md](../dev_predictor/credible_local_risk_goal.md)。
+2026-10-13用户采用 G1→G4 串行排期，本轮仅 G1，暂停高维模型与取证扩展；
+原 M2–M5未完成、失败、评价器和验收门槛保持。生产仍是 capturePredictionSnapshot
+→ makeFrozenPredictor/frozenPredictionQuery（prior OFF、horizon=0）→ PredictorModule
+→ 共同姿态 factor-two Fusion → predictionRiskVoxel → 同一 GridMap分类
+→ 单A*边积分 → 一条guide → 原EGO与执行权威。本轮没有生产／接口修改。
+`log/20261012T163704Z_119/export/analysis/g1` 的同输入／同包络与独立SVD检查、
+37项既有定向回归通过；可靠GNSS改善传入H/V，但V主导且倍率饱和为3。
+G1总体验收 BLOCKED/MODEL_GAP：低维LiDAR有符号物理律与共享来源关系尚无
+可实例化候选依据；不授予排序、PL或收益资格，不自动进入G2–G4。
+
 源码快照保留必需的 `patches/gtsam_points/pre_elimination_observer_v1.patch`，
 其基线、补丁SHA与依赖重建要求见 native_response_observer_contract。
 `.gitignore` 排除运行记录／重放输入／中间导出、构建缓存与传感器录制；
