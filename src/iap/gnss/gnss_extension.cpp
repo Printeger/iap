@@ -198,11 +198,13 @@ GnssExtensionModule::GnssExtensionModule()
   });
 
   const auto response_frames=config.param<std::vector<int>>("gnss","native_response_frames",{});
+  const auto source_freeze=config.param<bool>("gnss","native_response_first_source_freeze",false);
+  if(source_freeze && response_frames.empty()) throw std::runtime_error("native source freeze capture requires explicit frame selection");
   if(!response_frames.empty()) {
     const auto* logs=glim::RunLogManager::get_if_initialized();
     if(!logs) throw std::runtime_error("native response requires initialized run artifact authority");
     native_response_observer_=std::make_shared<NativeResponseObserver>(*logs,
-        std::vector<long>(response_frames.begin(),response_frames.end()));
+        std::vector<long>(response_frames.begin(),response_frames.end()),source_freeze);
     logger_->info("[native_response] enabled for {} selected frames plus initial x0 elimination",response_frames.size());
   }
 

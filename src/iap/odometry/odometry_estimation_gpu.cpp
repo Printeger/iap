@@ -440,6 +440,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
           const gtsam_points::IapObservedVGICPFactorGPU::shared_ptr& factor,
           const glim::EstimationFrame::ConstPtr& target,
           const bool target_is_fixed,
+          const bool target_is_keyframe,
           const int level_id,
           const double voxel_resolution) {
         iap::LidarAraimBlock block;
@@ -460,7 +461,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
 
         pending_blocks.push_back({factor, std::move(block)});
         factor->set_evidence_owner({frames[current]->id,target ? target->id : -1,
-          frames[current]->stamp,target ? target->stamp : 0.,voxel_resolution,level_id,target_is_fixed});
+          frames[current]->stamp,target ? target->stamp : 0.,voxel_resolution,level_id,target_is_fixed,target_is_keyframe});
       };
 
   const auto create_binary_factor = [this, &append_block_metadata](
@@ -468,7 +469,8 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
                                       gtsam::Key target_key,
                                       gtsam::Key source_key,
                                       const glim::EstimationFrame::ConstPtr& target,
-                                      const glim::EstimationFrame::ConstPtr& source) {
+                                      const glim::EstimationFrame::ConstPtr& source,
+                                      const bool target_is_keyframe=false) {
     auto stream_buffer = stream_buffer_roundrobin->get_stream_buffer();
     const auto& stream = stream_buffer.first;
     const auto& buffer = stream_buffer.second;
@@ -480,7 +482,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
       factor->set_enable_surface_validation(true);
       factors.add(factor);
       append_block_metadata(
-          factor, target, false, level_id, voxelmap->voxel_resolution());
+          factor, target, false, target_is_keyframe, level_id, voxelmap->voxel_resolution());
     }
   };
 
@@ -501,7 +503,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
       factor->set_enable_surface_validation(true);
       factors.add(factor);
       append_block_metadata(
-          factor, target, true, level_id, voxelmap->voxel_resolution());
+          factor, target, true, true, level_id, voxelmap->voxel_resolution());
     }
   };
 
@@ -543,7 +545,7 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
       if (!pred_values.exists(X(target))) {
         pred_values.insert(X(target), gtsam::Pose3(frames[target]->T_world_imu.matrix()));
       }
-      create_binary_factor(factors, X(target), X(current), frames[target], frames[current]);
+      create_binary_factor(factors, X(target), X(current), frames[target], frames[current],true);
     }
   }
 

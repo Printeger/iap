@@ -856,10 +856,17 @@ runpy.run_path(path,run_name='__main__')
             runtime, manifest = helper.materialize_profile(
                 source_config_dir=str(REPO / "config/profiles/full_stack_flight"),
                 output_dir=str(Path(temporary) / "run"), contract="full_stack",
-                simulation_scenario=scenario, capture_native_response_frames="50,150,160")
+                simulation_scenario=scenario, capture_native_response_frames="50,150,160",
+                capture_native_source_freeze=True)
             gnss = json.loads((Path(runtime) / "config_gnss.json").read_text())
             self.assertEqual(gnss["gnss"]["native_response_frames"], [50,150,160])
             self.assertEqual(manifest["native_response_frames"], [50,150,160])
+            self.assertTrue(gnss["gnss"]["native_response_first_source_freeze"])
+            for frames in ("", ",".join(str(i) for i in range(27))):
+                with self.assertRaises(RuntimeError):
+                    helper.materialize_profile(source_config_dir=str(REPO / "config/profiles/full_stack_flight"),
+                        output_dir=str(Path(temporary) / "invalid_freeze"),contract="full_stack",
+                        simulation_scenario=scenario,capture_native_response_frames=frames,capture_native_source_freeze=True)
             for value in ("1,1", "-1", "x", "2147483648", ",".join(str(i) for i in range(32))):
                 with self.assertRaises(RuntimeError):
                     helper.materialize_profile(source_config_dir=str(REPO / "config/profiles/full_stack_flight"),

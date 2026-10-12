@@ -1,4 +1,4 @@
-# Native pre-elimination response observer v2
+# Native pre-elimination response observer v3
 
 Status: M2 diagnostic interface. Interface verification does not qualify a
 physical joint error model, regional ordering, route choice or benefit.
@@ -25,6 +25,22 @@ empty selection installs no observer and creates no response artifacts. Flight
 profiles cannot enable this canonical diagnostic option. The OFF development
 collector exposes `--capture-native-response-frames` and requires its existing
 native increment/source observation mode. It does not change task configuration.
+
+Optional `capture_native_source_freeze:=true` selects the first positive target
+explicitly marked as an original keyframe connection, initially binary. Ordinary
+consecutive-frame factors cannot arm it. The first new fixed-target factor for
+that identity selects the previous native update, first fixed use, first update
+after it, actual native retirement and fixed-use frame +10; coincident roles use
+one snapshot. The +10 probe is a response component, not the exact 1 s primary
+evaluation. Selection permits at most 26 explicit frames, five extra snapshots
+and the original initial elimination (32 total). Only one previous packet rolls
+until fixed use, at most 100 updates after first binary use; no full trajectory
+archive exists. Every rolling copy uses the original caps/deadline; total callback
+time including disposal/selection is also reported. Any budget overrun or missing
+previous update prevents interface qualification. Explicit selection immediately
+before fixed use can leave the previous packet absent; absence is reported, never
+reconstructed. A boundary never reached remains unavailable. This option is OFF
+by default and simulation diagnostics only. No estimator or map lifetime changes.
 
 GNSS owns the attachment before its early origin/frame checks. The callback only
 reads already-cached CPU coefficients and values. It does not solve, relinearize,
@@ -59,8 +75,8 @@ snapshot with no partial graph. Bounds never justify deleting a requested frame
 or treating truncation as valid. A two-packet queue feeds lossless gzip off the
 estimator thread. Nonfinite worker-side coefficients invalidate the complete
 snapshot and update its ledger; observer failure cannot reach estimator recovery.
-At most 32 snapshots and 32 small ledger entries are produced, with no rolling
-full-history archive. Queue rejection and absent requested frames remain in the
+At most 32 snapshots and 32 small ledger entries are produced. One previous
+packet is allowed only for the opt-in finite boundary selector. Queue rejection and absent requested frames remain in the
 manifest. At most 2048 live VGICP factors have retention enabled; a bounded
 weak-reference registry releases capacity when the original owner releases them.
 Capture enumerates the native VariableIndex, preserving original factor indices
@@ -70,7 +86,8 @@ beyond the retention cap remain unavailable, never filled from another factor.
 
 RunLogManager owns `export/glio/native_response.jsonl.gz` and the subordinate
 `metadata/manifests/native_response.json`. No expanded duplicate is written.
-The v2 manifest binds run/build identity, selection, availability, caps and timing.
+The v3 manifest binds run/build identity, selection, availability, caps and timing;
+numeric response rows keep the v2 encoding.
 v1 failed snapshots remain unchanged. `augmented_information_upper` and VGICP's
 `full_augmented_information_upper` enumerate `(r,c)` with `r=0..n-1` and
 `c=r..n-1`; mirror the upper triangle to reconstruct the symmetric matrix.

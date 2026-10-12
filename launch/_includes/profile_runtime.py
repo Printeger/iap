@@ -113,6 +113,7 @@ def materialize_profile(
     capture_dense_lidar: bool = False,
     capture_source_observations: bool = False,
     capture_native_response_frames: str = "",
+    capture_native_source_freeze: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Create a run-local config and validate its module contract.
 
@@ -128,6 +129,8 @@ def materialize_profile(
     if capture_source_observations and (simulation_scenario is None or contract != "full_stack"):
         raise RuntimeError("source observation capture requires canonical simulation full_stack")
     response_frames = []
+    if capture_native_source_freeze and not capture_native_response_frames:
+        raise RuntimeError("native source freeze requires explicit native response frames")
     if capture_native_response_frames:
         if simulation_scenario is None or contract != "full_stack":
             raise RuntimeError("native response capture requires canonical simulation full_stack")
@@ -135,7 +138,7 @@ def materialize_profile(
             response_frames = [int(v) for v in capture_native_response_frames.split(",")]
         except ValueError as error:
             raise RuntimeError("native response frame IDs must be comma-separated integers") from error
-        if (not 1 <= len(response_frames) <= 31 or len(set(response_frames)) != len(response_frames)
+        if (not 1 <= len(response_frames) <= (26 if capture_native_source_freeze else 31) or len(set(response_frames)) != len(response_frames)
                 or min(response_frames) < 0 or max(response_frames) > 2147483647):
             raise RuntimeError("native response requires 1..31 unique nonnegative frame IDs")
     run_root = Path(output_dir).expanduser()
@@ -272,6 +275,7 @@ def materialize_profile(
     if isinstance(gnss, dict):
         gnss["debug_csv_path"] = str(export_dir / "iap_gnss_factor_debug.csv")
         gnss["native_response_frames"] = response_frames
+        gnss["native_response_first_source_freeze"] = capture_native_source_freeze
     integrity["araim_csv_path"] = str(integrity_export_dir / "iap_araim.csv")
     integrity["araim_pl_decomp_csv_path"] = str(
         integrity_export_dir / "iap_araim_pl_decomp.csv"
@@ -346,6 +350,7 @@ def materialize_profile(
         "capture_dense_lidar": capture_dense_lidar,
         "capture_source_observations": capture_source_observations,
         "native_response_frames": response_frames,
+        "native_response_first_source_freeze": capture_native_source_freeze,
         "imu_topic": glim_ros.get("imu_topic", ""),
         "points_topic": glim_ros.get("points_topic", ""),
         "materialized_secondary_configs": materialized_secondary_configs,

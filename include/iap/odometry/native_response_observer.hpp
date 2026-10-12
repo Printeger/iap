@@ -20,7 +20,8 @@ class NativeResponseObserver : public std::enable_shared_from_this<NativeRespons
   static constexpr std::size_t kMaxFactorDim=1536, kMaxBytes=8*1024*1024, kQueueLimit=2;
   static constexpr std::size_t kMaxCachedBytes=2*kMaxBytes;
   static constexpr double kCopyBudgetMs=5.;
-  NativeResponseObserver(const glim::RunLogManager& logs, const std::vector<long>& frames);
+  NativeResponseObserver(const glim::RunLogManager& logs, const std::vector<long>& frames,
+                         bool first_source_freeze=false);
   ~NativeResponseObserver();
   void prepare(gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother,
                const gtsam::NonlinearFactorGraph& new_factors, long frame, double stamp);
@@ -37,6 +38,13 @@ class NativeResponseObserver : public std::enable_shared_from_this<NativeRespons
   static nlohmann::json serialize(const NativeResponsePacket& packet);
   std::set<long> frames_, seen_;
   bool initial_seen_=false, stopping_=false;
+  bool source_freeze_enabled_=false, source_selection_done_=false;
+  long source_id_=-1, source_birth_frame_=-1, source_freeze_frame_=-1;
+  long source_previous_frame_=-1, source_retirement_frame_=-1;
+  std::string source_selection_failure_;
+  double max_observer_ms_=0.;
+  std::size_t observer_budget_overruns_=0, rolling_copies_=0, rolling_failures_=0;
+  std::unique_ptr<NativeResponsePacket> previous_;
   std::filesystem::path raw_path_, manifest_path_;
   std::mutex mutex_;
   std::condition_variable cv_;

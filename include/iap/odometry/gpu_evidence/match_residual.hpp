@@ -40,6 +40,7 @@ struct GpuMatchOwner {
   double source_stamp=0., target_stamp=0., voxel_resolution_m=0.;
   int level_id=-1;
   bool target_is_fixed=false;
+  bool target_is_keyframe=false;
 };
 struct GpuMatchCapture {
   bool available=false;
