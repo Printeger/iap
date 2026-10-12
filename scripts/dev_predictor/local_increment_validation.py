@@ -153,6 +153,54 @@ def transport_retained_error_law(joint_mean, joint_covariance, retained_dim,
     return output_mean, response @ covariance @ response.T
 
 
+def condense_physical_score_law(loss_information, eliminated_dim, alias_dim,
+                                joint_mean, joint_covariance, score_budget=1536,
+                                alias_budget=72):
+    """Offline native Schur response reference; never infer noise from H.
+
+    Input is [frozen-source/start aliases, physical score forcing on D, on R].
+    H is the verified native loss response in that D,R chart. Physical mean,
+    covariance and every alias/forcing cross block must be supplied independently.
+    Output keeps aliases and condensed forcing on R, rather than all old states
+    or primitive history. No production budget or predictor is changed here.
+    """
+    if joint_mean is None or joint_covariance is None:
+        raise ValueError('PHYSICAL_JOINT_SCORE_LAW_UNAVAILABLE')
+    H = np.asarray(loss_information, float)
+    if (H.ndim != 2 or H.shape[0] != H.shape[1] or
+            not isinstance(eliminated_dim, int) or not 0 < eliminated_dim < len(H) or
+            not isinstance(alias_dim, int) or alias_dim < 0):
+        raise ValueError('NATIVE_SCHUR_LAYOUT_INVALID')
+    n = len(H)
+    if n > score_budget or alias_dim > alias_budget:
+        raise ValueError('BOUNDED_SCORE_CARRIER_BUDGET_EXCEEDED')
+    mean, covariance = np.asarray(joint_mean, float), np.asarray(joint_covariance, float)
+    if (mean.shape != (alias_dim+n,) or covariance.shape != (alias_dim+n, alias_dim+n) or
+            not all(np.isfinite(v).all() for v in (H, mean, covariance))):
+        raise ValueError('PHYSICAL_JOINT_SCORE_BLOCKS_MISSING_OR_NONFINITE')
+    if not np.allclose(H, H.T, rtol=1e-12, atol=1e-12):
+        raise ValueError('NATIVE_LOSS_INFORMATION_NOT_SYMMETRIC')
+    if (not np.allclose(covariance, covariance.T, rtol=1e-12, atol=1e-12) or
+            np.linalg.eigvalsh(covariance / max(1., np.max(np.abs(covariance)))).min() < -1e-10):
+        raise ValueError('PHYSICAL_JOINT_SCORE_LAW_NOT_PSD')
+    D = eliminated_dim
+    Hdd = H[:D, :D]
+    scale = np.sqrt(np.diag(Hdd))
+    if not np.isfinite(scale).all() or np.any(scale <= 0):
+        raise ValueError('NATIVE_ELIMINATION_RESPONSE_SINGULAR')
+    try:
+        gain = np.linalg.solve(Hdd / np.outer(scale, scale), H[:D, D:] / scale[:, None]) / scale[:, None]
+    except np.linalg.LinAlgError as error:
+        raise ValueError('NATIVE_ELIMINATION_RESPONSE_SINGULAR') from error
+    # No covariance inversion, H^-1 noise assumption, or independent marginals.
+    response = np.zeros((alias_dim+n-D, alias_dim+n))
+    response[:alias_dim, :alias_dim] = np.eye(alias_dim)
+    response[alias_dim:, alias_dim:alias_dim+D] = -gain.T
+    response[alias_dim:, alias_dim+D:] = np.eye(n-D)
+    return (response @ mean, response @ covariance @ response.T,
+            H[D:, D:] - H[D:, :D] @ gain, response)
+
+
 def native_pose_at(evidence, stamp, T_map_world):
     """Original optimized state plus recorded IMU mean transport, no covariance.
 
