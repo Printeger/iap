@@ -137,6 +137,13 @@ simulation injection records independently expose physical measurement noise;
 VGICP Gaussian kernels and solver priors do not qualify physical LiDAR, IMU or
 retained-source error. Current posterior, independent source marginals and loss
 weights are forbidden substitutes. Missing inputs keep the model unqualified.
+PR rows can now preserve the immutable measurement epoch identity, reception
+stamp, channel frequency and raw receiver-reported sigma before weighting or
+fallback. Satellite identity and cached response complete the observable owner.
+Unavailable raw sigma remains unavailable even if a solver floor exists. This
+does not supply persistent bias, initialization ancestry, physical cross moments
+or a noise law for LiDAR/IMU. The reported value remains distinct from native
+loss sigma; no production weighting or prediction consumes these new fields.
 
 The fixed 1 s increment evaluation v1.2, original region/sample/rank gates and
 all old failures remain authoritative. Independent seeds are untouched until

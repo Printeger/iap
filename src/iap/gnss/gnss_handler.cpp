@@ -284,6 +284,8 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
         sat.sat_id,
         sat.constellation,
         sat.elevation);
+      std::static_pointer_cast<PseudorangeFactor>(graph.back())->bind_observation_owner(
+          {epoch.source_identity,epoch.stamp,sat.reported_pr_sigma_m,sat.observation_frequency_hz});
       if(motion) std::static_pointer_cast<PseudorangeFactor>(graph.back())->bind_epoch_motion(
           V(frame_idx),gtsam::symbol_shorthand::B(frame_idx),motion);
 

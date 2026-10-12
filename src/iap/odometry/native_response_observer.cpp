@@ -37,6 +37,7 @@ struct ResponseFactor {
   const char* native_type="missing";bool new_this_update=false;
   gtsam::GaussianFactor::shared_ptr cached;
   bool pseudorange=false;int sat_id=0;char constellation='?';double pr_meas=0.,elevation=0.;
+  PseudorangeFactor::ObservationOwner pr_owner;
   bool vgicp=false,target_response_available=false;
   GpuMatchOwner owner;
   std::vector<double> target_upper,linearization_transform,fixed_target_pose;
@@ -199,6 +200,7 @@ std::unique_ptr<NativeResponsePacket> NativeResponseObserver::capture(
       if(const auto* pr=dynamic_cast<const PseudorangeFactor*>(nf)) {
         f.pseudorange=true;f.sat_id=pr->sat_id();f.constellation=pr->constellation();
         f.pr_meas=pr->pr_meas();f.elevation=pr->elevation();
+        f.pr_owner=pr->observation_owner();charge(4*sizeof(double));
       }
 #ifdef IAP_NATIVE_GPU_MATCH
       if(const auto* gpu=dynamic_cast<const gtsam_points::IapObservedVGICPFactorGPU*>(nf)) {
@@ -259,7 +261,12 @@ Json NativeResponseObserver::serialize(const NativeResponsePacket& p) {
       {"augmented_information_upper",packed_upper(native_matrix)},
       {"new_this_update",f.new_this_update},{"native_type",f.native_type}};
     if(f.pseudorange) row["pseudorange"]={{"sat_id",f.sat_id},{"constellation",std::string(1,f.constellation)},
-      {"pr_meas_m",f.pr_meas},{"elevation_rad",f.elevation}};
+      {"pr_meas_m",f.pr_meas},{"elevation_rad",f.elevation},
+      {"epoch_source_identity",f.pr_owner.epoch_identity},{"receive_stamp",f.pr_owner.receive_stamp},
+      {"reported_sigma_m",std::isfinite(f.pr_owner.reported_sigma_m) ? Json(f.pr_owner.reported_sigma_m) : Json(nullptr)},
+      {"frequency_hz",std::isfinite(f.pr_owner.frequency_hz) ? Json(f.pr_owner.frequency_hz) : Json(nullptr)},
+      {"observation_owner_available",f.pr_owner.epoch_identity!=0 && std::isfinite(f.pr_owner.reported_sigma_m) && f.pr_owner.reported_sigma_m>0},
+      {"physical_joint_error_law_available",false}};
     if(f.vgicp) {
       const auto& o=f.owner;
       row["vgicp"]={{"source_frame_id",o.source_frame_id},{"target_frame_id",o.target_frame_id},

@@ -6,6 +6,7 @@
 #include <gtsam/navigation/ImuFactor.h>
 #include <Eigen/Core>
 #include <vector>
+#include <cstdint>
 
 namespace iap {
 
@@ -73,6 +74,13 @@ class PseudorangeFactor
   char   constellation() const { return constellation_; }
   double elevation()     const { return elevation_; }
   double pr_meas()       const { return pr_meas_; }
+  struct ObservationOwner {
+    std::uint64_t epoch_identity=0;
+    double receive_stamp=0., reported_sigma_m=-1., frequency_hz=0.;
+  };
+  // Bind once before inserting this factor into the solver; diagnostic only.
+  void bind_observation_owner(ObservationOwner owner) { observation_owner_=owner; }
+  const ObservationOwner& observation_owner() const { return observation_owner_; }
   void bind_epoch_motion(gtsam::Key velocity, gtsam::Key bias,
                          std::shared_ptr<const gtsam::PreintegratedImuMeasurements> motion);
   gtsam::Vector unwhitenedError(const gtsam::Values& values,
@@ -89,6 +97,7 @@ class PseudorangeFactor
                                gtsam::OptionalMatrixType H_rot     = nullptr) const override;
 
  private:
+  ObservationOwner observation_owner_;
   std::shared_ptr<const gtsam::PreintegratedImuMeasurements> epoch_motion_;
   double              pr_meas_;      ///< pseudorange measurement [m]
   Eigen::Vector3d     sat_pos_;      ///< satellite ECEF position [m]

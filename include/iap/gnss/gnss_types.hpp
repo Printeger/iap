@@ -48,6 +48,10 @@ struct SatObs {
   // Planner-advisory admission hysteresis. This never alters the immutable
   // measurement epoch identity or the certified monitor exclusion set.
   bool admission_hysteresis_pending = false;
+  // Immutable receiver fields, before fallback/floor/post-fit mutation. These
+  // identify an observable; reported sigma is not a complete physical law.
+  double reported_pr_sigma_m = -1.;
+  double observation_frequency_hz = 0.;
 };
 
 /// @brief All per-satellite observations at one GNSS epoch.

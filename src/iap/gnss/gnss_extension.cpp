@@ -580,6 +580,8 @@ void GnssExtensionModule::on_range_meas_(
     // Doppler: same ADD sign — removes satellite clock frequency bias
     sat.dop_meas      = dop_meas + svddt * CLIGHT;
     sat.pr_sigma      = (pr_sigma_override > 0.05) ? pr_sigma_override  : pr_noise_base_;
+    sat.reported_pr_sigma_m = pr_sigma_override;
+    sat.observation_frequency_hz = freq;
     sat.dop_sigma     = (dop_sigma_override > 0.01) ? dop_sigma_override : dop_noise_base_;
     // Satellite state in ECEF — factors work directly in ECEF
     sat.sat_pos       = sat_ecef_pos;

@@ -355,3 +355,34 @@ TEST(GnssEpochMotion, RotatedPoseAndComposedAnalyticJacobiansMatchNumericalMeasu
     }
   }
 }
+
+TEST(GnssNoiseAuthority, PrimitiveOwnerIsDistinctFromLossAndPreservesNativeResponse) {
+  iap::GnssHandler handler;
+  iap::GnssEpoch epoch;epoch.stamp=100.;epoch.gps_sec=100.;epoch.source_identity=1709;
+  iap::SatObs sat;sat.sat_id=7;sat.elevation=1.;sat.sat_pos=gtsam::Vector3(2.1e7,1.4e7,1.7e7);
+  sat.pr_meas=2e7;sat.pr_sigma=2.;sat.reported_pr_sigma_m=.2;sat.observation_frequency_hz=1575.42e6;
+  epoch.sats.push_back(sat);handler.insert_epoch(epoch);
+  const auto graph=handler.get_factors(1,100.,gtsam::Vector3(6378137.,0.,0.));
+  ASSERT_EQ(graph.size(),2u);
+  const auto pr=std::dynamic_pointer_cast<iap::PseudorangeFactor>(graph[0]);ASSERT_TRUE(pr);
+  EXPECT_EQ(pr->observation_owner().epoch_identity,1709u);
+  EXPECT_DOUBLE_EQ(pr->observation_owner().reported_sigma_m,.2);
+  const auto loss=std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(pr->noiseModel());ASSERT_TRUE(loss);
+  EXPECT_GT(loss->sigmas()(0),pr->observation_owner().reported_sigma_m);
+  using namespace gtsam::symbol_shorthand;
+  gtsam::Values values;values.insert(X(1),gtsam::Pose3());values.insert(C(1),gtsam::Vector2::Zero().eval());
+  values.insert(E(0),gtsam::Vector3(6378137.,0.,0.));values.insert(R(0),gtsam::Rot3());
+  const auto baseline=pr->linearize(values)->augmentedInformation();
+  auto no_owner=*pr;no_owner.bind_observation_owner({});
+  EXPECT_TRUE(baseline.isApprox(no_owner.linearize(values)->augmentedInformation(),1e-15));
+  // A physical +/-PR displacement uses the actual residual convention and
+  // native loss response, without declaring that loss to be physical noise.
+  auto perturbed=[&](double shift) {
+    iap::PseudorangeFactor moved(X(1),C(1),E(0),R(0),sat.pr_meas+shift,sat.sat_pos,
+        sat.tgd,epoch.gps_sec,epoch.iono_params,pr->noiseModel(),gtsam::Vector3::Zero(),sat.sat_id,'G',sat.elevation);
+    return moved.linearize(values)->augmentedInformation();
+  };
+  const auto plus=perturbed(.1),minus=perturbed(-.1);
+  const auto derivative=(plus.col(14).head(14)-minus.col(14).head(14))/.2;
+  EXPECT_LT((derivative-baseline.col(6).head(14)).norm(),1e-8);
+}
