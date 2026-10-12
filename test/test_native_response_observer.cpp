@@ -76,6 +76,40 @@ TEST(NativeResponseObserver, DeadFactorSlotsDoNotBecomeActiveGraphBudget) {
   EXPECT_LT(packet["native_active_factor_count"].get<int>(),600);
   EXPECT_TRUE(packet["complete"].get<bool>())<<packet.dump();
 }
+TEST(NativeResponseObserver, PartialCliqueRetirementPreservesAllRetainedEstimates) {
+  auto exercise_partial=[](bool observe) {
+    gtsam::ISAM2Params parameters;parameters.findUnusedFactorSlots=true;
+    gtsam_points::IncrementalFixedLagSmootherExt smoother(5.,parameters);
+    std::vector<std::vector<gtsam::Pose3>> output;
+    for(int i=0;i<85;++i) {
+      const auto key=gtsam::Symbol('x',i);gtsam::Values values;
+      const gtsam::Pose3 guess(gtsam::Rot3::Rz(.07*std::sin(i*.13)),gtsam::Point3(.02*i,.03*std::cos(i*.17),0.));
+      values.insert(key,guess);gtsam::NonlinearFactorGraph factors;
+      const auto motion=gtsam::noiseModel::Isotropic::Sigma(6,.1);
+      if(i==0) factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(key,guess,motion);
+      else factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(gtsam::Symbol('x',i-1),key,
+          gtsam::Pose3(gtsam::Rot3(),gtsam::Point3(.02,0.,0.)),motion);
+      factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(key,guess,gtsam::noiseModel::Isotropic::Sigma(6,.5));
+      if(i>=25 && i<70) factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(gtsam::Symbol('x',20),key,
+          gtsam::Pose3(gtsam::Rot3(),gtsam::Point3(.02*(i-20),.01,0.)),motion);
+      if(observe) smoother.setPreMarginalizationObserver([&](const auto& native,const auto& discarded) {
+        const auto packet=iap::NativeResponseObserver::snapshot(native,discarded,i,.1*i);
+        EXPECT_TRUE(packet["complete"].template get<bool>());
+      });
+      smoother.update(factors,values,{{key,.1*i}});smoother.update();
+      std::vector<gtsam::Pose3> row;const auto estimates=smoother.calculateEstimate();
+      for(const auto& item:estimates) row.push_back(estimates.at<gtsam::Pose3>(item.key));
+      output.push_back(std::move(row));
+    }
+    return output;
+  };
+  const auto off=exercise_partial(false),on=exercise_partial(true);
+  ASSERT_EQ(off.size(),on.size());
+  for(std::size_t i=0;i<off.size();++i) {
+    ASSERT_EQ(off[i].size(),on[i].size());
+    for(std::size_t j=0;j<off[i].size();++j) EXPECT_TRUE(off[i][j].equals(on[i][j],1e-12))<<"step "<<i<<" retained "<<j;
+  }
+}
 TEST(NativeResponseObserver, RepresentativeNativeSizeAndLargeMarginalFitOriginalCopyBudget) {
   // Native response/storage fixture only; the identity loss is NOT noise law.
   gtsam::ISAM2Params parameters;
