@@ -38,6 +38,7 @@ class NativeResponseObserver : public std::enable_shared_from_this<NativeRespons
   static nlohmann::json serialize(const NativeResponsePacket& packet);
   std::set<long> frames_, seen_;
   bool initial_seen_=false, stopping_=false;
+  bool deferred_ready_=false;
   bool source_freeze_enabled_=false, source_selection_done_=false;
   long source_id_=-1, source_birth_frame_=-1, source_freeze_frame_=-1;
   long source_previous_frame_=-1, source_retirement_frame_=-1;

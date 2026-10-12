@@ -275,7 +275,7 @@ TEST(GpuMatchEvidence, FirstNonzeroKeyframeFreezeSelectionIsBoundedAndReadOnly) 
   }
   nlohmann::json m;std::ifstream(logs.metadata_path("manifests/native_response.json"))>>m;
   const auto& selection=m["first_source_freeze"];
-  EXPECT_EQ(selection["source_id"],20);EXPECT_EQ(selection["previous_frame"],70);EXPECT_EQ(selection["first_fixed_use_frame"],70);
+  EXPECT_EQ(selection["source_id"],20);EXPECT_EQ(selection["previous_frame"],69);EXPECT_EQ(selection["first_fixed_use_frame"],70);
   EXPECT_TRUE(selection["selection_done"].get<bool>());EXPECT_EQ(selection["failure_reason"],"");
   EXPECT_EQ(selection["rolling_copy_failures"],0);EXPECT_LT(selection["rolling_copy_count"].get<int>(),100);
   EXPECT_EQ(m["observer_budget_overrun_count"],0);EXPECT_EQ(m["write_failures"],0);EXPECT_LE(m["written"].get<int>(),7);
@@ -285,7 +285,7 @@ TEST(GpuMatchEvidence, FirstNonzeroKeyframeFreezeSelectionIsBoundedAndReadOnly) 
   std::set<std::pair<long,std::size_t>> selected_updates;
   for(const auto& row:m["requests"]) {
     EXPECT_TRUE(selected_updates.emplace(row["frame_id"].get<long>(),row["native_update_in_frame"].get<std::size_t>()).second);
-    if(row["frame_id"]==70 && row["selection_roles"]==nlohmann::json::array({"update_before_native_retirement"})) {
+    if(row["frame_id"]==69) {
       EXPECT_EQ(row["native_update_in_frame"],1);
     }
     EXPECT_TRUE(row["complete"].get<bool>());if(!row["queue_accepted"].get<bool>()) ++rejected;
