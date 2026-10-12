@@ -201,6 +201,85 @@ def condense_physical_score_law(loss_information, eliminated_dim, alias_dim,
             H[D:, D:] - H[D:, :D] @ gain, response)
 
 
+def stationary_simulator_bootstrap_inputs(initial_pose, initial_velocity,
+                                         initial_bias, initial_anchor_ecef,
+                                         initial_rotation_ecef_map,
+                                         first_fix_ecef, body_to_enu_calibration,
+                                         enu_to_ecef_calibration,
+                                         rest_specific_force_body,
+                                         model_gravity_map, physical_recipe):
+    """Conditional initial error law from independent physical constraints.
+
+    Offline model input provider, not an estimator or complete forecast. Requires
+    the original simulation's held startup, ideal IMU and noise-free initial fix,
+    plus known initial body/ENU calibration. Read full initialization values once
+    from the existing initialization callback, never later posterior covariance,
+    rounded logs, actual matching residuals or a truth pose stream.
+
+    Choose one global datum with physical pose(0) equal to the nominal pose(0).
+    This leaves physical initial velocity/bias zero and changes the true gravity
+    and ECEF mapping expressed in that datum. Their discrepancy with the original
+    solver model is retained. Errors are deterministic conditional on the known
+    initial physical state and observed initialization, not zero by default.
+    Covariance zero here does not set subsequent map/innovation laws to zero.
+    """
+    required = {'held_before_first_estimator_feedback': True,
+                'input_phase': 'initialization_before_fixed_lag_update',
+                'imu_generation': 'ideal_specific_force_and_angular_velocity',
+                'initial_fix_generation': 'noise_free_receiver_lla',
+                'initial_body_enu_calibration_known': True,
+                'calibration_uncertainty': 'none_in_declared_simulator_recipe'}
+    if not isinstance(physical_recipe, dict) or any(
+            physical_recipe.get(k) != value for k, value in required.items()):
+        raise ValueError('STATIONARY_IDEAL_BOOTSTRAP_PHYSICAL_RECIPE_UNAVAILABLE')
+    pose = rigid(initial_pose)
+    velocity, bias, anchor, fix, acc, gravity = (
+        np.asarray(v, dtype=float) for v in
+        (initial_velocity, initial_bias, initial_anchor_ecef, first_fix_ecef,
+         rest_specific_force_body, model_gravity_map))
+    if (any(v.shape != (3,) for v in (velocity, anchor, fix, acc, gravity)) or
+            bias.shape != (6,) or
+            not all(np.isfinite(v).all() for v in (velocity, bias, anchor, fix, acc, gravity))):
+        raise ValueError('BOOTSTRAP_PHYSICAL_INPUT_MISSING_OR_NONFINITE')
+    rotations = []
+    for value in (initial_rotation_ecef_map, body_to_enu_calibration, enu_to_ecef_calibration):
+        value = np.asarray(value, dtype=float)
+        if value.shape != (3, 3):
+            raise ValueError('BOOTSTRAP_CALIBRATION_ROTATION_UNAVAILABLE')
+        transform = np.eye(4); transform[:3, :3] = value
+        rotations.append(rigid(transform)[:3, :3])
+    nominal_rotation, body_enu, enu_ecef = rotations
+    # The calibrated initial physical gravity must explain the independent
+    # rest measurement; changing the solver's gravity cannot make this pass.
+    if not np.allclose(body_enu @ acc, [0., 0., 9.81], atol=1e-10, rtol=0):
+        raise ValueError('BOOTSTRAP_REST_FORCE_INCONSISTENT_WITH_IDEAL_RECIPE')
+    physical_rotation = enu_ecef @ body_enu @ pose[:3, :3].T
+    physical_anchor = fix - physical_rotation @ pose[:3, 3]
+    R = physical_rotation.T @ nominal_rotation
+    half_skew = .5*np.array([R[2, 1]-R[1, 2], R[0, 2]-R[2, 0], R[1, 0]-R[0, 1]])
+    sine = np.linalg.norm(half_skew)
+    cosine = np.clip((np.trace(R)-1)/2, -1., 1.)
+    angle = np.arctan2(sine, cosine)
+    if sine < 1e-10 and cosine < 0:
+        raise ValueError('BOOTSTRAP_ALIGNMENT_LOG_AMBIGUOUS')
+    rotation_error = half_skew if angle < 1e-8 else half_skew*(angle/sine)
+    physical_gravity = -pose[:3, :3] @ acc
+    # Native Pose3 error is rotation then translation; vector states are direct
+    # differences and the alignment Rot3 uses its original right tangent chart.
+    mean = np.concatenate((np.zeros(6), velocity, bias,
+                           (anchor-fix)+physical_rotation @ pose[:3, 3], rotation_error,
+                           gravity-physical_gravity))
+    return {'mean': mean, 'covariance': np.zeros((24, 24)),
+            'layout': [('pose0_common_datum', 6), ('velocity0_map', 3),
+                       ('imu_bias0_acc_then_gyro', 6), ('anchor_ecef', 3),
+                       ('rotation_ecef_map_right', 3), ('gravity_model_minus_physical_map', 3)],
+            'physical_rotation_ecef_map': physical_rotation,
+            'physical_anchor_ecef': physical_anchor,
+            'physical_gravity_map': physical_gravity,
+            'complete_retained_or_innovation_law': False,
+            'production_predictor_connected': False}
+
+
 def native_pose_at(evidence, stamp, T_map_world):
     """Original optimized state plus recorded IMU mean transport, no covariance.
 
