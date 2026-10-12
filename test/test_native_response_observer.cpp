@@ -54,6 +54,26 @@ TEST(NativeResponseObserver, ActualFiveSecondLagOnAndExceptionPreserveEveryEstim
     EXPECT_TRUE(off[i].equals(on[i],1e-12));EXPECT_TRUE(off[i].equals(failure[i],1e-12));
   }
 }
+TEST(NativeResponseObserver, DeadFactorSlotsDoNotBecomeActiveGraphBudget) {
+  gtsam::ISAM2Params parameters;parameters.findUnusedFactorSlots=false;
+  gtsam_points::IncrementalFixedLagSmootherExt smoother(5.,parameters);
+  const auto noise=gtsam::noiseModel::Isotropic::Sigma(6,.1);
+  nlohmann::json packet;
+  for(int i=0;i<430;++i) {
+    const gtsam::Key key=gtsam::Symbol('x',i);
+    gtsam::NonlinearFactorGraph factors;gtsam::Values values;values.insert(key,gtsam::Pose3());
+    if(i==0) factors.add(gtsam::PriorFactor<gtsam::Pose3>(key,gtsam::Pose3(),noise));
+    else for(int duplicate=0;duplicate<10;++duplicate)
+      factors.add(gtsam::BetweenFactor<gtsam::Pose3>(gtsam::Symbol('x',i-1),key,gtsam::Pose3(),noise));
+    if(i==429) smoother.setPreMarginalizationObserver([&](const auto& native,const auto& discarded) {
+      packet=iap::NativeResponseObserver::snapshot(native,discarded,i,.1*i);
+    });
+    smoother.update(factors,values,{{key,.1*i}});
+  }
+  EXPECT_GT(packet["native_factor_slot_count"].get<int>(),iap::NativeResponseObserver::kMaxFactors);
+  EXPECT_LT(packet["native_active_factor_count"].get<int>(),600);
+  EXPECT_TRUE(packet["complete"].get<bool>())<<packet.dump();
+}
 TEST(NativeResponseObserver, OwnedWriterHasFiniteSelectionAndRetainsMissingRequests) {
   std::string pattern=(std::filesystem::temp_directory_path()/"iap_response_test_XXXXXX").string();
   auto* allocated=::mkdtemp(pattern.data());ASSERT_NE(allocated,nullptr);

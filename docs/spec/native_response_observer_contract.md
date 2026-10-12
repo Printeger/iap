@@ -35,7 +35,8 @@ block and its linearization transform from the reduction already consumed by
 fixed-target construction. The native Hessian upper-triangle convention is
 preserved. Factor lifetime remains owned by the original smoother.
 
-Each snapshot permits at most 512 state keys, 2048 factor slots, 128 tangent
+Each snapshot permits at most 512 state keys, 4096 active factors, 32768 indexed
+variable-factor relationships, 128 tangent
 dimensions per factor and 8 MiB of numerical payload. Copying checks a 5 ms
 deadline between bounded state/factor operations; one bounded operation can
 finish beyond that check. Report actual copy time rather than claiming a hard
@@ -46,8 +47,12 @@ or treating truncation as valid. A two-packet queue feeds lossless gzip off the
 estimator thread; large coefficient arrays are expanded only on that worker.
 At most 32 snapshots and 32 small ledger entries are produced, with no rolling
 full-history archive. Queue rejection and absent requested frames remain in the
-manifest. The existing native factor graph retains at most 2048 enabled fixed
-blocks while capture is pending; subsequent oversized graphs are not enabled.
+manifest. At most 2048 live VGICP factors have retention enabled; a bounded
+weak-reference registry releases capacity when the original owner releases them.
+Capture enumerates the native VariableIndex, preserving original factor indices
+while skipping dead slots; the estimator's slot reuse policy is unchanged. Slot
+capacity is diagnostic metadata and does not represent activity. New blocks
+beyond the retention cap remain unavailable, never filled from another factor.
 
 RunLogManager owns `export/glio/native_response.jsonl.gz` and the subordinate
 `metadata/manifests/native_response.json`. No expanded duplicate is written.

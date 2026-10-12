@@ -14,7 +14,8 @@ namespace iap {
 // No nonlinear evaluation, GPU synchronization, marginal covariance or solve.
 class NativeResponseObserver : public std::enable_shared_from_this<NativeResponseObserver> {
  public:
-  static constexpr std::size_t kMaxFrames=31, kMaxKeys=512, kMaxFactors=2048;
+  static constexpr std::size_t kMaxFrames=31, kMaxKeys=512, kMaxFactors=4096;
+  static constexpr std::size_t kMaxIndexEntries=32768, kMaxRetainedGpuFactors=2048;
   static constexpr std::size_t kMaxFactorDim=128, kMaxBytes=8*1024*1024, kQueueLimit=2;
   static constexpr double kCopyBudgetMs=5.;
   NativeResponseObserver(const glim::RunLogManager& logs, const std::vector<long>& frames);
@@ -35,6 +36,7 @@ class NativeResponseObserver : public std::enable_shared_from_this<NativeRespons
   std::condition_variable cv_;
   std::deque<nlohmann::json> queue_;
   std::vector<nlohmann::json> ledger_;
+  std::vector<std::weak_ptr<gtsam::NonlinearFactor>> retained_gpu_factors_;
   std::thread worker_;
   void* raw_=nullptr;
   std::size_t written_=0, write_failures_=0;

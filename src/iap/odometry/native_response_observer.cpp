@@ -14,12 +14,14 @@ namespace iap {
 namespace {
 using Json=nlohmann::json;
 template<class Matrix> Json row_major(const Matrix& m) {
+  if(!m.allFinite()) throw std::runtime_error("NONFINITE_NATIVE_STATE");
   Json out=Json::array();
   for(int r=0;r<m.rows();++r) for(int c=0;c<m.cols();++c) out.push_back(m(r,c));
   return out;
 }
 // Copy large coefficient blocks on the solver thread; expand only on writer.
 template<class Matrix> Json coefficient_bytes(const Matrix& m) {
+  if(!m.allFinite()) throw std::runtime_error("NONFINITE_NATIVE_COEFFICIENTS");
   Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor> copy=m;
   const auto* first=reinterpret_cast<const std::uint8_t*>(copy.data());
   return Json::binary(std::vector<std::uint8_t>(first,first+copy.size()*sizeof(double)));
@@ -57,6 +59,7 @@ NativeResponseObserver::~NativeResponseObserver() {
       {"missing_frames",missing},{"initial_x0_elimination_seen",initial_seen_},{"requests",ledger_},
       {"written",written_},{"write_failures",write_failures_},{"queue_limit",kQueueLimit},
       {"max_snapshots",kMaxFrames+1},{"max_keys",kMaxKeys},{"max_factors",kMaxFactors},
+      {"max_index_entries",kMaxIndexEntries},{"max_retained_gpu_factors",kMaxRetainedGpuFactors},
       {"max_factor_tangent_dim",kMaxFactorDim},{"matrix_byte_limit",kMaxBytes},
       {"copy_budget_ms",kCopyBudgetMs},{"physical_joint_error_law_available",false}};
     std::ofstream file(manifest_path_);file<<manifest.dump(2)<<'\n';file.flush();
@@ -68,9 +71,13 @@ void NativeResponseObserver::prepare(gtsam_points::IncrementalFixedLagSmootherEx
 #ifdef IAP_NATIVE_GPU_MATCH
   // CPU-only retention of the reduction already computed by the solver. Each
   // factor retains one fixed 12x12 block; the original lag owns its lifetime.
-  if((seen_.size()<frames_.size() || !initial_seen_) && smoother.getFactors().size()+new_factors.size()<=kMaxFactors) {
-    for(const auto& f:new_factors) if(auto gpu=dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get()))
-      gpu->retain_native_response();
+  if((seen_.size()<frames_.size() || !initial_seen_) && new_factors.size()<=kMaxFactors) {
+    retained_gpu_factors_.erase(std::remove_if(retained_gpu_factors_.begin(),retained_gpu_factors_.end(),
+        [](const auto& f){return f.expired();}),retained_gpu_factors_.end());
+    for(const auto& f:new_factors) if(auto gpu=dynamic_cast<gtsam_points::IapObservedVGICPFactorGPU*>(f.get())) {
+      if(retained_gpu_factors_.size()==kMaxRetainedGpuFactors) break;
+      gpu->retain_native_response();retained_gpu_factors_.push_back(f);
+    }
   }
 #endif
   const auto weak=weak_from_this();
@@ -88,9 +95,22 @@ Json NativeResponseObserver::snapshot(const gtsam_points::IncrementalFixedLagSmo
   std::size_t bytes=0;
   const auto& theta=native.getLinearizationPoint();
   const auto& factors=native.getLinearFactors();
+  const auto& index=native.getISAM2().getVariableIndex();
+  out["native_key_count"]=theta.size();out["native_factor_slot_count"]=factors.size();
+  out["native_index_entries"]=index.nEntries();
   auto elapsed=[&]{return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();};
   try {
-    if(theta.size()>kMaxKeys || factors.size()>kMaxFactors) throw std::runtime_error("NATIVE_GRAPH_CAP_EXCEEDED");
+    if(theta.size()>kMaxKeys || index.nEntries()>kMaxIndexEntries) throw std::runtime_error("NATIVE_GRAPH_CAP_EXCEEDED");
+    // The solver's VariableIndex contains only active relationships. Iterating
+    // it avoids an unbounded scan of old null factor slots without changing the
+    // estimator's slot reuse policy.
+    std::set<std::size_t> active;
+    for(const auto& entry:index) {
+      if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");
+      active.insert(entry.second.begin(),entry.second.end());
+      if(active.size()>kMaxFactors) throw std::runtime_error("NATIVE_ACTIVE_FACTOR_CAP_EXCEEDED");
+    }
+    out["native_active_factor_count"]=active.size();
     const auto& delta=native.getDelta();
     for(const auto& kv:theta) {
       if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");
@@ -109,11 +129,10 @@ Json NativeResponseObserver::snapshot(const gtsam_points::IncrementalFixedLagSmo
     }
     const auto& nonlinear=native.getFactors();
     const auto& new_indices=native.getISAM2Result().newFactorsIndices;
-    for(std::size_t i=0;i<nonlinear.size();++i)
-      if(nonlinear[i] && (i>=factors.size() || !factors[i])) throw std::runtime_error("NATIVE_LINEAR_CACHE_MISSING");
-    for(std::size_t i=0;i<factors.size();++i) {
+    for(const auto i:active) {
       if(elapsed()>kCopyBudgetMs) throw std::runtime_error("COPY_TIME_CAP_EXCEEDED");
-      const auto& factor=factors[i];if(!factor) continue;
+      if(i>=factors.size() || !factors[i]) throw std::runtime_error("NATIVE_LINEAR_CACHE_MISSING");
+      const auto& factor=factors[i];
       std::size_t dim=0;std::vector<std::size_t> dims;
       for(auto it=factor->begin();it!=factor->end();++it) {auto d=factor->getDim(it);dims.push_back(d);dim+=d;}
       if(dim>kMaxFactorDim || (bytes+=(dim+1)*(dim+1)*sizeof(double))>kMaxBytes)
