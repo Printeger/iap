@@ -41,6 +41,9 @@ class NativeResponseObserver : public std::enable_shared_from_this<NativeRespons
   bool source_freeze_enabled_=false, source_selection_done_=false;
   long source_id_=-1, source_birth_frame_=-1, source_freeze_frame_=-1;
   long source_previous_frame_=-1, source_retirement_frame_=-1;
+  long observed_frame_=-1;
+  std::size_t update_in_frame_=0;
+  std::set<long> boundary_frames_seen_;
   std::string source_selection_failure_;
   double max_observer_ms_=0.;
   std::size_t observer_budget_overruns_=0, rolling_copies_=0, rolling_failures_=0;

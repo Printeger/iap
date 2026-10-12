@@ -266,19 +266,28 @@ TEST(GpuMatchEvidence, FirstNonzeroKeyframeFreezeSelectionIsBoundedAndReadOnly) 
       }
       writer->prepare(on,owners,i,.1*i);
       off.update(factors,values,{{key,.1*i}});on.update(factors,values,{{key,.1*i}});
+      // Production performs an additional native update in the same frame.
+      // Previous snapshot must be the last update; selected boundaries occur
+      // once, retaining native call identity and actual discarded keys.
+      off.update();on.update();
       EXPECT_FALSE(on.fallbackHappened());EXPECT_TRUE(off.calculateEstimate<gtsam::Pose3>(key).equals(on.calculateEstimate<gtsam::Pose3>(key),1e-12));
     }
   }
   nlohmann::json m;std::ifstream(logs.metadata_path("manifests/native_response.json"))>>m;
   const auto& selection=m["first_source_freeze"];
-  EXPECT_EQ(selection["source_id"],20);EXPECT_EQ(selection["previous_frame"],69);EXPECT_EQ(selection["first_fixed_use_frame"],70);
+  EXPECT_EQ(selection["source_id"],20);EXPECT_EQ(selection["previous_frame"],70);EXPECT_EQ(selection["first_fixed_use_frame"],70);
   EXPECT_TRUE(selection["selection_done"].get<bool>());EXPECT_EQ(selection["failure_reason"],"");
   EXPECT_EQ(selection["rolling_copy_failures"],0);EXPECT_LT(selection["rolling_copy_count"].get<int>(),100);
   EXPECT_EQ(m["observer_budget_overrun_count"],0);EXPECT_EQ(m["write_failures"],0);EXPECT_LE(m["written"].get<int>(),7);
   // This accelerated fixture runs 85 updates in milliseconds. Queue rejection
   // is a retained interface failure, never a model PASS or a dropped request.
   int rejected=0;bool retirement_seen=false,probe_seen=false;
+  std::set<std::pair<long,std::size_t>> selected_updates;
   for(const auto& row:m["requests"]) {
+    EXPECT_TRUE(selected_updates.emplace(row["frame_id"].get<long>(),row["native_update_in_frame"].get<std::size_t>()).second);
+    if(row["frame_id"]==70 && row["selection_roles"]==nlohmann::json::array({"update_before_native_retirement"})) {
+      EXPECT_EQ(row["native_update_in_frame"],1);
+    }
     EXPECT_TRUE(row["complete"].get<bool>());if(!row["queue_accepted"].get<bool>()) ++rejected;
     for(const auto& role:row["selection_roles"]) {
       retirement_seen|=role=="nonzero_source_native_retirement";probe_seen|=role=="fixed_use_plus_10_updates";

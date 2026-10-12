@@ -1,4 +1,4 @@
-# Native pre-elimination response observer v3
+# Native pre-elimination response observer v4
 
 Status: M2 diagnostic interface. Interface verification does not qualify a
 physical joint error model, regional ordering, route choice or benefit.
@@ -29,12 +29,12 @@ native increment/source observation mode. It does not change task configuration.
 Optional `capture_native_source_freeze:=true` selects the first positive target
 explicitly marked as an original keyframe connection, initially binary. Ordinary
 consecutive-frame factors cannot arm it. The first new fixed-target factor for
-that identity selects the previous native update, first fixed use, first update
-after it, actual native retirement and fixed-use frame +10; coincident roles use
+that identity selects the final update before retirement, first fixed use, actual native
+retirement, first frame after retirement and fixed-use frame +10; coincident roles use
 one snapshot. The +10 probe is a response component, not the exact 1 s primary
 evaluation. Selection permits at most 26 explicit frames, five extra snapshots
 and the original initial elimination (32 total). Only one previous packet rolls
-until fixed use, at most 100 updates after first binary use; no full trajectory
+until native retirement, at most 100 frames / two native calls per frame after first binary use; no full trajectory
 archive exists. Every rolling copy uses the original caps/deadline; total callback
 time including disposal/selection is also reported. Any budget overrun or missing
 previous update prevents interface qualification. Explicit selection immediately
@@ -89,8 +89,19 @@ beyond the retention cap remain unavailable, never filled from another factor.
 
 RunLogManager owns `export/glio/native_response.jsonl.gz` and the subordinate
 `metadata/manifests/native_response.json`. No expanded duplicate is written.
-The v3 manifest binds run/build identity, selection, availability, caps and timing;
-numeric response rows keep the v2 encoding.
+The v4 manifest binds run/build identity, selection, availability, caps and timing;
+v3 response rows record the native update ordinal within a frame (starting at 0),
+while keeping the v2 numerical encoding. Native additional update reuses the
+same owning frame. The last pre-retirement call is retained as the previous packet;
+each selected boundary frame is emitted once. Duplicate native calls must never
+overwrite previous-frame evidence or manufacture a missing-frame failure.
+If first fixed use and pre-retirement fall in the same frame, their distinct
+native update ordinals retain distinct roles. The fixed-target switch precedes
+native retirement (`span > lag-0.1`), so the source can still change between them.
+Each selected packet also carries the previous update's source point/delta and
+its frame/ordinal (one small state), permitting checks of the exact pose used to
+construct that frame's fixed target. Permanent source freeze is tested at native
+retirement, never equated with the first unary-factor switch.
 v1 failed snapshots remain unchanged. `augmented_information_upper` and VGICP's
 `full_augmented_information_upper` enumerate `(r,c)` with `r=0..n-1` and
 `c=r..n-1`; mirror the upper triangle to reconstruct the symmetric matrix.

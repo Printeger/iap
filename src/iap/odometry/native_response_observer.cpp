@@ -9,6 +9,7 @@
 #include <gtsam/linear/HessianFactor.h>
 #include <spdlog/spdlog.h>
 #include <chrono>
+#include <optional>
 #include <fstream>
 #include <zlib.h>
 
@@ -50,6 +51,10 @@ struct NativeResponsePacket {
   std::vector<ResponseFactor> factors;
   std::vector<std::string> selection_roles;
   long selected_source_id=-1;
+  std::size_t native_update_in_frame=0;
+  std::optional<ResponseState> previous_source_state;
+  long previous_source_frame=-1;
+  std::size_t previous_source_update=0;
 };
 NativeResponseObserver::NativeResponseObserver(const glim::RunLogManager& logs,const std::vector<long>& frames,
     bool first_source_freeze)
@@ -72,7 +77,7 @@ NativeResponseObserver::~NativeResponseObserver() {
   if(gzclose(static_cast<gzFile>(raw_))!=Z_OK) ++write_failures_;
   try {
     Json missing=Json::array();for(auto frame:frames_) if(!seen_.count(frame)) missing.push_back(frame);
-    Json manifest={{"schema","iap_native_response_manifest_v3"},{"version",IAP_VERSION},
+    Json manifest={{"schema","iap_native_response_manifest_v4"},{"version",IAP_VERSION},
       {"build_type",IAP_BUILD_TYPE},{"run_identity","metadata/run_manifest.json"},
       {"raw","export/glio/native_response.jsonl.gz"},{"selection_frames",frames_},
       {"missing_frames",missing},{"initial_x0_elimination_seen",initial_seen_},{"requests",ledger_},
@@ -216,7 +221,8 @@ std::unique_ptr<NativeResponsePacket> NativeResponseObserver::capture(
   p->copy_ms=elapsed();return p;
 }
 Json NativeResponseObserver::serialize(const NativeResponsePacket& p) {
-  Json out={{"schema","iap_native_response_v2"},{"frame_id",p.frame},{"stamp",p.stamp},{"lag_s",p.lag},
+  Json out={{"schema","iap_native_response_v3"},{"frame_id",p.frame},{"stamp",p.stamp},{"lag_s",p.lag},
+    {"native_update_in_frame",p.native_update_in_frame},
     {"discarded_keys",p.discarded},{"complete",p.complete},{"failure_reason",p.failure},
     {"initial_x0_elimination",p.initial},{"copy_ms",p.copy_ms},{"copied_matrix_bytes",p.bytes},
     {"cached_factor_bytes",p.cached_bytes},
@@ -226,6 +232,11 @@ Json NativeResponseObserver::serialize(const NativeResponsePacket& p) {
     {"coefficient_semantics","cached_native_loss_normal_equations_not_physical_noise"},
     {"matrix_encoding","symmetric_upper_triangle_row_major"},{"physical_joint_error_law_available",false},
     {"states",Json::array()},{"factors",Json::array()}};
+  if(p.previous_source_state) {
+    const auto& s=*p.previous_source_state;
+    out["previous_source_state"]={{"frame_id",p.previous_source_frame},{"native_update_in_frame",p.previous_source_update},
+      {"key",s.key},{"dim",s.dim},{"linearization_point",s.point},{"delta",s.delta},{"representation",s.representation}};
+  }
   if(!p.complete) return out;
   for(const auto& s:p.states) out["states"].push_back({{"key",s.key},{"type",std::string(1,gtsam::Symbol(s.key).chr())},
     {"dim",s.dim},{"linearization_point",s.point},{"representation",s.representation},{"delta",s.delta}});
@@ -282,19 +293,23 @@ void NativeResponseObserver::observe(const gtsam_points::IncrementalFixedLagSmoo
       if(ms>kCopyBudgetMs) ++self.observer_budget_overruns_;
     }
   } timing{*this,observer_start};
+  if(frame==observed_frame_) ++update_in_frame_;
+  else {observed_frame_=frame;update_in_frame_=0;}
   const bool initial=!initial_seen_ && std::find(discarded.begin(),discarded.end(),gtsam::Symbol('x',0))!=discarded.end();
   std::vector<std::string> roles;
   if(frames_.count(frame) && !seen_.count(frame)) roles.push_back("explicit");
   if(initial) roles.push_back("initial_x0_elimination");
-  bool rolling=source_freeze_enabled_ && !source_selection_done_ && source_id_>=0 && source_freeze_frame_<0;
+  bool rolling=source_freeze_enabled_ && !source_selection_done_ && source_id_>=0 && source_retirement_frame_<0;
   if(source_freeze_enabled_ && !source_selection_done_ && source_id_>=0) {
-    if(frame-source_birth_frame_>100) {
+    if(frame-source_birth_frame_>100 || update_in_frame_>=2) {
       source_selection_failure_="SOURCE_BOUNDARY_NOT_OBSERVED_WITHIN_TRACKING_CAP";
       source_selection_done_=true;rolling=false;previous_.reset();
     } else {
-      if(frame==source_freeze_frame_) roles.push_back("first_nonzero_fixed_use");
-      if(source_freeze_frame_>=0 && frame==source_freeze_frame_+1) roles.push_back("first_update_after_fixed_use");
-      if(source_freeze_frame_>=0 && frame==source_freeze_frame_+10) roles.push_back("fixed_use_plus_10_updates");
+      if(!boundary_frames_seen_.count(frame)) {
+        if(frame==source_freeze_frame_) roles.push_back("first_nonzero_fixed_use");
+        if(source_retirement_frame_>=0 && frame==source_retirement_frame_+1) roles.push_back("first_update_after_native_retirement");
+        if(source_freeze_frame_>=0 && frame==source_freeze_frame_+10) roles.push_back("fixed_use_plus_10_updates");
+      }
       if(source_retirement_frame_<0 && std::find(discarded.begin(),discarded.end(),gtsam::Symbol('x',source_id_))!=discarded.end()) {
         source_retirement_frame_=frame;roles.push_back("nonzero_source_native_retirement");
       }
@@ -303,8 +318,16 @@ void NativeResponseObserver::observe(const gtsam_points::IncrementalFixedLagSmoo
   if(roles.empty() && !rolling) return;
   if(frames_.count(frame)) seen_.insert(frame);if(initial) initial_seen_=true;
   auto packet=capture(native,discarded,frame,stamp);packet->initial=initial;
+  packet->native_update_in_frame=update_in_frame_;
   packet->selection_roles=roles;packet->selected_source_id=source_id_;
-  // A single rolling packet before the selected fixed-use boundary. Never a
+  if(previous_ && previous_->complete && previous_->frame==frame-1 && source_id_>=0) {
+    const auto key=gtsam::Symbol('x',source_id_);
+    for(const auto& s:previous_->states) if(s.key==key) {
+      packet->previous_source_state=s;packet->previous_source_frame=previous_->frame;
+      packet->previous_source_update=previous_->native_update_in_frame;break;
+    }
+  }
+  // A single rolling packet before the selected native retirement. Never a
   // trajectory archive; original CPU clone/deadline caps apply on every copy.
   if(roles.empty()) {
     ++rolling_copies_;if(!packet->complete) ++rolling_failures_;
@@ -315,22 +338,24 @@ void NativeResponseObserver::observe(const gtsam_points::IncrementalFixedLagSmoo
     if(ledger_.size()>=kMaxFrames+1) throw std::runtime_error("NATIVE_SELECTION_CAP_EXCEEDED");
     const bool accepted=queue_.size()<kQueueLimit;p->request_id=ledger_.size();
     ledger_.push_back({{"frame_id",p->frame},{"stamp",p->stamp},{"initial_x0_elimination",p->initial},
+      {"native_update_in_frame",p->native_update_in_frame},
       {"selection_roles",p->selection_roles},{"complete",p->complete},{"failure_reason",p->failure},{"copy_ms",p->copy_ms},
       {"native_active_factor_count",p->active},{"native_factor_slot_count",p->slots},
       {"max_observed_factor_tangent_dim",p->max_factor_dim},{"queue_accepted",accepted}});
     if(accepted) queue_.push_back(std::move(p));
   };
-  if(frame==source_freeze_frame_) {
+  if(frame==source_retirement_frame_ && !boundary_frames_seen_.count(frame)) {
     if(previous_ && previous_->frame==frame-1) {
-      source_previous_frame_=previous_->frame;previous_->selection_roles={"update_before_first_fixed_use"};
+      source_previous_frame_=previous_->frame;previous_->selection_roles={"update_before_native_retirement"};
       enqueue(std::move(previous_));
     } else source_selection_failure_="PREVIOUS_NATIVE_UPDATE_NOT_RETAINED";
   }
-  // Explicit selections during tracking keep no second full packet. If the
-  // next update freezes the source, absence is explicit rather than filled.
-  if(rolling) previous_.reset();
+  // Selected first calls keep the existing previous packet; the original
+  // additional native call replaces it with the final solve of this frame.
+  if(source_freeze_enabled_ && source_id_>=0) boundary_frames_seen_.insert(frame);
   enqueue(std::move(packet));cv_.notify_one();
-  if(source_freeze_frame_>=0 && frame>=source_freeze_frame_+10 && source_retirement_frame_>=0)
+  if(source_freeze_frame_>=0 && source_retirement_frame_>=0 &&
+      frame>=std::max(source_freeze_frame_+10,source_retirement_frame_+1))
     source_selection_done_=true;
 }
 void NativeResponseObserver::drain() {
