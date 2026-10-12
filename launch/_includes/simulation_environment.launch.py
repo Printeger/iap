@@ -245,7 +245,8 @@ def _setup(context):
     if not output_dir.is_absolute():
         raise RuntimeError("output_dir must be an absolute path")
     output_dir.mkdir(parents=True, exist_ok=True)
-    if context.launch_configurations.get("capture_advisory_residuals", "false").lower() == "true":
+    if (context.launch_configurations.get("capture_advisory_residuals", "false").lower() == "true"
+            or context.launch_configurations.get("capture_native_source_freeze", "false").lower() == "true"):
         # Reuse the opt-in real residual capture and the canonical resolver.
         # This changes evidence only, never the simulator noise or random draws.
         gnss_params.update(enable_csv_log=True,

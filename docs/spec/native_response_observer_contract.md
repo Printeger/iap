@@ -41,6 +41,9 @@ previous update prevents interface qualification. Explicit selection immediately
 before fixed use can leave the previous packet absent; absence is reported, never
 reconstructed. A boundary never reached remains unavailable. This option is OFF
 by default and simulation diagnostics only. No estimator or map lifetime changes.
+It also reuses the existing simulator injected-noise CSV, without GPU residual
+traces or new random draws. This provides physical PR/Doppler white samples and
+persistent bias identities for later qualification, not a map-source joint law.
 
 GNSS owns the attachment before its early origin/frame checks. The callback only
 reads already-cached CPU coefficients and values. It does not solve, relinearize,

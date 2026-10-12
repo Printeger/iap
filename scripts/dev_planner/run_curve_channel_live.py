@@ -273,7 +273,7 @@ def main():
         manifest(run,'planning_input_capture',{'source':identity,'inputs':planning_inputs,
             'first_input_only_requested':args.stop_after_planning_input,
             'status':'CAPTURED' if planning_inputs else 'NO_MATCHING_PLANNING_INPUT'},owner=True)
-        if args.capture_advisory_residuals:
+        if args.capture_advisory_residuals or args.capture_native_source_freeze:
             noise_path = run / 'export/simulation/gnss_injected_noise.csv'
             manifest(run, 'gnss_injected_noise_capture', {
                 'path': str(noise_path.relative_to(run)),
