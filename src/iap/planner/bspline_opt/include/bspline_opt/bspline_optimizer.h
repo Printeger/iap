@@ -275,12 +275,10 @@ namespace ego_planner
     bool guide_tracking_ = false;
     bool planningOccupied(const Eigen::Vector3d& position) const {
       if (!planning_query_) return grid_map_->getInflateOccupancy(position) != 0;
-      const auto cell = planning_query_(position);
-      if (!cell.executable()) return true;
-      const auto cls = cell.advisory.classification;
-      return !planning_advisory_fallback_ &&
-          (cls == GridAdvisoryClass::AVOID ||
-           cls == GridAdvisoryClass::PREDICTED_DEGRADED);
+      // Rebound planes and collision checks consume the original frozen
+      // physical/motion refusal. Advisory is a soft path preference; it must
+      // never manufacture obstacle support or require traversal fallback.
+      return !planning_query_(position).executable();
     }
     fast_planner::ObjPredictor::Ptr moving_objs_;
     SwarmTrajData *swarm_trajs_{NULL}; // Can not use shared_ptr and no need to free

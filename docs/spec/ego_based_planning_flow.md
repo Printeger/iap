@@ -7,7 +7,9 @@
 8 项定向投影／translation-gauge 机制测试通过。开发检查已拒绝 A0 与唯一 A1：
 7400 固定来源地图 A0 Q_H/Q_V/S 区域0、rho=-1；原生当前地图 S 为1/3、-.5；
 A1新增5个 unavailable，原生区域仅余2窗口。70项数值检查通过、2项空GNSS
-明确不可用，证据 `log/20261013T064758Z_490/export/analysis/g2_bounded_development_v3`。
+明确不可用，证据由提交版重放
+`log/20261013T070544Z_354/export/analysis/g2_committed_reproduction_v4`
+完整绑定源码字节；与旧v3逐行分数、排序及缺失完全一致，旧v3保留。
 G2科学 BLOCKED，不能冻结或授予独立排序／真实模型资格。
 证据工具审查修复：每次离线计算保存实际源码字节；采用外层 IAP_RUN_DIR 时
 只写不可变子清单，不改 owner 主清单；异常保存输入 hash、完整请求分母与
@@ -17,6 +19,21 @@ G2科学 BLOCKED，不能冻结或授予独立排序／真实模型资格。
 后端只有原目标与 guide 留存检查，没有直接 PI 风险积分／控制点梯度。
 G3-F 可准备明确合成机制测试；真实接入与 G3-B 以合格 G2 为前提，G4 以完整
 G3 通过为前提。原 prior OFF、预算、执行权威与全部历史失败保留。
+
+**G3-F 合成机制准备／职责修复（未授予真实模型资格）**：首个错误语义是
+`BsplineOptimizer::planningOccupied()` 将 AVOID／PREDICTED_DEGRADED 加入占据。
+定向原生反例先红后绿；入口现在只消费原 frozen cell.executable() 的物理／
+未知／运动拒绝，没有修改执行许可或阈值。初始化／rebound／refine 的同一
+占据调用链不再制造 Advisory 障碍平面。单 A* 仍按原软倍率做路径边积分。
+高风险带绕行、全 warning 唯一通路、实际未知曲线及 warning guide 的5项
+定向回归通过，45项 A* 全套通过，原 search=1s／事务=1.5s 保持。
+EGO 全套103项：99通过、2失败、2跳过；两个失败
+RealPredictorUsesSameMapAndRejectsStaleInputs、
+GuideCurvePlanningAndBoundedActualCorrectionKeepOriginalMargin 已在隔离
+`b847e91b` 旧 header／library／test 基线重现，原断言失败保留，不称全套绿。
+证据 `log/20261013T065622Z_785` 的 runtime 和 baseline_two_failures.json。
+这是离线合成机制结果，无四分叉现场验收。未提供无量纲生产尺度通道、
+合格真实场／路线或后端 PI 梯度；G3-F整体、G3-B、G4均未通过。
 
 **历史 A0 范围（2026-10-13）**：用户明确采用任务书正文v1.2，当前仅
 G2-A0定义／方案，见[单一候选卡](advisory_joint_model.md#route-a-g2-a0)。

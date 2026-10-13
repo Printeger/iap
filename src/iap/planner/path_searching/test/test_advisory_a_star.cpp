@@ -944,6 +944,34 @@ TEST(AdvisoryAStar, OfflineSegmentAttributionUsesPhysicalChecksAndBothDirections
   EXPECT_FALSE(checker.diagnosticSegmentCost(b,a)); // advisory fallback cannot admit physical unknown
 }
 
+TEST(AdvisoryAStar, SyntheticHighRiskBandSelectsDetourByIntegralWithoutHardBarrier) {
+  auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
+  AStar search;search.initGridMap(map,Eigen::Vector3i(70,40,10));
+  auto budget=std::make_shared<PlanningBudget>(1.5);search.setPlanningBudget(budget);
+  const auto query=[](const Eigen::Vector3d& p) {
+    GridPlanningCell cell;
+    cell.execution_reason=std::abs(p.z()-1)>.06 || std::abs(p.y())>1. ?
+        GridExecutionReason::PHYSICAL_OBSTACLE : GridExecutionReason::OK;
+    const bool band=std::abs(p.x())<1.5 && std::abs(p.y())<.3;
+    cell.advisory.classification=band ? GridAdvisoryClass::AVOID : GridAdvisoryClass::VALID;
+    cell.advisory.cost_multiplier=band ? 3. : 1.;return cell;
+  };
+  search.setPlanningQuery(query);
+  ASSERT_TRUE(search.AstarSearch(.1,{-2,0,1},{2,0,1}));
+  double lateral=0;
+  for(const auto& p:search.getPath()) {
+    EXPECT_TRUE(query(p).executable());
+    lateral=std::max(lateral,std::abs(p.y()));
+  }
+  EXPECT_GE(lateral,.3-1e-9);
+  EXPECT_GT(search.lastResult().path_length_m,4.);
+  // Straight: 3m high band at multiplier 3 plus 1m neutral = 10m.
+  // The soft integral saving must pay for the detour's added length.
+  EXPECT_LT(search.lastResult().path_cost,10.);
+  EXPECT_EQ(search.lastResult().rejected_advisory,0u);
+  EXPECT_TRUE(search.lastResult().optimality_proven);
+}
+
 TEST(AdvisoryAStar, SoleWarningConnectionRemainsTraversableWithoutFallback) {
   auto map=std::make_shared<GridMap>();GridMapTestAccess::configure(*map);
   AStar search;search.initGridMap(map,Eigen::Vector3i(50,20,10));

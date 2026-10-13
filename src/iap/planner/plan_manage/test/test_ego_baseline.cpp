@@ -114,6 +114,9 @@ struct GridMapTestAccess {
 };
 namespace ego_planner {
 struct BsplineOptimizerTestAccess {
+  static bool physicalOccupied(const BsplineOptimizer& optimizer,const Eigen::Vector3d& p) {
+    return optimizer.planningOccupied(p);
+  }
   static std::pair<int,size_t> controlAndReferenceCounts(const BsplineOptimizer& optimizer) {
     return {optimizer.cps_.size,optimizer.ref_pts_.size()};
   }
@@ -1926,6 +1929,47 @@ TEST(EgoBaseline, WarnedPhysicalOriginUsesOneCountedSoftCostSearch) {
   EXPECT_EQ(budget->count(PlanningBudget::Repair::AdvisoryFallback),0u);
   EXPECT_TRUE(optimizer.recoveryGuide().front().isApprox(start,1e-9));
   EXPECT_TRUE(optimizer.recoveryGuide().back().isApprox(target,1e-9));
+}
+
+TEST(EgoBaseline, AdvisoryCannotCreateReboundOccupancyOrRecovery) {
+  for(const auto classification:{GridAdvisoryClass::AVOID,GridAdvisoryClass::PREDICTED_DEGRADED,
+                                  GridAdvisoryClass::UNKNOWN,GridAdvisoryClass::VALID}) {
+    SCOPED_TRACE(static_cast<int>(classification));
+    auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+    GridMapTestAccess::markObserved(*map);
+    ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+    optimizer.a_star_=std::make_shared<AStar>();optimizer.a_star_->initGridMap(map,Eigen::Vector3i(60,30,10));
+    optimizer.setPlanningQuery([classification](const Eigen::Vector3d&) {
+      GridPlanningCell cell;cell.execution_reason=GridExecutionReason::OK;
+      cell.advisory.classification=classification;cell.advisory.cost_multiplier=3.;return cell;
+    });
+    const Eigen::Vector3d start(-2,0,1),end(2,0,1);
+    EXPECT_FALSE(ego_planner::BsplineOptimizerTestAccess::physicalOccupied(optimizer,start));
+    auto budget=std::make_shared<PlanningBudget>();optimizer.setPlanningBudget(budget);
+    optimizer.setPlanningEndpoints(start,end);optimizer.setBsplineInterval(.4);
+    Eigen::MatrixXd points(3,12);
+    for(int i=0;i<12;++i)points.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+    const auto segments=optimizer.initControlPoints(points,true);
+    EXPECT_TRUE(segments.empty());EXPECT_FALSE(optimizer.initializationFailed());
+    EXPECT_FALSE(optimizer.needsGuideReinitialization());EXPECT_EQ(budget->searches.calls,0u);
+    EXPECT_FALSE(optimizer.curveViolates(points,.4));
+  }
+}
+
+TEST(EgoBaseline, ReboundKeepsPhysicalUnknownMotionAndObstacleRefusals) {
+  auto node=makeNode();auto map=std::make_shared<GridMap>();map->initMap(node);
+  ego_planner::BsplineOptimizer optimizer;optimizer.setParam(node);optimizer.setEnvironment(map);
+  for(const auto reason:{GridExecutionReason::PHYSICAL_OBSTACLE,GridExecutionReason::ENVIRONMENT_UNOBSERVED,
+                         GridExecutionReason::CURRENT_MOTION_UNAVAILABLE}) {
+    optimizer.setPlanningQuery([reason](const Eigen::Vector3d&) {
+      GridPlanningCell cell;cell.execution_reason=reason;
+      cell.advisory.classification=GridAdvisoryClass::VALID;cell.advisory.cost_multiplier=1.;return cell;
+    });
+    EXPECT_TRUE(ego_planner::BsplineOptimizerTestAccess::physicalOccupied(optimizer,{0,0,1}));
+    Eigen::MatrixXd points(3,12);
+    for(int i=0;i<12;++i)points.col(i)=Eigen::Vector3d(-2+4.*i/11.,0,1);
+    EXPECT_TRUE(optimizer.curveViolates(points,.4));
+  }
 }
 
 TEST(EgoBaseline, WarnedOriginNeedsNoTraversalFallback) {
