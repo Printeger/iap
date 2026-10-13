@@ -2,6 +2,13 @@
 
 Status: experimental; no empirical error or fused integrity qualification.
 
+**Current execution scope (2026-10-13):** the user activates development plan
+v1.3 G2→G3→G4, superseding the historical A0-only stop/acquisition restrictions
+below. The original candidate, numerical/native ordering gates and failures are
+unchanged. The minimum A0 offline projection now exists; it has no empirical or
+independent qualification and does not feed production HPL/VPL or costs. See the
+single active status entry for progress and the bounded research budget.
+
 **Route A applicability (2026-10-13):** the user explicitly activates the
 [development plan v1.2](../dev_predictor/advisory_development_plan_v1.md), sections
 00/04/06/09. An independently validated degradation proxy need not reconstruct
@@ -14,6 +21,54 @@ the Route A candidate. The sole current status authority remains
 <a id="route-a-g2-a0"></a>
 
 ## Route A G2-A0: one candidate and its validation plan
+
+### v1.3 bounded development decision (2026-10-13)
+
+The A0 offline implementation passes its projection mechanisms, but the viewed
+7400 native in-region Q_H/Q_V/S ordering is 0 concordance / -1 Spearman with
+no new unavailable. Reject A0; do not collect its proposed dense supplement or
+freeze it. Original native current-map scores are separately retained.
+
+One substantive alternative hypothesis is now preregistered before evaluation:
+`pose6_lidar_translation_gauge_probe_a1`. The new source-role counterexample is
+that a common translation of a self-built LiDAR map is invisible to its local
+scan geometry, while GNSS alone anchors that translation. A0 conditions this
+datum as known and the recorded reliable GNSS sigma change alters S by only
+about 1e-5; this numerical response is not independent global anchoring evidence.
+The alternative explicitly gives the LiDAR map an unbounded common translation
+nuisance, eliminated inside the existing offline common-pose computation:
+
+```
+L = [[A, C], [C^T, D]]
+L_gauge = [[0, 0], [0, D - C^T A^+ C]]
+I_a1 = (G + L_gauge)/2
+```
+
+The PSD range test is required; no map prior or epsilon is introduced. This
+translation-gauge test makes no claim to cover map rotation or deformation.
+Original clock/source admission, envelope, 0.5m probes, K, axes and single
+Q_H/Q_V/S definition remain. No new map, manager or production predictor is
+added. It is mathematically different from tuning A0: LiDAR cannot anchor an
+unknown map translation. On the same viewed rows, preserve original missing
+and newly unavailable, check independent measurement-space elimination and
+the four numerical source conditions; no empirical causal qualification is
+granted. Missing anchor observability, no native local-order improvement or
+improvement only by deleting windows rejects it. This is the sole alternative
+budget; no further parameter or candidate search follows. The inability to
+represent both requested roles with these inputs is a scientific stop, not a
+reason to relax the original 1s object or independent gates.
+
+A1 outcome: rejected on the same viewed inputs. Five additional unavailable
+queries include one of the three native in-region 7400 windows. The remaining
+two cannot satisfy the unchanged six-window gate; their vertical order is
+opposite. Historical S concordance is 0/1/1/3 and Spearman .25/.214/-.543,
+not a stable local ranking. These are optimistic observable projections before
+any stricter inherited conditioning gate; further rejection cannot qualify
+missing windows. Numerical source-role examples are synthetic mechanism only.
+No independent source-role/global-error qualification is asserted. A0 and this
+sole alternative are exhausted; no development supplement, model freeze,
+independent campaign or real planning qualification is justified. See the active
+entry and its immutable summary for denominators and evidence limitations.
 
 **A0 PASS = 可实施、可证伪的定义／方案完成；不是模型PASS。** 本节只定义
 `pose6_horizontal_probe_geometry_a0`，不实现／拟合／采集，不恢复有符号创新

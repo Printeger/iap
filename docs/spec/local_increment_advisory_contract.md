@@ -6,6 +6,13 @@ the frozen map's common absolute datum from the primary evaluation object.
 The previous absolute correction evaluation, all failures, regions and gates
 remain immutable evidence. A contract change is not a model improvement PASS.
 
+**Current execution scope (2026-10-13):** the user activates development plan
+v1.3 G2→G3→G4, superseding the historical A0-only stop/acquisition restrictions
+below. The original candidate, numerical/native ordering gates and failures are
+unchanged. The minimum A0 offline projection now exists; it has no empirical or
+independent qualification and does not feed production HPL/VPL or costs. See the
+single active status entry for progress and the bounded research budget.
+
 **Route A applicability (2026-10-13):** under the user's explicit
 [plan v1.2](../dev_predictor/advisory_development_plan_v1.md) scope, defining and
 validating an explainable degradation proxy does not require a full physical

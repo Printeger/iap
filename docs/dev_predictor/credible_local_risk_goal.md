@@ -6,6 +6,51 @@
 历史负结论 `log/20261011T044535Z_421/export/analysis/goal_report_v1/REPORT.md`
 保持只读，不作为开发成功。
 
+## 当前授权：v1.3 G2 → G3 → G4（2026-10-13，Asia/Shanghai）
+
+现场起点为 `9505b12a`，当前分支 `dev/iap_refactor`。已完整读取
+[开发任务书 v1.3](advisory_development_plan_v1.md) 及现行模型、原生评价、
+EGO 流程与 ADR。计划及 assets/prompts 是未跟踪用户文件，不代提交。
+用户本次明确授权连续研发，覆盖下文仅 G1／仅 A0、补录待授权及旧 G4 数量
+排期；这些段落保留为历史。原 1.000s 原生评价、三区域、.7/.5 门槛、全部
+missing、旧 G1 BLOCKED/MODEL_GAP、M2–M5 和历史 FAIL 不变。
+G4 主要评价以现行 v1.2 原生端点为准，三组三臂上限已获本次授权；正式运行前
+仍须预登记与冻结。G2 未取得独立资格时不接入真实风险／后端 PI 或启动 G4。
+
+当前 G2.1：从唯一 `pose6_horizontal_probe_geometry_a0` 做最小离线投影、
+有限差分／独立 SVD、已查看历史开发拒绝检查。`horizontal_probe_advisory.py`
+只消费原准入共同 6D 信息；四个 0.5m 探针共用一次解，零空间逐分量检查。
+输出带版本、无量纲尺度及状态，不改变旧米制 H/V 或生产 V5。
+8 项新机制测试通过；两个候选均被开发拒绝，尚无独立模型资格。最多一次 105s 开发
+补录，仅在候选未被拒绝而数据不足时采用；明确反证后至多一项实质不同候选，
+不扫探针、K、来源 trace 或区域。正常技术问题和内部里程碑自动推进。
+
+### G2 有界开发拒绝结果
+
+证据 owner `log/20261013T064758Z_490`，
+`export/analysis/g2_bounded_development_v3/summary.json`：70 项数值检查通过，
+两个空间 query 无已准入 GNSS 行，明确 unavailable，不计 GNSS 敏感性通过。
+固定来源地图上 A0 的 Q_H/S 仍复现旧反序；7400 原生三区域 Q_H/Q_V/S 都是
+concordance=0、Spearman=-1，无新增 unavailable。原生当前地图另列，A0 S
+为 1/3、-.5，Q_H 为 2/3、.5，Q_V 为 1/3、-.5；3<6，不授予任何资格。
+旧 5101–5103 发布插值标签只作开发诊断；24 份原 payload 已缺失，保留现存
+解码输入的 hash 与数值重建，不宣称完整原生重放或升级 v1.2。
+
+明确新反例支持下已预登记并检验唯一实质不同候选
+`pose6_lidar_translation_gauge_probe_a1`：先消去 LiDAR 自建地图的共同平移
+nuisance，再按原包络联合 GNSS 和共同位姿。独立 measurement SVD 核对通过；
+新增 5 个 unavailable，7400 区域内只余 2 窗口，不能以删除坏窗口后的 XY
+concordance=1 冒充通过，Z 仍反序。旧三次 S concordance=0、1、1/3，rho=
+.25、.214、-.543，全部未通过。A1 亦拒绝；不增加候选、调尺度或权重。
+
+**科学结论：G2 EVIDENCE_BASED_BLOCKED。** 已检验本轮 A0 与唯一替代假设；
+固定地图瞬时响应仍不解释原生局部增量，而消去地图绝对锚定假设会暴露 GNSS
+全球位置可观性缺失。独立 GNSS 全球参考／LiDAR 局部误差资格均未取得。
+两候选已拒绝，105s 补录不再符合“未拒绝但缺样本”的前提；三次独立资格
+运行尚未启动，7301–7303 未读／未采。候选冻结、真实 G3/G4 和总目标未完成。
+唯一可继续的工程工作为已授权 G3-F 合成机制／确定语义修复；不能借此解除
+科学门禁。扩大候选或改变评价对象须一次明确范围决定。
+
 ## 路线 A 当前范围：G2-A0（2026-10-13，UTC）
 
 用户已明确采用 [任务书正文 v1.2](advisory_development_plan_v1.md) 的路线 A；
