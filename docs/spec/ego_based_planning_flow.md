@@ -1,5 +1,18 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
+**当前路线A范围（2026-10-13）**：用户明确采用任务书正文v1.2，当前仅
+G2-A0定义／方案，见[单一候选卡](advisory_joint_model.md#route-a-g2-a0)。
+A0 PASS只表示方案可实施／可证伪；候选是原共同6D信息的固定水平探针响应
+投影，输出无量纲Q_H/Q_V及唯一S，尚未实现／拟合／采集或部署。
+G1来源／数值机制证据复用；原严格模型BLOCKED、M2–M5与FAIL保留。
+下文旧“仅G1／物理律／下一项”段落作为原研究路线历史保留，不再阻塞路线A。
+本次无生产流程变化：原米制H/V→单GridMap风险层→唯一cost→单A*→一条guide
+→原EGO及执行权威保持，prior OFF、horizon=0及原预算固定。未来无量纲score
+须显式尺度接口，不能写入hpl/vpl或沿用米预算，唯一映射留G3。
+文档证据：`log/20261013T032154Z_119/metadata/manifests/`；只核对文件／diff／
+证据引用，不重建、不核验安装或重跑G1。唯一建议下一项为获后续明确范围后的
+一次离线实现／开发拒绝检查；本轮到A0停止，G2独立资格及G3/G4仍未完成。
+
 当前执行入口仍为 [credible_local_risk_goal.md](../dev_predictor/credible_local_risk_goal.md)。
 2026-10-13用户采用 G1→G4 串行排期，本轮仅 G1，暂停高维模型与取证扩展；
 原 M2–M5未完成、失败、评价器和验收门槛保持。生产仍是 capturePredictionSnapshot

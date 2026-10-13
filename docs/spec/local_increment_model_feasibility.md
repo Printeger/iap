@@ -5,6 +5,17 @@ remains unfinished. This document closes the observer investigation and names
 the missing physical inputs; it does not introduce a new evaluator, gate,
 runtime format, map, estimator or budget.
 
+**Route A applicability (2026-10-13):** this document's physical joint score
+model, missing signed innovations/source cross moments and unlock conditions
+remain the original research decision. The user's explicit
+[v1.2 Route A scope](../dev_predictor/advisory_development_plan_v1.md) removes
+them as universal prerequisites for an independently validated degradation
+proxy or G2-A0. They remain necessary for any corresponding physical-moment/PL
+claim, are not filled with zero and do not qualify the existing model.
+The current proxy definition is in the [existing joint-model card](advisory_joint_model.md#route-a-g2-a0);
+no observer, physical calibration provider, score propagation or new capture
+is authorized by this applicability note. Original M2-M5 and failures remain.
+
 ## Decision and applicability
 
 The remaining primary obstacle is the physical prediction model. The active

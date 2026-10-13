@@ -6,6 +6,21 @@ the frozen map's common absolute datum from the primary evaluation object.
 The previous absolute correction evaluation, all failures, regions and gates
 remain immutable evidence. A contract change is not a model improvement PASS.
 
+**Route A applicability (2026-10-13):** under the user's explicit
+[plan v1.2](../dev_predictor/advisory_development_plan_v1.md) scope, defining and
+validating an explainable degradation proxy does not require a full physical
+two-endpoint law, complete signed bias/cross moments or strict PL coverage.
+Those requirements below continue to apply to candidates claiming physical
+error moments or coverage, including the original paired-response candidate;
+its failures remain unchanged. A horizon=0 proxy may test its ordering relation
+to the original target without claiming a prospective segment covariance or
+using the realized future segment as a feature. The primary, native endpoint
+qualification, all original regions/missing rows and numerical gates below
+remain active. Supplemental Z-component evaluation does not replace XY.
+The [single Route A candidate card](advisory_joint_model.md#route-a-g2-a0)
+defines the current A0 proposal. Historical pilot/capture schedules below are
+not new acquisition authorization; A0 is documentation only and stops here.
+
 ## Object, window and coordinates
 
 Use one fixed **1.000 s** window beginning at each predeclared query reference
