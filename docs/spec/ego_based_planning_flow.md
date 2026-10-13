@@ -14,7 +14,7 @@ G2科学 BLOCKED，不能冻结或授予独立排序／真实模型资格。
 证据工具审查修复：每次离线计算保存实际源码字节；采用外层 IAP_RUN_DIR 时
 只写不可变子清单，不改 owner 主清单；异常保存输入 hash、完整请求分母与
 已完成行／检查。两项证据所有权／失败账本测试通过。旧v3结果保留，修复后的
-提交版本将单独复算绑定，不视为新科学试验或增加独立样本。
+提交版本已单独复算绑定，不视为新科学试验或增加独立样本。
 生产仍为 V5 米制诊断→同 GridMap→单 A* 边积分→单 guide→原 EGO；
 后端只有原目标与 guide 留存检查，没有直接 PI 风险积分／控制点梯度。
 G3-F 可准备明确合成机制测试；真实接入与 G3-B 以合格 G2 为前提，G4 以完整
@@ -34,6 +34,11 @@ GuideCurvePlanningAndBoundedActualCorrectionKeepOriginalMargin 已在隔离
 证据 `log/20261013T065622Z_785` 的 runtime 和 baseline_two_failures.json。
 这是离线合成机制结果，无四分叉现场验收。未提供无量纲生产尺度通道、
 合格真实场／路线或后端 PI 梯度；G3-F整体、G3-B、G4均未通过。
+
+最终入口报告为 `log/20261013T071206Z_429/export/analysis/g2_final/REPORT.md`，
+84项可执行 Predictor Python测试通过，两轴审查问题修复后均0。
+实现／证据／职责修复提交为 b847e91b／a9733225／698c853f；Release生产目标
+和安装字节一致性已绑定，仍无场景现场验收或真实模型／任务收益资格。
 
 **历史 A0 范围（2026-10-13）**：用户明确采用任务书正文v1.2，当前仅
 G2-A0定义／方案，见[单一候选卡](advisory_joint_model.md#route-a-g2-a0)。
