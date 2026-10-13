@@ -27,13 +27,18 @@ REPO = Path(__file__).resolve().parents[2]
 A1 = 'pose6_lidar_translation_gauge_probe_a1'
 sys.path.insert(0, str(REPO/'launch/_includes'))
 from run_directory import (resolve_run_directory, adopt_run_directory,
-                           write_subordinate_manifest, finalize_run)
+                           register_subordinate_manifest, finalize_run)
 
 
 class Evidence:
     def __init__(self):
         self.inputs = {}
         self.missing = []
+        self.development_rows = []
+        self.expected_rows = []
+        self.development_checks = []
+        self.g1_rows = []
+        self.checks = []
 
     def bind(self, p):
         p = Path(p)
@@ -86,6 +91,8 @@ def g1_checks(ev):
     path = REPO/'log/20261012T163704Z_119/export/analysis/g1/aligned.json'
     g1 = ev.read(path)
     checks, rows = [], []
+    ev.checks = checks
+    ev.g1_rows = rows
     for value in g1['input_binding'].values():
         ev.bind(value['payload'])
         if sha(value['payload']) != value['payload_sha256']:
@@ -201,6 +208,11 @@ def development(ev):
     pilot_native = ev.read(pilot_root/'export/analysis/native_increment_representation_v1/summary.json')
     old = REPO/'log/20261011T044535Z_421'
     rows, checks = [], []
+    ev.development_rows = rows
+    ev.development_checks = checks
+    ev.expected_rows = [{k: v for k, v in r.items() if k in
+                        ('seed', 'frame_id', 'pair_index', 'qualified', 'reason', 'evaluation_reason')}
+                        for r in historical['rows']+pilot['rows']]
     for original in historical['rows']+pilot['rows']:
         r = {k: v for k, v in original.items() if k in
              ('seed', 'frame_id', 'pair_index', 'position', 'qualified', 'reason',
@@ -285,10 +297,16 @@ def development(ev):
     return rows, checks
 
 
-def evaluate(run, label):
+def child_manifest(run, label, value, *, owner):
+    path = run/'metadata/manifests'/f'{label}.json'
+    json_write(path, value)  # Immutable and no adopter mutation of owner state.
+    if owner:
+        register_subordinate_manifest(run, path)
+
+
+def evaluate(run, label, ev, *, owner):
     out = run/'export/analysis'/label
     out.mkdir(exist_ok=False)
-    ev = Evidence()
     for name in ('horizontal_probe_advisory.py', 'g2_a0_rejection_check.py', 'local_increment_validation.py',
                  'surface_model_probe.py', 'heldout_fixed_map.py'):
         path = ev.bind(Path(__file__).with_name(name))
@@ -299,7 +317,7 @@ def evaluate(run, label):
             f.write(path.read_bytes())
     g1, checks = g1_checks(ev)
     rows, development_checks = development(ev)
-    checks += development_checks
+    checks = checks+development_checks
     result = {'schema': 'iap_g2_a0_rejection_v1', 'model_version': MODEL_VERSION,
               'identity': 'VIEWED_DEVELOPMENT_ONLY', 'gates': GATES, 'regions': REGIONS,
               'rows': rows, 'g1_single_source_and_controls': g1, 'mechanism_checks': checks,
@@ -322,9 +340,9 @@ def evaluate(run, label):
               'missing_payload_scope': 'historical decoded diagnostic only; no full native replay qualification'}
     target = out/'summary.json'
     json_write(target, result)
-    write_subordinate_manifest(run, label, {'source': source_identity(), 'argv': sys.argv,
+    child_manifest(run, label, {'source': source_identity(), 'argv': sys.argv,
                                           'inputs_sha256': ev.inputs, 'result_sha256': sha(target),
-                                          'qualification': 'DEVELOPMENT_REJECTION_CHECK_ONLY'})
+                                          'qualification': 'DEVELOPMENT_REJECTION_CHECK_ONLY'}, owner=owner)
     print(json.dumps({'run': str(run), 'mechanism_pass': result['mechanism_pass'],
                       'summary': str(target), 'a1_new_unavailable': result['a1_new_unavailable_count']}))
     return 0 if result['mechanism_pass'] else 1
@@ -339,14 +357,26 @@ def main():
     run = adopt_run_directory(inherited) if inherited else resolve_run_directory(
         entrypoint='g2_a0_rejection_check', scenario='icra_dense_forest_four_fork_v2')
     code = 1
+    ev = Evidence()
     try:
-        code = evaluate(run, label)
+        code = evaluate(run, label, ev, owner=not inherited)
         return code
     except Exception:
         failure = run/'runtime'/f'{label}_failure.txt'
         # Existing evidence is never overwritten, including an earlier failure.
         if not failure.exists():
             failure.write_text(traceback.format_exc())
+            partial = run/'export/analysis'/label/'failure.json'
+            partial.parent.mkdir(exist_ok=True)
+            json_write(partial, {'status': 'EVALUATION_FAILED', 'argv': sys.argv,
+                                 'inputs_sha256': ev.inputs, 'missing_original_payloads': ev.missing,
+                                 'development_rows': ev.development_rows,
+                                 'expected_rows': ev.expected_rows,
+                                 'g1_rows': ev.g1_rows,
+                                 'completed_checks': ev.checks+ev.development_checks,
+                                 'traceback': failure.read_text(), 'independent_qualification': False})
+            child_manifest(run, label+'_failure', {'source': source_identity(),
+                           'inputs_sha256': ev.inputs, 'failure_sha256': sha(partial)}, owner=not inherited)
         raise
     finally:
         if not inherited:
