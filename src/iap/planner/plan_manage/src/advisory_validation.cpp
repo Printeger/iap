@@ -701,7 +701,7 @@ int main(int argc,char** argv) {
     if(mode=="diagnostics") {samplingDiagnostics(label,log);return 0;}
     Input in; double budget=120.;
     if(mode=="fixture" || mode=="fixture_ab") in=fixture();
-    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit" || mode=="replay_points" || mode=="replay_metadata") && argc>=4) {
+    else if((mode=="replay" || mode=="replay_ab" || mode=="replay_audit" || mode=="replay_points" || mode=="replay_metadata" || mode=="replay_header") && argc>=4) {
       std::ifstream file(argv[3],std::ios::binary|std::ios::ate);
       if(!file || file.tellg()<=0 || file.tellg()>256*1024*1024) throw std::runtime_error("invalid payload file");
       const size_t size=file.tellg();file.seekg(0);std::vector<uint8_t> data(size);
@@ -709,6 +709,12 @@ int main(int argc,char** argv) {
       if(argc>=5) budget=std::stod(argv[4]);
     } else throw std::invalid_argument("invalid validation mode");
     if(!std::isfinite(budget) || budget<0.) throw std::invalid_argument("invalid preparation budget");
+    if(mode=="replay_header") {
+      const auto path=log.export_path("advisory/validation/"+label+"/input.json");
+      if(std::filesystem::exists(path)) throw std::runtime_error("metadata evidence exists");
+      std::filesystem::create_directories(path.parent_path());describe(in,path);
+      return 0; // Decode original identity/coordinates only; no query or geometry dump.
+    }
     if(mode=="replay_metadata") {
       const auto path=log.export_path("advisory/validation/"+label+"/input.json");
       const auto raw_path=path.parent_path()/"raw_centers.csv";

@@ -1,12 +1,25 @@
 # 可信局部风险与实际选路收益：持续开发入口
 
-状态：EVIDENCE_BASED_BLOCKED（当前 G2 科学资格），目标未完成。原轮次基线
+状态：ACTIVE（新 G2 源效应研究，尚未取得模型资格）；旧 G2 科学
+EVIDENCE_BASED_BLOCKED 结论保留。原轮次基线
 为 `f90d42c9`，当前分支 `dev/iap_refactor`；原轮次开始时工作区干净。用户目标文件
 `goal-objective.md` 的 M1–M5 和约束是本轮授权与完成条件。
 历史负结论 `log/20261011T044535Z_421/export/analysis/goal_report_v1/REPORT.md`
 保持只读，不作为开发成功。
 
-## 当前授权：v1.3 G2 → G3 → G4（2026-10-13，Asia/Shanghai）
+## 当前授权：仅新 G2-L／G2-G／G2-F（2026-10-13）
+
+用户的新源效应任务从实际本地 `d4f1e1fd` 出发，覆盖旧 G2→G3→G4 排期。
+新增[双维评价契约](../spec/source_effect_advisory_contract.md)，旧局部契约全文
+与门槛、V5／A0／A1 拒绝、G1 BLOCKED、M2–M5 未完成保持不变。
+当前只准备一个105s×四格pilot；GNSS/LiDAR物理对照、固定ECEF/ENU评价
+以及至多三组正式四格运行按新契约有界推进。没有新的G3或G4开发。
+原生求解器反例证明长GNSS缺失会边缘化静态全球E/R；最小存续修复不改变
+原先验、权重、动态5s lag或无GNSS局部端点不可用。新增只读全球均值／
+实际ICP支持诊断不授予源效应或融合风险资格。pilot尚未运行；未跟踪用户
+文件的clean-worktree门禁待处理，不能据此得出科学负结论。
+
+## 历史授权：v1.3 G2 → G3 → G4（2026-10-13，Asia/Shanghai）
 
 现场起点为 `9505b12a`，当前分支 `dev/iap_refactor`。已完整读取
 [开发任务书 v1.3](advisory_development_plan_v1.md) 及现行模型、原生评价、

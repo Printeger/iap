@@ -2,7 +2,13 @@
 
 Status: experimental; no empirical error or fused integrity qualification.
 
-**Current execution scope (2026-10-13):** the user activates development plan
+**Current execution scope (2026-10-13, source effects):** only G2-L/G/F.
+The [source-effect contract](source_effect_advisory_contract.md) adds a fixed
+global-reference object while preserving every original native local gate and
+failure. Physical source effects must precede one evidence-supported candidate;
+no further probe variants or new G3/G4 work. The old A0/A1 rejection remains.
+
+**Historical execution scope (2026-10-13):** the user activates development plan
 v1.3 G2→G3→G4, superseding the historical A0-only stop/acquisition restrictions
 below. The original candidate, numerical/native ordering gates and failures are
 unchanged. The minimum A0 offline projection now exists; it has no empirical or

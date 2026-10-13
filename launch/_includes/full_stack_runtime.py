@@ -88,6 +88,34 @@ def load_advisory_trial(path, scenario):
     target=Path(path)
     if not target.is_absolute(): raise ValueError("validation trial must use an absolute path")
     trial=json.loads(target.read_text())
+    if trial.get("schema") == "iap_source_effect_trial_v1":
+        protocol_path = Path(trial["protocol"])
+        if (not protocol_path.is_absolute() or
+                hashlib.sha256(protocol_path.read_bytes()).hexdigest() != trial["protocol_sha256"]):
+            raise ValueError("source effect protocol checksum mismatch")
+        protocol = json.loads(protocol_path.read_text())
+        conditions = {
+            "GG_LG": {"gnss_dropout": False, "lidar_max_range_m": 10.},
+            "GG_LB": {"gnss_dropout": False, "lidar_max_range_m": 3.},
+            "GB_LG": {"gnss_dropout": True, "lidar_max_range_m": 10.},
+            "GB_LB": {"gnss_dropout": True, "lidar_max_range_m": 3.},
+        }
+        if (protocol.get("schema") != "iap_source_effect_protocol_v1" or
+                protocol.get("conditions") != conditions or
+                protocol.get("duration_s") != 105. or
+                protocol.get("dropout_elapsed_s") != [30., 60.] or
+                protocol.get("record_interval_s") != 2. or
+                protocol.get("record_initial_delay_s") != 10. or
+                protocol.get("record_count") != 92 or
+                trial.get("scene") != "icra_dense_forest_four_fork_v2" or
+                trial.get("map_seed") != 41021 or trial.get("condition") not in conditions or
+                trial.get("phase") != "pilot" or trial.get("seed") != 9100 or
+                protocol.get("formal_authorized_by_this_preparation") is not False or
+                protocol.get("qualification") != "PREDECLARED_PILOT_ONLY"):
+            raise ValueError("predeclared bounded source effect trial required")
+        trial["observation"] = conditions[trial["condition"]]
+        trial["protocol_values"] = protocol
+        return trial
     if (trial.get("schema")!="iap_advisory_validation_trial_v1" or
             trial.get("scene")!="icra_dense_forest_four_fork_v2" or trial.get("map_seed")!=41021 or
             trial.get("condition") not in ("normal","gnss_degraded","lidar_degraded") or
@@ -181,6 +209,10 @@ def planner_parameters(scenario, capture_failure_map=False, advisory_posterior_p
     params.update(load_advisory_calibration(advisory_calibration))
     trial=load_advisory_trial(advisory_trial,scenario)
     if trial:
+        if trial["schema"] == "iap_source_effect_trial_v1":
+            if advisory_posterior_prior or advisory_guidance or advisory_calibration:
+                raise ValueError("source effects require original posterior/guidance OFF and no calibration")
+            return params  # Preserve the original scene goal and planner inputs.
         if advisory_posterior_prior or (trial["phase"]!="mission" and advisory_guidance):
             raise ValueError("trial requires posterior OFF and calibration guidance OFF")
         params["fsm/flight_type"]=2
@@ -209,6 +241,7 @@ def _setup(context):
     scenario = json.loads((share / "config/scenarios/catalog.json").read_text())[name]
     scenario = {**scenario, "manual_goal": name == "manual"}
     run = Path(os.environ["IAP_RUN_DIR"])
+    trial = load_advisory_trial(context.launch_configurations.get("advisory_trial", ""), scenario)
     runtime, _ = materialize_profile(
         source_config_dir=str(share / "config/profiles/full_stack_flight"),
         output_dir=str(run), contract="full_stack",
@@ -217,7 +250,8 @@ def _setup(context):
         capture_dense_lidar=context.launch_configurations.get("capture_dense_lidar","false").lower()=="true",
         capture_source_observations=context.launch_configurations.get("capture_source_observations","false").lower()=="true",
         capture_native_response_frames=context.launch_configurations.get("capture_native_response_frames",""),
-        capture_native_source_freeze=context.launch_configurations.get("capture_native_source_freeze","false").lower()=="true")
+        capture_native_source_freeze=context.launch_configurations.get("capture_native_source_freeze","false").lower()=="true",
+        capture_source_effects=trial.get("schema") == "iap_source_effect_trial_v1")
     register_config_snapshot(run, Path(runtime))
     remaps = [("odom_world", "/drone_0_visual_slam/odom"),
               ("grid_map/odom", "/drone_0_visual_slam/odom"),

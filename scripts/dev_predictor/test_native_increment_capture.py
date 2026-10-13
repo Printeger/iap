@@ -59,6 +59,17 @@ class NativeIncrementSelection(unittest.TestCase):
         self.assertFalse(written[0]['report']['optimized_valid'])
         self.assertEqual(written[0]['report']['fixed_array'], [1., None])
 
+    def test_two_second_cadence_preserves_both_full_post_windows(self):
+        written = []
+        capture = NativeIncrementCapture(written.append)
+        capture.begin('A', 10., 2.3)
+        capture.begin('B', 12., 2.3)
+        capture.observe({'owner': 'overlap'}, 12.2)
+        capture.observe({'owner': 'B-only'}, 12.4)
+        self.assertEqual([(r['request_id'], r['report']['owner']) for r in written],
+                         [('A', 'overlap'), ('B', 'overlap'), ('B', 'B-only')])
+        self.assertEqual(capture.until, 14.3)
+
     def test_native_exact_epoch_uses_sensor_transport_without_posterior_covariance(self):
         T = native_pose_at(evidence(), 100.05, np.eye(4))
         np.testing.assert_allclose(T[:3, 3], [.05, .01, 0.], atol=1e-12)

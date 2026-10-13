@@ -84,15 +84,32 @@ def main():
     parser.add_argument('--omit-planner-map-dumps',action='store_true',help='M2 source-observation diagnostics only: omit repetitive planner maps and internal input dumps, retain failure ledgers')
     parser.add_argument('--record-count',type=int,default=None,help='Number of frozen inputs; default retains original 10s cadence')
     parser.add_argument('--record-initial-delay',type=float,default=0.,help='Predeclared first snapshot delay, seconds')
+    parser.add_argument('--record-interval',type=float,default=10.,help='Predeclared pair-start cadence, seconds')
+    parser.add_argument('--advisory-trial',default='',help='Absolute immutable canonical trial JSON')
     parser.add_argument('--gnss-seed', type=int, default=None, help='Independent simulation observation seed; all noise/planner settings retained')
     parser.add_argument('--execution-evidence-ids', default='', help='Opt-in comma-separated owning IDs; retain existing immutable final/refusal corridor evidence')
     parser.add_argument('--protection-margin-replan',action='store_true',help='Experimental early physical-reserve scheduling; keeps original hard checks and total budget')
     args = parser.parse_args()
+    from full_stack_runtime import load_advisory_trial
+    scene = json.loads((REPO / 'config/scenarios/catalog.json').read_text())['icra_dense_forest_four_fork_v2']
+    trial = load_advisory_trial(args.advisory_trial, scene)
+    source_effects = trial.get('schema') == 'iap_source_effect_trial_v1'
+    if source_effects:
+        protocol = trial['protocol_values']
+        if (args.guidance != 'false' or not args.capture_native_increments or
+                not args.omit_planner_map_dumps or not args.rinex_nav_file or args.gnss_seed is not None or
+                args.duration != protocol['duration_s'] or args.record_count != protocol['record_count'] or
+                args.record_interval != protocol['record_interval_s'] or args.record_initial_delay != protocol['record_initial_delay_s'] or
+                args.capture_advisory_residuals or args.capture_dense_lidar or args.capture_native_response_frames or
+                args.capture_source_observations or
+                args.capture_native_source_freeze or args.protection_margin_replan or args.capture_fork_entries or
+                args.stop_after_planning_input or args.stop_after_task):
+            raise ValueError('source effect driver must match the frozen minimal protocol')
     if args.capture_dense_lidar and not args.capture_advisory_residuals:
         raise ValueError('--capture-dense-lidar requires --capture-advisory-residuals')
-    if args.omit_planner_map_dumps and (not args.capture_source_observations or args.guidance != 'false'):
+    if args.omit_planner_map_dumps and (not (args.capture_source_observations or source_effects) or args.guidance != 'false'):
         raise ValueError('--omit-planner-map-dumps requires OFF source-observation diagnostics')
-    if args.capture_native_increments and (not args.capture_source_observations or args.guidance != 'false' or
+    if args.capture_native_increments and (not (args.capture_source_observations or source_effects) or args.guidance != 'false' or
             (args.record_count is not None and args.record_count % 2)):
         raise ValueError('native increment diagnostics require OFF source observations and even total input count')
     if args.capture_native_response_frames and (not args.capture_native_increments or args.guidance != "false"):
@@ -104,6 +121,8 @@ def main():
         raise ValueError('duration must be at least 30 seconds')
     if args.record_count is not None and args.record_count < 1:
         raise ValueError('record count must be positive')
+    if not math.isfinite(args.record_interval) or args.record_interval <= (1. if args.capture_native_increments else 0.):
+        raise ValueError('record interval must exceed the native pair window')
     if not math.isfinite(args.record_initial_delay) or not 0 <= args.record_initial_delay < args.duration-5:
         raise ValueError('record delay must leave time for the source request')
     safe_label(args.label)
@@ -174,6 +193,21 @@ def main():
                    f'run_duration_s:={args.duration}']
         if args.rinex_nav_file:
             command.append('rinex_nav_file:=' + str(Path(args.rinex_nav_file).resolve()))
+        if args.advisory_trial:
+            trial_copy = run / 'metadata/config/driver_trial_input.json'
+            trial_bytes = Path(args.advisory_trial).read_bytes()
+            frozen_trial = json.loads(trial_bytes)
+            if source_effects:
+                protocol_copy = run / 'metadata/config/driver_source_effect_protocol.json'
+                protocol_copy.write_bytes(Path(frozen_trial['protocol']).read_bytes())
+                if sha(protocol_copy) != frozen_trial['protocol_sha256']:
+                    raise ValueError('protocol changed after validation')
+                frozen_trial['protocol'] = str(protocol_copy)
+            trial_copy.write_text(json.dumps(frozen_trial, indent=2, sort_keys=True)+'\n')
+            manifest(run, 'advisory_trial_binding', {'trial_input_sha256':sha(Path(args.advisory_trial)),
+                'trial_copy':str(trial_copy.relative_to(run)), 'trial_copy_sha256':sha(trial_copy),
+                'protocol_sha256':frozen_trial.get('protocol_sha256')}, owner=True)
+            command.append('advisory_trial:=' + str(trial_copy))
         if args.capture_advisory_residuals:
             command.append('capture_advisory_residuals:=true')
         if args.capture_dense_lidar:
@@ -206,13 +240,15 @@ def main():
                           '--duration', str(args.duration + 15), '--label', args.label]
         if args.capture_native_increments and args.omit_planner_map_dumps:
             capture_command += ['--compact-source-diagnostics']
+        if source_effects:
+            capture_command += ['--source-effects']
         spawn('capture', capture_command)
         spawn('launch', command)
         launch_started=time.monotonic()
         record_command = [sys.executable, str(REPO / 'scripts/dev_predictor/advisory_validation.py'),
                          'record', '--label', args.label, '--count', str(args.record_count or (2 if args.capture_native_increments else 1)*math.ceil(args.duration / 10)),
                          '--initial-delay',str(args.record_initial_delay),
-                         '--interval', '10', '--timeout', '5']
+                         '--interval', str(args.record_interval), '--timeout', '5']
         if args.capture_native_increments:
             record_command += ['--capture-native-increments', '--pair-window', '1']
         spawn('record', record_command)
@@ -273,7 +309,7 @@ def main():
         manifest(run,'planning_input_capture',{'source':identity,'inputs':planning_inputs,
             'first_input_only_requested':args.stop_after_planning_input,
             'status':'CAPTURED' if planning_inputs else 'NO_MATCHING_PLANNING_INPUT'},owner=True)
-        if args.capture_advisory_residuals or args.capture_native_source_freeze:
+        if args.capture_advisory_residuals or args.capture_native_source_freeze or source_effects:
             noise_path = run / 'export/simulation/gnss_injected_noise.csv'
             manifest(run, 'gnss_injected_noise_capture', {
                 'path': str(noise_path.relative_to(run)),

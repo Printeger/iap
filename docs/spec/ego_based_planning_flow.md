@@ -1,6 +1,28 @@
 # 完整性感知 EGO 当前流程（v1.1 轻量闭环）
 
-**当前授权（2026-10-13，Asia/Shanghai）**：任务书 v1.3 已由用户明确激活，
+**当前授权（2026-10-13，新源效应 Goal）**：仅执行 G2-L／G2-G／G2-F；
+禁止新的 G3／G4 或规划器调整。双维实验契约见
+[source_effect_advisory_contract.md](source_effect_advisory_contract.md)。
+旧 V5／A0／A1 拒绝、G1 BLOCKED、M2–M5 未完成与既有合成机制结果保留。
+原生反例发现 GNSS 缺失超过5s后静态E/R被边缘化；修复只延长已有全球
+基准键的存续，不增加先验／权重、不改变动态fixed-lag或原生局部不可用语义。
+这只是实验必要的软件机制修复，不是源效应、风险模型或排序资格。
+原生全球均值只读CSV默认OFF，继续记录缺失期原生帧／stamp／sequence；
+原ICP CSV追加实际匹配计数和既有SVD弱方向。共同canonical trial控制物理
+观测，planner参数与原起终点保持。2s采样保留原2.3s重叠／末尾窗口；
+replay_header只解码原metadata，不查询模型或运行规划器。
+新离线评价器直接复用原native_endpoint／relative_error与50ms真值门禁，
+按唯一producer elapsed登记phase中位数／时间四分位增长和恢复代数分解；
+保存完整请求分母、实际source字节及失败时部分结果。尚无实际pilot评价。
+准备验证：原生GNSS9项、canonical launch50项及header-only解码11项通过；
+冻结query拒绝不能被后续原生报告重新纳入，缺半对仍绑定成功输入，缺payload
+只拒绝该对并继续评价。两轴审查所见问题已修复，均无剩余发现。
+扩大检查另保留fork replay旧codec门禁失败和prior-AB弱LiDAR空HPL断言失败；
+未修改这些接口或宣称全套绿。数值／接口测试不等同于四格源效应实测。
+当前准备一组预登记四格pilot；live受未跟踪用户文件的clean-worktree门禁阻塞。
+生产仍是同一GridMap、一个A*、一条guide和原EGO／执行权威，prior OFF。
+
+**历史授权（2026-10-13，Asia/Shanghai）**：任务书 v1.3 已由用户明确激活，
 连续推进 G2→G3-F→G3-B→G4；下文仅 G1／A0 停止排期是历史。
 当前阶段 G2.1，最小离线 A0 投影位于 `scripts/dev_predictor/horizontal_probe_advisory.py`：
 原共同位姿信息→固定四水平探针→无量纲 Q_H/Q_V/S＋状态／版本。

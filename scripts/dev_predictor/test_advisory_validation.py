@@ -63,6 +63,15 @@ class AdvisoryValidationTest(unittest.TestCase):
         self.assertEqual(self.tables["S5_no_observations"][0]["module_valid"], "0")
         self.assertEqual(self.tables["S5_both_missing"][0]["module_valid"], "0")
 
+    def test_header_decode_preserves_identity_without_model_query_or_geometry_dump(self):
+        source = self.run_dir / "export/advisory/validation/fixture/S0/input.bin"
+        validation.backend(self.run_dir, Path(ARGS.binary), ["replay_header", "header_only", str(source)], "header_only")
+        directory = self.run_dir / "export/advisory/validation/header_only"
+        actual = json.loads((directory / "input.json").read_text())
+        expected = json.loads(source.with_name("input.json").read_text())
+        self.assertEqual(actual, expected)
+        self.assertEqual([p.name for p in directory.iterdir()], ["input.json"])
+
     def test_classification_preserves_failed_requests(self):
         expected = {"wrong_frame": "COORDINATE_ERROR", "out_of_map": "COORDINATE_ERROR",
                     "physical_occupied": "PHYSICAL_FILTERED", "physical_unobserved": "PHYSICAL_FILTERED",

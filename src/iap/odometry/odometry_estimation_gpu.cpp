@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/HessianFactor.h>
@@ -325,6 +326,9 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
 
   // Condition number of the 6×6 Hessian block for X(current)
   double cond_number = 1.0;
+  Eigen::Matrix<double, 6, 1> weak_native_pose_direction =
+      Eigen::Matrix<double, 6, 1>::Constant(std::numeric_limits<double>::quiet_NaN());
+  double native_min_singular_value = std::numeric_limits<double>::quiet_NaN();
   {
     const auto H_blocks = gfg->hessianBlockDiagonal();
     const auto it = H_blocks.find(X(current));
@@ -333,6 +337,10 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
       const auto& sv = svd.singularValues();
       const double sv_min = sv(sv.size() - 1);
       const double sv_max = sv(0);
+      if (sv.size() == 6) {
+        weak_native_pose_direction = svd.matrixV().col(5);
+        native_min_singular_value = sv_min;
+      }
       cond_number = (sv_min > 1e-10) ? sv_max / sv_min : 1e9;
     }
   }
@@ -394,13 +402,17 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
     FILE* f = std::fopen(params->icp_csv_path.c_str(), icp_csv_header_written ? "a" : "w");
     if (f) {
       if (!icp_csv_header_written) {
-        std::fprintf(f, "stamp,frame_id,rmse,inlier_fraction,condition_number,gamma_lidar,drop_flag\n");
+        std::fprintf(f, "stamp,frame_id,rmse,inlier_fraction,condition_number,gamma_lidar,drop_flag,inlier_count,vgicp_factor_count,native_min_singular_value,weak_native_rot_x,weak_native_rot_y,weak_native_rot_z,weak_native_trans_x,weak_native_trans_y,weak_native_trans_z\n");
         icp_csv_header_written = true;
       }
-      std::fprintf(f, "%.6f,%ld,%.4f,%.4f,%.1f,%.4f,%d\n",
+      std::fprintf(f, "%.17g,%ld,%.17g,%.17g,%.17g,%.17g,%d,%d,%zu,%.17g",
                    frames[current]->stamp, static_cast<long>(current),
                    rmse, inlier_fraction, cond_number, gamma_lidar,
-                   degeneracy_flag ? 1 : 0);
+                   degeneracy_flag ? 1 : 0, inlier_count, vgicp_factors.size(), native_min_singular_value);
+      // Native GTSAM Pose3 chart (rotation then translation), diagnostic only:
+      // mixed units and singular-vector sign preclude an error/PL interpretation.
+      for (int i = 0; i < 6; ++i) std::fprintf(f, ",%.17g", weak_native_pose_direction(i));
+      std::fprintf(f, "\n");
       std::fclose(f);
       if (!icp_csv_first_row_logged) {
         logger->info("[icp_csv] first row written -> {}", params->icp_csv_path);

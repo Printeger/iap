@@ -114,6 +114,7 @@ def materialize_profile(
     capture_source_observations: bool = False,
     capture_native_response_frames: str = "",
     capture_native_source_freeze: bool = False,
+    capture_source_effects: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Create a run-local config and validate its module contract.
 
@@ -122,6 +123,8 @@ def materialize_profile(
     """
 
     source = Path(source_config_dir).expanduser().resolve()
+    if capture_source_effects and (simulation_scenario is None or contract != "full_stack"):
+        raise RuntimeError("source effects require canonical simulation full_stack")
     if capture_gpu_match_evidence and (simulation_scenario is None or contract != "full_stack"):
         raise RuntimeError("GPU residual capture requires the canonical simulation full_stack contract")
     if capture_dense_lidar and not capture_gpu_match_evidence:
@@ -276,6 +279,7 @@ def materialize_profile(
         gnss["debug_csv_path"] = str(export_dir / "iap_gnss_factor_debug.csv")
         gnss["native_response_frames"] = response_frames
         gnss["native_response_first_source_freeze"] = capture_native_source_freeze
+        gnss["enable_source_effect_csv"] = capture_source_effects
     integrity["araim_csv_path"] = str(integrity_export_dir / "iap_araim.csv")
     integrity["araim_pl_decomp_csv_path"] = str(
         integrity_export_dir / "iap_araim_pl_decomp.csv"
@@ -351,6 +355,7 @@ def materialize_profile(
         "capture_source_observations": capture_source_observations,
         "native_response_frames": response_frames,
         "native_response_first_source_freeze": capture_native_source_freeze,
+        "capture_source_effects": capture_source_effects,
         "imu_topic": glim_ros.get("imu_topic", ""),
         "points_topic": glim_ros.get("points_topic", ""),
         "materialized_secondary_configs": materialized_secondary_configs,

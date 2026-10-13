@@ -8,6 +8,7 @@ validator, rosbag recorder, or RViz process.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -229,14 +230,21 @@ def _setup(context):
     trial_path=context.launch_configurations.get("advisory_trial", "")
     from full_stack_runtime import load_advisory_trial, historical_gnss_parameters, gnss_observation_seed
     trial=load_advisory_trial(trial_path,scenario)
-    observation=trial["degradation_schedule"]["conditions"][trial["condition"]] if trial else {}
+    source_effects = trial.get("schema") == "iap_source_effect_trial_v1"
+    observation = trial["observation"] if source_effects else (trial["degradation_schedule"]["conditions"][trial["condition"]] if trial else {})
     lidar_range=observation.get("lidar_max_range_m",10.)
     gnss_params=_gnss_parameters(iap_share,str(scenario["gnss_profile"]))
     nav_path = context.launch_configurations.get("rinex_nav_file", "")
     historical = bool(nav_path)
     gnss_params.update(historical_gnss_parameters(nav_path))
     if trial:
-        gnss_params.update(random_seed=trial["seed"],pseudorange_noise_std_m=observation["gnss_pseudorange_sigma_m"])
+        gnss_params.update(random_seed=trial["seed"],pseudorange_noise_std_m=1. if source_effects else observation["gnss_pseudorange_sigma_m"])
+    if source_effects:
+        if not historical:
+            raise ValueError("source effect study requires original strict GPS+BDS historical NAV")
+        gnss_params.update(doppler_noise_std_mps=.03, enable_map_occlusion=False,
+                           enable_skymask=False, enable_nlos=False, enable_multipath=False,
+                           enable_fault_injection=observation["gnss_dropout"])
     seed = gnss_observation_seed(context.launch_configurations.get("gnss_observation_seed", ""), trial)
     if seed is not None:
         gnss_params["random_seed"] = seed
@@ -245,8 +253,19 @@ def _setup(context):
     if not output_dir.is_absolute():
         raise RuntimeError("output_dir must be an absolute path")
     output_dir.mkdir(parents=True, exist_ok=True)
+    if source_effects:
+        # Producer-side absence of every GPS/BDS observation, not a FIM edit.
+        # Both arms use the same scenario bytes; only fault application differs.
+        fault_path = output_dir / "metadata/config/source_effect_faults.yaml"
+        if fault_path.exists(): raise RuntimeError("source effect fault file already exists")
+        faults = "faults:\n" + "".join(
+            f"  - constellation: {system}\n    sat: {prn}\n    start_time_s: 30.0\n    duration_s: 30.0\n    drop: true\n"
+            for system, count in (("GPS", 32), ("BDS", 63)) for prn in range(1, count + 1))
+        fault_path.write_text(faults, encoding="utf-8")
+        gnss_params["scenario_file"] = str(fault_path)
     if (context.launch_configurations.get("capture_advisory_residuals", "false").lower() == "true"
-            or context.launch_configurations.get("capture_native_source_freeze", "false").lower() == "true"):
+            or context.launch_configurations.get("capture_native_source_freeze", "false").lower() == "true"
+            or source_effects):
         # Reuse the opt-in real residual capture and the canonical resolver.
         # This changes evidence only, never the simulator noise or random draws.
         gnss_params.update(enable_csv_log=True,
@@ -261,6 +280,7 @@ def _setup(context):
                 "contract": scenario,
                 "validation_trial": trial,
                 "observation_parameters": {"gnss":gnss_params,"lidar_max_range_m":lidar_range},
+                "source_effect_faults_sha256": hashlib.sha256(fault_path.read_bytes()).hexdigest() if source_effects else None,
             },
             indent=2,
             sort_keys=True,

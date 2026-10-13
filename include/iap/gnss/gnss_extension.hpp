@@ -189,6 +189,9 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::ofstream       debug_csv_file_;
   std::ofstream       coordinate_evidence_csv_;
   std::ofstream       clock_evidence_csv_;
+  // Opt-in native means only, including GNSS absence; never a covariance/PL.
+  std::ofstream       global_state_csv_;
+  uint64_t global_state_rows_ = 0;
   uint64_t coordinate_evidence_rows_ = 0;
   std::mutex          debug_csv_mutex_;
 };

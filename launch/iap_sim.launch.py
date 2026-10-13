@@ -129,7 +129,8 @@ def _setup(context):
         from full_stack_runtime import load_advisory_trial, planner_parameters
         trial=load_advisory_trial(trial_path,catalog[scenario])
         if scenario!="icra_dense_forest_four_fork_v2": raise ValueError("validation trial requires canonical forest")
-        for key in ("coordinates","physical_route_evidence"):
+        resources = ("protocol",) if trial["schema"] == "iap_source_effect_trial_v1" else ("coordinates", "physical_route_evidence")
+        for key in resources:
             frozen=output_dir/"metadata/config"/(key+".json")
             frozen.write_bytes(Path(trial[key]).read_bytes());register_config_snapshot(output_dir,frozen)
             trial[key]=str(frozen)

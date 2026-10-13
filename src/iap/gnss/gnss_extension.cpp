@@ -238,6 +238,25 @@ GnssExtensionModule::GnssExtensionModule()
   // ── Debug CSV logging (from config_gnss.json) ──────────────────────────
   const bool enable_csv = config.param<bool>("gnss", "enable_debug_csv", false);
   logger_->info("[gnss_ext] enable_debug_csv={}", enable_csv);
+  if (config.param<bool>("gnss", "enable_source_effect_csv", false)) {
+    const auto* artifacts = glim::RunLogManager::get_if_initialized();
+    if (!artifacts) throw std::runtime_error("source effect capture requires the shared run resolver");
+    const auto path = artifacts->export_path("glio/gnss_global_state.csv");
+    const auto manifest_path = artifacts->metadata_path("manifests/gnss_global_state.json");
+    if (std::filesystem::exists(path) || std::filesystem::exists(manifest_path))
+      throw std::runtime_error("global state artifact already exists");
+    global_state_csv_.open(path);
+    if (!global_state_csv_) throw std::runtime_error("global state artifact open failed");
+    global_state_csv_ << "state_stamp_s,frame_id,update_sequence,epoch_source_identity,pr_count,dop_count,fallback,pose_valid,datum_valid";
+    for (const auto prefix : {"p_world_imu", "anchor_ecef"})
+      for (const auto axis : {"x", "y", "z"}) global_state_csv_ << ',' << prefix << '_' << axis;
+    for (int row = 0; row < 3; ++row) for (int col = 0; col < 3; ++col)
+      global_state_csv_ << ",R_ecef_world_" << row << col;
+    global_state_csv_ << ",gnss_epoch_stamp_s\n";
+    std::ofstream manifest(manifest_path);
+    manifest << R"({"schema":"iap_gnss_global_state_v1","csv":"export/glio/gnss_global_state.csv","time":"native post-update owner state stamp","reference":"E(0)+R(0)*X(frame).translation; no alignment","absence":"missing keys remain blank; no GNSS epoch is invented","authority":"offline source-effect means only; no covariance, PL or model qualification"})" << '\n';
+    if (!manifest) throw std::runtime_error("global state manifest write failed");
+  }
   if (enable_csv) {
     debug_csv_enabled_ = true;
     std::string csv_path = config.param<std::string>(
@@ -622,6 +641,16 @@ void GnssExtensionModule::on_smoother_update_(
   }
   if(native_response_observer_) native_response_observer_->prepare(smoother,new_factors,frame_id,frame_stamp);
   if (frame_id < 0) return;
+  // Capture the owner of this solver update even when no observation is
+  // injected. A newer asynchronous sensor frame cannot relabel its result.
+  {
+    std::lock_guard<std::mutex> lock(factors_mutex_);
+    last_injected_frame_id_ = frame_id;
+    last_injected_frame_stamp_ = frame_stamp;
+    last_injected_epoch_.reset();
+    last_pr_factors_.clear();
+    last_dop_factors_.clear();
+  }
 
   // Retrieve current ECEF anchor for get_factors()
   Eigen::Vector3d anc_ecef;
@@ -670,6 +699,16 @@ void GnssExtensionModule::on_smoother_update_(
         last_epoch_motion_=std::make_shared<gtsam::PreintegratedImuMeasurements>(epoch_imu_.integrated_measurements());
         return last_epoch_motion_;
       });
+
+  // E/R describe the persistent global datum, not one GNSS epoch. Retain
+  // existing keys across measurement absence; never recreate a missing datum
+  // or add a fresh prior. The original lag still applies to dynamic states.
+  if (gnss_factors.empty() && ext_vars_inserted_.load()) {
+    const auto current = smoother.calculateEstimate();
+    for (const auto key : {E(0), R(0)}) {
+      if (current.exists(key)) new_stamps[key] = frame_stamp;
+    }
+  }
 
   if (gnss_factors.size() > 0) {
     auto& lifecycle = glim::KeyLifecycleMonitor::instance();
@@ -971,15 +1010,40 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   evidence.state_stamp=frame_stamp;
   evidence.gnss_stamp=postopt_epoch ? postopt_epoch->stamp : 0.;
   evidence.epoch_source_identity=postopt_epoch ? postopt_epoch->source_identity : 0;
+  gtsam::Values all_vals;
+  // Read the actual native estimate once. The normal GNSS evidence below
+  // reuses it; the opt-in absence trace adds no factors or marginalization.
+  if (global_state_csv_.is_open() || postopt_epoch) {
+    try { all_vals = smoother.calculateEstimate(); }
+    catch (const std::exception& error) { coordinates.failure_reason = error.what(); }
+  }
+  if (global_state_csv_.is_open()) {
+    const bool pose_valid = all_vals.exists(gtsam::symbol_shorthand::X(frame_id));
+    const bool datum_valid = all_vals.exists(E(0)) && all_vals.exists(R(0));
+    global_state_csv_ << std::setprecision(17) << frame_stamp << ',' << frame_id
+        << ',' << evidence.update_sequence << ',' << evidence.epoch_source_identity
+        << ',' << pr_factors.size() << ',' << dop_factors.size() << ','
+        << smoother.fallbackHappened() << ',' << pose_valid << ',' << datum_valid;
+    const auto value = [&](double v) { global_state_csv_ << ','; if (std::isfinite(v)) global_state_csv_ << v; };
+    const double missing = std::numeric_limits<double>::quiet_NaN();
+    const auto p = pose_valid ? all_vals.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(frame_id)).translation()
+                             : gtsam::Point3::Constant(missing).eval();
+    const auto anchor = datum_valid ? all_vals.at<gtsam::Vector3>(E(0)) : gtsam::Vector3::Constant(missing).eval();
+    const auto rotation = datum_valid ? all_vals.at<gtsam::Rot3>(R(0)).matrix() : gtsam::Matrix3::Constant(missing).eval();
+    for (int i = 0; i < 3; ++i) value(p(i));
+    for (int i = 0; i < 3; ++i) value(anchor(i));
+    for (int row = 0; row < 3; ++row) for (int col = 0; col < 3; ++col) value(rotation(row, col));
+    value(evidence.gnss_stamp);
+    global_state_csv_ << '\n';
+    if (++global_state_rows_ % 100 == 0) global_state_csv_.flush();
+  }
   if (!postopt_epoch || (pr_factors.empty() && dop_factors.empty())) {
     coordinates.failure_reason="no_epoch_injected_in_update";
     evidence.failure_reason=coordinates.failure_reason;
     IapSharedState::instance().set_gnss_postopt_bundle(bundle);
     return;
   }
-  gtsam::Values all_vals;
   try {
-    all_vals=smoother.calculateEstimate();
     coordinates.frame_id=frame_id;
     coordinates.stamp=frame_stamp;
     coordinates.epoch_source_identity=postopt_epoch->source_identity;

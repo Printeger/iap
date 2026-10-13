@@ -27,6 +27,7 @@ def plain(value):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--duration',type=float,default=170);p.add_argument('--label',default='survey')
     p.add_argument('--compact-source-diagnostics',action='store_true',help='M2 only: source/health/scalar execution events; pose CSV and selected native reports belong to recorder')
+    p.add_argument('--source-effects',action='store_true',help='Retain actual scalar source health in compact G2 capture')
     args=p.parse_args();safe_label(args.label)
     run=adopt_run_directory(os.environ['IAP_RUN_DIR']);primary=json.loads((run/'metadata/run_manifest.json').read_text())
     if primary['entrypoint']!='iap_sim' or primary['scenario']!='icra_dense_forest_four_fork_v2':
@@ -50,7 +51,8 @@ def main():
                 else:
                     payload=plain(message_to_ordereddict(msg))
                 if args.compact_source_diagnostics and msg.__class__.__name__=='IntegrityReport':
-                    payload={k:v for k,v in payload.items() if k in ('header','estimation_frame_id','gnss_epoch_stamp') or k.startswith('current_motion_')}
+                    payload={k:v for k,v in payload.items() if k in ('header','estimation_frame_id','gnss_epoch_stamp') or k.startswith('current_motion_') or
+                             (args.source_effects and (k.startswith(('icp_', 'gnss_', 'lidar_')) or k in ('n_sv_used','n_constellations','n_detected','excluded_prns','excluded_trunk_ids','n_trunks_observed','failure_reason')))}
                     post=msg.advisory_postopt
                     payload['postopt_identity']={k:getattr(post,k) for k in ('model','update_sequence','frame_id','state_stamp','gnss_stamp','epoch_source_identity','optimized_valid','covariance_valid','failure_reason')}
                 if msg.__class__.__name__=='String':
@@ -90,7 +92,7 @@ def main():
     finally:
         node.destroy_node();rclpy.try_shutdown()
         manifest(run,'advisory_capture_'+args.label,{'identity':'LIVE_MEASUREMENT','source':primary['source'],
-             'capture_scope':'M2_SOURCE_DIAGNOSTIC' if args.compact_source_diagnostics else 'FULL_REFERENCE_EVENTS',
+             'capture_scope':'G2_SOURCE_EFFECTS' if args.source_effects else ('M2_SOURCE_DIAGNOSTIC' if args.compact_source_diagnostics else 'FULL_REFERENCE_EVENTS'),
              'full_task_evidence':not args.compact_source_diagnostics,
              'counts':dict(counts),'duration_s':time.monotonic()-started,'shutdown_reason':shutdown_reason,'artifacts_sha256':{str(target.relative_to(run)):sha(target)}})
     print(json.dumps({'path':str(target),'counts':dict(counts)}))

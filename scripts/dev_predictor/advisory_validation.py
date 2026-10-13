@@ -248,9 +248,10 @@ class NativeIncrementCapture:
         self.recent = deque(maxlen=20)
         self.request_id = None
         self.until = -float('inf')
+        self.pending = {}
 
-    def emit(self, report, stamp):
-        self.write({'request_id': self.request_id, 'receive_steady_s': stamp,
+    def emit(self, report, stamp, request_id):
+        self.write({'request_id': request_id, 'receive_steady_s': stamp,
                     'report': report})
 
     def observe(self, report, stamp):
@@ -263,14 +264,19 @@ class NativeIncrementCapture:
             return value
         report = plain(report)
         self.recent.append((stamp, report))
-        if self.request_id is not None and stamp <= self.until:
-            self.emit(report, stamp)
+        self.pending = {key: end for key, end in self.pending.items() if stamp <= end}
+        for request_id in self.pending:
+            self.emit(report, stamp, request_id)
 
     def begin(self, request_id, stamp, duration_s):
         self.request_id, self.until = request_id, stamp+duration_s
+        self.pending = {key: end for key, end in self.pending.items() if stamp <= end}
+        if len(self.pending) >= 2:
+            raise ValueError('native capture allows at most two overlapping request windows')
+        self.pending[request_id] = self.until
         for received, report in self.recent:
             if stamp-.5 <= received <= stamp:
-                self.emit(report, received)
+                self.emit(report, received, request_id)
 
 
 def record(run, args):
@@ -355,6 +361,11 @@ def record(run, args):
                 end = (pair_start + (pair_window if i % 2 == 0 else args.interval)) if pair_window else time.monotonic() + args.interval
                 while time.monotonic() < end:
                     rclpy.spin_once(node, timeout_sec=min(.1, end - time.monotonic()))
+            # A 2s cadence overlaps the unchanged 2.3s post window. Complete
+            # the final selection before closing its existing evidence owner.
+            if native_capture:
+                while time.monotonic() < native_capture.until:
+                    rclpy.spin_once(node, timeout_sec=min(.1, native_capture.until-time.monotonic()))
             del subscriptions
     except (KeyboardInterrupt, ExternalShutdownException):
         pass  # Intentional owned stop still closes and registers evidence.

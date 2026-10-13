@@ -332,6 +332,28 @@ and joint marginal difference covariance. The original covariance time remains
 the state time; unavailable reference/covariance fields stay empty. This sampled
 diagnostic does not qualify a frozen state or grant Advisory validity.
 
+The opt-in G2 source-effect study uses `gnss.enable_source_effect_csv` to write
+`export/glio/gnss_global_state.csv` and immutable
+`metadata/manifests/gnss_global_state.json` v1. Every native update owns its
+original frame/stamp/sequence and actual injected PR/Doppler counts. Native
+world position, E(0) and R(0) are means only; absent keys stay blank and fallback
+remains explicit. This trace continues during GNSS absence without inventing a
+GNSS epoch, native local endpoint, covariance or safety authority. Default is
+OFF; it requires the shared resolver. Existing `iap_icp.csv` appends actual
+inlier/factor counts and the existing native pose-block SVD minimum/direction.
+That mixed-unit Pose3 direction is diagnostic, with arbitrary sign, not an
+error direction or certified bound. No raw GPU/source-family capture is added.
+
+`iap_source_effect_trial_v1` reuses the canonical `advisory_trial` argument and
+binds an immutable `iap_source_effect_protocol_v1`. It changes only declared
+physical GNSS dropout and LiDAR range, retains the original scene/goal/planner,
+and requires guidance/posterior OFF. The driver binds copied trial/protocol
+bytes; the simulator records the producer fault schedule in run-local config.
+The recorder retains two overlapping bounded post windows at a 2s cadence,
+including the final 2.3s window. Original 10s behavior remains unchanged.
+`advisory_validation replay_header LABEL PAYLOAD` decodes original metadata only
+through the existing codec; it runs no query, A*, optimizer or geometry dump.
+
 The forest driver binds installed binaries, plugins and the core library to
 their workspace Release build hashes before starting processes. An ordinary
 installed copy is permitted when byte-identical or when its only byte changes

@@ -8,10 +8,15 @@
 #include <gtsam/navigation/ImuBias.h>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <unistd.h>
 
 namespace iap {
 struct GnssClockInjectionTestAccess {
+  static void capture_global(GnssExtensionModule& module, const std::filesystem::path& path) {
+    module.global_state_csv_.open(path);
+  }
+  static void flush_global(GnssExtensionModule& module) { module.global_state_csv_.flush(); }
   static void imu(GnssExtensionModule& module,double stamp) {
     module.epoch_imu_.insert_imu(stamp,Eigen::Vector3d(2.,0.,9.81),Eigen::Vector3d::Zero());
   }
@@ -219,6 +224,100 @@ TEST(GnssClockInjection, RemovingEitherConstellationDoesNotCreateUnusedClock) {
     EXPECT_FALSE(incomplete.state.optimized_valid);EXPECT_FALSE(incomplete.state.covariance_valid);
     EXPECT_TRUE(incomplete.state.joint_covariance_row_major.empty());
     EXPECT_FALSE(incomplete.state.failure_reason.empty());
+  }
+}
+
+TEST(GnssClockInjection, GlobalDatumSurvivesAbsenceLongerThanOriginalLag) {
+  const auto root = std::filesystem::temp_directory_path() /
+      ("iap_global_datum_" + std::to_string(::getpid()));
+  struct Cleanup { std::filesystem::path path; ~Cleanup() { std::filesystem::remove_all(path); } } cleanup{root};
+  std::filesystem::create_directories(root);
+  std::ofstream(root / "config.json") << R"({"global":{"config_path":"","config_gnss":"config_gnss.json","config_odometry":"config_odometry.json"}})";
+  std::ofstream(root / "config_gnss.json") << R"({"gnss":{"enable_debug_csv":false}})";
+  std::ofstream(root / "config_odometry.json") << R"({"odometry_estimation":{"clock_owner_mode":"gnss"}})";
+  glim::GlobalConfig::instance(root.string(), true);
+  iap::GnssExtensionModule extension;
+  const auto trace_path = root / "global.csv";
+  iap::GnssClockInjectionTestAccess::capture_global(extension, trace_path);
+  gtsam_points::IncrementalFixedLagSmootherExtWithFallback smoother(5, production_clock_params());
+  using namespace gtsam::symbol_shorthand;
+  for (long frame = 1; frame <= 3; ++frame) {
+    SCOPED_TRACE(frame);
+    const double stamp = frame == 1 ? 100. : (frame == 2 ? 106. : 106.1);
+    iap::GnssEpoch epoch;
+    epoch.stamp = stamp;
+    epoch.source_identity = 9100 + frame;
+    if (frame != 2) {
+      for (int i = 0; i < 8; ++i) {
+        iap::SatObs satellite;
+        satellite.sat_id = i + 1;
+        satellite.elevation = 1.;
+        satellite.sat_pos = Eigen::Vector3d(21000000 + i * 300000,
+            14000000 - i * 170000, 17000000 + (i % 3) * 400000);
+        satellite.pr_meas = satellite.sat_pos.norm();
+        epoch.sats.push_back(satellite);
+      }
+      if (frame == 1) iap::GnssClockInjectionTestAccess::prepare(extension, true, epoch);
+      else iap::GnssClockInjectionTestAccess::advance(extension, frame, epoch, false);
+    } else {
+      iap::GnssClockInjectionTestAccess::steer_frame_only(extension, frame, stamp);
+    }
+    gtsam::Values values;
+    gtsam::NonlinearFactorGraph factors;
+    std::map<std::uint64_t, double> stamps;
+    values.insert(X(frame), gtsam::Pose3());
+    values.insert(V(frame), gtsam::Vector3::Zero().eval());
+    values.insert(B(frame), gtsam::imuBias::ConstantBias());
+    factors.addPrior<gtsam::Pose3>(X(frame), gtsam::Pose3(), gtsam::noiseModel::Isotropic::Sigma(6, .001));
+    factors.addPrior<gtsam::Vector3>(V(frame), gtsam::Vector3::Zero(), gtsam::noiseModel::Isotropic::Sigma(3, .001));
+    factors.addPrior<gtsam::imuBias::ConstantBias>(B(frame), gtsam::imuBias::ConstantBias(), gtsam::noiseModel::Isotropic::Sigma(6, .001));
+    stamps[X(frame)] = stamps[V(frame)] = stamps[B(frame)] = stamp;
+    iap::GnssClockInjectionTestAccess::inject(extension, smoother, factors, values, stamps);
+    ASSERT_NO_THROW(smoother.update(factors, values, stamps));
+    ASSERT_FALSE(smoother.fallbackHappened());
+    const auto estimate = smoother.calculateEstimate();
+    ASSERT_TRUE(estimate.exists(E(0))) << "GNSS absence must not expire the established global datum";
+    ASSERT_TRUE(estimate.exists(R(0)));
+    if (frame == 2) EXPECT_FALSE(estimate.exists(X(1))) << "Original dynamic fixed-lag must remain unchanged";
+    EXPECT_LT(estimate.at<gtsam::Vector3>(E(0)).norm(), .01);
+    iap::GnssClockInjectionTestAccess::steer_frame_only(extension, 999, stamp + .05);
+    ASSERT_NO_THROW(iap::GnssClockInjectionTestAccess::finish(extension, smoother));
+    const auto bundle = iap::IapSharedState::instance().get_gnss_postopt_bundle();
+    if (frame == 2) {
+      EXPECT_FALSE(bundle.epoch);
+      EXPECT_FALSE(bundle.state.optimized_valid);
+      EXPECT_EQ(bundle.state.frame_id, frame);
+      EXPECT_DOUBLE_EQ(bundle.state.state_stamp, stamp);
+    } else {
+      ASSERT_TRUE(bundle.epoch);
+      EXPECT_EQ(bundle.epoch->source_identity, epoch.source_identity);
+      EXPECT_EQ(bundle.state.frame_id, frame);
+      EXPECT_TRUE(bundle.state.optimized_valid) << bundle.state.failure_reason;
+    }
+  }
+  iap::GnssClockInjectionTestAccess::flush_global(extension);
+  std::ifstream trace(trace_path);
+  std::string first, absent, recovered;
+  ASSERT_TRUE(static_cast<bool>(std::getline(trace, first)));
+  ASSERT_TRUE(static_cast<bool>(std::getline(trace, absent)));
+  ASSERT_TRUE(static_cast<bool>(std::getline(trace, recovered)));
+  long owner = 0;
+  for (const auto& line : {first, absent, recovered}) {
+    ++owner;
+    std::istringstream stream(line);
+    std::vector<std::string> columns;
+    for (std::string column; std::getline(stream, column, ',');) columns.push_back(column);
+    ASSERT_EQ(columns.size(), 25u);
+    EXPECT_EQ(std::stol(columns[1]), owner);
+    EXPECT_EQ(std::stol(columns[2]), owner);
+    EXPECT_EQ(std::stol(columns[3]), owner == 2 ? 0 : 9100 + owner);
+    EXPECT_EQ(std::stol(columns[4]), owner == 2 ? 0 : 8);
+    EXPECT_EQ(std::stol(columns[5]), owner == 2 ? 0 : 8);
+    EXPECT_EQ(columns[6], "0");
+    EXPECT_EQ(columns[7], "1");
+    EXPECT_EQ(columns[8], "1");
+    EXPECT_DOUBLE_EQ(std::stod(columns[0]), owner == 1 ? 100. : (owner == 2 ? 106. : 106.1));
+    EXPECT_DOUBLE_EQ(std::stod(columns[24]), owner == 2 ? 0. : std::stod(columns[0]));
   }
 }
 

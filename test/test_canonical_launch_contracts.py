@@ -21,6 +21,56 @@ LAUNCH = REPO / "launch"
 
 
 class CanonicalLaunchContractsTest(unittest.TestCase):
+    def test_source_effect_trial_uses_canonical_graph_and_actual_producer_controls(self):
+        import hashlib
+        sys.path.insert(0, str(REPO / 'scripts/dev_predictor'))
+        from g2_source_effect_study import pilot_protocol
+        canonical = self._load_launch('iap_sim.launch.py')
+        environment = self._load_launch('_includes/simulation_environment.launch.py')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            protocol = root/'protocol.json'; protocol.write_text(json.dumps(pilot_protocol()))
+            trial = root/'trial.json'
+            trial.write_text(json.dumps(dict(schema='iap_source_effect_trial_v1',
+                scene='icra_dense_forest_four_fork_v2', map_seed=41021, phase='pilot', seed=9100,
+                condition='GB_LB', protocol=str(protocol),
+                protocol_sha256=hashlib.sha256(protocol.read_bytes()).hexdigest())))
+            nav = root/'mixed.rnx'; nav.write_bytes(b'unit NAV identity only')
+            context = LaunchContext()
+            context.launch_configurations.update(scenario='icra_dense_forest_four_fork_v2',
+                advisory_trial=str(trial), rinex_nav_file=str(nav), advisory_guidance='false',
+                advisory_posterior_prior='false', start_rviz='false', start_grid_map_visualizer='false',
+                planner_start_delay_s='0', run_duration_s='105')
+            with mock.patch.dict(os.environ, {'IAP_RUN_ROOT':str(root/'runs')}), mock.patch.object(
+                    canonical, 'get_package_share_directory', return_value=str(REPO)):
+                canonical._setup(context)
+            run = next((root/'runs').glob('20*'))
+            primary = json.loads((run/'metadata/run_manifest.json').read_text())
+            self.assertEqual(primary['validation_trial']['condition'], 'GB_LB')
+            frozen = run/'metadata/config/protocol.json'
+            self.assertEqual(frozen.read_bytes(), protocol.read_bytes())
+            context.launch_configurations.update(output_dir=str(run),
+                advisory_trial=str(run/'metadata/config/advisory_trial.json'))
+            nodes = []; original = environment.Node
+            def capture(**kwargs):
+                nodes.append(kwargs); return original(**kwargs)
+            with mock.patch.object(environment, 'get_package_share_directory', return_value=str(REPO)), \
+                    mock.patch.object(environment, 'Node', side_effect=capture):
+                environment._setup(context)
+            gnss = next(n for n in nodes if n.get('executable')=='gnss_sim_node')['parameters'][0]
+            self.assertEqual(gnss['random_seed'], 9100)
+            self.assertTrue(gnss['enable_fault_injection'])
+            self.assertFalse(gnss['enable_map_occlusion']); self.assertFalse(gnss['enable_nlos'])
+            self.assertEqual(gnss['pseudorange_noise_std_m'], 1.)
+            self.assertEqual(gnss['doppler_noise_std_mps'], .03)
+            faults = yaml.safe_load(Path(gnss['scenario_file']).read_text())['faults']
+            self.assertEqual(len(faults), 95)
+            self.assertTrue(all(f['drop'] and f['start_time_s']==30. and f['duration_s']==30. for f in faults))
+            lidar = next(n for n in nodes if n.get('executable')=='pcl_render_node')
+            params = {k:v for item in lidar['parameters'] if isinstance(item, dict) for k,v in item.items()}
+            self.assertEqual(params['sensing_horizon'], 10.)
+            self.assertEqual(params['lidar.max_range_m'], 3.)
+
     @staticmethod
     def _load_launch(filename: str):
         path = LAUNCH / filename
