@@ -46,6 +46,9 @@ G2-L/G实测解释为INCONCLUSIVE，G2-F仍UNQUALIFIED：局部缺测、运动/�
 51项canonical契约检查通过，安装run_directory与源码一致；28个必要证据run
 由受保护报告owner固定引用，28份原primary与1490比较绑定hash保持。
 生产仍是同一GridMap、一个A*、一条guide和原EGO／执行权威，prior OFF。
+仓库忽略规则补齐本地.env、缓存、ROS用户目录、编辑器临时文件及根目录core dump；
+.env.example/sample/template和原log/COLCON_IGNORE仍可入库。git check-ignore定向
+核验忽略/保留边界，运行证据继续留本地受保护owner；本次远程同步不改变G2资格。
 
 **历史授权（2026-10-13，Asia/Shanghai）**：任务书 v1.3 已由用户明确激活，
 连续推进 G2→G3-F→G3-B→G4；下文仅 G1／A0 停止排期是历史。

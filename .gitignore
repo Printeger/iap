@@ -51,6 +51,15 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+# Local environment settings; retain shareable templates.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.cache/
+.ros/
+.DS_Store
 .coverage
 .coverage.*
 htmlcov/
@@ -65,6 +74,9 @@ qtcreator-*
 
 # Emacs
 .#*
+# Vim temporary files
+*.swp
+*.swo
 
 # Catkin custom files
 CATKIN_IGNORE
@@ -83,6 +95,10 @@ cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
 /Testing/
+
+# Repository-root crash dumps
+/core
+/core.[0-9]*
 
 # Misplaced runtime artifact roots and raw sensor recordings
 /runtime/
