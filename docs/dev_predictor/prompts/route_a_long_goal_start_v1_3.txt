@@ -1,0 +1,42 @@
+# IAP Route A：Advisory → Risk-aware A* → EGO PI Gradient → Full Mission
+# 长期自主开发启动 Prompt v1.3
+
+请执行一个长期、目标驱动的研发任务，不要将正常技术问题拆成反复问用户是否继续的短任务。
+
+仓库：Printeger/iap，当前工作目录及分支以现场核验为准，目标分支 dev/iap_refactor。用户已报告 G1 机制审计完成、旧 G1 BLOCKED/MODEL_GAP 保留，G2-A0 候选方案提交 9505b12a；不能因远端不同步推断本地 HEAD。不得改动不相关用户文件、不得盲目 reset、stash 或覆盖。
+
+【强制读取】先实际阅读全文：
+1. AGENTS.md；
+2. docs/dev_predictor/advisory_development_plan_v1.md（v1.3，尤其 00–08 章）；
+3. docs/dev_predictor/credible_local_risk_goal.md；
+4. docs/spec/advisory_joint_model.md 的 Route A G2-A0；
+5. docs/spec/local_increment_advisory_contract.md；
+6. docs/spec/ego_based_planning_flow.md；
+7. docs/adr/0004-single-route-safety-planner-v1.md；以及其他直接关联的现行 spec。
+若计划不存在或与活动契约真实冲突，先准确定位最小冲突并处理文档落地/报告；不要凭文件名臆造要求，也不要把已授权的新研究范围重新转成反复审批。
+
+【最终目标】完成 3 个长期 Goal：
+G2：对 GNSS 全球锚定和 LiDAR 局部观测各自提供独立证据，形成一个可在线查询、可解释、独立排序合格的融合定位退化 Advisory 风险场。
+G3：在同一 GridMap、同一个 A*、一条 guide 和原 EGO 后端中，先使前端风险 A* 正确产生低风险 guide，再将同一已验证风险场的 PI-inspired 软成本及其实际空间/控制点梯度加到 EGO B-spline 优化中。G3-F 与 G3-B 是同一个长期 Goal 的连续内部里程碑，不必分别请用户启动。
+G4：按同仓库 Baseline（前端 OFF、梯度 OFF）、Front-only（前端 ON、梯度 OFF）、Full（前后端 ON）完成原四分叉任务对照，独立评估 1s 局部增量误差、固定全球参考漂移、轨迹 PI 风险、连续接续、硬检查及到达。
+
+【最先行动】从已存在的 pose6_horizontal_probe_geometry_a0 开始，完成 G2 的最小离线实现、有限差分/SVD机制核对、历史开发拒绝检查。当前 A0 只表示候选定义合格，绝不等于模型资格。若候选明显失败，不扫描 0.5m 探针、K、GNSS/LiDAR 信息 trace、区域阈值来追求 PASS；只允许在清晰新反例支持下换至至多一项实质不同的候选。定向 GNSS 全球锚定与 LiDAR 局部可观性分别验证，最终只有一个融合 s(p)，不能额外加 GNSS Cost/Global Anchoring Manager。
+
+【持续工作而非一问一答】可在需求已授权预算内自主做最小必要补录、单源与融合诊断、实现、修复、提交并自动推进阶段；不因完成文档、机制 PASS、一个实验失败或子阶段结束而暂停。G2 冻结后做三个全新独立运行的原排序验证，未通过不得宣称可信风险。G3-F 允许在 G2 尚未通过前，用明确标注的合成风险场并行准备算法机制回归，但不能提前授予真实模型资格。G3-B 只在合格风险与前端接口之上正式接入 PI 梯度。G4 只有在 G3 整体通过后启动。
+
+【范围硬边界】
+- 一张 GridMap、一个 A*、一条 guide、原 EGO 与执行权威。不得新增 RiskGridMap、单源规划优化器、PI 场管理器或并行候选竞赛。
+- Advisory 不形成物理障碍、运动许可或停车授权。特别审查 planningOccupied 对 AVOID/PREDICTED_DEGRADED 的伪占据用法；按责任入口作最小修复。
+- 同一有版本身份的风险场供 A* 做路径边积分、EGO 做直接曲线 PI 风险积分和空间/控制点梯度；不要把 guide 风险检查冒充后端 PI 梯度。
+- 无量纲 s 不填入米制 HPL/VPL/AL，未有正式覆盖证明不得使用 certified PL 的语言。
+- 原 GLIO/FGO、FDE、NAV、原场景与起终点、300s、search 1s、事务 1.5s、动力学/碰撞/跟踪/未知空间/接续/后备政策不因研究而改动。
+- 真值/未来扫描只离线评估；原失败、missing、旧 G1 BLOCKED/MODEL_GAP 和 M2–M5 未完成始终保留。
+
+【证据、停止和对用户沟通】
+- 每项修改先定位首个错误语义/不变量，以定向测试证伪；禁止同模型换 seed、调整 K/权重或通过补充日志代替模型资格。
+- 在本任务书给定的有界候选、数据与消融预算内自主推进。G2 原 1s 原生端点及独立排序门槛不得降低；G4 三臂配对方案需在首个正式运行前预登记与冻结。
+- 仅当必须改变目标、独立验收对象、安全权威、架构或超出本轮上限，或者有证据的科学停止条件成立，才升级给用户作范围决策。
+- 连续保留必要的版本/配置/输入身份、定向检查、结果和最小报告；按 AGENTS.md 提交。内部里程碑结束自动进入下一项，不需每次询问。
+- 最终仅声明 SUCCESS（G2→G3→G4 的独立资格、实际路线和完整任务全部通过）或 EVIDENCE-BASED BLOCKED（范围内已检验完、剩余科学障碍具体可复现）。不把单纯方案完成当研发成功。
+
+从 G2 现有 A0 候选的实际离线实现和拒绝检查直接开始，并持续推进授权内的研究目标。

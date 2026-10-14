@@ -1,0 +1,25 @@
+flowchart TD
+  S[GNSS / LiDAR / IMU] --> F[现有 GLIO / FGO]
+  F --> M[Current Monitor / FDE]
+  F --> I[IntegritySnapshot：位姿、epoch、坐标、状态]
+  M --> I
+  F --> G[唯一 GridMap：物理占据与观测证据]
+  I --> B[冻结 PredictionInput：身份与参考时刻]
+  G --> B
+  B --> GN[GNSS Advisory 信息]
+  B --> LI[LiDAR Advisory 信息]
+  GN --> FU[一个 Fusion：共同位姿信息与消元]
+  LI --> FU
+  FU --> R[同图风险层：融合 H/V → 唯一 cost_multiplier]
+  R --> A[一个 A*：整路长度、风险、任务推进]
+  A --> Q[一条 guide]
+  Q --> E[原 EGO：初始化、跟踪、实际 B-spline]
+  R -. 同场核验 .-> E
+  E --> C[物理、运动质量、动力学与跟踪硬检查]
+  G --> C
+  M -->|运动质量| C
+  C -->|通过| X[既有服务端：P/V/A 接续、反馈、推进终点]
+  C -->|未通过| BK[保留合格旧轨迹；必要时受检停车]
+  B -. 只读 .-> V[独立有界显示：查询、插值、历史、无效]
+  FU -. 记录 .-> D[离线单源/融合诊断与真值评价]
+  X -. 实际结果 .-> D
