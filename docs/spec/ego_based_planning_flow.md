@@ -19,7 +19,9 @@ replay_header只解码原metadata，不查询模型或运行规划器。
 只拒绝该对并继续评价。两轴审查所见问题已修复，均无剩余发现。
 扩大检查另保留fork replay旧codec门禁失败和prior-AB弱LiDAR空HPL断言失败；
 未修改这些接口或宣称全套绿。数值／接口测试不等同于四格源效应实测。
-当前准备一组预登记四格pilot；live受未跟踪用户文件的clean-worktree门禁阻塞。
+2026-10-14用户明确授权处理原13个未跟踪文件；内容／敏感信息检查后
+原样独立提交 `f8011c54`，原SHA／大小不变，旧clean-worktree门禁解除。
+下一项立即执行原冻结四格pilot，仍仅G2-L／G2-G／G2-F，不启动新的G3/G4。
 生产仍是同一GridMap、一个A*、一条guide和原EGO／执行权威，prior OFF。
 
 **历史授权（2026-10-13，Asia/Shanghai）**：任务书 v1.3 已由用户明确激活，
