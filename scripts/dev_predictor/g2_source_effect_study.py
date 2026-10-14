@@ -391,9 +391,24 @@ def paired_contrasts(cells):
     return contrasts
 
 
+def original_a0_diagnostic(point, matrices, metadata):
+    from horizontal_probe_advisory import project_information
+    # Physical/stale/input refusals legitimately have no queried matrix. Their
+    # status is evidence, not a zero-information finite score or a parser error.
+    if point['status'] != 'VALID':
+        return project_information(None, metadata['K_H_adv'], metadata['K_V_adv'], input_status=point['status'])
+    if matrices.get('joint_pose_information') is None:
+        raise ValueError('VALID_QUERY_WITHOUT_JOINT_INFORMATION')
+    information = np.array(matrices['joint_pose_information']['row_major']).reshape(6, 6)
+    zero = project_information(information, metadata['K_H_adv'], metadata['K_V_adv'], zero_probe=True)
+    if not np.allclose([zero['Q_H'], zero['Q_V']],
+                      [float(point['module_hpl']), float(point['module_vpl'])], rtol=1e-8, atol=1e-9):
+        raise ValueError('ORIGINAL_POSITION_OR_ZERO_OFFSET_BINDING_MISMATCH')
+    return project_information(information, metadata['K_H_adv'], metadata['K_V_adv'])
+
+
 def compare(run, evaluations, selection_path, binary, label, *, owner):
     """Four-cell developer evidence and fixed receiver source responses only."""
-    from horizontal_probe_advisory import project_information
     safe_label(label)
     output = artifact(run, 'export/analysis/'+label+'/summary.json')
     if output.exists(): raise ValueError('comparison evidence already exists')
@@ -463,8 +478,17 @@ def compare(run, evaluations, selection_path, binary, label, *, owner):
                     response['header_command'] = [str(binary), *header_args]
                     try:
                         backend(run, binary, header_args, name)
+                        response['header_exit_code'] = 0
+                    except subprocess.CalledProcessError as error:
+                        response['header_exit_code'] = error.returncode
+                        raise
                     finally:
                         for log in (run/'runtime/ros').glob('advisory_'+name+'*.log'): bind(log)
+                        header_directory = run/'export/advisory/validation'/name
+                        response['header_directory'] = str(header_directory.relative_to(run))
+                        if header_directory.exists():
+                            for item in header_directory.iterdir():
+                                if item.is_file(): bind(item)
                     meta = read(run/'export/advisory/validation'/name/'input.json')
                     if any(meta[k] != record[k] for k in ('frame_id', 'geometry_id', 'generation')):
                         raise ValueError('DECODED_SOURCE_IDENTITY_MISMATCH')
@@ -477,24 +501,23 @@ def compare(run, evaluations, selection_path, binary, label, *, owner):
                     for mode in ('gnss', 'lidar', 'fusion'):
                         child = name+'_'+mode
                         arguments = ['replay_points', child, str(payload), '120', str(points), mode]
-                        response['modes'][mode] = {'command': [str(binary), *arguments]}
+                        directory = run/'export/advisory/validation'/child
+                        response['modes'][mode] = {'command': [str(binary), *arguments],
+                            'retained_directory': str(directory.relative_to(run))}
                         try:
                             backend(run, binary, arguments, child)
+                            response['modes'][mode]['exit_code'] = 0
+                        except subprocess.CalledProcessError as error:
+                            response['modes'][mode]['exit_code'] = error.returncode
+                            raise
                         finally:
                             for log in (run/'runtime/ros').glob('advisory_'+child+'*.log'): bind(log)
-                        directory = run/'export/advisory/validation'/child
-                        for item in directory.iterdir():
-                            if item.is_file(): bind(item)
+                            if directory.exists():
+                                for item in directory.iterdir():
+                                    if item.is_file(): bind(item)
                         with (directory/'points.csv').open() as stream: point = next(csv.DictReader(stream))
                         matrices = json.loads((directory/'matrices.jsonl').read_text())
-                        information = np.array(matrices['joint_pose_information']['row_major']).reshape(6, 6)
-                        score = project_information(information,
-                            meta['K_H_adv'], meta['K_V_adv'], input_status=point['status'])
-                        if point['status'] == 'VALID':
-                            zero = project_information(information, meta['K_H_adv'], meta['K_V_adv'], zero_probe=True)
-                            if not np.allclose([zero['Q_H'], zero['Q_V']],
-                                               [float(point['module_hpl']), float(point['module_vpl'])], rtol=1e-8, atol=1e-9):
-                                raise ValueError('ORIGINAL_POSITION_OR_ZERO_OFFSET_BINDING_MISMATCH')
+                        score = original_a0_diagnostic(point, matrices, meta)
                         response['modes'][mode].update({'point': point, 'original_A0_diagnostic': score,
                             'original_query_qualified': meta['current_motion_quality'] == 1,
                             'exit_code': 0, 'retained_directory': str(directory.relative_to(run))})

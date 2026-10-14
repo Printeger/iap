@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 import tempfile
@@ -27,6 +28,14 @@ def global_row(sequence=1):
 
 
 class SourceEffectStudy(unittest.TestCase):
+    def test_physical_refusal_without_matrix_stays_refused_not_finite(self):
+        metadata=dict(K_H_adv=5.,K_V_adv=5.)
+        for status in ('PHYSICAL_FILTERED','STALE','INPUT_UNAVAILABLE','MODEL_INVALID'):
+            score=study.original_a0_diagnostic({'status':status}, {'joint_pose_information':None}, metadata)
+            self.assertEqual(score['status'],status)
+            self.assertFalse(score['valid']);self.assertIsNone(score['S'])
+        with self.assertRaisesRegex(ValueError,'VALID_QUERY_WITHOUT'):
+            study.original_a0_diagnostic({'status':'VALID'}, {'joint_pose_information':None}, metadata)
     def test_contrasts_retain_missing_near_floor_and_run_unit(self):
         def cell(local, global_error):
             def stats(value):
@@ -81,6 +90,31 @@ class SourceEffectStudy(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'EVALUATOR_SNAPSHOT_BYTES_CHANGED'):
                 study.compare(run,evaluations,selection,root/'decoder','changed_snapshot',owner=False)
             snapshot.write_bytes(old_source)
+            # A native backend can emit evidence before returning nonzero.
+            value=json.loads(evaluations[0].read_text())
+            payload=root/'GG_LG/input.bin';payload.write_bytes(b'UNIT_TEST_DOUBLE')
+            payload.with_name('record.json').write_text('{}')
+            value['requests'][0].update(available='True',payload='input.bin')
+            evaluations[0].write_text(json.dumps(value))
+            def failed_backend(run, binary, arguments, name):
+                target=run/'export/advisory/validation'/name;target.mkdir(parents=True)
+                log=run/'runtime/ros'/('advisory_'+name+'.log');log.parent.mkdir(parents=True,exist_ok=True);log.write_text('UNIT_TEST_DOUBLE')
+                if arguments[0]=='replay_header':
+                    (target/'input.json').write_text(json.dumps(dict(frame_id='map',geometry_id='unit',generation=1,
+                        current_motion_quality=1,reference_time_s=116.,epoch_source_identity=1,position=[0.,0.,0.])))
+                else:
+                    (target/'partial.csv').write_text('PARTIAL_FAILED_COMMAND_EVIDENCE')
+                    raise subprocess.CalledProcessError(7,arguments)
+            record=dict(frame_id='map',geometry_id='unit',generation=1,producer_binary={'libraries_sha256':{}})
+            with mock.patch.object(study,'binary_identity',return_value={'libraries_sha256':{}}), \
+                    mock.patch.object(study,'validate_record',return_value=record), \
+                    mock.patch.object(study,'backend',side_effect=failed_backend):
+                partial=study.compare(run,evaluations,selection,root/'decoder','failed_command',owner=False)
+            response=partial['responses'][0]
+            self.assertEqual(response['modes']['gnss']['exit_code'],7)
+            failed_output=run/response['modes']['gnss']['retained_directory']/'partial.csv'
+            self.assertEqual(partial['inputs_sha256'][str(failed_output.resolve())],study.sha(failed_output))
+            self.assertEqual(len(partial['responses']),12)
             # Failed input identity cannot silently become another completed comparison.
             value=json.loads(evaluations[-1].read_text());value['source_process']['exit_codes']['record']=1
             evaluations[-1].write_text(json.dumps(value))
