@@ -1130,6 +1130,29 @@ runpy.run_path(path,run_name='__main__')
                 self.assertTrue(run.is_dir())
             self.assertFalse(any(root.glob(".retention-trash.*")))
 
+    def test_protected_campaign_retains_old_input_bytes_without_rewriting_their_manifests(self):
+        helper = self._load_launch("_includes/run_directory.py")
+        now = datetime(2026, 9, 29, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = self._make_retention_run(root, "20260801T000000Z_000", ended_at=now-timedelta(days=30))
+            unused = self._make_retention_run(root, "20260802T000000Z_000", ended_at=now-timedelta(days=30))
+            owner = self._make_retention_run(root, "20260803T000000Z_000", ended_at=now-timedelta(days=30),
+                                             retention_class="protected", lifecycle="active")
+            original = (evidence/"metadata/run_manifest.json").read_bytes()
+            path = owner/"metadata/run_manifest.json"; value = json.loads(path.read_text())
+            value["retained_input_run_ids"] = [evidence.name, "../escape", 7]
+            path.write_text(json.dumps(value))
+            removed = helper.prune_development_runs(root, now=now, keep_latest=0)
+            self.assertEqual(removed, [unused])
+            self.assertEqual((evidence/"metadata/run_manifest.json").read_bytes(), original)
+            # Unprotected or invalid owner identities cannot supply pins.
+            value["retention_class"] = "ordinary"; path.write_text(json.dumps(value))
+            self.assertEqual(helper._retained_input_run_ids(root), set())
+            value["retention_class"] = "protected"; value["run_id"] = "wrong"
+            path.write_text(json.dumps(value))
+            self.assertEqual(helper._retained_input_run_ids(root), set())
+
     def test_retention_skips_nonordinary_unfinished_invalid_symlink_and_locked_runs(self):
         helper = self._load_launch("_includes/run_directory.py")
         now = datetime(2026, 9, 29, tzinfo=timezone.utc)

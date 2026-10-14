@@ -115,7 +115,7 @@ def _retention_enabled(parent: Path) -> bool:
     return parent.resolve() == (package_root / "log").resolve()
 
 
-def _load_retention_manifest(run_dir: Path) -> tuple[dict, datetime] | None:
+def _read_run_manifest(run_dir: Path) -> dict | None:
     if run_dir.is_symlink() or not run_dir.is_dir() or not _RUN_ID.fullmatch(run_dir.name):
         return None
     manifest_path = run_dir / "metadata" / "run_manifest.json"
@@ -127,19 +127,44 @@ def _load_retention_manifest(run_dir: Path) -> tuple[dict, datetime] | None:
         return None
     if not isinstance(manifest, dict):
         return None
-    ended_at = _parse_utc(manifest.get("ended_at_utc"))
     if (
         manifest.get("schema_version") != "iap_run_artifact_v1"
         or manifest.get("run_id") != run_dir.name
         or manifest.get("run_dir") != str(run_dir)
         or manifest.get("run_root") != str(run_dir.parent)
-        or manifest.get("lifecycle") not in _TERMINAL_LIFECYCLES
+    ):
+        return None
+    return manifest
+
+
+def _load_retention_manifest(run_dir: Path) -> tuple[dict, datetime] | None:
+    manifest = _read_run_manifest(run_dir)
+    if manifest is None:
+        return None
+    ended_at = _parse_utc(manifest.get("ended_at_utc"))
+    if (
+        manifest.get("lifecycle") not in _TERMINAL_LIFECYCLES
         or manifest.get("run_class") != "development"
         or manifest.get("retention_class") != "ordinary"
         or ended_at is None
     ):
         return None
     return manifest, ended_at
+
+
+def _retained_input_run_ids(parent: Path) -> set[str]:
+    """A protected campaign owner pins its evidence without rewriting old runs."""
+    retained: set[str] = set()
+    for child in parent.iterdir():
+        manifest = _read_run_manifest(child)
+        if manifest is None or manifest.get("retention_class") != "protected":
+            continue
+        references = manifest.get("retained_input_run_ids", [])
+        if not isinstance(references, list):
+            continue
+        retained.update(name for name in references
+                        if isinstance(name, str) and _RUN_ID.fullmatch(name))
+    return retained
 
 
 def _run_is_locked(run_dir: Path) -> bool:
@@ -193,7 +218,7 @@ def prune_development_runs(
             if loaded is not None:
                 records.append((child, loaded[1]))
         records.sort(key=lambda item: item[0].name, reverse=True)
-        protected = {path.name for path, _ in records[:keep_latest]}
+        protected = {path.name for path, _ in records[:keep_latest]} | _retained_input_run_ids(parent)
         cutoff = current_time - max_age
 
         for run_dir, ended_at in records[keep_latest:]:

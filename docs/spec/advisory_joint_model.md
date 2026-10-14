@@ -7,6 +7,12 @@ The [source-effect contract](source_effect_advisory_contract.md) adds a fixed
 global-reference object while preserving every original native local gate and
 failure. Physical source effects must precede one evidence-supported candidate;
 no further probe variants or new G3/G4 work. The old A0/A1 rejection remains.
+The frozen source-effect pilot is now complete: one matched group is
+INCONCLUSIVE, with no new candidate or independent qualification. Actual FGO
+GNSS admission differs from spatial forecast LOS admission; absent GNSS also
+leaves the frozen forecast coordinate contract unavailable. These limits and
+motion/local-label confounding do not erase old ordering failures or justify
+new weights. The current status entry links the full empirical report.
 
 **Historical execution scope (2026-10-13):** the user activates development plan
 v1.3 G2→G3→G4, superseding the historical A0-only stop/acquisition restrictions

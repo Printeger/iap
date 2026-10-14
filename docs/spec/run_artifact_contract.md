@@ -170,6 +170,17 @@ explicit external export. Under the root lock it revalidates the candidate,
 atomically renames it to a root-local quarantine name, and only then removes
 the quarantined tree. A failure is reported and does not block allocation.
 
+A protected campaign owner may record `retained_input_run_ids` in its own
+primary manifest. The collector also skips those named direct-child runs under
+the same root, including while the protected owner is active. References must
+be a list of valid run IDs; malformed/symlinked owners and other roots do not
+provide pins. This preserves a campaign's unique inputs and failed results
+without rewriting their already hash-bound primary manifests. The campaign
+owner alone sets its protection and evidence references; child manifests do not
+change run-level retention authority. The owner establishes protection/references
+under the root retention lock before publishing the campaign. Ordinary
+unreferenced retention is unchanged.
+
 ## 8. Migration
 
 Migration proceeds in this order: freeze this contract; adopt the outer run in

@@ -13,7 +13,7 @@
 replay_header只解码原metadata，不查询模型或运行规划器。
 新离线评价器直接复用原native_endpoint／relative_error与50ms真值门禁，
 按唯一producer elapsed登记phase中位数／时间四分位增长和恢复代数分解；
-保存完整请求分母、实际source字节及失败时部分结果。尚无实际pilot评价。
+保存完整请求分母、实际source字节及失败时部分结果；四格实际评价现已完成。
 准备验证：原生GNSS9项、canonical launch50项及header-only解码11项通过；
 冻结query拒绝不能被后续原生报告重新纳入，缺半对仍绑定成功输入，缺payload
 只拒绝该对并继续评价。两轴审查所见问题已修复，均无剩余发现。
@@ -31,11 +31,20 @@ replay_header只解码原metadata，不查询模型或运行规划器。
 原请求／测量字节仍核对原owner，源码升级不篡改历史评价。
 28项定向检查通过（含旧源码／冻结字节篡改反例），证据
 `log/20261014T041714Z_744`；规范／规格两轴审查的首个问题已修复。
-下一项完成G2-L／G2-G／G2-F实测解释，不启动新的G3/G4。
+G2-L/G实测解释为INCONCLUSIVE，G2-F仍UNQUALIFIED：局部缺测、运动/地图
+分化及预测/native准入不同，不能冻结合格单一s或采正式组。完整六问矩阵、
+曲线/阶段差值与复现身份见
+[新G2报告](../../log/20261014T042610Z_279/export/analysis/g2_source_effect_final/REPORT.md)。
+真实模型交接仍EVIDENCE_BASED_BLOCKED，未启动9101–9103正式组或新的G3/G4。
 真实compare初次遇到物理occupied拒绝／空矩阵，完整失败owner
 `log/20261014T041747Z_839`保留；离线汇总按原status保留拒绝，不求逆空矩阵。
 失败子命令的退出码、部分输出与日志亦绑定；这些证据工具修复不改实际输入。
 修复后29项定向检查通过，证据`log/20261014T042018Z_906`，两轴复查均0剩余问题。
+报告owner按原artifact契约保护完整证据cohort；自身primary的retained_input_run_ids
+使普通清理跳过所需原输入/评价/失败run，不重写原已绑定primary字节。
+只修复离线证据保留，不改图、模型、运动或安全政策。
+51项canonical契约检查通过，安装run_directory与源码一致；28个必要证据run
+由受保护报告owner固定引用，28份原primary与1490比较绑定hash保持。
 生产仍是同一GridMap、一个A*、一条guide和原EGO／执行权威，prior OFF。
 
 **历史授权（2026-10-13，Asia/Shanghai）**：任务书 v1.3 已由用户明确激活，
