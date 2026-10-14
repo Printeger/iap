@@ -106,6 +106,18 @@ consistency and fixed offline route/region exposure. Do not invent a total
 ordering for local/global tradeoffs without a declared task/error-scale basis.
 Detection floors above do not supply that utility basis.
 
+The offline `g2_source_effect_study.py compare` command accepts exactly four
+completed pilot evaluation summaries and their unchanged bound inputs. It reports
+bad-minus-good phase medians/growth in both source strata, all request denominators,
+actual native injection counts, effective/raw sigma, ICP support and motion/region
+coverage. One group remains one group; no contrast grants qualification.
+The fixed developer response selection is original requests 6/24/56 in every cell,
+queried at their frozen receiver position in GNSS/LiDAR/Fusion diagnostic modes.
+Missing/refused inputs are retained without replacement. This selection was frozen
+before model replay, after pilot error inspection; it is not independent acceptance.
+Original A0 projection is unchanged and remains rejected. These diagnostic source
+ablations never alter the live estimator, map, planner or execution policy.
+
 QUALIFIED requires both independent effects and the frozen fused/local/global
 gates. PARTIALLY QUALIFIED, NOT SUPPORTED UNDER CURRENT CONDITIONS or
 INCONCLUSIVE are valid completed research deliveries when backed by bounded

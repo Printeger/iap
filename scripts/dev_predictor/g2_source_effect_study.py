@@ -4,6 +4,7 @@ No truth enters an online predictor, no old probe is refitted, and preparation
 or evaluator tests grant no source-effect/model qualification.
 """
 import argparse
+from collections import Counter
 import csv
 import gzip
 import json
@@ -317,22 +318,223 @@ def prepare(run, *, owner):
     return {'run': str(run), 'protocol': str(config), 'trials': trials}
 
 
+def cell_diagnostics(result):
+    """Descriptive run summaries; native updates/windows are never independent N."""
+    origin = result['producer_origin_stamp_s']
+    phases = {}
+    for phase, bounds in result['protocol']['phases_elapsed_s'].items():
+        lo, hi = bounds
+        local = [r for r in result['local_rows'] if r.get('qualified') and lo <= r['elapsed_s'] <= hi]
+        global_rows = [r for r in result['global_rows'] if lo <= r['elapsed_s'] <= hi]
+        icp = [r for r in result['actual_icp_support'] if lo <= float(r['stamp'])-origin <= hi]
+        physical = [r for r in result['physical_gnss_observations'] if lo <= float(r['scenario_time_s']) <= hi]
+        factors = [r for r in result['actual_gnss_factors'] if lo <= float(r['stamp'])-origin <= hi]
+        def median(rows, key):
+            values = [float(r[key]) for r in rows if r.get(key) not in (None, '')]
+            values = [v for v in values if np.isfinite(v)]
+            return float(np.median(values)) if values else None
+        phases[phase] = {
+            'native_global_updates': len(global_rows),
+            'native_pr_factors': sum(int(r['native']['pr_count']) for r in global_rows),
+            'native_dop_factors': sum(int(r['native']['dop_count']) for r in global_rows),
+            'native_updates_with_pr': sum(int(r['native']['pr_count']) > 0 for r in global_rows),
+            'physical_observations': len(physical),
+            'physical_emitted': sum(r['observation_emitted'] == '1' for r in physical),
+            'physical_visibility': dict(Counter(r['visibility_state'] for r in physical)),
+            'raw_pr_sigma_m': median(physical, 'raw_pr_sigma_m'),
+            'effective_pr_sigma_m': median([r for r in factors if r['factor_type'] == 'PR'], 'sigma'),
+            'factor_debug_note': 'postopt evaluations can repeat; totals come from native injection CSV',
+            'icp_rows': len(icp),
+            'icp_medians': {k: median(icp, k) for k in ('rmse', 'inlier_fraction', 'inlier_count',
+                'vgicp_factor_count', 'condition_number', 'native_min_singular_value')},
+            'weak_direction_note': 'native Pose3 rotation then translation; mixed units/sign; raw CSV retained',
+            'qualified_local_windows': len(local),
+            'rotation_error_rad': median([r['relative'] for r in local], 'rotation_error_rad'),
+            'translation_error_m': median([r['relative'] for r in local], 'translation_error_m'),
+            'truth_motion_distance_m': median([r['relative'] for r in local], 'truth_motion_distance_m'),
+        }
+    positions = [r['truth_position'] for r in result['global_rows'] if r.get('qualified')]
+    represented = []
+    for i, (lo, hi) in enumerate(REGIONS):
+        rows = [r for r in result['local_rows'] if r.get('qualified') and lo <= r['position'][0] and
+                (r['position'][0] < hi or (i == len(REGIONS)-1 and r['position'][0] == hi))]
+        represented.append({'bin': [lo, hi], 'qualified_windows': len(rows)})
+    return {'phases': phases, 'local_requested': len(result['local_rows']),
+            'local_qualified': sum(bool(r.get('qualified')) for r in result['local_rows']),
+            'local_reasons': dict(Counter(r.get('reason', 'QUALIFIED') for r in result['local_rows'])),
+            'regions': represented, 'truth_position_min': np.min(positions, axis=0).tolist() if positions else None,
+            'truth_position_max': np.max(positions, axis=0).tolist() if positions else None,
+            'recovery': result['recovery'], 'independent_groups': 1}
+
+
+def paired_contrasts(cells):
+    """Bad-minus-good descriptive contrasts in both strata; no automatic PASS."""
+    contrasts = []
+    for source, pairs in (('L', [('GG_LG', 'GG_LB'), ('GB_LG', 'GB_LB')]),
+                          ('G', [('GG_LG', 'GB_LG'), ('GG_LB', 'GB_LB')])):
+        for good, bad in pairs:
+            for phase in pilot_protocol()['phases_elapsed_s']:
+                for field in ('local_XY', 'global_XY', 'global_3D'):
+                    def stats(cell):
+                        return (cell['local_phases'][phase] if field == 'local_XY' else
+                                cell['global_phases'][phase]['horizontal_error_m' if field == 'global_XY' else 'error_3d_m'])
+                    a, b = stats(cells[good]), stats(cells[bad])
+                    floor = pilot_protocol()['detection_floors_m']['local' if field == 'local_XY' else 'global']
+                    delta = b['median']-a['median'] if a['median'] is not None and b['median'] is not None else None
+                    contrasts.append({'source': source, 'good': good, 'bad': bad, 'phase': phase, 'field': field,
+                        'good_count': a['count'], 'bad_count': b['count'], 'bad_minus_good_m': delta,
+                        'growth_bad_minus_good_m': b['last_minus_first_quartile_median']-a['last_minus_first_quartile_median']
+                            if all(s['last_minus_first_quartile_median'] is not None for s in (a, b)) else None,
+                        'phase_minimum_met': a['phase_minimum_met'] and b['phase_minimum_met'],
+                        'above_detection_floor': abs(delta) > floor if delta is not None else False,
+                        'detection_floor_m': floor, 'independent_groups': 1, 'qualified_effect': False})
+    return contrasts
+
+
+def compare(run, evaluations, selection_path, binary, label, *, owner):
+    """Four-cell developer evidence and fixed receiver source responses only."""
+    from horizontal_probe_advisory import project_information
+    safe_label(label)
+    output = artifact(run, 'export/analysis/'+label+'/summary.json')
+    if output.exists(): raise ValueError('comparison evidence already exists')
+    result = {'schema': 'iap_g2_four_cell_diagnostic_v1', 'inputs_sha256': {}, 'cells': {},
+              'responses': [], 'model_qualified': False, 'source_effects_qualified': False,
+              'formal_runs_started': False, 'independent_groups': 1, 'evaluation_source_snapshots': {}}
+    def bind(path):
+        path = Path(path).resolve(); digest = sha(path); key = str(path)
+        if key in result['inputs_sha256'] and result['inputs_sha256'][key] != digest:
+            raise ValueError('INPUT_BYTES_CHANGED_DURING_COMPARISON')
+        result['inputs_sha256'][key] = digest
+        return path
+    def read(path): return json.loads(bind(path).read_text())
+    try:
+        for name in ('g2_source_effect_study.py', 'horizontal_probe_advisory.py', 'advisory_validation.py'):
+            source = bind(Path(__file__).with_name(name))
+            with artifact(run, 'metadata/config/'+label+'/source/'+name).open('xb') as stream:
+                stream.write(source.read_bytes())
+        selection = read(selection_path)
+        if selection['request_indices'] != [6, 24, 56] or selection['conditions'] != list(pilot_protocol()['conditions']):
+            raise ValueError('FIXED_RESPONSE_SELECTION_REQUIRED')
+        result['response_selection'] = selection
+        cells = {}
+        for path in evaluations:
+            cell = read(path); condition = cell['trial']['condition']
+            if condition in cells or cell['trial']['seed'] != 9100 or cell['protocol'] != json.loads(json.dumps(pilot_protocol())):
+                raise ValueError('ONE_FROZEN_PILOT_PER_CONDITION_REQUIRED')
+            if not cell['status'].startswith('PILOT_DIAGNOSTIC_COMPLETE') or cell['source_lifecycle'] != 'completed':
+                raise ValueError('COMPLETED_PILOT_REQUIRED; failed source/evaluation remains evidence')
+            # Evaluator code is historical evidence: its owner saved these exact
+            # bytes before evaluation. Workspace tools can advance independently.
+            # Physical payloads/data still bind their original owner paths.
+            evaluator_names = ('g2_source_effect_study.py', 'local_increment_validation.py',
+                               'epoch_motion_reference.py', 'advisory_validation.py')
+            for original, digest in cell['inputs_sha256'].items():
+                original_path = Path(original).resolve()
+                if original_path.parent == Path(__file__).resolve().parent and original_path.name in evaluator_names:
+                    snapshot = Path(path).resolve().parents[3]/'metadata/config'/Path(path).parent.name/'source'/original_path.name
+                    result['evaluation_source_snapshots'][condition+':'+str(original_path)] = str(snapshot)
+                    if sha(bind(snapshot)) != digest: raise ValueError('EVALUATOR_SNAPSHOT_BYTES_CHANGED')
+                elif sha(bind(original_path)) != digest: raise ValueError('EVALUATED_SOURCE_BYTES_CHANGED')
+            process = cell['source_process']
+            if process['required_input_failure'] or any(v != 0 for v in process['exit_codes'].values()):
+                raise ValueError('PILOT_PROCESS_HEALTH_FAILED')
+            cells[condition] = cell
+            result['cells'][condition] = {'evaluation': str(path), 'source_run': cell['source_run'],
+                'source_revision': cell['source_revision'], 'local_phases': cell['local_phases'],
+                'global_phases': cell['global_phases'], **cell_diagnostics(cell)}
+        if set(cells) != set(pilot_protocol()['conditions']): raise ValueError('ALL_FOUR_CONDITIONS_REQUIRED')
+        result['contrasts'] = paired_contrasts(cells)
+        result['decoder_binary'] = binary_identity(binary)
+        for condition in selection['conditions']:
+            cell = cells[condition]; requests = {int(r['request']): r for r in cell['requests']}
+            for index in selection['request_indices']:
+                response = {'condition': condition, 'request': index, 'available': False, 'modes': {}}
+                result['responses'].append(response)
+                try:
+                    request = requests[index]
+                    if request['available'] != 'True': raise ValueError('ORIGINAL_REQUEST_UNAVAILABLE')
+                    payload = bind(Path(cell['source_run'])/request['payload'])
+                    record = validate_record(payload, bind(payload.with_name('record.json')))
+                    for library, digest in record['producer_binary']['libraries_sha256'].items():
+                        if library in result['decoder_binary']['libraries_sha256'] and result['decoder_binary']['libraries_sha256'][library] != digest:
+                            raise ValueError('DECODER_PRODUCER_LIBRARY_MISMATCH')
+                    name = f'{label}_{condition}_{index:04}'
+                    header_args = ['replay_header', name, str(payload)]
+                    response['header_command'] = [str(binary), *header_args]
+                    try:
+                        backend(run, binary, header_args, name)
+                    finally:
+                        for log in (run/'runtime/ros').glob('advisory_'+name+'*.log'): bind(log)
+                    meta = read(run/'export/advisory/validation'/name/'input.json')
+                    if any(meta[k] != record[k] for k in ('frame_id', 'geometry_id', 'generation')):
+                        raise ValueError('DECODED_SOURCE_IDENTITY_MISMATCH')
+                    response.update(available=True, original_motion_quality=meta['current_motion_quality'],
+                        original_reference_elapsed_s=meta['reference_time_s']-cell['producer_origin_stamp_s'],
+                        epoch_source_identity=meta['epoch_source_identity'], position=meta['position'])
+                    points = artifact(run, 'metadata/config/'+label+'/'+name+'_receiver.txt')
+                    with points.open('x') as stream: stream.write(' '.join(format(v, '.17g') for v in meta['position'])+'\n')
+                    bind(points)
+                    for mode in ('gnss', 'lidar', 'fusion'):
+                        child = name+'_'+mode
+                        arguments = ['replay_points', child, str(payload), '120', str(points), mode]
+                        response['modes'][mode] = {'command': [str(binary), *arguments]}
+                        try:
+                            backend(run, binary, arguments, child)
+                        finally:
+                            for log in (run/'runtime/ros').glob('advisory_'+child+'*.log'): bind(log)
+                        directory = run/'export/advisory/validation'/child
+                        for item in directory.iterdir():
+                            if item.is_file(): bind(item)
+                        with (directory/'points.csv').open() as stream: point = next(csv.DictReader(stream))
+                        matrices = json.loads((directory/'matrices.jsonl').read_text())
+                        information = np.array(matrices['joint_pose_information']['row_major']).reshape(6, 6)
+                        score = project_information(information,
+                            meta['K_H_adv'], meta['K_V_adv'], input_status=point['status'])
+                        if point['status'] == 'VALID':
+                            zero = project_information(information, meta['K_H_adv'], meta['K_V_adv'], zero_probe=True)
+                            if not np.allclose([zero['Q_H'], zero['Q_V']],
+                                               [float(point['module_hpl']), float(point['module_vpl'])], rtol=1e-8, atol=1e-9):
+                                raise ValueError('ORIGINAL_POSITION_OR_ZERO_OFFSET_BINDING_MISMATCH')
+                        response['modes'][mode].update({'point': point, 'original_A0_diagnostic': score,
+                            'original_query_qualified': meta['current_motion_quality'] == 1,
+                            'exit_code': 0, 'retained_directory': str(directory.relative_to(run))})
+                except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+                    response['failure'] = f'{type(error).__name__}: {error}'
+        result['status'] = 'FOUR_CELL_DEVELOPMENT_DIAGNOSTIC; no independent qualification'
+    except Exception as error:
+        result.update(status='COMPARISON_FAILED_PARTIAL_EVIDENCE_RETAINED', failure=f'{type(error).__name__}: {error}')
+        raise
+    finally:
+        json_write(output, result)
+        manifest = artifact(run, 'metadata/manifests/'+label+'.json')
+        json_write(manifest, {'summary': str(output.relative_to(run)), 'summary_sha256': sha(output),
+            'inputs_sha256': result['inputs_sha256'], 'status': result.get('status')})
+        if owner: register_subordinate_manifest(run, manifest)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('prepare', 'evaluate'))
+    parser.add_argument('mode', choices=('prepare', 'evaluate', 'compare'))
+    parser.add_argument('--evaluation', type=Path, action='append', default=[])
+    parser.add_argument('--response-selection', type=Path)
     parser.add_argument('--source-run', type=Path)
     parser.add_argument('--binary', type=Path)
     parser.add_argument('--label', default='g2_source_effect_evaluation')
     args = parser.parse_args()
     if args.mode == 'evaluate' and (not args.source_run or not args.binary):
         parser.error('evaluate requires source-run and the committed decoder binary')
+    if args.mode == 'compare' and (len(args.evaluation) != 4 or not args.response_selection or not args.binary):
+        parser.error('compare requires four evaluations, response-selection and decoder binary')
     inherited = os.environ.get('IAP_RUN_DIR')
     owner = not inherited
     run = resolve_run_directory(entrypoint='g2_source_effect_preregistration' if args.mode == 'prepare' else 'g2_source_effect_evaluation', scenario='icra_dense_forest_four_fork_v2') if owner else adopt_run_directory(inherited)
     try:
         if args.mode == 'prepare': print(json.dumps(prepare(run, owner=owner), indent=2))
         else:
-            result = evaluate(run, args.source_run.resolve(), args.label, args.binary.resolve(), owner=owner)
+            result = (compare(run, args.evaluation, args.response_selection, args.binary.resolve(), args.label, owner=owner)
+                      if args.mode == 'compare' else
+                      evaluate(run, args.source_run.resolve(), args.label, args.binary.resolve(), owner=owner))
             print(json.dumps({'run': str(run), 'status': result['status']}))
     except Exception:
         if owner: finalize_run(run, lifecycle='failed')

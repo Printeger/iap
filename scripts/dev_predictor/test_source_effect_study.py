@@ -27,6 +27,68 @@ def global_row(sequence=1):
 
 
 class SourceEffectStudy(unittest.TestCase):
+    def test_contrasts_retain_missing_near_floor_and_run_unit(self):
+        def cell(local, global_error):
+            def stats(value):
+                return dict(count=8 if value is not None else 0, median=value,
+                            last_minus_first_quartile_median=value,
+                            phase_minimum_met=value is not None)
+            return dict(local_phases={p:stats(local) for p in ('pre','absence','post')},
+                global_phases={p:{f:stats(global_error) for f in ('horizontal_error_m','error_3d_m')}
+                               for p in ('pre','absence','post')})
+        cells = {'GG_LG':cell(.005,.1), 'GG_LB':cell(.0045,.15),
+                 'GB_LG':cell(None,.09), 'GB_LB':cell(None,.2)}
+        rows = study.paired_contrasts(cells)
+        self.assertEqual(len(rows),36)
+        near = next(r for r in rows if r['source']=='L' and r['good']=='GG_LG' and r['field']=='local_XY')
+        self.assertFalse(near['above_detection_floor'])
+        missing = next(r for r in rows if r['source']=='L' and r['good']=='GB_LG' and r['field']=='local_XY')
+        self.assertIsNone(missing['bad_minus_good_m'])
+        self.assertFalse(missing['phase_minimum_met'])
+        self.assertTrue(all(r['independent_groups']==1 and not r['qualified_effect'] for r in rows))
+
+    def test_four_cell_comparison_preserves_failed_response_requests_and_child_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); run = root/'output'; evaluations=[]
+            selection = root/'selection.json'
+            selection.write_text(json.dumps(dict(request_indices=[6,24,56],conditions=list(study.pilot_protocol()['conditions']))))
+            stat=dict(count=0,median=None,last_minus_first_quartile_median=None,phase_minimum_met=False)
+            for condition in study.pilot_protocol()['conditions']:
+                value=dict(trial=dict(condition=condition,seed=9100),protocol=study.pilot_protocol(),
+                    status='PILOT_DIAGNOSTIC_COMPLETE',source_lifecycle='completed',inputs_sha256={},
+                    source_process=dict(required_input_failure=False,exit_codes=dict(capture=0,launch=0,record=0)),
+                    source_run=str(root/condition),source_revision='UNIT_TEST_DOUBLE',producer_origin_stamp_s=100.,
+                    local_rows=[dict(qualified=False,reason='MISSING') for _ in range(46)],global_rows=[],
+                    actual_icp_support=[],physical_gnss_observations=[],actual_gnss_factors=[],recovery=None,
+                    local_phases={p:stat for p in ('pre','absence','post')},
+                    global_phases={p:{f:stat for f in ('horizontal_error_m','error_3d_m')} for p in ('pre','absence','post')},
+                    requests=[dict(request=str(i),available='False') for i in (6,24,56)])
+                path=root/condition/'export/analysis/unit/summary.json';path.parent.mkdir(parents=True)
+                old_source=b'IMMUTABLE_EVALUATOR_BYTES_BEFORE_COMPARE_WAS_ADDED'
+                snapshot=root/condition/'metadata/config/unit/source/g2_source_effect_study.py'
+                snapshot.parent.mkdir(parents=True);snapshot.write_bytes(old_source)
+                value['inputs_sha256']={str(Path(study.__file__).resolve()):hashlib.sha256(old_source).hexdigest()}
+                path.write_text(json.dumps(value));evaluations.append(path)
+            with mock.patch.object(study,'binary_identity',return_value={'unit_test_double':True}), \
+                    mock.patch.object(study,'register_subordinate_manifest',side_effect=AssertionError('child changed owner')):
+                result=study.compare(run,evaluations,selection,root/'decoder','compare',owner=False)
+            self.assertEqual(len(result['responses']),12)
+            self.assertTrue(all('ORIGINAL_REQUEST_UNAVAILABLE' in r['failure'] for r in result['responses']))
+            self.assertTrue(all(c['local_requested']==46 and c['local_qualified']==0 for c in result['cells'].values()))
+            self.assertFalse(result['model_qualified'])
+            self.assertEqual(len(result['evaluation_source_snapshots']),4)
+            snapshot.write_bytes(b'TAMPERED_HISTORICAL_SOURCE')
+            with self.assertRaisesRegex(ValueError,'EVALUATOR_SNAPSHOT_BYTES_CHANGED'):
+                study.compare(run,evaluations,selection,root/'decoder','changed_snapshot',owner=False)
+            snapshot.write_bytes(old_source)
+            # Failed input identity cannot silently become another completed comparison.
+            value=json.loads(evaluations[-1].read_text());value['source_process']['exit_codes']['record']=1
+            evaluations[-1].write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError,'PILOT_PROCESS_HEALTH_FAILED'):
+                study.compare(run,evaluations,selection,root/'decoder','failed_compare',owner=False)
+            saved=json.loads((run/'export/analysis/failed_compare/summary.json').read_text())
+            self.assertEqual(saved['status'],'COMPARISON_FAILED_PARTIAL_EVIDENCE_RETAINED')
+
     def test_half_pair_binding_and_missing_payload_do_not_rehabilitate_unqualified_queries(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); run = root/'output'; source = root/'source'
